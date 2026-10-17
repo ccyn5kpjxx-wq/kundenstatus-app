@@ -18,7 +18,7 @@
 .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 /* Service detail: a short introduction, concrete work and one direct enquiry. */
-.service-item>img[src$="/achsvermessung-v1.webp"]{object-fit:contain;background:#e8e7e3}
+.service-item>img[src$="/achsvermessung-v1.webp"],.service-item>img[src$="/klimaservice-v1.webp"]{object-fit:contain;background:#e8e7e3}
 .service-detail-page h1{font-size:clamp(40px,4.4vw,64px);line-height:1.05;margin:18px 0 22px;overflow-wrap:anywhere}
 .service-detail-hero{position:relative;isolation:isolate;display:flex;align-items:center;min-height:530px;padding-block:48px 58px;overflow:hidden;background:var(--paper)}
 .service-detail-inner{position:relative;z-index:1}.service-detail-copy{max-width:590px}
@@ -71,4 +71,7 @@
 .contact-band .opening-hours{margin-top:18px;font-size:14px;line-height:1.6}.opening-hours strong{font-weight:750}
 
 /* Keep the complete alignment scene visible on smaller screens. */
-@media(max-width:850px){[data-service="achsvermessung"] .service-detail-hero{display:block;min-height:0;padding-bottom:0}[data-service="achsvermessung"] .service-detail-inner{padding-bottom:26px}[data-service="achsvermessung"] .service-detail-photo{position:relative;inset:auto;height:auto;aspect-ratio:3/2}[data-service="achsvermessung"] .service-detail-photo img{height:auto;object-fit:contain;object-position:center}[data-service="achsvermessung"] .service-detail-photo::after{display:none}}
+@media(max-width:850px){:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-hero{display:block;min-height:0;padding-bottom:0}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-inner{padding-bottom:26px}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo{position:relative;inset:auto;height:auto;aspect-ratio:3/2}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo img{height:auto;object-fit:contain;object-position:center}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo::after{display:none}}
+/* Full workshop scenes stay inside the work-photo frame. */
+@media(min-width:851px){:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo{background:var(--paper)}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo img{object-fit:contain;object-position:right center}}
+:is(#arbeit-achsvermessung,#arbeit-klimaservice) .arbeitsbild-foto img{object-fit:contain;background:#e8e7e3}

@@ -38,10 +38,10 @@ class ServiceNavigationTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         return html, Document(html)
 
-    def test_homepage_eight_distinct_details(self):
+    def test_homepage_nine_distinct_details(self):
         _, doc = self.page("/homepage")
         links = doc.find("a", "service-item")
-        self.assertEqual(len(links), 8)
+        self.assertEqual(len(links), 9)
         self.assertEqual({a["href"] for a in links},
                          {f"/leistungen/{slug}" for slug in portal.HOMEPAGE_LEISTUNGEN})
         for a in links:
@@ -54,7 +54,7 @@ class ServiceNavigationTests(unittest.TestCase):
             with self.subTest(page=path):
                 _, doc = self.page(path)
                 photos = doc.find("a", "arbeitsbild-foto")
-                self.assertEqual(len(photos), 14)
+                self.assertEqual(len(photos), 15)
                 self.assertEqual({a["href"] for a in photos},
                                  {f"/leistungen/{slug}" for slug in portal.HOMEPAGE_LEISTUNGEN})
                 self.assertTrue(all("Leistungen ansehen" in a["aria-label"] for a in photos))
@@ -85,11 +85,12 @@ class ServiceNavigationTests(unittest.TestCase):
                     self.assertIn("csrf_token", fields)
                     self.assertTrue(any(t.get("name") == "nachricht" for t in form.find("textarea")))
                     self.assertTrue(all("required" not in f for f in form.find("input") if f.get("type") == "file"))
-                    if slug == "achsvermessung":
-                        self.assertEqual(parse_qs(target.query)["mechanik_kategorie"], ["achsvermessung"])
+                    if slug in {"achsvermessung", "klimaservice"}:
+                        expected_category = "klima" if slug == "klimaservice" else "achsvermessung"
+                        self.assertEqual(parse_qs(target.query)["mechanik_kategorie"], [expected_category])
                         selected = [f["value"] for f in form.find("input")
                                     if f.get("name") == "mechanik_kategorie" and "checked" in f]
-                        self.assertEqual(selected, ["achsvermessung"])
+                        self.assertEqual(selected, [expected_category])
 
     def test_public_host_details_and_sitemap_but_no_internal_access(self):
         with patch.multiple(portal, PUBLIC_SITE_ONLY=True, PUBLIC_SITE_INDEXABLE=True,

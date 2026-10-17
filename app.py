@@ -45311,6 +45311,21 @@ HOMEPAGE_LEISTUNGEN = {
         "anliegen": "mechanikanfrage", "aktion": "Wartung oder Reparatur anfragen",
         "hinweis": "Welche Arbeiten und Teile Ihr Fahrzeug benötigt, klären wir anhand des Fahrzeugtyps und der Prüfung. Ein Wunschtermin wird persönlich bestätigt.",
     },
+    "klimaservice": {
+        "titel": "Klimaservice", "kurz": "Kühlleistung prüfen. Angenehm unterwegs.",
+        "bild": "leistungsfotos-v2/klimaservice-v1.webp",
+        "intro": "Die Klimaanlage kühlt nicht wie gewohnt oder der nächste Service steht an? Wir prüfen die Funktion und stimmen die passende Wartung oder Reparatur mit Ihnen ab.",
+        "arbeiten": [
+            ("Funktion & Kühlleistung", "Die Klimaanlage auf Funktion und auffällige Veränderungen der Kühlleistung prüfen."),
+            ("Wartung nach Fahrzeugvorgabe", "Den erforderlichen Serviceumfang und das passende Kältemittel anhand der Fahrzeugdaten klären."),
+            ("Kältemittelservice", "Erforderliche Arbeiten am Kältemittelkreislauf nach Prüfung und Herstellervorgaben abstimmen und durchführen."),
+            ("Undichtigkeiten & Bauteile", "Bei Auffälligkeiten die Ursache prüfen und notwendige Reparaturen vorab mit Ihnen besprechen."),
+            ("Innenraumfilter & Luftqualität", "Filterzustand und Gerüche beurteilen und geeignete weitere Schritte mit Ihnen abstimmen."),
+        ],
+        "anliegen": "mechanikanfrage", "mechanik_kategorie": "klima",
+        "aktion": "Klimaservice anfragen",
+        "hinweis": "Bitte nennen Sie uns Fahrzeugmodell und Ihre Beobachtungen. Welche Arbeiten möglich und nötig sind, prüfen wir am Fahrzeug. Umfang, Preis und Termin bestätigen wir persönlich.",
+    },
     "achsvermessung": {
         "titel": "Achsvermessung", "kurz": "Spur prüfen. Fahrwerk richtig einstellen.",
         "bild": "leistungsfotos-v2/achsvermessung-v1.webp",
@@ -45401,6 +45416,7 @@ HOMEPAGE_LEISTUNGEN = {
 }
 
 HOMEPAGE_ARBEIT_ZU_LEISTUNG = {
+    "klimaservice": "klimaservice",
     "achsvermessung": "achsvermessung",
     "reifenmontage": "reifenservice", "reifenlager": "reifenservice",
     "bremsenservice": "wartung-mechanik", "oelservice": "wartung-mechanik", "inspektion": "wartung-mechanik",

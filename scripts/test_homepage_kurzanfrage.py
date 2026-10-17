@@ -134,6 +134,27 @@ def achsvermessung_checks():
     return checks
 
 
+def klimaservice_checks():
+    client = portal.app.test_client()
+    page = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=klima')
+    checked = 'value="klima" checked'
+    checks = [check('Klimaservice ist im Direktformular vorausgewählt', page.status_code == 200 and checked in page.text)]
+    with client.session_transaction() as session:
+        csrf = session.get(portal.CSRF_FIELD_NAME)
+    with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
+        portal.PUBLIC_FORM_ATTEMPTS.clear()
+    data = {portal.CSRF_FIELD_NAME: csrf, 'anliegen': 'mechanikanfrage', 'mechanik_kategorie': 'klima', 'name': 'Klimaservice Testkunde', 'telefon': '0171 1234567', 'email': '', 'nachricht': ''}
+    with patch.object(portal, 'sende_website_lead_benachrichtigung'), patch.object(portal, 'lead_notice'), patch.object(portal, 'notify_lead_workshop'):
+        before = scalar('SELECT COUNT(*) FROM leads')
+        invalid = client.post('/anfrage', data=data)
+        checks.append(check('Klimaservice bleibt bei Fehlern ausgewählt und ohne Lead', invalid.status_code == 400 and checked in invalid.text and scalar('SELECT COUNT(*) FROM leads') == before))
+        data['nachricht'] = 'Klimaanlage kühlt nicht wie gewohnt'
+        response = client.post('/anfrage', data=data)
+        lead = portal.get_lead(int(scalar('SELECT MAX(id) FROM leads')))
+        checks.append(check('Klimaservice-Anfrage speichert genau einen korrekt zugeordneten Lead', response.status_code == 302 and scalar('SELECT COUNT(*) FROM leads') == before+1 and 'Klimaanlage' in lead['beschreibung'] and 'Achsvermessung / Spureinstellung' not in lead['beschreibung']))
+    return checks
+
+
 def main():
     portal.app.config["TESTING"] = True
     client = portal.app.test_client()
@@ -469,6 +490,7 @@ def main():
 
     checks += reifenservice_checks()
     checks += achsvermessung_checks()
+    checks += klimaservice_checks()
     print(f"Temporäre Testdaten: {TEMP_DIR}")
     return 0 if all(checks) else 1
 
