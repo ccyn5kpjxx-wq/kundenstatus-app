@@ -21,9 +21,9 @@
     <div class="arbeitsbilder-grid">
       {% for slug, bereich, titel, beschreibung, datei, alt, position in arbeitsmotive %}
       <figure class="arbeitsbild" id="arbeit-{{ slug }}">
-        <a class="arbeitsbild-foto" href="{{ url_for('static', filename=datei) }}" target="_blank" rel="noopener" aria-label="Bild vergrößern: {{ titel }}">
+        <a class="arbeitsbild-foto" href="{{ portal_links.auswahl }}" aria-label="{{ titel }} anfragen">
           <img src="{{ url_for('static', filename=datei) }}" alt="{{ alt }}" width="600" height="450" style="object-position:{{ position }}" loading="lazy" decoding="async">
-          <span class="arbeitsbild-zoom" aria-hidden="true">↗</span>
+          <span class="arbeitsbild-zoom" aria-hidden="true">→</span>
         </a>
         <figcaption><span class="arbeitsbild-bereich">{{ '%02d'|format(loop.index) }} / {{ bereich }}</span><h3>{{ titel }}</h3><p>{{ beschreibung }}</p></figcaption>
       </figure>

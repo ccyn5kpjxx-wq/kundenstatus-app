@@ -48,7 +48,7 @@
         ('Autoglas', 'Steinschlag, Riss oder Scheibentausch.', 'leistungsfotos/autoglas.jpg', 'arbeit-autoglas'),
         ('Dellen & Smart Repair', 'Gezielt reparieren und Werte erhalten.', 'leistungsfotos-v2/dellen-hagel.jpg', 'arbeit-dellen-hagel'),
         ('Schaden & Mobilität', 'Abwicklung, Abholung und Ersatzwagen.', 'leistungsfotos-v2/schadenaufnahme.jpg', 'arbeit-schadenabwicklung')
-      ] %}<a class="service-item" href="{{ url_for('oeffentliche_leistungen') }}#{{ target }}"><img src="{{ url_for('static', filename='homepage/' ~ photo) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ title }}</h3><p>{{ text }}</p></div><span aria-hidden="true">↗</span></a>{% endfor %}
+      ] %}<a class="service-item" href="{{ portal_links.auswahl }}"><img src="{{ url_for('static', filename='homepage/' ~ photo) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ title }}</h3><p>{{ text }}</p></div><span aria-hidden="true">↗</span></a>{% endfor %}
       </div><p class="service-note">Auch HU/AU: Wir organisieren die Prüfung über unseren externen Prüfpartner.</p>
     </div></section>
     <section class="trust wrap section-pad" id="vertrauen" aria-labelledby="trust-title">

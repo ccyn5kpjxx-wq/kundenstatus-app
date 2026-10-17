@@ -44374,9 +44374,11 @@ def public_root():
 
 GOOGLE_REVIEWS_CACHE = {"payload": None, "expires_at": 0}
 GOOGLE_REVIEWS_CACHE_LOCK = threading.Lock()
+# Verified public business profile, opened directly on its reviews tab.
 GOOGLE_MAPS_FALLBACK_URL = (
-    "https://www.google.com/maps/search/?api=1&query="
-    "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
+    "https://www.google.com/maps/place/Karosserie+%26+Lack+G%C3%A4rtner+GmbH/"
+    "@49.3958049,9.123215,17z/data=!4m8!3m7!1s0x4797f50077c5e48b:0xb9c4f6b6b41be3b3"
+    "!8m2!3d49.3958049!4d9.123215!9m1!1b1!16s%2Fg%2F11w8ljhg68?hl=de"
 )
 
 
@@ -44433,7 +44435,7 @@ def get_google_reviews():
             "rating": data.get("rating"),
             "count": data.get("userRatingCount"),
             "reviews": reviews,
-            "maps_url": clean_text(data.get("googleMapsUri")) or GOOGLE_MAPS_FALLBACK_URL,
+            "maps_url": GOOGLE_MAPS_FALLBACK_URL,
         }
         with GOOGLE_REVIEWS_CACHE_LOCK:
             GOOGLE_REVIEWS_CACHE["payload"] = payload
