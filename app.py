@@ -260,6 +260,9 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS") or DEFAULT_ADMIN_PASS
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or ""
 DEFAULT_PUBLIC_BASE_URL = ""
 PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or DEFAULT_PUBLIC_BASE_URL).strip().rstrip("/")
+# Verified in the business's Google Maps profile on 17 October 2026.
+# Public pages must remain independent of the private portal database.
+HOMEPAGE_OEFFNUNGSZEITEN = "Montag–Samstag 07:00–18:00 Uhr · Sonntag geschlossen"
 PUBLIC_SITE_ONLY = env_flag("PUBLIC_SITE_ONLY", False)
 PUBLIC_SITE_INDEXABLE = env_flag("PUBLIC_SITE_INDEXABLE", False)
 PUBLIC_SITE_VARIANT = clean_text(os.environ.get("PUBLIC_SITE_VARIANT") or "company").lower()
@@ -2860,6 +2863,7 @@ def inject_csrf_helpers():
 
     return {
         "csrf_token": get_csrf_token,
+        "homepage_oeffnungszeiten": HOMEPAGE_OEFFNUNGSZEITEN,
         "csrf_field": csrf_field,
         "admin_postfach_count": once(admin_postfach_count),
         "admin_leads_count": once(admin_leads_count),

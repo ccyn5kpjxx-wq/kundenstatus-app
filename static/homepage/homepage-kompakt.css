@@ -66,3 +66,5 @@
 .move-strip{position:relative;z-index:2;padding-top:16px;background:linear-gradient(180deg,#f6f3ee 0%,#edb5ac 15%,#ce2119 45%,#b6221d 100%)}
 .compact-home .intro.hero-wide::after{content:"";position:absolute;z-index:0;inset:0 0 auto;height:88px;pointer-events:none;background:linear-gradient(180deg,#b6221d 0%,rgba(182,34,29,.58) 28%,rgba(182,34,29,0) 100%)}
 .audience:nth-child(2)>img{object-position:73% 30%}
+
+.contact-band .opening-hours{margin-top:18px;font-size:14px;line-height:1.6}.opening-hours strong{font-weight:750}
