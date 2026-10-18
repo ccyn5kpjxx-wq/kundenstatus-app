@@ -17,7 +17,7 @@
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
 </head>
-<body class="compact-home">
+<body class="compact-home home-overview">
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header">
     <nav class="wrap site-nav" aria-label="Hauptnavigation">
@@ -30,45 +30,45 @@
   <div class="move-strip"><div class="wrap"><span>Ab <strong>1. November 2026</strong> · Alte Neckarelzer Straße 18/1, Mosbach</span><a href="#neue-location">Neue Location entdecken <span aria-hidden="true">→</span></a></div></div>
   <main id="inhalt">
     <section class="intro hero-wide" aria-labelledby="hero-title">
-      <div class="intro-copy"><span class="eyebrow">Gärtner · Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Service, Reparatur und Fuhrparkbetreuung aus einer Hand. Bei einem Schaden kümmern wir uns auch um die Unterlagen und die Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
+      <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
       <div class="intro-photo"><img src="{{ url_for('static', filename='homepage/werkstatt-hero-v3.webp') }}" alt="Fahrzeug in der Gärtner-Werkstatt" width="1448" height="1086" fetchpriority="high"></div>
     </section>
     <section class="audiences wrap" aria-label="Der passende Einstieg für Sie" id="fuer-sie">
-      <a class="audience" href="{{ portal_links.auswahl }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Autoschlüssel" width="1200" height="1800" loading="lazy"><div><span class="eyebrow">Für Ihr eigenes Fahrzeug</span><h2>Privatkunden</h2><p>Schaden, Service oder Reifen?<br>Wir helfen Ihnen weiter.</p><span class="text-link">Mein Anliegen starten →</span></div></a>
-      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Beratung im Autohaus" width="1200" height="800" loading="lazy"><div><span class="eyebrow">Ihr fester Reparaturpartner</span><h2>Autohäuser &amp;<br>Werkstätten</h2><p>Karosserie und Lack.<br>Verlässlich für Ihre Kunden.</p><span class="text-link">Partnerschaft entdecken →</span></div></a>
-      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Geordnete Firmenflotte" width="1200" height="674" loading="lazy"><div><span class="eyebrow">Mehr Zeit für Ihr Geschäft</span><h2>Firmenflotten</h2><p>Wir managen Ihren Fuhrpark.<br>Von Fälligkeiten bis Reparaturen.</p><span class="text-link">Betreuung kennenlernen →</span></div></a>
+      <a class="audience" href="{{ portal_links.auswahl }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Autoschlüssel" width="1200" height="1800" loading="lazy"><div><h2>Privatkunden</h2><span class="text-link">Anfrage starten →</span></div></a>
+      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Beratung im Autohaus" width="1200" height="800" loading="lazy"><div><h2>Autohäuser &amp;<br>Werkstätten</h2><span class="text-link">Zusammenarbeiten →</span></div></a>
+      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Geordnete Firmenflotte" width="1200" height="674" loading="lazy"><div><h2>Firmenflotten</h2><span class="text-link">Fuhrpark betreuen lassen →</span></div></a>
     </section>
     <section class="services section-pad" id="leistungen" aria-labelledby="services-title"><div class="wrap">
-      <div class="section-head"><div><span class="eyebrow">Alles aus einer Hand</span><h2 id="services-title">Was Ihr Fahrzeug braucht.</h2></div><a class="text-link" href="{{ url_for('oeffentliche_leistungen') }}">Alle Leistungen &amp; Arbeitsbilder →</a></div>
+      <div class="section-head"><div><h2 id="services-title">Was Ihr Fahrzeug braucht.</h2></div><a class="text-link" href="{{ url_for('oeffentliche_leistungen') }}">Leistungen &amp; Arbeitsbilder →</a></div>
       <div class="service-grid">
-      {% for slug, leistung in leistungen.items() %}<a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ leistung.titel }}</h3><p>{{ leistung.kurz }}</p></div><span aria-hidden="true">↗</span></a>{% endfor %}
+      {% for slug, leistung in leistungen.items() %}<a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ leistung.titel }}</h3></div><span aria-hidden="true">↗</span></a>{% endfor %}
       </div><p class="service-note">Auch HU/AU: Wir organisieren die Prüfung über unseren externen Prüfpartner.</p>
     </div></section>
     <section class="trust wrap section-pad" id="vertrauen" aria-labelledby="trust-title">
       <div class="trust-photo"><img src="{{ url_for('static', filename='homepage/margita-hoefer-portrait.jpg') }}" alt="Margita Höfer, Büro und Partnerbetreuung" width="1003" height="1568" loading="lazy"></div>
-      <div class="trust-copy"><span class="eyebrow">Digital organisiert. Persönlich betreut.</span><h2 id="trust-title">Ein Team, das<br>an alles denkt.</h2><p>Sie sagen uns, was ansteht. Wir stimmen die nächsten Schritte mit Ihnen ab – verständlich, transparent und mit einem festen Kontakt.</p><a class="text-link" href="{{ url_for('oeffentliches_team') }}">Team &amp; Werkstatt kennenlernen →</a><div class="trust-bottom"><span>Margita Höfer · Büro &amp; Partnerbetreuung</span><a href="tel:+4917660477486">0176 60477486</a></div></div>
-      <aside class="trust-proof"><span class="eyebrow">Vertrauen auf einen Blick</span><ul><li>Meisterbetrieb für Karosserie &amp; Lack</li><li>Persönliche Abstimmung und klare Angebote</li><li>Hol- &amp; Bringservice nach Vereinbarung</li></ul><a class="text-link" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer">Google-Bewertungen ansehen ↗</a></aside>
+      <div class="trust-copy"><h2 id="trust-title">Persönlich für Sie da.</h2><p>Ein fester Kontakt. Klare Absprachen.</p><a class="text-link" href="{{ url_for('oeffentliches_team') }}">Unser Team kennenlernen →</a><div class="trust-bottom"><span>Margita Höfer · Büro &amp; Partnerbetreuung</span><a href="tel:+4917660477486">0176 60477486</a></div></div>
+      <aside class="trust-proof"><ul><li>Meisterbetrieb für Karosserie &amp; Lack</li><li>Klare Angebote</li><li>Hol- &amp; Bringservice nach Vereinbarung</li></ul><a class="text-link" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer">Google-Bewertungen ansehen ↗</a></aside>
     </section>
     <section class="new-location section-pad" id="neue-location" aria-labelledby="location-title">
       <div class="wrap location-layout">
         <div class="location-copy">
-          <span class="eyebrow">Neue Location · Ab 01.11.2026</span>
+          <span class="eyebrow">Neue Location</span>
           <h2 id="location-title">Hier begrüßen wir Sie persönlich.</h2>
-          <p>Ab dem <strong>1. November 2026</strong> sind wir an unserem neuen Standort in Mosbach für Sie da. Wir freuen uns darauf, Sie in unserem neuen Empfang persönlich begrüßen zu dürfen.</p>
+          <p>Ab <strong>1. November 2026</strong> an unserem neuen Standort.</p>
           <address><strong>Alte Neckarelzer Straße 18/1</strong><br>74821 Mosbach</address>
-          <a class="text-link" href="#kontakt">Wir freuen uns auf Sie →</a>
+          <a class="text-link" href="#kontakt">Kontakt →</a>
         </div>
         <div class="location-views">
           <div class="location-gallery">
             <figure><a href="{{ url_for('static', filename='homepage/neue-location-empfang-kundensicht-v1.webp') }}" target="_blank" rel="noopener" aria-label="Einrichtungsvisualisierung vom Kundeneingang in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-empfang-kundensicht-v1.webp') }}" alt="Einrichtungsvisualisierung: weiße Empfangstheke mit Logo, Wartebereich und Kaffeeplatz" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick vom Kundeneingang</figcaption></figure>
             <figure><a href="{{ url_for('static', filename='homepage/neue-location-empfang-eingang-v1.webp') }}" target="_blank" rel="noopener" aria-label="Einrichtungsvisualisierung zur Eingangstür in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-empfang-eingang-v1.webp') }}" alt="Einrichtungsvisualisierung: Empfangstheke an der Rampe und zwei Stühle im Wartebereich" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick zur Eingangstür</figcaption></figure>
           </div>
-          <p class="location-preview-note">Einrichtungsvisualisierungen – so ist unser neuer Empfang geplant. Bilder zum Vergrößern anklicken.</p>
+          <p class="location-preview-note">Einrichtungsvisualisierungen · Zum Vergrößern anklicken.</p>
           <details class="location-entrance"><summary>Entwurf des Eingangs ansehen</summary><figure><a href="{{ url_for('static', filename='homepage/neue-location-eingang-rot-weiss-v1.webp') }}" target="_blank" rel="noopener" aria-label="Visualisierung des neuen Eingangs in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-eingang-rot-weiss-v1.webp') }}" alt="Gestaltungsentwurf: Eingang 18/1 mit anthrazitfarbenem Rahmen und rot-weißer Beschilderung" width="1086" height="1448" loading="lazy" decoding="async"></a><figcaption>Gestaltungsentwurf für unseren neuen Eingang</figcaption></figure></details>
         </div>
       </div>
     </section>
-    <section class="contact-band" id="kontakt"><div class="wrap contact-inner"><div><span class="eyebrow">Der nächste Schritt ist ganz einfach.</span><h2>Wie können wir helfen?</h2><p>Fotos senden, Termin anfragen oder direkt miteinander sprechen.</p><p class="opening-hours"><strong>Öffnungszeiten</strong><br>{{ homepage_oeffnungszeiten }}</p></div><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto ↗</a><a class="button light" href="tel:+4915227706694">0152 277 066 94</a></div></div></section>
+    <section class="contact-band" id="kontakt"><div class="wrap contact-inner"><div><h2>Wie können wir helfen?</h2><p class="opening-hours"><strong>Öffnungszeiten</strong><br>{{ homepage_oeffnungszeiten }}</p></div><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto ↗</a><a class="button light" href="tel:+4915227706694">0152 277 066 94</a></div></div></section>
   </main>
   <footer class="site-footer"><div class="wrap footer-grid"><div><strong>Gärtner GmbH Karosserie + Lack</strong><p>Binauer Höhe 4 · 74821 Mosbach-Lohrbach<br>Ab 01.11.2026: Alte Neckarelzer Straße 18/1, Mosbach</p><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Fuhrpark &amp; Partnerschaft</a><a href="{{ url_for('oeffentliches_team') }}#unsere-geschichte">Unsere Geschichte</a><a href="{{ portal_links.karriere }}">Stellen &amp; Karriere</a></nav><nav aria-label="Zugänge und Rechtliches"><a href="{{ url_for('oeffentliche_portale') }}">Kunden- &amp; Partnerzugänge</a><a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}</nav></div></footer>
   <script>
