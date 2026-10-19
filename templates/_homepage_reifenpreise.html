@@ -1,0 +1,54 @@
+{% macro money(cents) -%}{{ cents // 100 }},{{ '%02d'|format(cents % 100) }} €{%- endmacro %}
+{% macro price(cents) -%}<span class="tire-price-value" data-net-cents="{{ cents }}"><strong>{{ money((cents * 119 + 50) // 100) }}</strong><small>{{ money(cents) }} netto</small></span>{%- endmacro %}
+<dialog class="tire-pricing" id="reifenpreise" aria-labelledby="tire-pricing-title">
+  <div class="tire-price-dialog-head"><div><span class="eyebrow">Reifenservice &amp; Einlagerung</span><h2 id="tire-pricing-title">Unsere Preise.</h2></div><button class="tire-price-close" type="button" data-tire-price-close aria-label="Preisliste schließen" autofocus>×</button></div>
+  <div class="tire-price-dialog-body">
+    <p class="tire-pricing-intro">Unsere Basispreise sind <strong>Nettopreise zuzüglich 19 % MwSt.</strong> Der jeweils hervorgehobene Endpreis enthält die Mehrwertsteuer bereits. Für Standard-Pkw mit Stahl- oder Alufelgen; ein Satz umfasst vier Räder.</p>
+    <div class="tire-price-cards">
+      <article class="tire-price-card"><h3>Radwechsel</h3><p class="tire-price-amount">41,65 €<span>35,00 € netto + 19 % MwSt.<br>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>47,60 €</strong><br><small>40,00 € netto + 19 % MwSt.</small></p><p class="tire-price-card-note">Kompletträder wechseln, Sichtkontrolle und Luftdruckprüfung. Ohne Wuchten.</p></article>
+      <article class="tire-price-card"><h3>Radwechsel mit Wuchten</h3><p class="tire-price-amount">71,40 €<span>60,00 € netto + 19 % MwSt.<br>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>83,30 €</strong><br><small>70,00 € netto + 19 % MwSt.</small></p><p class="tire-price-card-note">Radwechsel und Auswuchten einschließlich Standardgewichten.</p></article>
+      <article class="tire-price-card"><h3>Einlagerung</h3><p class="tire-price-amount">53,55 €<span>45,00 € netto + 19 % MwSt.<br>für vier Räder / sechs Monate</span></p><p>Inklusive Kennzeichnung und Sichtcheck.</p><p class="tire-price-card-note">Kompletträder bis 20 Zoll, ab Annahme. Radwechsel und Wäsche separat.</p></article>
+    </div>
+    <div class="tire-price-details">
+      <div class="tire-price-details-body">
+        <table class="tire-price-table">
+          <caption>Reifen auf Felgen ummontieren</caption>
+          <thead><tr><th scope="col">Felgengröße</th><th scope="col">Je Reifen</th><th scope="col">Vier Reifen</th></tr></thead>
+          <tbody><tr><th scope="row">13-16 Zoll</th><td>{{ price(2250) }}</td><td>{{ price(9000) }}</td></tr><tr><th scope="row">17-18 Zoll</th><td>{{ price(2500) }}</td><td>{{ price(10000) }}</td></tr><tr><th scope="row">19-20 Zoll</th><td>{{ price(3000) }}</td><td>{{ price(12000) }}</td></tr></tbody>
+        </table>
+        <p class="tire-price-note">Inklusive Radaus- und -einbau, altem Reifen abziehen, neuem Reifen aufziehen, Wuchten, Standardgewichten und Standard-Gummiventil ohne RDKS. Reifen selbst und Entsorgung separat. Radwechsel und Wuchten werden nicht zusätzlich berechnet.</p>
+        <p class="tire-price-note">Bei angelieferten losen Rädern: <strong>5,95 € weniger je Rad (5,00 € netto + 19 % MwSt.)</strong>. Viererpakete für vier Räder derselben Preisgruppe, MwSt. je Paket gerundet; bei Mischbereifung gilt die jeweilige Zollklasse pro Rad.</p>
+        <table class="tire-price-table">
+          <caption>Saisonpakete für vier Räder</caption>
+          <thead><tr><th scope="col">Leistung</th><th scope="col">Bis 17 Zoll</th><th scope="col">18-20 Zoll</th></tr></thead>
+          <tbody><tr><th scope="row">Einlagerung + ein Radwechsel</th><td>{{ price(8000) }}</td><td>{{ price(8500) }}</td></tr><tr><th scope="row">Einlagerung + ein Radwechsel mit Wuchten</th><td>{{ price(10500) }}</td><td>{{ price(11500) }}</td></tr></tbody>
+        </table>
+        <p class="tire-price-note">Pro Saison, maximal sechs Monate ab Annahme, ohne Wäsche. Keine Jahrespreise. Größere oder besonders schwere Räder und längere Lagerzeiten nach vorherigem Angebot.</p>
+        <table class="tire-price-table tire-price-extras">
+          <caption>Zusatzleistungen</caption>
+          <thead><tr><th scope="col">Leistung</th><th scope="col">Endpreis inkl. MwSt.</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Räderwäsche bei normaler Verschmutzung</th><td>{{ price(1500) }} / vier Räder</td></tr>
+            <tr><th scope="row">Wuchten loser Räder bis 17 Zoll, inkl. Gewichten</th><td>{{ price(625) }} / Rad</td></tr>
+            <tr><th scope="row">Wuchten loser Räder 18-20 Zoll, inkl. Gewichten</th><td>{{ price(750) }} / Rad</td></tr>
+            <tr><th scope="row">Runflat / Niederquerschnitt bei Reifenmontage</th><td>+ {{ price(500) }} / Reifen</td></tr>
+            <tr><th scope="row">Altreifenentsorgung ohne Felge</th><td>{{ price(400) }} / Reifen</td></tr>
+            <tr><th scope="row">Metallventil statt Standard-Gummiventil, ohne RDKS</th><td>+ {{ price(450) }} / Ventil</td></tr>
+          </tbody>
+        </table>
+        <p class="tire-price-note">Der Zuschlag für Runflat/Niederquerschnitt wird nur einmal je Reifen berechnet und gilt nicht beim reinen Komplettradwechsel. Das Metallventil ersetzt das enthaltene Gummiventil; RDKS-Ventile und Servicekits sind davon ausgenommen.</p>
+        <p class="tire-price-note">Reifen und Felgen, RDKS-Service und Anlernen, Reifenreparaturen nach Prüfung, Räder ab 21 Zoll sowie Mehraufwand bei SUV/Transportern oder festsitzenden Befestigungen bieten wir Ihnen vorab individuell an.</p>
+      </div>
+    </div>
+    <div class="tire-price-action"><a class="button red service-enquiry" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifenservice und Termin anfragen <span aria-hidden="true">→</span></a></div>
+  </div>
+</dialog>
+<script>
+(() => {
+  const dialog = document.getElementById('reifenpreise');
+  const openButton = document.querySelector('[data-tire-price-open]');
+  const closeButton = dialog.querySelector('[data-tire-price-close]');
+  openButton.addEventListener('click', () => dialog.showModal());
+  closeButton.addEventListener('click', () => dialog.close());
+})();
+</script>
