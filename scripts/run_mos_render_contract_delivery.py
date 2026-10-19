@@ -109,7 +109,7 @@ def run(environment: dict[str, str] | None = None, *, secret_root: Path = SECRET
         runtime.pop(key, None)  # The mail worker never contacts Stripe.
     try:
         result = subprocess.run(
-            [sys.executable, '-m', 'flask', '--app', 'app', 'mos-contract-delivery'],
+            [sys.executable, '-m', 'scripts.run_mos_render_cli', 'mos-contract-delivery'],
             cwd=ROOT, env=runtime, timeout=TIMEOUT_SECONDS, check=False,
         )
     except subprocess.TimeoutExpired:

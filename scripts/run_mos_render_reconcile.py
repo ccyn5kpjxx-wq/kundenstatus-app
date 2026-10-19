@@ -120,7 +120,7 @@ def run(environment: dict[str, str] | None = None, *, secret_root: Path = SECRET
     })
     try:
         result = subprocess.run(
-            [sys.executable, '-m', 'flask', '--app', 'app', 'mos-booking-reconcile'],
+            [sys.executable, '-m', 'scripts.run_mos_render_cli', 'mos-booking-reconcile'],
             cwd=ROOT, env=runtime, timeout=TIMEOUT_SECONDS, check=False,
         )
     except subprocess.TimeoutExpired:

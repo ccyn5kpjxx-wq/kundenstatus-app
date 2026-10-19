@@ -76,6 +76,7 @@ class RenderReconcileTests(unittest.TestCase):
         with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as process:
             self.assertEqual(runner.run(self.env, secret_root=self.root), 0)
         args, kwargs = process.call_args
+        self.assertEqual(args[0][1:3], ['-m', 'scripts.run_mos_render_cli'])
         self.assertEqual(args[0][-1], 'mos-booking-reconcile')
         self.assertEqual(kwargs['timeout'], runner.TIMEOUT_SECONDS)
         self.assertEqual(kwargs['env']['DATABASE_URL'], self.env['DATABASE_URL'])

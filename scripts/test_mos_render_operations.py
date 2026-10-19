@@ -74,7 +74,7 @@ class OperationsTests(TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([call[0][-1] for call in calls], ['mos-booking-reconcile'])
         self.assertEqual([call[1]['timeout'] for call in calls], [900])
-        self.assertTrue(all(call[0][1:4] == ['-m', 'flask', '--app'] for call in calls))
+        self.assertTrue(all(call[0][1:3] == ['-m', 'scripts.run_mos_render_cli'] for call in calls))
         self.assertEqual(calls[0][1]['env']['MOS_TERMINATION_ENABLED'], '0')
         monitor.assert_called_once()
         self.assertEqual(monitor.call_args.args[0]['MOS_TERMINATION_MONITOR_ENABLED'], '1')

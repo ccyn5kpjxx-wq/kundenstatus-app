@@ -50,3 +50,13 @@ Zugriffe bleiben bei vorgeschriebener, aber deaktivierter Route auch mit Cache g
 Alle übrigen Buchungsfreigaben bleiben unverändert.
 
 Offlineprüfung: `python -m unittest scripts.test_mos_render_operations -v`.
+
+Die beiden MOS-Hintergrundstarter importieren die Portal-App über
+`scripts.run_mos_render_cli`. Eine eigene PostgreSQL-Session-Sperre serialisiert
+diesen vollständigen Import zwischen Vertragsworker und Abgleich-Cron. Das Poll-Wartebudget
+beträgt 90 Sekunden, zusätzlich gelten 10 Sekunden für den Verbindungsaufbau und
+5 Sekunden pro SQL-Abfrage. Anschließend werden Sperre und Verbindung
+vor dem unveränderten eigentlichen CLI-Befehl freigegeben. Die zusätzliche Verbindung
+verwendet nur den vorhandenen PostgreSQL-Zugang. Dies koordiniert keine Webstarts und
+keine späteren Schemaaufrufe der Befehle. Bei einem Webdeployment müssen die beiden
+MOS-Hintergrunddienste deshalb während der App-Initialisierung gestoppt bleiben.

@@ -39,6 +39,7 @@ class PreflightTests(unittest.TestCase):
             process.return_value.returncode = 0
             self.assertEqual(run(self.env, secret_root=self.file.parent), 0)
         args, kwargs = process.call_args
+        self.assertEqual(args[0][1:3], ['-m', 'scripts.run_mos_render_cli'])
         self.assertEqual(args[0][-1], 'mos-contract-delivery')
         self.assertNotIn('MOS_STRIPE_LIVE_KEY', kwargs['env'])
         self.assertEqual(kwargs['env']['MAIL_SMTP_PASS'], 'synthetic')
