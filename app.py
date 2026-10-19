@@ -30903,7 +30903,7 @@ def save_google_ads_tageswert(
         db.close()
 
 
-def list_google_ads_statistik(tage=30, website="alle"):
+def list_google_ads_statistik(tage=30, website="alle", ausgeblendete_websites=()):
     try:
         tage = int(tage or 30)
     except (TypeError, ValueError):
@@ -30912,14 +30912,19 @@ def list_google_ads_statistik(tage=30, website="alle"):
     website = clean_text(website).lower()
     if website != "alle":
         website = normalize_besucher_website(website) or "alle"
+    ausgeblendete_websites = tuple(key for key in BESUCHER_WEBSITES if key in ausgeblendete_websites)
+    if website in ausgeblendete_websites:
+        website = "alle"
     erster_tag = date.today() - timedelta(days=tage - 1)
     letzter_tag = date.today()
-    website_filter = " AND website=?" if website != "alle" else ""
-    params = (
-        (erster_tag.isoformat(), letzter_tag.isoformat(), website)
-        if website != "alle"
-        else (erster_tag.isoformat(), letzter_tag.isoformat())
+    website_filter = (
+        f" AND website NOT IN ({','.join('?' for _ in ausgeblendete_websites)})"
+        if ausgeblendete_websites else ""
     )
+    params = (erster_tag.isoformat(), letzter_tag.isoformat(), *ausgeblendete_websites)
+    if website != "alle":
+        website_filter += " AND website=?"
+        params += (website,)
     db = get_db()
     try:
         rows = db.execute(
@@ -30941,7 +30946,7 @@ def list_google_ads_statistik(tage=30, website="alle"):
         db.close()
 
     lookup = {row["website"]: dict(row) for row in rows}
-    selected_keys = list(GOOGLE_ADS_KAMPAGNEN)
+    selected_keys = [key for key in GOOGLE_ADS_KAMPAGNEN if key not in ausgeblendete_websites]
     if website != "alle":
         selected_keys = [website]
     campaigns = []
@@ -31179,7 +31184,7 @@ def log_besucher_event(seite, referrer="", user_agent="", ip_address="", website
     return True
 
 
-def list_besucher_statistik(tage=30, website="alle"):
+def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
     try:
         tage = int(tage or 30)
     except (TypeError, ValueError):
@@ -31188,10 +31193,18 @@ def list_besucher_statistik(tage=30, website="alle"):
     website = clean_text(website).lower()
     if website != "alle":
         website = normalize_besucher_website(website) or "alle"
-    website_filter = " AND website=?" if website != "alle" else ""
+    ausgeblendete_websites = tuple(key for key in BESUCHER_WEBSITES if key in ausgeblendete_websites)
+    if website in ausgeblendete_websites:
+        website = "alle"
+    ausblend_filter = (
+        f" AND website NOT IN ({','.join('?' for _ in ausgeblendete_websites)})"
+        if ausgeblendete_websites else ""
+    )
+    website_filter = ausblend_filter + (" AND website=?" if website != "alle" else "")
 
     def filter_params(cutoff_value):
-        return (cutoff_value, website) if website != "alle" else (cutoff_value,)
+        params = (cutoff_value, *ausgeblendete_websites)
+        return params + (website,) if website != "alle" else params
 
     erster_tag = date.today() - timedelta(days=tage - 1)
     cutoff = f"{erster_tag.isoformat()} 00:00:00"
@@ -31268,13 +31281,13 @@ def list_besucher_statistik(tage=30, website="alle"):
             filter_params(cutoff),
         ).fetchall()
         website_rows = db.execute(
-            """
+            f"""
             SELECT website, COUNT(*) AS aufrufe, COUNT(DISTINCT visitor_hash) AS besucher
             FROM besucher_events
-            WHERE erstellt_am >= ? AND ist_bot=0
+            WHERE erstellt_am >= ? AND ist_bot=0{ausblend_filter}
             GROUP BY website ORDER BY aufrufe DESC, website
             """,
-            (cutoff,),
+            (cutoff, *ausgeblendete_websites),
         ).fetchall()
     finally:
         db.close()
@@ -31301,6 +31314,8 @@ def list_besucher_statistik(tage=30, website="alle"):
     website_lookup = {row["website"]: dict(row) for row in website_rows}
     websites = []
     for key, config in BESUCHER_WEBSITES.items():
+        if key in ausgeblendete_websites:
+            continue
         row = website_lookup.get(key, {})
         websites.append({
             "key": key,
@@ -39030,13 +39045,17 @@ def api_besucher_event():
 @app.route("/admin/besucherstatistik")
 @admin_required
 def admin_besucherstatistik():
+    # Nur diese Übersicht ausblenden; Tracking, Zuordnungen und gespeicherte Daten bleiben erhalten.
+    ausgeblendete_websites = ("tomorrowworks",)
     statistik = list_besucher_statistik(
         tage=request.args.get("tage", 30),
         website=request.args.get("website", "alle"),
+        ausgeblendete_websites=ausgeblendete_websites,
     )
     google_ads = list_google_ads_statistik(
         tage=statistik["tage"],
         website=statistik["website"],
+        ausgeblendete_websites=ausgeblendete_websites,
     )
     return render_template(
         "besucherstatistik_admin.html",

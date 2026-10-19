@@ -131,7 +131,7 @@ def main():
             )
             tomorrowworks = client.post(
                 "/api/besucher",
-                data='{"website":"tomorrowworks","seite":"/websites.html","referrer":"www.google.de"}',
+                data='{"website":"tomorrowworks","seite":"/websites.html","referrer":"tomorrowworks-only.example"}',
                 content_type="text/plain;charset=UTF-8",
                 headers={"User-Agent": chrome_ua, "CF-Connecting-IP": "203.0.113.10", "Origin": "https://www.tomorrowworks-agentur.de"},
                 base_url="https://kundenstatus-app.onrender.com",
@@ -140,6 +140,18 @@ def main():
                 "/api/besucher",
                 json={"website": "tomorrowworks", "seite": "/admin", "referrer": ""},
                 headers={"User-Agent": chrome_ua, "CF-Connecting-IP": "203.0.113.55", "Origin": "https://auto-lackierzentrum.de"},
+                base_url="https://kundenstatus-app.onrender.com",
+            )
+            mos = client.post(
+                "/api/besucher",
+                json={"website": "autovermietung-mos", "seite": "/", "referrer": "mos-only.example"},
+                headers={"User-Agent": "Mozilla/5.0 (iPad) Firefox/126.0", "CF-Connecting-IP": "203.0.113.88", "Origin": "https://autovermietung-mos.de"},
+                base_url="https://kundenstatus-app.onrender.com",
+            )
+            tomorrowworks_bot = client.post(
+                "/api/besucher",
+                json={"website": "tomorrowworks", "seite": "/", "referrer": ""},
+                headers={"User-Agent": "Googlebot/2.1", "CF-Connecting-IP": "203.0.113.89", "Origin": "https://tomorrowworks-agentur.de"},
                 base_url="https://kundenstatus-app.onrender.com",
             )
             statistik = portal.list_besucher_statistik(7, website="alle")
@@ -163,7 +175,7 @@ def main():
 
             ok &= check("Beacon-Endpunkt antwortet ohne Inhalt", all(
                 response.status_code == 204
-                for response in (first, second, mobile, bot, portal_form, tomorrowworks, invalid)
+                for response in (first, second, mobile, bot, portal_form, tomorrowworks, invalid, mos, tomorrowworks_bot)
             ))
             ok &= check(
                 "CORS erlaubt nur die passende Website",
@@ -173,16 +185,16 @@ def main():
                 == "https://www.tomorrowworks-agentur.de"
                 and not invalid.headers.get("Access-Control-Allow-Origin"),
             )
-            ok &= check("Drei Websites werden gemeinsam ausgewertet", statistik["aufrufe"] == 5 and statistik["besucher"] == 4 and len(statistik["websites"]) == 3)
+            ok &= check("Ungefilterte Auswertung und Tracking aller drei Websites bleiben erhalten", statistik["aufrufe"] == 6 and statistik["besucher"] == 5 and len(statistik["websites"]) == 3)
             ok &= check("Auto-Lackierzentrum separat auswertbar", auto_statistik["aufrufe"] == 4 and auto_statistik["besucher"] == 3)
             ok &= check("Tomorrowworks separat auswertbar", tomorrowworks_statistik["aufrufe"] == 1 and tomorrowworks_statistik["besucher"] == 1)
-            ok &= check("Bots werden separat ausgewiesen", statistik["bot_aufrufe"] == 1)
+            ok &= check("Bots werden separat ausgewiesen", statistik["bot_aufrufe"] == 2)
             ok &= check("Homepage-Pfade werden zusammengeführt", auto_statistik["seiten"][0]["seite"] == "/")
             ok &= check("Herkunft nur als Domain gespeichert", rows[0]["referrer_domain"] == "www.google.de")
             ok &= check("Interne Herkunft erkannt", rows[2]["referrer_domain"] == "Intern")
             ok &= check("Gerät und Browser klassifiziert", rows[2]["geraet"] == "Mobil" and rows[2]["browser"] == "Safari")
             ok &= check("Keine Roh-IP in Ereignisdaten", all("203.0.113" not in row["visitor_hash"] for row in rows))
-            ok &= check("Unpassende Herkunft wird ignoriert", len(rows) == 6)
+            ok &= check("Unpassende Herkunft wird ignoriert", len(rows) == 8)
             ok &= check("Besucher-Hashes bleiben je Website getrennt", rows[0]["visitor_hash"] != rows[5]["visitor_hash"])
             ok &= check("90-Tage-Löschfrist greift", all(row["visitor_hash"] != "alt" for row in rows))
             ok &= check(
@@ -201,6 +213,54 @@ def main():
                 and google_ads_auto["kosten_pro_abschluss_label"] == "6,17 €"
                 and google_ads_auto["campaigns"][0]["ctr_label"] == "5,00 %",
             )
+
+            for key, kosten, klicks in (("tomorrowworks", 9999, 99), ("autovermietung-mos", 250, 2)):
+                portal.save_google_ads_tageswert(
+                    website=key, datum=datetime.now().strftime("%Y-%m-%d"),
+                    kosten_cent=kosten, klicks=klicks, impressionen=100, conversions=1,
+                )
+            hidden = ("tomorrowworks",)
+            sichtbar = portal.list_besucher_statistik(7, ausgeblendete_websites=hidden)
+            sichtbare_ads = portal.list_google_ads_statistik(7, ausgeblendete_websites=hidden)
+            ok &= check(
+                "Dashboard-Summen, Tageswerte und Bots enthalten kein Tomorrowworks",
+                sichtbar["aufrufe"] == 5 and sichtbar["besucher"] == 4
+                and sichtbar["heute_aufrufe"] == 5 and sichtbar["heute_besucher"] == 4
+                and sichtbar["bot_aufrufe"] == 1
+                and sum(row["aufrufe"] for row in sichtbar["verlauf"]) == 5,
+            )
+            ok &= check(
+                "Website-Karten, Seiten, Herkunft, Geräte und Browser sind konsistent gefiltert",
+                {row["key"] for row in sichtbar["websites"]} == {"auto-lackierzentrum", "autovermietung-mos"}
+                and all(row["website"] != "tomorrowworks" for row in sichtbar["seiten"])
+                and all(row["quelle"] != "tomorrowworks-only.example" for row in sichtbar["quellen"])
+                and any(row["geraet"] == "Tablet" for row in sichtbar["geraete"])
+                and any(row["browser"] == "Firefox" for row in sichtbar["browser"])
+                and all(sum(row["aufrufe"] for row in sichtbar[key]) == 5 for key in ("seiten", "quellen", "geraete", "browser")),
+            )
+            ok &= check(
+                "Dashboard-Werbekosten und Budgets enthalten nur die zwei sichtbaren Websites",
+                sichtbare_ads["kosten_cent"] == 1484 and sichtbare_ads["klicks"] == 12
+                and sichtbare_ads["tagesbudget_cent"] == 1000
+                and sichtbare_ads["max_budget_cent"] == 7000
+                and {row["website"] for row in sichtbare_ads["campaigns"]} == {"auto-lackierzentrum", "autovermietung-mos"},
+            )
+            for key, expected in (("auto-lackierzentrum", 4), ("autovermietung-mos", 1)):
+                filtered = portal.list_besucher_statistik(7, website=key, ausgeblendete_websites=hidden)
+                ok &= check(f"Sichtbare Website {key} bleibt separat auswertbar", filtered["website"] == key and filtered["aufrufe"] == expected)
+            for old_link in ("tomorrowworks", "www.tomorrowworks-agentur.de"):
+                filtered = portal.list_besucher_statistik(7, website=old_link, ausgeblendete_websites=hidden)
+                filtered_ads = portal.list_google_ads_statistik(7, website=old_link, ausgeblendete_websites=hidden)
+                ok &= check(
+                    f"Alter Tomorrowworks-Filter {old_link} fällt auf sichtbare Gesamtübersicht zurück",
+                    filtered["website"] == "alle" and filtered["aufrufe"] == 5
+                    and filtered_ads["website"] == "alle" and filtered_ads["kosten_cent"] == 1484,
+                )
+            database = temp_get_db()
+            unchanged_count = database.execute("SELECT COUNT(*) FROM besucher_events").fetchone()[0]
+            stored_ads = database.execute("SELECT kosten_cent FROM google_ads_tageswerte WHERE website='tomorrowworks'").fetchone()[0]
+            database.close()
+            ok &= check("Anzeige-Filter löscht keine Besucher- oder Kostendaten", unchanged_count == len(rows) and stored_ads == 9999)
 
             captured = {}
             portal.render_template = lambda name, **context: captured.update(
@@ -226,12 +286,14 @@ def main():
             database.close()
             ok &= check("Analytics ist nur für Admins erreichbar", unauthenticated.status_code in {302, 303})
             ok &= check(
-                "Admin-Auswertung nutzt Website- und Zeitraumfilter",
+                "Admin-Route blendet Tomorrowworks auch über alte Direktlinks aus",
                 admin_view.status_code == 200
                 and captured.get("name") == "besucherstatistik_admin.html"
                 and captured.get("statistik", {}).get("tage") == 7
-                and captured.get("statistik", {}).get("website") == "tomorrowworks"
-                and captured.get("google_ads", {}).get("website") == "tomorrowworks",
+                and captured.get("statistik", {}).get("website") == "alle"
+                and captured.get("statistik", {}).get("aufrufe") == 5
+                and captured.get("google_ads", {}).get("website") == "alle"
+                and captured.get("google_ads", {}).get("kosten_cent") == 1484,
             )
             ok &= check("Eigene Admin-Aufrufe werden nicht gezählt", admin_beacon.status_code == 204 and after_admin_beacon == before_admin_beacon)
 
@@ -285,13 +347,13 @@ def main():
             rendered.status_code == 200
             and "Besucher-Analytics" in rendered_html
             and "Besucher-Summe" in rendered_html
-            and "Tomorrowworks" in rendered_html
+            and "tomorrowworks" not in rendered_html.lower()
             and "Autovermietung MOS" in rendered_html
             and "Erkannte Bots" in rendered_html
             and "Google Ads Kosten" in rendered_html
             and "Kosten je Abschluss" in rendered_html
             and "Weitere Kennzahlen" in rendered_html
-            and "15,00 € Tagesbudget eingerichtet" in rendered_html,
+            and "10,00 € Tagesbudget eingerichtet" in rendered_html,
         )
         public_homepage = render_client.get(
             "/homepage",
