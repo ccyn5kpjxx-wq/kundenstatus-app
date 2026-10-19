@@ -121,6 +121,19 @@ def listed_slots(db, active=True, weekly=False, now=None):
     return sorted(slots,key=lambda row:datetime.fromisoformat(row['slot']).astimezone(timezone.utc))
 
 
+def default_end_slot(slots, max_days):
+    """Prefer one elapsed day after the first pickup, within the rental limit."""
+    if not slots:return None
+    start=datetime.fromisoformat(slots[0]).astimezone(timezone.utc)
+    later=[]
+    for slot in slots:
+        end=datetime.fromisoformat(slot).astimezone(timezone.utc)
+        if start<end<=start+timedelta(days=max_days):later.append((end,slot))
+    later.sort()
+    target=start+timedelta(days=1)
+    return next((slot for end,slot in later if end>=target),later[-1][1] if later else None)
+
+
 def selected_slots_open(db,start,end,weekly=False,now=None):
     now=now or datetime.now(timezone.utc)
     try:
@@ -827,9 +840,12 @@ def register(portal):
     @bp.get('/')
     def index():
         db=portal.get_db()
-        try:slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(setup()['cfg']))]
+        try:
+            cfg=setup()['cfg']
+            slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(cfg))]
         finally:db.close()
-        return render_template('mos_public/index.html',listings=LISTINGS,slots=slots)
+        return render_template('mos_public/index.html',listings=LISTINGS,slots=slots,
+                               default_end=default_end_slot(slots,cfg['max_days']))
 
     @app.cli.command('mos-contract-delivery')
     def deliver_contracts():
