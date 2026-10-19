@@ -1,13 +1,13 @@
-{% macro money(cents) -%}{{ cents // 100 }},{{ '%02d'|format(cents % 100) }} €{%- endmacro %}
-{% macro price(cents) -%}<span class="tire-price-value" data-net-cents="{{ cents }}"><strong>{{ money((cents * 119 + 50) // 100) }}</strong><small>{{ money(cents) }} netto</small></span>{%- endmacro %}
+{% macro money(cents) -%}{{ cents // 100 }}{% if cents % 100 %},{{ '%02d'|format(cents % 100) }}{% endif %} €{%- endmacro %}
+{% macro price(cents) -%}<span class="tire-price-value" data-gross-cents="{{ cents }}"><strong>{{ money(cents) }}</strong></span>{%- endmacro %}
 <dialog class="tire-pricing" id="reifenpreise" aria-labelledby="tire-pricing-title">
   <div class="tire-price-dialog-head"><div><span class="eyebrow">Reifenservice &amp; Einlagerung</span><h2 id="tire-pricing-title">Unsere Preise.</h2></div><button class="tire-price-close" type="button" data-tire-price-close aria-label="Preisliste schließen" autofocus>×</button></div>
   <div class="tire-price-dialog-body">
-    <p class="tire-pricing-intro">Unsere Basispreise sind <strong>Nettopreise zuzüglich 19 % MwSt.</strong> Der jeweils hervorgehobene Endpreis enthält die Mehrwertsteuer bereits. Für Standard-Pkw mit Stahl- oder Alufelgen; ein Satz umfasst vier Räder.</p>
+    <p class="tire-pricing-intro"><strong>Alle Preise inklusive 19 % MwSt.</strong> Für Standard-Pkw mit Stahl- oder Alufelgen. Ein Satz umfasst vier Räder.</p>
     <div class="tire-price-cards">
-      <article class="tire-price-card"><h3>Radwechsel</h3><p class="tire-price-amount">41,65 €<span>35,00 € netto + 19 % MwSt.<br>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>47,60 €</strong><br><small>40,00 € netto + 19 % MwSt.</small></p><p class="tire-price-card-note">Kompletträder wechseln, Sichtkontrolle und Luftdruckprüfung. Ohne Wuchten.</p></article>
-      <article class="tire-price-card"><h3>Radwechsel mit Wuchten</h3><p class="tire-price-amount">71,40 €<span>60,00 € netto + 19 % MwSt.<br>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>83,30 €</strong><br><small>70,00 € netto + 19 % MwSt.</small></p><p class="tire-price-card-note">Radwechsel und Auswuchten einschließlich Standardgewichten.</p></article>
-      <article class="tire-price-card"><h3>Einlagerung</h3><p class="tire-price-amount">53,55 €<span>45,00 € netto + 19 % MwSt.<br>für vier Räder / sechs Monate</span></p><p>Inklusive Kennzeichnung und Sichtcheck.</p><p class="tire-price-card-note">Kompletträder bis 20 Zoll, ab Annahme. Radwechsel und Wäsche separat.</p></article>
+      <article class="tire-price-card"><h3>Radwechsel</h3><p class="tire-price-amount">35 €<span>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>40 €</strong></p><p class="tire-price-card-note">Kompletträder wechseln, Sichtkontrolle und Luftdruckprüfung. Ohne Wuchten.</p></article>
+      <article class="tire-price-card"><h3>Radwechsel mit Wuchten</h3><p class="tire-price-amount">60 €<span>für vier Räder bis 17 Zoll</span></p><p>18-20 Zoll: <strong>70 €</strong></p><p class="tire-price-card-note">Radwechsel und Auswuchten einschließlich Standardgewichten.</p></article>
+      <article class="tire-price-card"><h3>Einlagerung</h3><p class="tire-price-amount">45 €<span>für vier Räder / sechs Monate</span></p><p>Inklusive Kennzeichnung und Sichtcheck.</p><p class="tire-price-card-note">Kompletträder bis 20 Zoll, ab Annahme. Radwechsel und Wäsche separat.</p></article>
     </div>
     <div class="tire-price-details">
       <div class="tire-price-details-body">
@@ -17,7 +17,7 @@
           <tbody><tr><th scope="row">13-16 Zoll</th><td>{{ price(2250) }}</td><td>{{ price(9000) }}</td></tr><tr><th scope="row">17-18 Zoll</th><td>{{ price(2500) }}</td><td>{{ price(10000) }}</td></tr><tr><th scope="row">19-20 Zoll</th><td>{{ price(3000) }}</td><td>{{ price(12000) }}</td></tr></tbody>
         </table>
         <p class="tire-price-note">Inklusive Radaus- und -einbau, altem Reifen abziehen, neuem Reifen aufziehen, Wuchten, Standardgewichten und Standard-Gummiventil ohne RDKS. Reifen selbst und Entsorgung separat. Radwechsel und Wuchten werden nicht zusätzlich berechnet.</p>
-        <p class="tire-price-note">Bei angelieferten losen Rädern: <strong>5,95 € weniger je Rad (5,00 € netto + 19 % MwSt.)</strong>. Viererpakete für vier Räder derselben Preisgruppe, MwSt. je Paket gerundet; bei Mischbereifung gilt die jeweilige Zollklasse pro Rad.</p>
+        <p class="tire-price-note">Bei angelieferten losen Rädern: <strong>5 € weniger je Rad</strong>. Satzpreise für vier Räder derselben Preisgruppe; bei Mischbereifung gilt die jeweilige Zollklasse pro Rad.</p>
         <table class="tire-price-table">
           <caption>Saisonpakete für vier Räder</caption>
           <thead><tr><th scope="col">Leistung</th><th scope="col">Bis 17 Zoll</th><th scope="col">18-20 Zoll</th></tr></thead>
