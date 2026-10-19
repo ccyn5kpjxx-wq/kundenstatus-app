@@ -205,11 +205,24 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
                                ('TOPPADDING', (0, 0), (-1, -1), 4), ('BOTTOMPADDING', (0, 0), (-1, -1), 4)]))
     story += [table, para('Vereinbarte Mietbedingungen', 'MOSSection'),
         para('Version ' + contract['terms_version'] + ' - diese Fassung wurde vor der Zahlung angezeigt und unterschrieben.', 'MOSSmall')]
-    for block in contract['terms_text'].split('\n'):
+    terms_blocks = contract['terms_text'].split('\n')
+    keep_heading = False
+    for index, block in enumerate(terms_blocks):
         if block.strip():
-            story.append(para(block))
+            paragraph = para(block)
+            # Plain-text headings are short, standalone lines without a final
+            # sentence mark. Keep any following blank spacers in the same chain
+            # so a heading cannot be left behind at the foot of a page.
+            stripped = block.strip()
+            keep_heading = (len(stripped) <= 110
+                            and not re.search(r'[.!?]["\u201d\u00bb)]?$', stripped)
+                            and any(line.strip() for line in terms_blocks[index + 1:]))
+            paragraph.keepWithNext = keep_heading
+            story.append(paragraph)
         else:
-            story.append(Spacer(1, 5))
+            spacer = Spacer(1, 5)
+            spacer.keepWithNext = keep_heading
+            story.append(spacer)
     local_time = datetime.fromisoformat(signed_at).astimezone(ZoneInfo('Europe/Berlin')).strftime('%d.%m.%Y, %H:%M:%S %Z')
     sig_width, sig_height = PillowImage.open(BytesIO(signature)).size
     rendered_width = min(185, sig_width * 0.6)
