@@ -21,3 +21,32 @@ Die Portal-Integration lässt `mos_termination.*` bei `PUBLIC_SITE_ONLY` zu und 
 Die geschützte Prüfansicht `/mieten/admin/kuendigungen` zeigt Erklärungen und offene Mailstatus für die Werkstatt. Die CLI `flask --app app mos-termination-check` gibt bei jeder nicht angenommenen Bestätigung einen Fehlercode zurück. `scripts/run_mos_render_termination_monitor.py` bereitet dafür einen gesonderten Render-Cron-Alarm vor und lehnt fehlende Live-/PostgreSQL-/HTTPS-Konfiguration ab. **Es ist noch kein Cron-Dienst eingerichtet oder getestet.** Ein manueller Blick auf die Adminseite allein genügt nicht. Vor Live sind eine kontrollierte Empfangsprobe mit echtem Postfach, belegte Zustell-/Alarmzeiten, eine Betreiberanweisung für `review`, Aufbewahrungsregel und die juristische Prüfung des exakten Wortlauts erforderlich. Ein Browser-Download und die SMTP-Annahme allein beweisen nicht die erfolgreiche sofortige Zustellung der Textbestätigung nach § 312k Abs. 4 BGB. Eine Störung mit offenem Mailstatus ist deshalb ein Betriebsalarm und **keine bestandene Live-Abnahme**.
 
 Synthetische Tests: `python -m unittest scripts.test_mos_termination scripts.test_mos_render_termination_monitor -v`.
+
+## Gemeinsamer Betriebsstarter ohne zusätzlichen Dienst
+
+`python -m scripts.run_mos_render_operations` kann als Startkommando des bestehenden
+Zahlungsabgleich-Crons verwendet werden. Er startet unverändert den vorhandenen
+Abgleich-Starter und nur bei `MOS_TERMINATION_MONITOR_ENABLED=1` anschließend die
+Read-only-Prüfung des Kündigungsmonitors. Beide Prüfungen werden auch bei Fehler oder Timeout der jeweils
+anderen ausgeführt; am Ende bleibt der erste Fehlercode für den Render-Alarm erhalten.
+Der Abgleich-Starter begrenzt seinen Flask-Prozess weiterhin auf 900 Sekunden. Der
+Read-only-Monitor importiert keine App und benötigt keine SMTP-Zugänge. Er zählt mit
+psycopg ausschließlich bestehende `mail_status!='sent'`-Zeilen in einer expliziten
+Read-only-Transaktion. Verbindungsaufbau ist auf 10 Sekunden, SQL auf 10 Sekunden und
+das Warten auf eine Sperre auf 3 Sekunden begrenzt. Fehlende Tabelle, Datenbankfehler
+oder offene Bestätigungen erzeugen einen Alarm; das Schema wird nicht angelegt.
+
+Der gemeinsame Starter versendet keine Kündigungsbestätigungen und wiederholt keine
+unklaren Mailversuche. Der unmittelbare Versand in der Kündigungsroute und der separate
+Vertrags-Mailworker bleiben unverändert. Eine offene Kündigungsbestätigung stoppt somit
+keinen Vertrags-Mailworker. Tatsächliche Alarmzeiten hängen vom Cronplan und der Laufzeit
+des vorangehenden Abgleichs ab und müssen betrieblich geprüft werden. Der Starter ändert
+keine gespeicherten Aktivierungsschalter und richtet selbst keinen Render-Dienst ein.
+Im Cron bleibt `MOS_TERMINATION_ENABLED=0`; nur der Webdienst aktiviert die öffentliche
+Route. Der separate Monitorschalter steuert allein die Read-only-Prüfung. Für den
+Abgleich-Kindprozess setzt der Starter den öffentlichen Routenschalter ausdrücklich auf
+`0`. Reine CLI-Kontexte dürfen den Abgleichzustand ohne öffentliche Route laden; HTTP-
+Zugriffe bleiben bei vorgeschriebener, aber deaktivierter Route auch mit Cache gesperrt.
+Alle übrigen Buchungsfreigaben bleiben unverändert.
+
+Offlineprüfung: `python -m unittest scripts.test_mos_render_operations -v`.

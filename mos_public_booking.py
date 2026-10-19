@@ -12,7 +12,7 @@ import time
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, current_app, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, has_request_context, redirect, render_template, request, session, url_for
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, init_schema as init_contract_schema
 from mos_public_contract import finalize as finalize_contract, presign_quote, read as read_contract, signature_png
@@ -182,10 +182,14 @@ def register(portal):
     bp=Blueprint('mos_public',__name__,url_prefix=prefix)
 
     def setup():
+        cfg=app.config['MOS_PUBLIC_BOOKING']
+        if (has_request_context() and cfg.get('mode')=='live' and cfg.get('enabled') is True
+                and cfg.get('launch',{}).get('termination_review',{}).get('applies') is True
+                and not app.config.get('MOS_TERMINATION_ENABLED')):
+            raise ValueError('Öffentlicher Kündigungsweg muss vor Livebuchungen aktiviert sein.')
         existing=app.extensions.get('mos_public_booking')
         if existing:
             return existing
-        cfg=app.config['MOS_PUBLIC_BOOKING']
         live=cfg.get('mode')=='live'
         # No accidental production inventory edits with a test Stripe key.
         pg_test = isolated_postgres_stripe_test(portal, cfg) if portal.USE_POSTGRES else False
@@ -230,9 +234,6 @@ def register(portal):
         if live:
             problems=launch_errors(cfg) if cfg.get('enabled') is True else settlement_errors(cfg)
             if problems:raise ValueError('Buchung noch nicht freigegeben: '+'; '.join(problems))
-            if (cfg.get('enabled') is True and cfg['launch']['termination_review']['applies']
-                    and not app.config.get('MOS_TERMINATION_ENABLED')):
-                raise ValueError('Öffentlicher Kündigungsweg muss vor Livebuchungen aktiviert sein.')
             if not portal.USE_POSTGRES:
                 raise ValueError('Livebetrieb benötigt den autoritativen PostgreSQL-Portalbestand, keine lokale Kopie.')
             if getattr(portal,'USING_EPHEMERAL_SECRET_KEY',True) or getattr(portal,'USING_GENERATED_FLASK_SECRET_KEY',True):
