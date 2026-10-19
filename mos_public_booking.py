@@ -24,6 +24,7 @@ from mos_return import (init_schema as init_return_schema, deposit_release_eligi
                         release_review_deadline)
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 from mos_contract_delivery import _single_address
+import mos_site_handoff
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -1017,9 +1018,26 @@ def register(portal):
 
     @bp.post('/quote')
     def preview():
-        q=quote(request.form.get('vehicle'),request.form.get('start'),request.form.get('end'))
+        prefill={}
+        if 'handoff_nonce' in request.form:
+            try:
+                mos_site_handoff.consume_nonce(session,request.form.get('handoff_nonce'))
+                prefill=mos_site_handoff.validated_prefill(request.form,setup()['cfg'])
+                q=quote(prefill['vehicle'],prefill['start'],prefill['end'])
+            except ValueError as error:
+                return render_template('mos_public/error.html',message=str(error)),400
+        else:
+            q=quote(request.form.get('vehicle'),request.form.get('start'),request.form.get('end'))
         token=serializer().dumps({'quote':q,'nonce':secrets.token_urlsafe(20)})
-        return render_template('mos_public/quote.html',q=q,token=token)
+        return render_template('mos_public/quote.html',q=q,token=token,prefill=prefill)
+
+    @bp.get('/start')
+    def site_start():
+        # Ordinary GET initializes the normal first-party session and CSRF.
+        # The subsequent quote POST keeps the existing global CSRF protection.
+        nonce=mos_site_handoff.issue_nonce(session)
+        return render_template('mos_public/site_start.html',nonce=nonce,
+                               site_origins=mos_site_handoff.SITE_ORIGINS)
 
     @bp.post('/checkout')
     def checkout():

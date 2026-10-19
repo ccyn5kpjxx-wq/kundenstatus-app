@@ -5,12 +5,13 @@
 <p><strong>Konkretes Fahrzeug:</strong> {{ q.portal_vehicle_name }} · Kennzeichen: {{ q.vehicle_plate or 'wird vor Übergabe mitgeteilt' }}{% if q.vehicle_vin %} · FIN: {{ q.vehicle_vin }}{% endif %}.</p>
 <p><strong>Vermieter und Vertragspartner:</strong> {{ q.lessor_name }}, {{ q.lessor_address }}. „Autovermietung MOS“ bezeichnet nur das Angebot und ist keine eigene Vertragspartei.</p>
 {% if q.lessor_email and q.lessor_phone %}<p><strong>Kontakt des Vermieters:</strong> {{ q.lessor_email }} · Telefon {{ q.lessor_phone }}.</p>{% endif %}
-<h2>{{ "Mietbedingungen" if live else "Entwurf der Mietbedingungen" }}</h2><div class="terms">{{ q.terms_text }}</div><p class="small">Version: {{ q.rules_version }}. Diese Übersicht ist 15 Minuten gültig.</p></section>
+<details class="terms-disclosure" id="booking-terms"><summary>{{ "Mietbedingungen und Haftungsblatt" if live else "Entwurf der Mietbedingungen und des Haftungsblatts" }}</summary><div class="terms">{{ q.terms_text }}</div></details><p class="small">Version: {{ q.rules_version }}. Diese Übersicht ist 15 Minuten gültig.</p></section>
 <button type="button" class="secondary" id="download-overview">Diese Buchungsübersicht und Mietbedingungen speichern</button>
 <p class="small">Bitte prüfe Fahrzeug, Termine, Preis und Bedingungen. Mit „Auswahl ändern“ unten kannst du Eingabefehler vor der Unterschrift korrigieren. Name und E-Mail kannst du direkt im Formular berichtigen; eine gezeichnete Unterschrift mit „Unterschrift löschen“. Wenn du nach der Unterschrift und vor der Mietzahlung etwas ändern möchtest, beende den offenen Checkout im Buchungsstatus und beginne erneut. Falls die Zahlung schon läuft, prüfe zuerst den Buchungsstatus. {% if live %}Der Vertragsschluss erfolgt in deutscher Sprache.{% else %}Die Testoberfläche ist auf Deutsch.{% endif %} Die unterschriebene Fassung wird gespeichert und nach bestätigter Buchung als PDF im Buchungsstatus bereitgestellt.</p>
 <form class="card" method="post" action="{{ url_for('mos_public.checkout') }}" id="contract-sign-form">{{ csrf_field()|safe }}<input type="hidden" name="quote_token" value="{{ token }}"><input type="hidden" name="signature_data" id="signature-data">
 <h2>{{ 'Buchungsdaten und Unterschrift vorbereiten' if live else 'Test-Buchungsangebot vor der Testzahlung unterschreiben' }}</h2>
-<label for="name">{{ "Name" if live else "Testname" }}</label><input id="name" name="name" maxlength="150" required autocomplete="off"><label for="email">{{ "E-Mail" if live else "Test-E-Mail (kein Versand)" }}</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="off">
+<label for="name">{{ "Name" if live else "Testname" }}</label><input id="name" name="name" maxlength="150" required autocomplete="off"{% if prefill %} value="{{ prefill.name }}"{% endif %}><label for="email">{{ "E-Mail" if live else "Test-E-Mail (kein Versand)" }}</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="off"{% if prefill %} value="{{ prefill.email }}"{% endif %}>
+{% if prefill and prefill.planned_km is not none %}<p class="small">Deine geplante Fahrstrecke: {{ prefill.planned_km }} km. Sie ändert den oben ausgewiesenen Mietpreis nicht. Tatsächliche Mehrkilometer werden bei Rückgabe gesondert abgerechnet.</p>{% endif %}
 <label><input type="checkbox" name="accept" value="yes" required> {% if live %}Ich habe die Preisübersicht gelesen und stimme den Mietbedingungen dieser Version zu.{% else %}Ich habe Preisübersicht und gekennzeichnete Entwurfsbedingungen für diesen Test gelesen.{% endif %}</label>
 <label for="signature-pad">Unterschrift mit Finger oder Maus zeichnen</label>
 <canvas id="signature-pad" width="700" height="180" style="width:100%;height:180px;touch-action:none;background:#fff;border:1px solid #888;border-radius:8px" aria-label="Unterschriftsfeld"></canvas>
@@ -22,7 +23,16 @@
 <script>
 (() => {
   document.getElementById('download-overview').addEventListener('click', () => {
-    const body = 'Buchungsübersicht und Mietbedingungen\n\n' + document.getElementById('booking-overview').innerText;
+    const details = document.getElementById('booking-terms');
+    const wasOpen = details.open;
+    let overview;
+    try {
+      details.open = true;
+      overview = document.getElementById('booking-overview').innerText;
+    } finally {
+      details.open = wasOpen;
+    }
+    const body = 'Buchungsübersicht und Mietbedingungen\n\n' + overview;
     const url = URL.createObjectURL(new Blob([body], {type: 'text/plain;charset=utf-8'}));
     const link = document.createElement('a');
     link.href = url; link.download = 'MOS-Buchungsuebersicht-und-Mietbedingungen.txt';
