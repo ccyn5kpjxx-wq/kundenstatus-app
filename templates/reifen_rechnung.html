@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Reifenrechnung · Auftrag {{ auftrag.id }}{% endblock %}
+
+{% block extra_css %}
+<style>
+  .reifen-rechnung-layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr); gap:1.5rem; align-items:start; }
+  .reifen-rechnung-layout > * { min-width:0; }
+  .reifen-rechnung-card { padding:1.4rem; margin-bottom:1.25rem; }
+  .reifen-rechnung-card h2 { font-size:1.25rem; margin:0 0 .5rem; }
+  .reifen-rechnung-adresse { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+  .reifen-rechnung-adresse .breit { grid-column:1/-1; }
+  .reifen-leistung { display:grid; grid-template-columns:minmax(0,1fr) auto 80px; align-items:center; gap:.75rem; padding:.95rem 0; border-bottom:1px solid var(--line); }
+  .reifen-leistung:last-child { border-bottom:0; }
+  .reifen-leistung-label { display:flex; gap:.7rem; align-items:start; cursor:pointer; min-width:0; }
+  .reifen-leistung-label input { margin-top:.3rem; flex-shrink:0; }
+  .reifen-leistung-label span { overflow-wrap:anywhere; }
+  .reifen-leistung-preis { white-space:nowrap; text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+  .reifen-leistung-preis small { display:block; color:var(--muted); font-weight:400; }
+  .reifen-leistung details { margin-top:.2rem; color:var(--muted); font-size:.83rem; }
+  .reifen-leistung details summary { cursor:pointer; }
+  .reifen-leistung details p { margin:.3rem 0 0; }
+  .reifen-mengen-label { display:block; font-size:.75rem; color:var(--muted); margin-bottom:.15rem; }
+  .reifen-rechnung-tabelle { width:100%; border-collapse:collapse; font-size:.9rem; }
+  .reifen-rechnung-tabelle th, .reifen-rechnung-tabelle td { padding:.65rem .3rem; vertical-align:top; border-bottom:1px solid var(--line); }
+  .reifen-rechnung-tabelle th { font-size:.78rem; color:var(--muted); font-weight:500; }
+  .reifen-rechnung-tabelle .betrag { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .reifen-rechnung-tabelle .leistung { overflow-wrap:anywhere; }
+  .reifen-rechnung-summen { margin:1rem 0; }
+  .reifen-rechnung-summen > div { display:flex; justify-content:space-between; gap:1rem; margin:.4rem 0; }
+  .reifen-rechnung-summen dd { margin:0; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .reifen-rechnung-gesamt { border-top:2px solid var(--line); padding-top:.8rem; font-size:1.3rem; font-weight:700; }
+  .reifen-rechnung-hinweis { border-left:3px solid var(--accent); padding:.6rem .8rem; background:var(--panel-soft); font-size:.9rem; }
+  .reifen-rechnung-toolbar { display:flex; flex-wrap:wrap; gap:.5rem; }
+  .reifen-rechnung-aktion { position:sticky; top:1rem; }
+  .reifen-rechnung-aktion .form-check { line-height:1.5; }
+  @media(max-width:1100px) { .reifen-rechnung-layout { grid-template-columns:1fr; } .reifen-rechnung-aktion { position:static; } }
+  @media(max-width:550px) { .reifen-rechnung-card { padding:1rem; } .reifen-rechnung-adresse { grid-template-columns:1fr; } .reifen-leistung { grid-template-columns:minmax(0,1fr) 75px; gap:.6rem; } .reifen-leistung-label { grid-column:1/-1; } .reifen-leistung-preis { text-align:left; padding-left:1.6rem; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set kalkulation = entwurf.kalkulation %}
+{% set kunde = entwurf.kunde %}
+<div class="page-header">
+  <div>
+    <span class="badge-soft">Reifenauftrag · {{ auftrag.status_meta.label }}</span>
+    <h1 class="mt-3 mb-2">Rechnung erstellen</h1>
+    <p>Auftrag {{ auftrag.id }} · {{ auftrag.fahrzeug or 'Fahrzeug' }}{% if auftrag.kennzeichen %} · {{ auftrag.kennzeichen }}{% endif %}</p>
+  </div>
+  <a class="btn btn-soft" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">← Zum Reifenauftrag</a>
+</div>
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+<div class="reifen-rechnung-layout">
+  <form method="POST" action="{{ url_for('reifen_rechnung', auftrag_id=auftrag.id) }}" id="reifen-leistungen-form">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="revision" value="{{ entwurf.revision }}">
+    <fieldset {% if locked %}disabled{% endif %}>
+      <section class="page-card reifen-rechnung-card" aria-labelledby="reifen-kundendaten">
+        <h2 id="reifen-kundendaten">1. Rechnungsempfänger</h2>
+        <p class="small text-muted mb-3">Kundendaten prüfen und das Datum der ausgeführten Arbeit angeben.</p>
+        <div class="reifen-rechnung-adresse">
+          <div class="breit"><label class="form-label" for="rechnung_name">Name / Firma</label><input class="form-control" id="rechnung_name" name="rechnung_name" autocomplete="name" value="{{ kunde.name or '' }}" required maxlength="200"></div>
+          <div class="breit"><label class="form-label" for="rechnung_strasse">Straße und Hausnummer</label><input class="form-control" id="rechnung_strasse" name="rechnung_strasse" autocomplete="street-address" value="{{ kunde.strasse or '' }}" required maxlength="200"></div>
+          <div><label class="form-label" for="rechnung_plz">Postleitzahl</label><input class="form-control" id="rechnung_plz" name="rechnung_plz" autocomplete="postal-code" value="{{ kunde.plz or '' }}" required maxlength="20"></div>
+          <div><label class="form-label" for="rechnung_ort">Ort</label><input class="form-control" id="rechnung_ort" name="rechnung_ort" autocomplete="address-level2" value="{{ kunde.ort or '' }}" required maxlength="150"></div>
+          <div><label class="form-label" for="leistungsdatum">Leistungsdatum</label><input class="form-control" type="date" id="leistungsdatum" name="leistungsdatum" value="{{ entwurf.leistungsdatum or '' }}" required></div>
+        </div>
+        {% if kunde.telefon or kunde.email %}<p class="small text-muted mt-3 mb-0 text-break">Kontakt: {{ kunde.telefon or '' }}{% if kunde.telefon and kunde.email %} · {% endif %}{{ kunde.email or '' }}</p>{% endif %}
+      </section>
+      <section class="page-card reifen-rechnung-card" aria-labelledby="reifen-auswahl">
+        <h2 id="reifen-auswahl">2. Was wurde gemacht?</h2>
+        <p class="small text-muted mb-2">Ausgeführte Leistungen auswählen. Alle Preise inklusive 19 % MwSt. Ein Satz = vier Räder.</p>
+        {% for preis in katalog %}
+        <div class="reifen-leistung" data-preis-id="{{ preis.id }}">
+          <div>
+            <label class="reifen-leistung-label" for="leistung-{{ preis.id }}"><input class="form-check-input" type="checkbox" name="leistung" value="{{ preis.id }}" id="leistung-{{ preis.id }}" {% if preis.id in entwurf.auswahl %}checked{% endif %}><span>{{ preis.bezeichnung }}</span></label>
+            {% if preis.hinweis %}<details><summary>Umfang</summary><p>{{ preis.hinweis }}</p></details>{% endif %}
+          </div>
+          <div class="reifen-leistung-preis">{{ preis.brutto_cent|geld_cent }}<small>pro {{ preis.einheit }}</small></div>
+          <div>
+            {% if preis.einheit == 'Satz' %}
+            <input type="hidden" name="menge_{{ preis.id }}" value="1"><span class="small text-muted">1 Satz</span>
+            {% else %}
+            <label class="reifen-mengen-label" for="menge-{{ preis.id }}">Menge</label><select class="form-select form-select-sm" id="menge-{{ preis.id }}" name="menge_{{ preis.id }}" aria-label="Menge: {{ preis.bezeichnung }}">{% for menge in range(1, 5) %}<option value="{{ menge }}" {% if entwurf.auswahl.get(preis.id, 1)|int == menge %}selected{% endif %}>{{ menge }}</option>{% endfor %}</select>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        <label class="form-check mt-3"><input type="checkbox" class="form-check-input" name="lose_raeder" value="1" {% if entwurf.lose_raeder %}checked{% endif %}><span>Reifenmontage an angelieferten losen Rädern</span><span class="d-block small text-muted">Der hinterlegte Nachlass von 5,00 € je montiertem Rad wird berücksichtigt.</span></label>
+        <button class="btn btn-brand mt-4" type="submit">Berechnen &amp; speichern</button>
+        <p class="small text-muted mt-2 mb-0" id="reifen-ungespeichert" hidden role="status">Änderungen bitte zuerst berechnen und speichern.</p>
+      </section>
+    </fieldset>
+  </form>
+
+  <aside class="reifen-rechnung-aktion" aria-label="Gespeicherte Rechnung und nächste Schritte">
+    <section class="page-card reifen-rechnung-card" aria-labelledby="reifen-gespeichert">
+      <h2 id="reifen-gespeichert">3. Prüfen und Rechnung erstellen</h2>
+      {% if kalkulation %}
+      <p class="small text-muted">Gespeicherter Stand · Leistungsdatum {{ entwurf.leistungsdatum }}</p>
+      <p class="text-break mb-3"><strong>{{ kunde.name }}</strong><br>{{ kunde.strasse }}<br>{{ kunde.plz }} {{ kunde.ort }}</p>
+      <table class="reifen-rechnung-tabelle">
+        <thead><tr><th scope="col">Leistung</th><th scope="col" class="betrag">Brutto</th></tr></thead>
+        <tbody>{% for position in kalkulation.positionen %}<tr><td class="leistung">{{ position.bezeichnung }}<small class="d-block text-muted">{{ position.menge }} {{ position.einheit }} × {{ position.einzel_brutto_cent|geld_cent }}</small></td><td class="betrag">{{ position.brutto_cent|geld_cent }}</td></tr>{% endfor %}</tbody>
+      </table>
+      <dl class="reifen-rechnung-summen">
+        <div><dt class="fw-normal">Netto</dt><dd>{{ kalkulation.gesamt.netto_cent|geld_cent }}</dd></div>
+        <div><dt class="fw-normal">19 % MwSt.</dt><dd>{{ kalkulation.gesamt.mwst_cent|geld_cent }}</dd></div>
+        <div class="reifen-rechnung-gesamt"><dt>Gesamt</dt><dd>{{ kalkulation.gesamt.brutto_cent|geld_cent }}</dd></div>
+      </dl>
+      <div class="reifen-rechnung-toolbar mb-3"><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_excel', auftrag_id=auftrag.id) }}">Excel-Kalkulation</a><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_druck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Entwurf drucken</a></div>
+      {% else %}
+      <p class="text-muted">Links die erledigten Leistungen auswählen und speichern. Die Summe erscheint hier automatisch.</p>
+      {% endif %}
+
+      {% if auftrag.lexware_invoice_url %}
+      <div class="alert alert-success small">Für diesen Auftrag wurde bereits ein Lexware-Beleg erstellt.</div>
+      <a class="btn btn-brand w-100" href="{{ auftrag.lexware_invoice_url }}" target="_blank" rel="noopener">Vorhandenen Lexware-Beleg öffnen</a>
+      <p class="small text-muted mt-2 mb-0">Den Entwurf in Lexware abschließen und die endgültige Rechnung dort drucken.</p>
+      {% elif auftrag.rechnung_erstellung_status == 'laeuft' %}
+      <div class="alert alert-info mb-0" role="status">Die Rechnungserstellung läuft. Bitte die Seite später aktualisieren.</div>
+      {% elif auftrag.rechnung_erstellung_status == 'pruefen' %}
+      <div class="alert alert-warning small">Der letzte Erstellungsversuch ist noch ungeklärt. Bitte zuerst in Lexware prüfen, ob bereits ein Beleg entstanden ist.</div>
+      <form method="POST" action="{{ url_for('admin_rechnung_pruefung', auftrag_id=auftrag.id) }}">
+        {{ csrf_field()|safe }}
+        <label class="form-check small"><input class="form-check-input" type="checkbox" name="kein_beleg_bestaetigt" value="1" required> In Lexware geprüft: Es ist kein Beleg entstanden.</label>
+        <button class="btn btn-soft mt-2" type="submit">Erneute Vorbereitung freigeben</button>
+      </form>
+      {% elif locked %}
+      <div class="alert alert-warning small mb-0">Für diesen Auftrag ist bereits ein Rechnungsbeleg hinterlegt. Bitte den vorhandenen Beleg verwenden.</div>
+      {% elif not api_ready %}
+      <div class="reifen-rechnung-hinweis">Die Verbindung zu Lexware ist noch nicht eingerichtet. Die gespeicherte Kalkulation bleibt verfügbar.</div>
+      {% elif not kalkulation %}
+      <div class="reifen-rechnung-hinweis">Zuerst Leistungen und Rechnungsempfänger speichern.</div>
+      {% else %}
+      {% if auftrag.status|int < 4 %}<div class="alert alert-info small">Die Rechnung kann erstellt werden, sobald der Reifenauftrag als „Fertig“ markiert ist.</div>{% endif %}
+      <form method="POST" action="{{ url_for('lexware_rechnung_erstellen', auftrag_id=auftrag.id) }}" id="reifen-lexware-form" data-submit-once>
+        {{ csrf_field()|safe }}
+        <input type="hidden" name="reifen_revision" value="{{ entwurf.revision }}">
+        <label class="form-check small mb-3"><input class="form-check-input" type="checkbox" name="rechnung_pruefung_bestaetigt" value="1" required {% if auftrag.status|int < 4 %}disabled{% endif %}> Empfänger, Leistungen und Betrag geprüft; vorhandene Rechnungen abgeglichen.</label>
+        <button class="btn btn-brand w-100" type="submit" {% if auftrag.status|int < 4 %}disabled{% endif %}>Rechnung in Lexware erstellen</button>
+        <p class="small text-muted mt-2 mb-0">Der Entwurf wird an Lexware übertragen. Dort abschließen und die endgültige Rechnung drucken.</p>
+      </form>
+      {% endif %}
+      {% if rechnungsdateien %}<div class="mt-3"><h3 class="h6">Vorhandene Rechnungsdateien</h3>{% for datei in rechnungsdateien %}<a class="d-block text-break mb-2" href="{{ url_for('admin_datei', datei_id=datei.id) }}" target="_blank" rel="noopener">{{ datei.original_name }}</a>{% endfor %}</div>{% endif %}
+    </section>
+  </aside>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const form = document.getElementById('reifen-leistungen-form');
+  const hint = document.getElementById('reifen-ungespeichert');
+  const lexwareForm = document.getElementById('reifen-lexware-form');
+  if (!form) return;
+  form.addEventListener('input', () => {
+    if (hint) hint.hidden = false;
+    if (lexwareForm) lexwareForm.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
+  });
+  form.addEventListener('change', () => {
+    if (hint) hint.hidden = false;
+    if (lexwareForm) lexwareForm.querySelectorAll('input, button').forEach(control => { control.disabled = true; });
+  });
+  if (lexwareForm) lexwareForm.addEventListener('submit', () => {
+    const button = lexwareForm.querySelector('button[type="submit"]');
+    if (button) { button.disabled = true; button.textContent = 'Wird an Lexware übertragen …'; }
+  });
+})();
+</script>
+{% endblock %}

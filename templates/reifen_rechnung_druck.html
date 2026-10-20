@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Leistungsübersicht / Rechnungsentwurf · Reifenauftrag {{ auftrag.id }}</title>
+  <style>
+    * { box-sizing:border-box; }
+    body { margin:0; background:#eef0f2; color:#18212b; font:14px/1.5 Arial, sans-serif; }
+    .druck-toolbar { max-width:210mm; margin:20px auto; display:flex; gap:12px; align-items:center; padding:0 16px; }
+    .druck-toolbar button { border:0; border-radius:6px; background:#163f46; color:#fff; padding:11px 18px; font:inherit; font-weight:700; cursor:pointer; }
+    .druck-toolbar p { margin:0; font-size:12px; color:#535f6b; }
+    .blatt { width:calc(100% - 32px); max-width:210mm; margin:0 auto 24px; padding:17mm; background:#fff; box-shadow:0 2px 18px #18212b15; }
+    header { border-bottom:3px solid #a23f2d; padding-bottom:16px; margin-bottom:25px; }
+    .firma { font-size:18px; font-weight:700; margin:0 0 6px; }
+    .entwurf-marke { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:#9a3224; font-weight:700; }
+    h1 { font-size:24px; line-height:1.2; margin:9px 0 0; }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:25px; margin-bottom:28px; }
+    .meta h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:#626d78; margin:0 0 8px; }
+    .meta p { margin:0 0 5px; overflow-wrap:anywhere; }
+    address { font-style:normal; overflow-wrap:anywhere; }
+    table { width:100%; border-collapse:collapse; table-layout:fixed; font-size:12px; }
+    th { font-size:10px; text-align:left; text-transform:uppercase; letter-spacing:.03em; background:#eff2f3; padding:10px 6px; }
+    td { padding:12px 6px; border-bottom:1px solid #dde2e5; vertical-align:top; overflow-wrap:anywhere; }
+    .nummer { width:6%; }
+    .leistung { width:42%; }
+    .menge { width:9%; text-align:right; }
+    .einheit { width:11%; }
+    .betrag { width:16%; text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .hinweis { display:block; font-size:10px; color:#626d78; margin-top:4px; }
+    tbody tr { break-inside:avoid; }
+    thead { display:table-header-group; }
+    .summen { margin:20px 0 0 auto; max-width:300px; break-inside:avoid; }
+    .summen div { display:flex; justify-content:space-between; gap:20px; margin:6px 0; }
+    .summen dt { font-weight:400; }
+    .summen dd { margin:0; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .summen .gesamt { border-top:2px solid #18212b; padding-top:10px; margin-top:12px; font-size:17px; }
+    .summen .gesamt dt, .summen .gesamt dd { font-weight:700; }
+    footer { border-top:1px solid #dde2e5; margin-top:30px; padding-top:13px; color:#626d78; font-size:11px; break-inside:avoid; }
+    @page { size:A4; margin:15mm; }
+    @media print { body { background:#fff; font-size:11pt; } .druck-toolbar { display:none; } .blatt { width:100%; max-width:none; margin:0; padding:0; box-shadow:none; } h1 { font-size:20pt; } a { color:inherit; text-decoration:none; } }
+    @media screen and (max-width:600px) { .blatt { padding:20px 12px; width:calc(100% - 16px); } .meta { grid-template-columns:1fr; gap:18px; } h1 { font-size:21px; } .druck-toolbar { flex-wrap:wrap; } table { font-size:10px; } th, td { padding:8px 3px; } th { font-size:8px; } .betrag { white-space:normal; } .hinweis { font-size:9px; } }
+  </style>
+</head>
+<body>
+{% set kalkulation = entwurf.kalkulation %}
+{% set kunde = entwurf.kunde %}
+<div class="druck-toolbar"><button type="button" onclick="window.print()">Entwurf drucken</button><p>Für den Kundenbeleg die endgültige Rechnung aus Lexware verwenden.</p></div>
+<main class="blatt">
+  <header><p class="firma">Gärtner Karosserie &amp; Lack GmbH</p><span class="entwurf-marke">Reifenservice · Entwurf</span><h1>Leistungsübersicht / Rechnungsentwurf</h1></header>
+  <div class="meta">
+    <section><h2>Rechnungsempfänger</h2><address><strong>{{ kunde.name }}</strong><br>{{ kunde.strasse }}<br>{{ kunde.plz }} {{ kunde.ort }}</address></section>
+    <section><h2>Reifenauftrag {{ auftrag.id }}</h2><p>{{ auftrag.fahrzeug or 'Fahrzeug' }}{% if auftrag.kennzeichen %}<br>{{ auftrag.kennzeichen }}{% endif %}</p><p>Leistungsdatum: {{ entwurf.leistungsdatum }}</p></section>
+  </div>
+  {% if kalkulation %}
+  <table aria-label="Ausgeführte Reifenleistungen">
+    <thead><tr><th class="nummer" scope="col">Pos.</th><th class="leistung" scope="col">Leistung</th><th class="menge" scope="col">Menge</th><th class="einheit" scope="col">Einheit</th><th class="betrag" scope="col">Einzel brutto</th><th class="betrag" scope="col">Gesamt brutto</th></tr></thead>
+    <tbody>{% for position in kalkulation.positionen %}<tr><td>{{ loop.index }}</td><td>{{ position.bezeichnung }}{% if position.hinweis %}<span class="hinweis">{{ position.hinweis }}</span>{% endif %}</td><td class="menge">{{ position.menge }}</td><td>{{ position.einheit }}</td><td class="betrag">{{ position.einzel_brutto_cent|geld_cent }}</td><td class="betrag">{{ position.brutto_cent|geld_cent }}</td></tr>{% endfor %}</tbody>
+  </table>
+  <dl class="summen"><div><dt>Netto</dt><dd>{{ kalkulation.gesamt.netto_cent|geld_cent }}</dd></div><div><dt>19 % MwSt.</dt><dd>{{ kalkulation.gesamt.mwst_cent|geld_cent }}</dd></div><div class="gesamt"><dt>Gesamt brutto</dt><dd>{{ kalkulation.gesamt.brutto_cent|geld_cent }}</dd></div></dl>
+  {% else %}<p>Für diesen Auftrag sind noch keine Leistungen gespeichert.</p>{% endif %}
+  <footer>Entwurf – kein Rechnungsbeleg. Endgültige Rechnung in Lexware.<br>Alle Preise inklusive 19 % MwSt. Ein Satz umfasst vier Räder.</footer>
+</main>
+</body>
+</html>
