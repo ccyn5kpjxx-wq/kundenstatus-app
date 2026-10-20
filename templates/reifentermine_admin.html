@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Reifentermine{% endblock %}
+{% block extra_css %}
+<style>
+  .reifen-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:1rem; }
+  .reifen-card { min-width:0; padding:1.3rem; border:1px solid var(--line); border-radius:18px; background:var(--panel); overflow-wrap:anywhere; }
+  .reifen-card h2 { margin:.7rem 0; font-size:1.25rem; }
+  .reifen-card p { margin:.5rem 0; }
+  .reifen-card ul { padding-left:1.25rem; margin:.8rem 0; }
+  .reifen-card .reifen-date { color:var(--brand); font-weight:800; }
+  .reifen-card .reifen-contact { display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:1rem 0; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Reifentermine</h1><p>Neue Terminwünsche von der Homepage: Leistungen und Zeit prüfen, dann den Kunden kontaktieren.</p></div></div>
+<p class="text-muted">{{ reifentermine|length }} offene Anfrage(n) · Ein Terminwunsch ist noch keine verbindliche Zusage. Eingeplante Aufträge stehen weiterhin im Kalender und auf der Werkstatttafel.</p>
+<div class="reifen-grid">
+  {% for termin in reifentermine %}
+  <article class="reifen-card" data-reifentermin="{{ termin.id }}">
+    <span class="badge-soft">Terminwunsch · Bestätigung offen</span>
+    <h2>{{ termin.kunde_name or 'Kundenanfrage' }}</h2>
+    <p class="reifen-date">{{ termin.termin_label }}</p>
+    <p>{{ termin.fahrzeug or 'Fahrzeug noch abstimmen' }}{% if termin.kennzeichen %} · {{ termin.kennzeichen }}{% endif %}</p>
+    <ul>{% for leistung in termin.leistungen %}<li>{{ leistung }}</li>{% endfor %}</ul>
+    <div class="reifen-contact">
+      {% if termin.kontakt_telefon %}<a href="tel:{{ termin.kontakt_telefon }}">{{ termin.kontakt_telefon }}</a>{% endif %}
+      {% if termin.kunde_email %}<a href="mailto:{{ termin.kunde_email }}">{{ termin.kunde_email }}</a>{% endif %}
+    </div>
+    <a class="btn btn-brand" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Anfrage bearbeiten →</a>
+  </article>
+  {% else %}
+  <div class="reifen-card"><h2>Keine offenen Reifen-Terminwünsche</h2><p>Neue Kundenanfragen erscheinen hier automatisch.</p></div>
+  {% endfor %}
+</div>
+{% endblock %}

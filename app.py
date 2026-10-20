@@ -13000,7 +13000,7 @@ def create_lead(payload, attachments=None):
         """
         UPDATE leads
         SET website=?, herkunft_typ=?, herkunft_id=?, kunden_status_token=?,
-            kunden_status_aktiv=1, portal_json='{}', angebot_status='entwurf'
+            kunden_status_aktiv=1, portal_json=?, angebot_status='entwurf'
         WHERE id=?
         """,
         (
@@ -13008,6 +13008,7 @@ def create_lead(payload, attachments=None):
             normalize_lead_herkunft_typ(payload.get("herkunft_typ")),
             int(payload.get("herkunft_id") or 0),
             kunden_status_token,
+            json.dumps(payload.get("portal_data") if isinstance(payload.get("portal_data"), dict) else {}, ensure_ascii=False),
             int(lead_id),
         ),
     )
@@ -39183,7 +39184,7 @@ def admin_lackier_statistik():
 def cockpit_aktionsuebersicht(auftraege):
     """Read-only next actions; no notifications, hidden completion flags or N+1 reads."""
     db = get_db()
-    leads = [dict(r) for r in db.execute("SELECT id, auftrag_id, kunde_name, fahrzeug, status, angebot_status, naechste_aktion, naechster_kontakt_am FROM leads WHERE website='auto-lackierzentrum' AND status!='verloren' ORDER BY id DESC").fetchall()]
+    leads = [dict(r) for r in db.execute("SELECT id, auftrag_id, kunde_name, fahrzeug, status, angebot_status, naechste_aktion, naechster_kontakt_am, portal_json FROM leads WHERE website='auto-lackierzentrum' AND status!='verloren' ORDER BY id DESC").fetchall()]
     unread = {int(r["auftrag_id"]) for r in db.execute("SELECT DISTINCT auftrag_id FROM benachrichtigungen WHERE quelle='kunde' AND COALESCE(gelesen,0)=0 AND titel IN ('Nachricht vom Kunden','Neue Unterlagen vom Kunden')").fetchall()}
     db.close()
     orders = {int(a['id']): a for a in auftraege if not a.get('archiviert')}
@@ -39209,7 +39210,10 @@ def cockpit_aktionsuebersicht(auftraege):
             if (wish or intake.get('kunden_angebot_angenommen_am')) and (not intake.get('kunden_wunsch_bestaetigt_am') or intake.get('kunden_wunsch_neuabstimmung_offen_am')):
                 add('termine', 'Termin abstimmen', 'Wunschtermin: '+str(wish) if wish else 'Angebot angenommen; Termin noch abstimmen.', '#kundenkommunikation')
         elif lead['status'] != 'gewonnen':
-            if lead['angebot_status'] == 'angebot_abgegeben' or lead['status'] == 'angebot_offen':
+            reifen = reifen_termin_daten(lead)
+            if reifen:
+                add('termine', 'Reifentermin prüfen', reifen['termin_label'] + ' · ' + ', '.join(reifen['leistungen']), '#kundenportal')
+            elif lead['angebot_status'] == 'angebot_abgegeben' or lead['status'] == 'angebot_offen':
                 waiting += 1
             elif lead['status'] == 'besichtigung_geplant':
                 add('termine', 'Besichtigung vorbereiten', lead['naechste_aktion'] or ('Geplante Besichtigung: '+str(lead['naechster_kontakt_am'] or 'Termin im Vorgang prüfen')), '#kundenportal')
@@ -39260,6 +39264,7 @@ def betriebs_cockpit():
         "cockpit.html",
         cockpit=cockpit_data,
         aktionsuebersicht=cockpit_aktionsuebersicht(auftraege),
+        reifentermine=list_reifentermine(),
         start_inbox=start_inbox_daten(
             cockpit_data["postfach_items"],
             neue_emails,
@@ -44894,6 +44899,67 @@ WEBSITE_BESICHTIGUNGSARTEN = {
 }
 
 
+def reifen_termin_daten(lead):
+    """Read-only view of the current customer wish, never a confirmed appointment."""
+    try:
+        daten = json.loads(lead.get("portal_json") or "{}")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(daten, dict) or daten.get("anliegen") != "reifenservice":
+        return None
+    auswahl = daten.get("reifen_leistungen")
+    if not isinstance(auswahl, list):
+        return None
+    leistungen = [WEBSITE_REIFEN_LEISTUNGEN[key] for key in dict.fromkeys(
+        key for key in auswahl if isinstance(key, str) and key in WEBSITE_REIFEN_LEISTUNGEN
+    )]
+    if not leistungen:
+        return None
+    wunsch = parse_date(daten.get("kunden_wunsch_annahme_datum"))
+    zeit = clean_text(daten.get("kunden_wunsch_zeitfenster"))[:80]
+    label = format_date(wunsch.isoformat()) if wunsch else "Datum noch abstimmen"
+    if zeit:
+        label += " · " + zeit
+    return {
+        "datum_iso": wunsch.isoformat() if wunsch else "",
+        "zeit": zeit,
+        "termin_label": label,
+        "leistungen": leistungen,
+    }
+
+
+def list_reifentermine():
+    """Pending tire requests; no lead synchronization, tokens or messages on GET."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            """SELECT id, kunde_name, kontakt_telefon, kunde_email, fahrzeug, kennzeichen,
+                      status, portal_json, erstellt_am
+               FROM leads WHERE website=? AND quelle=? AND herkunft_typ=?
+                 AND status NOT IN (?, ?) AND COALESCE(auftrag_id, 0)=0""",
+            ("auto-lackierzentrum", "website", "website_formular", "gewonnen", "verloren"),
+        ).fetchall()
+    finally:
+        db.close()
+    termine = []
+    for row in rows:
+        lead = dict(row)
+        details = reifen_termin_daten(lead)
+        if details:
+            termine.append({key: lead[key] for key in (
+                "id", "kunde_name", "kontakt_telefon", "kunde_email", "fahrzeug", "kennzeichen", "status"
+            )} | details)
+    return sorted(termine, key=lambda item: (item["datum_iso"] or "9999", item["zeit"], item["id"]))
+
+
+@app.route("/admin/reifentermine")
+@admin_required
+def admin_reifentermine():
+    response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine()))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
     formdata = formdata or {}
     ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
@@ -44973,12 +45039,13 @@ def website_anfrage():
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
+        kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen == "reifenservice" else ""
         fin = re.sub(
             r"[^A-Za-z0-9]",
             "",
             clean_text(request.form.get("fin"))[:80],
         ).upper()
-        wunschdatum = clean_text(request.form.get("wunschdatum"))[:10]
+        wunschdatum = clean_text(request.form.get("wunschdatum"))[:100 if anliegen == "reifenservice" else 10]
         fahrzeug_link = (
             clean_text(request.form.get("fahrzeug_link"))[:1000]
             if anliegen == "kaufberatung"
@@ -45036,7 +45103,7 @@ def website_anfrage():
             )
         if anliegen in {"kaufberatung", "leasingrueckgabe"} and len(fahrzeug) < 2:
             errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
-        if anliegen in WEBSITE_KURZANFRAGEN and len(nachricht) < 5:
+        if anliegen in WEBSITE_KURZANFRAGEN and anliegen != "reifenservice" and len(nachricht) < 5:
             errors.append("Bitte Ihr Anliegen kurz beschreiben.")
         if anliegen == "fahrzeugpflege":
             if any(value not in WEBSITE_PFLEGE_KATEGORIEN for value in pflege_kategorien):
@@ -45053,6 +45120,19 @@ def website_anfrage():
                 errors.append("Bitte nur gültige Reifenleistungen auswählen.")
             elif not reifen_leistungen:
                 errors.append("Bitte mindestens eine Reifenleistung auswählen.")
+            if not wunschdatum:
+                errors.append("Bitte ein Wunschdatum für Ihren Reifentermin auswählen.")
+            elif not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", wunschdatum):
+                errors.append("Bitte ein gültiges Wunschdatum angeben.")
+            if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", wunschzeit):
+                errors.append("Bitte eine gültige Wunschuhrzeit angeben.")
+            elif wunschdatum:
+                try:
+                    wunsch = datetime.fromisoformat(wunschdatum + "T" + wunschzeit).replace(tzinfo=ZoneInfo("Europe/Berlin"))
+                    if wunsch < datetime.now(ZoneInfo("Europe/Berlin")):
+                        errors.append("Ihr Wunschtermin darf nicht in der Vergangenheit liegen.")
+                except ValueError:
+                    pass  # The common date validation below returns the date error.
         if anliegen == "fahrzeugcheck" and fahrzeugcheck_art not in WEBSITE_FAHRZEUGCHECK_ARTEN:
             errors.append("Bitte die gewünschte Art des Fahrzeugchecks auswählen.")
         if anliegen == "weitere_anfrage" and weitere_anfrage_art not in WEBSITE_WEITERE_ANFRAGE_ARTEN:
@@ -45099,7 +45179,9 @@ def website_anfrage():
         if anliegen == "reifenservice":
             beschreibungsteile.append("Reifenservice: " + ", ".join(WEBSITE_REIFEN_LEISTUNGEN[value] for value in reifen_leistungen))
         if wunschzeit:
-            beschreibungsteile.append(f"Gewünschter Zeitraum / Rückruf: {wunschzeit}")
+            beschreibungsteile.append(f"Wunschuhrzeit: {wunschzeit}")
+        if kennzeichen:
+            beschreibungsteile.append(f"Kennzeichen: {kennzeichen}")
         if fahrzeug:
             fahrzeug_label = "Gewünschtes Mietfahrzeug" if anliegen == "mietwagenanfrage" else "Fahrzeug"
             beschreibungsteile.append(f"{fahrzeug_label}: {fahrzeug}")
@@ -45181,6 +45263,14 @@ def website_anfrage():
                 "kontakt_telefon": telefon,
                 "kunde_email": email,
                 "fahrzeug": fahrzeug,
+                "kennzeichen": kennzeichen,
+                "portal_data": {
+                    "anliegen": "reifenservice",
+                    "reifen_leistungen": reifen_leistungen,
+                    "kunden_wunsch_annahme_datum": format_date(wunschdatum),
+                    "kunden_wunsch_zeitfenster": wunschzeit,
+                    "kunden_wunsch_hinweis": nachricht,
+                } if anliegen == "reifenservice" else {},
                 "schadenart": "unbekannt",
                 "beschreibung": " · ".join(beschreibungsteile),
                 "naechste_aktion": naechste_aktion,
@@ -45372,7 +45462,7 @@ HOMEPAGE_LEISTUNGEN = {
             ("Neue Reifen", "Passende Bereifung anhand der Fahrzeugdaten auswählen und die Bestellung abstimmen."),
             ("Reifeneinlagerung", "Räder kennzeichnen, den Zustand erfassen und die Einlagerung sowie den nächsten Wechsel vereinbaren."),
         ],
-        "anliegen": "reifenservice", "aktion": "Reifenservice und Termin anfragen",
+        "anliegen": "reifenservice", "aktion": "Reifentermin buchen",
         "hinweis": "Reifengröße, gewünschte Leistung und ein Wunschtermin helfen uns bei der Vorbereitung. Fotos können Sie ergänzen, müssen Sie aber nicht.",
     },
     "autoglas": {
@@ -54247,6 +54337,7 @@ def werkstatt_tafel():
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
+        reifentermine=list_reifentermine(),
         anzahl=len(auftraege),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",

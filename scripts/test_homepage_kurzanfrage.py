@@ -57,7 +57,7 @@ def reifenservice_checks():
     def post(changes=(), files=()):
         with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
             portal.PUBLIC_FORM_ATTEMPTS.clear()
-        data = MultiDict([(portal.CSRF_FIELD_NAME, csrf), ('anliegen','reifenservice'), ('name','Privater Reifen Testkunde'), ('email','reifen@example.invalid'), ('telefon',''), ('nachricht','Winterräder wechseln und den alten Satz einlagern'), ('reifen_leistung','radwechsel'), ('reifen_leistung','einlagerung'), ('reifen_leistung','radwechsel'), ('wunschdatum',(date.today()+timedelta(days=10)).isoformat()), ('wunschzeit','vormittags')])
+        data = MultiDict([(portal.CSRF_FIELD_NAME, csrf), ('anliegen','reifenservice'), ('name','Privater Reifen Testkunde'), ('email','reifen@example.invalid'), ('telefon',''), ('nachricht','Winterräder wechseln und den alten Satz einlagern'), ('reifen_leistung','radwechsel'), ('reifen_leistung','einlagerung'), ('reifen_leistung','radwechsel'), ('wunschdatum',(date.today()+timedelta(days=10)).isoformat()), ('wunschzeit','09:30')])
         for key,value in changes:
             data.setlist(key,value if isinstance(value,list) else [value])
         for key,value in files:
@@ -70,7 +70,7 @@ def reifenservice_checks():
         description = lead['beschreibung']
         result += [
             check('Reifenanfrage ohne Fahrzeug und Fotos wird gespeichert', response.status_code == 302 and lead['fahrzeug'] == '' and not portal.list_lead_dateien(lead['id'])),
-            check('Mehrfachauswahl dedupliziert und Terminwunsch bleiben erhalten', description.count('Radwechsel / Saisonwechsel') == 1 and 'Reifeneinlagerung' in description and 'vormittags' in description and (date.today()+timedelta(days=10)).isoformat() in description),
+            check('Mehrfachauswahl dedupliziert und Terminwunsch bleiben erhalten', description.count('Radwechsel / Saisonwechsel') == 1 and 'Reifeneinlagerung' in description and '09:30' in description and (date.today()+timedelta(days=10)).isoformat() in description),
             check('Folgeaktion ist persönliche Terminabstimmung ohne Werkstattauftrag', 'persönlich abstimmen' in lead['naechste_aktion'] and scalar('SELECT COUNT(*) FROM auftraege') == before),
         ]
         success = client.get(response.headers['Location'])
@@ -80,14 +80,13 @@ def reifenservice_checks():
             ('Unbekannte Reifenleistung', [('reifen_leistung',['invalid'])], 'gültige Reifenleistungen'),
             ('Vergangenes Wunschdatum', [('wunschdatum',(date.today()-timedelta(days=1)).isoformat())], 'nicht in der Vergangenheit'),
             ('Ungültiges Wunschdatum', [('wunschdatum','2026-02-30')], 'gültiges Wunschdatum'),
-            ('Fehlende Kurzbeschreibung', [('nachricht','')], 'Anliegen kurz beschreiben'),
             ('Geschäftspartnerart wird nicht eingeführt', [('anliegen','gespraech')], 'Anliegen auswählen'),
         ]:
             count = scalar('SELECT COUNT(*) FROM leads')
             bad = post(changes)
             result.append(check(label+' wird ohne Leadanlage abgewiesen', bad.status_code == 400 and error in bad.text and scalar('SELECT COUNT(*) FROM leads') == count))
             if 'Wunschdatum' in label:
-                result.append(check(label+': Reifenwahl und Rückrufwunsch bleiben sichtbar', 'value="radwechsel" checked' in bad.text and 'value="vormittags"' in bad.text))
+                result.append(check(label+': Reifenwahl und Rückrufwunsch bleiben sichtbar', 'value="radwechsel" checked' in bad.text and 'value="09:30"' in bad.text))
         count = scalar('SELECT COUNT(*) FROM leads')
         no_csrf = post([(portal.CSRF_FIELD_NAME,'wrong')])
         result.append(check('Neue Reifenroute bleibt CSRF-geschützt', no_csrf.status_code == 400 and scalar('SELECT COUNT(*) FROM leads') == count))

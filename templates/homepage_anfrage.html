@@ -252,9 +252,15 @@
       {% elif kurzanfrage and formdata.get('anliegen') in kurzanfrage_optionen %}
         <aside class="info">
           <div class="eyebrow">Ganz einfach</div>
+          {% if formdata.get('anliegen') == 'reifenservice' %}
+          <h2>Ihr nächster Reifentermin.</h2>
+          <p>Wählen Sie die gewünschten Arbeiten und Ihren Wunschtermin.</p>
+          <ul><li>Radwechsel, Montage oder Einlagerung</li><li>Wunschdatum und Uhrzeit</li><li>Telefon oder E-Mail für unsere Bestätigung</li></ul>
+          {% else %}
           <h2>Kurz schildern. Wir kümmern uns.</h2>
           <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.{% if formdata.get('anliegen') == 'glasschaden' %} Für die eindeutige Scheibenzuordnung benötigen wir lediglich die FIN.{% endif %}</p>
           <ul><li>Name und Rückrufmöglichkeit</li><li>Kurze Beschreibung</li><li>Bis zu fünf Bilder, wenn Sie möchten</li></ul>
+          {% endif %}
           <p class="info-note">Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.</p>
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
@@ -263,7 +269,7 @@
           <input type="hidden" name="besichtigungsart" value="werkstatt">
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}</h2>
-          <p class="form-intro">Nur das Nötigste – in etwa einer Minute erledigt.</p>
+          <p class="form-intro">{% if formdata.get('anliegen') == 'reifenservice' %}Leistungen auswählen und Wunschtermin senden. Wir bestätigen Ihren Termin persönlich.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
             <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
@@ -288,9 +294,10 @@
               <p class="hint">Mehrfachauswahl möglich.</p>
             </fieldset>
             {% elif formdata.get('anliegen') == 'reifenservice' %}
+            <div class="field"><label for="kennzeichen">Kennzeichen <span class="hint">(optional)</span></label><input id="kennzeichen" name="kennzeichen" maxlength="30" placeholder="z. B. MOS AB 123" value="{{ formdata.get('kennzeichen','') }}"></div>
             <fieldset><legend>Welche Reifenleistungen wünschen Sie? *</legend><div class="choice-grid">{% for key,label in reifen_leistungen.items() %}<label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}" {% if key in reifen_auswahl %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><p class="hint">Mehrfachauswahl möglich. Reifengröße und Lagerwunsch können Sie unten ergänzen.</p></fieldset>
-            <div class="field"><label for="wunschdatum">Wunschdatum <span class="hint">(optional)</span></label><input id="wunschdatum" name="wunschdatum" type="date" min="{{ today_iso }}" value="{{ formdata.get('wunschdatum','') }}"></div>
-            <div class="field"><label for="wunschzeit">Zeitraum oder Rückrufwunsch <span class="hint">(optional)</span></label><input id="wunschzeit" name="wunschzeit" maxlength="100" placeholder="z. B. vormittags oder Rückruf zur Abstimmung" value="{{ formdata.get('wunschzeit','') }}"></div>
+            <div class="field"><label for="wunschdatum">Wunschdatum *</label><input id="wunschdatum" name="wunschdatum" type="date" min="{{ today_iso }}" value="{{ formdata.get('wunschdatum','') }}" required></div>
+            <div class="field"><label for="wunschzeit">Wunschuhrzeit *</label><input id="wunschzeit" name="wunschzeit" type="time" value="{{ formdata.get('wunschzeit','') }}" required></div>
             <p class="hint field full">Wir prüfen Leistungen und Einlagerungsmöglichkeiten persönlich. Ihr Wunschtermin ist erst nach unserer Bestätigung vereinbart.</p>
             {% elif formdata.get('anliegen') == 'fahrzeugpflege' %}
             <fieldset>
@@ -336,7 +343,7 @@
             {% elif formdata.get('anliegen') == 'weitere_anfrage' %}
             <div class="field full"><label for="weitere_anfrage_art">Welche Anfrage passt am besten? *</label><select id="weitere_anfrage_art" name="weitere_anfrage_art" required>{% for key,label in weitere_anfrage_arten.items() %}<option value="{{ key }}" {% if formdata.get('weitere_anfrage_art','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             {% endif %}
-            <div class="field full"><label for="nachricht">{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" required>{{ formdata.get('nachricht','') }}</textarea></div>
+            <div class="field full"><label for="nachricht">{% if formdata.get('anliegen') == 'reifenservice' %}Reifengröße oder weitere Hinweise <span class="hint">(optional)</span>{% else %}{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *{% endif %}</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" {% if formdata.get('anliegen') != 'reifenservice' %}required{% endif %}>{{ formdata.get('nachricht','') }}</textarea></div>
             <label class="upload-box" for="bilder">
               <span class="upload-icon" aria-hidden="true">＋📷</span>
               <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu {{ bilder_max_anzahl }} Bilder · JPG, PNG, WebP oder HEIC · je max. {{ bilder_max_datei_mb }} MB, zusammen max. {{ bilder_max_gesamt_mb }} MB. Sie können die Anfrage auch ohne Bilder senden.</span></span>
@@ -345,7 +352,7 @@
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
           <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>.</p>
-          <button class="button" type="submit">{% if formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% elif formdata.get('anliegen') == 'reifenservice' %}Reifenservice und Termin anfragen{% else %}Kurzanfrage senden{% endif %}</button>
+          <button class="button" type="submit">{% if formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% elif formdata.get('anliegen') == 'reifenservice' %}Terminanfrage senden{% else %}Kurzanfrage senden{% endif %}</button>
         </form>
       {% elif not kurzanfrage %}
         {% set ausgewaehltes_anliegen = formdata.get('anliegen','allgemein') %}
