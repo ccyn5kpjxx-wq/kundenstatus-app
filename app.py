@@ -45817,6 +45817,29 @@ HOMEPAGE_ARBEIT_ZU_LEISTUNG = {
 }
 
 
+def homepage_jahreszeit(heute=None):
+    """Choose the public homepage imagery by the local meteorological season."""
+    heute = heute if heute is not None else datetime.now(ZoneInfo("Europe/Berlin")).date()
+    if 3 <= heute.month <= 5:
+        key, label, kicker, titel = "fruehling", "Frühling", "Zeit für Sommerräder", "Frisch in den Frühling."
+        alt = "Gepflegter Kombi auf einem Parkplatz zwischen frisch grünen Bäumen im Frühling"
+    elif 6 <= heute.month <= 8:
+        key, label, kicker, titel = "sommer", "Sommer", "Bereit für Ihre Fahrt", "Gut durch den Sommer."
+        alt = "Gepflegter Kombi auf einem ruhigen Parkplatz unter grünen Sommerbäumen"
+    elif 9 <= heute.month <= 11:
+        key, label, kicker, titel = "herbst", "Herbst", "Jetzt ist Reifenzeit", "Zeit für Winterräder."
+        alt = "Gepflegter Kombi auf einem Parkplatz mit Bäumen und goldenem Herbstlaub"
+    else:
+        key, label, kicker, titel = "winter", "Winter", "Reifenservice im Winter", "Gut durch den Winter."
+        alt = "Gepflegter Kombi auf einem ruhigen Parkplatz mit winterlichen Bäumen"
+    hero_bild = f"homepage/hero-{key}-20261021.webp"
+    return {
+        "key": key, "label": label, "hero_bild": hero_bild, "hero_alt": alt,
+        "reifen_bild": "homepage/karte-reifen-herbst-20261021.webp" if key == "herbst" else hero_bild,
+        "reifen_kicker": kicker, "reifen_titel": titel,
+    }
+
+
 @app.route("/homepage")
 def oeffentliche_homepage():
     return (
@@ -45825,6 +45848,7 @@ def oeffentliche_homepage():
             google_reviews=get_google_reviews(),
             portal_links=homepage_portal_links(),
             leistungen=HOMEPAGE_LEISTUNGEN,
+            jahreszeit=homepage_jahreszeit(),
             homepage_stellenanzeigen=DEFAULT_STELLENANZEIGEN,
             site_indexable=public_site_is_indexable_request(),
             canonical_url=f"{PUBLIC_BASE_URL}/" if PUBLIC_BASE_URL else "",

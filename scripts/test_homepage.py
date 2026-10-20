@@ -1,5 +1,7 @@
 from pathlib import Path
+from datetime import date, datetime
 import sys
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ def main():
     services_html = html.split('id="leistungen"',1)[1].split('</section>',1)[0]
     oil_form = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=oelwechsel').get_data(as_text=True)
     care_form = client.get('/anfrage?anliegen=fahrzeugpflege').get_data(as_text=True)
+    saison = portal.homepage_jahreszeit()
     checks = {
         "Status 200": response.status_code == 200,
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
@@ -48,8 +51,8 @@ def main():
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
-        "Freigegebenes Titelbild vorhanden": '/static/homepage/werkstatt-hero-v3.webp' in html and (ROOT / "static/homepage/werkstatt-hero-v3.webp").is_file(),
-        "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns','Zeit für Winterräder.','Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
+        "Passendes saisonales Titelbild vorhanden": f'/static/{saison["hero_bild"]}' in html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
+        "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
         "Newslinks starten mit passendem Anliegen": 'value="oelwechsel" checked' in oil_form and 'name="pflege_kategorie"' in care_form,
         "Leistungsuebersicht bleibt vollstaendig ohne zweiten Buchungsbutton": services_html.count('class="service-item"') == 9 and 'href="/leistungen/reifenservice"' in services_html and 'data-reifen-buchung' not in services_html,
         "Umzugshinweis und Stylesheet verfuegbar": "1. November 2026" in html and "Alte Neckarelzer Straße 18" in html and css.status_code == 200,
@@ -58,6 +61,41 @@ def main():
         "Vorschau nicht indexierbar": 'name="robots" content="noindex, nofollow"' in html,
     }
     print_checks(checks)
+
+    season_checks = {}
+    for month, key in enumerate(("winter", "winter", "fruehling", "fruehling", "fruehling", "sommer", "sommer", "sommer", "herbst", "herbst", "herbst", "winter"), 1):
+        season_checks[f"Jahreszeit im Monat {month:02d}"] = portal.homepage_jahreszeit(date(2028, month, 1))["key"] == key
+    for tag, key in ((date(2028, 2, 29), "winter"), (date(2026, 5, 31), "fruehling"), (date(2026, 8, 31), "sommer"), (date(2026, 11, 30), "herbst")):
+        season_checks[f"Saisonende am {tag.isoformat()}"] = portal.homepage_jahreszeit(tag)["key"] == key
+    class BerlinBoundary(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # UTC is still February; the homepage must already show March in Berlin.
+            return datetime(2026, 2, 28, 23, 30, tzinfo=portal.timezone.utc).astimezone(tz)
+    with patch.object(portal, "datetime", BerlinBoundary):
+        season_checks["Saisonwechsel nach Berliner Ortszeit"] = portal.homepage_jahreszeit()["key"] == "fruehling"
+    for month, key in ((1, "winter"), (4, "fruehling"), (7, "sommer"), (10, "herbst")):
+        expected = portal.homepage_jahreszeit(date(2026, month, 15))
+        with patch.object(portal, "homepage_jahreszeit", return_value=expected):
+            seasonal_response = client.get("/homepage")
+        seasonal_html = seasonal_response.get_data(as_text=True)
+        hero_path = '/static/' + expected['hero_bild']
+        season_checks[f"Homepage mit vollstaendigen {key}-Motiven"] = (
+            seasonal_response.status_code == 200
+            and f'data-jahreszeit="{key}"' in seasonal_html
+            and f'rel="preload" as="image" href="{hero_path}"' in seasonal_html
+            and f'class="intro-photo"><img src="{hero_path}"' in seasonal_html
+            and expected['reifen_titel'] in seasonal_html
+            and '/static/' + expected['reifen_bild'] in seasonal_html
+            and client.get(hero_path).status_code == 200
+            and client.get('/static/' + expected['reifen_bild']).status_code == 200
+        )
+    season_checks["Oel- und Pflegekarten mit erreichbaren Bildern"] = all(
+        '/static/homepage/' + name in hero_html and client.get('/static/homepage/' + name).status_code == 200
+        for name in ('karte-oelservice-20261021.webp', 'fahrzeugpflege.webp')
+    )
+    checks.update(season_checks)
+    print_checks(season_checks)
 
     captured = {}
     original_create_lead = portal.create_lead
