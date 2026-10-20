@@ -33,6 +33,19 @@
     <section class="intro hero-wide" aria-labelledby="hero-title">
       <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
       <div class="intro-photo"><img src="{{ url_for('static', filename='homepage/werkstatt-hero-v3.webp') }}" alt="Fahrzeug in der Gärtner-Werkstatt" width="1448" height="1086" fetchpriority="high"></div>
+      <aside class="current-deck" id="aktuell" aria-labelledby="current-title">
+        <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>Herbst &amp; Winter</span></div>
+        <article class="current-feature" data-reifen-buchung>
+          <div class="current-feature-top"><span class="current-kicker">Jetzt ist Reifenzeit</span><svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false"><circle cx="24" cy="24" r="20" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="24" r="11" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="24" r="3" stroke="currentColor" stroke-width="2"/><path d="M24 13v8m0 6v8m-11-11h8m6 0h8M10 10l4 4m20 20 4 4m0-28-4 4M14 34l-4 4" stroke="currentColor" stroke-width="2"/></svg></div>
+          <h3>Zeit für Winterräder.</h3>
+          <p>Radwechsel und Einlagerung.<br>Freie Uhrzeit direkt online wählen.</p>
+          <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
+        </article>
+        <div class="current-more">
+          <a class="current-small" href="{{ portal_links.anfrage }}?anliegen=mechanikanfrage&amp;mechanik_kategorie=oelwechsel#kurzanfrage"><span class="current-kicker">Ölcheck</span><h3>Gut versorgt.</h3><p>Ölstand im Blick.<br>Motor gut versorgen.</p><span class="current-link">Ölservice anfragen <span aria-hidden="true">↗</span></span></a>
+          <a class="current-small" href="{{ portal_links.anfrage }}?anliegen=fahrzeugpflege#kurzanfrage"><span class="current-kicker">Aufbereitung</span><h3>Frisch gepflegt.</h3><p>Schmutz entfernen.<br>Lack und Innenraum pflegen.</p><span class="current-link">Pflege anfragen <span aria-hidden="true">↗</span></span></a>
+        </div>
+      </aside>
     </section>
     <section class="audiences wrap" aria-label="Der passende Einstieg für Sie" id="fuer-sie">
       <a class="audience" href="{{ portal_links.auswahl }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Autoschlüssel" width="1200" height="1800" loading="lazy"><div><h2>Privatkunden</h2><span class="text-link">Anfrage starten →</span></div></a>
@@ -43,9 +56,7 @@
       <div class="section-head"><div><h2 id="services-title">Was Ihr Fahrzeug braucht.</h2></div><a class="text-link" href="{{ url_for('oeffentliche_leistungen') }}">Leistungen &amp; Arbeitsbilder →</a></div>
       <div class="service-grid">
       {% for slug, leistung in leistungen.items() %}
-      {% if slug == 'reifenservice' %}
-      <div class="service-item" data-reifen-buchung><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><a href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><h3>{{ leistung.titel }}</h3></a><a class="button red" style="margin-top:10px; min-height:40px; padding:9px 13px; font-size:12px;" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Termin jetzt buchen →</a></div></div>
-      {% else %}<a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ leistung.titel }}</h3></div><span aria-hidden="true">↗</span></a>{% endif %}
+      <a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ leistung.titel }}</h3></div><span aria-hidden="true">↗</span></a>
       {% endfor %}
       </div><p class="service-note">Auch HU/AU: Wir organisieren die Prüfung über unseren externen Prüfpartner.</p>
     </div></section>

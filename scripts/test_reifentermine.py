@@ -91,7 +91,7 @@ class ReifentermineTest(unittest.TestCase):
         self.assertIn('Reifen-Termin jetzt buchen', detail.text)
         home = self.client.get('/homepage')
         self.assertIn('data-reifen-buchung', home.text)
-        self.assertIn('Termin jetzt buchen', home.text)
+        self.assertIn('Reifentermin online buchen', home.text)
 
     def test_request_is_structured_without_order_or_price_commitment(self):
         before = self.count('auftraege')

@@ -24,6 +24,10 @@ def main():
     leistungen_html = client.get("/leistungen").get_data(as_text=True)
     partner_html = client.get("/geschaeftspartner").get_data(as_text=True)
     css = client.get("/static/homepage/homepage-kompakt.css")
+    hero_html = html.split('<section class="audiences',1)[0]
+    services_html = html.split('id="leistungen"',1)[1].split('</section>',1)[0]
+    oil_form = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=oelwechsel').get_data(as_text=True)
+    care_form = client.get('/anfrage?anliegen=fahrzeugpflege').get_data(as_text=True)
     checks = {
         "Status 200": response.status_code == 200,
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
@@ -45,6 +49,9 @@ def main():
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
         "Freigegebenes Titelbild vorhanden": '/static/homepage/werkstatt-hero-v3.webp' in html and (ROOT / "static/homepage/werkstatt-hero-v3.webp").is_file(),
+        "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns','Zeit für Winterräder.','Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
+        "Newslinks starten mit passendem Anliegen": 'value="oelwechsel" checked' in oil_form and 'name="pflege_kategorie"' in care_form,
+        "Leistungsuebersicht bleibt vollstaendig ohne zweiten Buchungsbutton": services_html.count('class="service-item"') == 9 and 'href="/leistungen/reifenservice"' in services_html and 'data-reifen-buchung' not in services_html,
         "Umzugshinweis und Stylesheet verfuegbar": "1. November 2026" in html and "Alte Neckarelzer Straße 18" in html and css.status_code == 200,
         "Lazy Loading ausserhalb des Titelbilds": html.count('loading="lazy"') >= 4,
         "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html and "localStorage" not in html and "document.cookie" not in html,
