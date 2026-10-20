@@ -58,11 +58,15 @@ class ReifenservicePreiseTest(unittest.TestCase):
         result = calc(("montage_13_16", 2), ("montage_19_20", 2), ("runflat", 2),
                       ("metallventil", 4), ("entsorgung", 4), lose_raeder=True)
         self.assertEqual(result["gesamt"]["brutto_cent"], 12900)
-        discount = result["positionen"][-1]
-        self.assertEqual((discount["preis_id"], discount["menge"], discount["brutto_cent"]), ("lose_raeder", 4, -2000))
+        self.assertEqual([p["einzel_brutto_cent"] for p in result["positionen"][:2]], [1750,2500])
+        self.assertIn('Nachlass',result["positionen"][0]["hinweis"])
         for position in result["positionen"]:
             self.assertEqual(position["netto_cent"] + position["mwst_cent"], position["brutto_cent"])
         self.assertEqual(result["gesamt"]["netto_cent"] + result["gesamt"]["mwst_cent"], 12900)
+
+    def test_loose_wheel_discount_uses_discounted_gross_vat_basis(self):
+        result = calc(("montage_19_20",3),lose_raeder=True)
+        self.assertEqual(result["gesamt"],{"brutto_cent":7500,"netto_cent":6303,"mwst_cent":1197})
 
     def test_all_season_package_prices(self):
         for key, gross in (("saison_radwechsel_bis17", 8000), ("saison_radwechsel_18_20", 8500),

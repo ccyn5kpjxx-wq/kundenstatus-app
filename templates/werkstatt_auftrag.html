@@ -552,7 +552,7 @@
     {% endif %}
     <h1><small style="display:block; font-size:.8rem;">{{ auftrag['auftragsart_label'] }}</small>{{ auftrag['fahrzeug'] }}</h1>
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
-    {% if session.admin %}{% if auftrag['ist_reifenauftrag'] %}<a class="ws-back" href="{{ url_for('admin_reifentermine') }}">← Reifenportal</a>{% else %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}{% endif %}
+    {% if session.admin %}{% if auftrag['ist_reifenauftrag'] %}<a class="ws-back" href="{{ url_for('admin_reifentermine') }}">← Reifenportal</a><a class="ws-back" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Reifenleistungen &amp; Rechnung →</a>{% else %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}{% endif %}
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}

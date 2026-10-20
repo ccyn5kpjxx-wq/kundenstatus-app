@@ -369,6 +369,7 @@
             {% endif %}
           </div>
           <div class="d-flex gap-2 flex-wrap justify-content-end">
+            {% if auftrag['ist_reifenauftrag'] %}<a class="btn btn-brand" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Reifenleistungen &amp; Rechnung →</a>{% endif %}
             <a href="{{ url_for('admin_auftrag_kalkulation', auftrag_id=auftrag['id']) }}" class="btn btn-soft">
               Kalkulation{% if auftrag['kalkulation_vorhanden'] %} · {{ auftrag['kalkulation_status_meta']['label'] }}{% endif %}
             </a>

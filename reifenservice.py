@@ -92,13 +92,14 @@ def _menge(value, preis):
     return menge
 
 
-def _position(preis, menge):
-    brutto = (Decimal(preis.brutto_cent) * menge / _HUNDRED).quantize(_CENT)
+def _position(preis, menge, nachlass_cent=0):
+    einzel = preis.brutto_cent - nachlass_cent
+    brutto = (Decimal(einzel) * menge / _HUNDRED).quantize(_CENT)
     netto = (brutto / _FAKTOR).quantize(_CENT, rounding=ROUND_HALF_UP)
     return {
         "preis_id": preis.id, "bezeichnung": preis.bezeichnung,
-        "menge": menge, "einheit": preis.einheit, "hinweis": preis.hinweis,
-        "einzel_brutto_cent": preis.brutto_cent,
+        "menge": menge, "einheit": preis.einheit, "hinweis": preis.hinweis + (" Angelieferte lose Räder: 5,00 EUR Nachlass je Rad bereits abgezogen." if nachlass_cent else ""),
+        "einzel_brutto_cent": einzel,
         "brutto_cent": int(brutto * _HUNDRED),
         "netto_cent": int(netto * _HUNDRED),
         "mwst_cent": int((brutto - netto) * _HUNDRED),
@@ -147,11 +148,12 @@ def berechne_reifenservice(auswahl, *, lose_raeder=False):
             raise ValueError("Montage-Zuschläge nur bis zur Anzahl der tatsächlich montierten Reifen auswählen.")
     if lose_raeder and not montage_menge:
         raise ValueError("Der Nachlass für lose Räder gilt nur bei Reifenmontage.")
-    positionen = [_position(preis, menge) for preis, menge in gewaehlt]
-    if lose_raeder:
-        positionen.append(_position(_LOSE_RAEDER, montage_menge))
+    # Discount before VAT rounding, using exactly the same gross unit lines
+    # as the accounting adapter. A separate negative line can differ by a cent.
+    positionen = [_position(preis, menge, 500 if lose_raeder and preis.gruppe == "montage" else 0)
+                  for preis, menge in gewaehlt]
     return {
-        "schema_version": 1, "katalog_version": PREISKATALOG_VERSION,
+        "schema_version": 2, "katalog_version": PREISKATALOG_VERSION,
         "quelle": _QUELLE, "status": "entwurf", "steuerbasis": "brutto",
         "mwst_satz": "19.00", "lose_raeder": lose_raeder,
         "positionen": positionen,

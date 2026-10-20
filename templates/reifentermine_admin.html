@@ -12,13 +12,22 @@
 </style>
 {% endblock %}
 {% block content %}
+{% macro termin_aendern(lead_id, datum='', uhrzeit='') %}
+<details class="mt-3"><summary>Termin ändern oder stornieren</summary>
+<form class="mt-2" method="POST" action="{{ url_for('reifen_buchung_termin',lead_id=lead_id) }}">
+  <label class="form-label">Datum<input type="date" name="datum" class="form-control" value="{{ datum }}"></label>
+  <label class="form-label">Ankunft<select name="uhrzeit" class="form-select">{% for h in range(7,18) %}{% set zeit='%02d:00'|format(h) %}<option value="{{ zeit }}" {% if zeit==uhrzeit %}selected{% endif %}>{{ zeit }} Uhr</option>{% endfor %}</select></label>
+  <button class="btn btn-soft" name="aktion" value="verschieben">Termin speichern</button>
+  <button class="btn btn-outline-danger" name="aktion" value="stornieren" formnovalidate onclick="return confirm('Reifenbuchung stornieren und Uhrzeit freigeben?')">Stornieren</button>
+</form></details>
+{% endmacro %}
 <div class="page-header"><div><h1>Reifenportal</h1><p>Reifenbuchungen, Einlagerung und Reifenaufträge.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Gemeinsame Werkstatt-Tafel →</a></div>
 <h2 class="h4">Neue Reifenbuchungen</h2>
-<p class="text-muted">{{ reifentermine|length }} offene Anfrage(n) · Ein Terminwunsch ist noch keine verbindliche Zusage. Eingeplante Aufträge stehen weiterhin im Kalender und auf der Werkstatttafel.</p>
+<p class="text-muted">{{ reifentermine|length }} neue Buchung(en). Reservierte Uhrzeit prüfen und mit einem Klick als Reifenauftrag übernehmen.</p>
 <div class="reifen-grid">
   {% for termin in reifentermine %}
   <article class="reifen-card" data-reifentermin="{{ termin.id }}">
-    <span class="badge-soft">Reifenbuchung · Bestätigung offen</span>
+    <span class="badge-soft">Reifenbuchung</span>
     <h2>{{ termin.kunde_name or 'Kundenanfrage' }}</h2>
     <p class="reifen-date">{{ termin.termin_label }}</p>
     <p>{{ termin.fahrzeug or 'Fahrzeug noch abstimmen' }}{% if termin.kennzeichen %} · {{ termin.kennzeichen }}{% endif %}</p>
@@ -28,6 +37,8 @@
       {% if termin.kunde_email %}<a href="mailto:{{ termin.kunde_email }}">{{ termin.kunde_email }}</a>{% endif %}
     </div>
     <a class="btn btn-brand" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Reifenbuchung bearbeiten →</a>
+    <form class="mt-2" method="POST" action="{{ url_for('reifen_buchung_uebernehmen',lead_id=termin.id) }}"><button class="btn btn-brand">Als Reifenauftrag einplanen →</button></form>
+    {{ termin_aendern(termin.id) }}
   </article>
   {% else %}
   <div class="reifen-card"><h2>Keine offenen Reifen-Terminwünsche</h2><p>Neue Kundenanfragen erscheinen hier automatisch.</p></div>
@@ -43,6 +54,8 @@
     <p class="reifen-date">{% if auftrag.annahme_datum %}{{ auftrag.annahme_datum }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}{% else %}Termin noch abstimmen{% endif %}</p>
     <p>{{ auftrag.werkstatt_angebot_text or auftrag.beschreibung }}</p>
     <a class="btn btn-brand" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">Reifenauftrag öffnen →</a>
+    {% if auftrag.status < 4 %}<form class="mt-2" method="POST" action="{{ url_for('status_update',auftrag_id=auftrag.id,neuer_status=4) }}"><input type="hidden" name="next" value="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}"><button class="btn btn-brand">Fertig · Rechnung erstellen →</button></form>{% else %}<a class="btn btn-brand mt-2" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Rechnung erstellen →</a>{% endif %}
+    {% if auftrag.status < 3 and auftrag.schaden_aufnahme.get('reifen_buchung_id') %}{{ termin_aendern(auftrag.schaden_aufnahme.reifen_buchung_id,auftrag.annahme_datum_obj.isoformat() if auftrag.annahme_datum_obj else '',auftrag.annahme_uhrzeit) }}{% endif %}
   </article>
   {% else %}<p class="text-muted">Noch keine übernommenen Reifenaufträge.</p>{% endfor %}
 </div>

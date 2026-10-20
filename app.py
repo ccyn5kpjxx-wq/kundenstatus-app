@@ -50,6 +50,7 @@ import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
 import mietwagen_checkout
+from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 import mos_handover
 import mos_order_receipt
 import mos_public_booking
@@ -10818,6 +10819,7 @@ def init_db():
     ensure_column(db, "lead_dateien", "kunden_sichtbar", "INTEGER DEFAULT NULL")
     ensure_column(db, "benachrichtigungen", "kunden_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
+    ensure_column(db, "auftraege", "reifen_rechnung_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "rechnung_erstellung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
@@ -13077,7 +13079,16 @@ def pruefe_reifen_lead_statuswechsel(db, lead_id, status):
     # Lock before reading: a cancelled reservation may have been assigned to
     # somebody else. Reopening a lead must never silently revive its old hour.
     db.execute("UPDATE leads SET status=status WHERE id=?", (int(lead_id),))
-    row = db.execute("SELECT status, portal_json FROM leads WHERE id=?", (int(lead_id),)).fetchone()
+    row = db.execute("SELECT status, portal_json, auftrag_id FROM leads WHERE id=?", (int(lead_id),)).fetchone()
+    if row and row["auftrag_id"] and status == "verloren":
+        try:
+            intake = json.loads(row["portal_json"] or "{}")
+        except (ValueError, TypeError):
+            intake = {}
+        if isinstance(intake, dict) and intake.get("anliegen") == "reifenservice":
+            db.rollback()
+            db.close()
+            raise ReifenSlotBelegt("Bitte den Reifenauftrag im Reifenportal stornieren.")
     if row and row["status"] == "verloren" and status != "verloren":
         try:
             intake = json.loads(row["portal_json"] or "{}")
@@ -13321,6 +13332,15 @@ def set_lead_status(lead_id, status):
 def delete_lead(lead_id):
     """Löscht nur den Lead; ein bereits erzeugter Auftrag bleibt erhalten."""
     db = get_db()
+    linked = db.execute("SELECT l.portal_json,a.archiviert FROM leads l JOIN auftraege a ON a.id=l.auftrag_id WHERE l.id=?",(int(lead_id),)).fetchone()
+    if linked and not linked["archiviert"]:
+        try:
+            intake = json.loads(linked["portal_json"] or "{}")
+        except (ValueError,TypeError):
+            intake = {}
+        if isinstance(intake,dict) and intake.get("anliegen") == "reifenservice":
+            db.close()
+            raise ValueError("Bitte zuerst den Reifenauftrag im Reifenportal stornieren. Die reservierte Stunde bleibt erhalten.")
     legacy = db.execute("SELECT datei_stored_name FROM leads WHERE id=?", (int(lead_id),)).fetchone()
     dateien = db.execute("SELECT stored_name FROM lead_dateien WHERE lead_id=?", (int(lead_id),)).fetchall()
     stored_names = [clean_text(legacy["datei_stored_name"] if legacy else "")]
@@ -18018,6 +18038,18 @@ def build_versicherung_prozesskalender(auftrag, teile=None, prozess=None):
 
 
 def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
+    if auftrag_ist_reifen(auftrag):
+        entwurf = reifen_rechnungsentwurf(auftrag)
+        kalkulation = entwurf["kalkulation"]
+        if not kalkulation:
+            raise ValueError("Bitte zuerst die ausgeführten Reifenleistungen speichern.")
+        return {
+            "kunde": entwurf["kunde"], "positionen": kalkulation["positionen"],
+            "belegtext": f"Reifenservice · Auftrag #{auftrag['id']} · {clean_text(auftrag.get('fahrzeug'))} · {clean_text(auftrag.get('kennzeichen'))}",
+            "bonus_text":"", "bonus_remark":"", "tax_rate":19,
+            "reifen_kalkulation":kalkulation, "leistungsdatum":entwurf["leistungsdatum"],
+            "netto_betrag":kalkulation["gesamt"]["netto_cent"]/100,
+        }
     autohaus = get_autohaus(auftrag["autohaus_id"]) if auftrag.get("autohaus_id") else None
     kunde_name = clean_text(autohaus.get("name") if autohaus else "") or clean_text(auftrag.get("kunde_name"))
     kunde = {
@@ -21389,19 +21421,36 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
         if can_reference_contact
         else build_lexware_invoice_address(rechnung["kunde"])
     )
+    reifen = rechnung.get("reifen_kalkulation")
+    if reifen:
+        reifen = _gepruefter_snapshot(reifen)
+        line_items = []
+        for p in reifen["positionen"]:
+            if p["preis_id"] == "lose_raeder":
+                continue
+            einzel = p["einzel_brutto_cent"]
+            hinweis = p["hinweis"]
+            line_items.append({
+                "type":"custom", "name":p["bezeichnung"], "description":hinweis,
+                "quantity":p["menge"], "unitName":p["einheit"],
+                "unitPrice":{"currency":"EUR","grossAmount":einzel/100,"taxRatePercentage":19},
+                "discountPercentage":0,
+            })
+    else:
+        line_items = [build_lexware_invoice_line_item(position, description, net_amount, rechnung["tax_rate"])]
     payload = {
         "archived": False,
         "voucherDate": lexware_datetime(),
         "address": invoice_address,
-        "lineItems": [build_lexware_invoice_line_item(position, description, net_amount, rechnung["tax_rate"])],
-        "totalPrice": {"currency": "EUR"},
-        "taxConditions": {"taxType": "net"},
+        "lineItems": line_items,
+        "totalPrice": {"currency": "EUR", **({"totalDiscountPercentage":0} if reifen else {})},
+        "taxConditions": {"taxType": "gross" if reifen else "net"},
         "shippingConditions": {
-            "shippingDate": lexware_datetime(auftrag.get("abholtermin")),
-            "shippingType": "delivery",
+            "shippingDate": lexware_datetime(rechnung["leistungsdatum"] if reifen else auftrag.get("abholtermin")),
+            "shippingType": "service" if reifen else "delivery",
         },
         "title": "Rechnung",
-        "introduction": "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
+        "introduction": rechnung["belegtext"] if reifen else "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
         "remark": remark,
     }
     created = lexware_request("POST", "/v1/invoices", payload)
@@ -32422,9 +32471,10 @@ def create_auftrag(
     farbcode="",
     farbton="",
     farbton_2="",
+    _db=None,
 ):
     jetzt = now_str()
-    db = get_db()
+    db = _db if _db is not None else get_db()
     db.execute(
         """
         INSERT INTO auftraege
@@ -32516,8 +32566,9 @@ def create_auftrag(
             "UPDATE auftraege SET versicherung_portal_freigabe_id=? WHERE id=?",
             (int(versicherung_id), auftrag_id),
         )
-    db.commit()
-    db.close()
+    if _db is None:
+        db.commit()
+        db.close()
     return auftrag_id
 
 
@@ -45071,6 +45122,109 @@ def admin_reifentermine():
     return response
 
 
+def reifenauftrag_aus_buchung(lead_id):
+    """Claim the existing reservation and create exactly one scheduled order."""
+    db = get_db()
+    try:
+        db.execute("UPDATE leads SET geaendert_am=geaendert_am WHERE id=?", (int(lead_id),))
+        row = db.execute("SELECT * FROM leads WHERE id=?", (int(lead_id),)).fetchone()
+        if not row:
+            raise ValueError("Reifenbuchung nicht gefunden.")
+        lead = dict(row)
+        intake = json.loads(lead.get("portal_json") or "{}")
+        if not isinstance(intake, dict) or intake.get("anliegen") != "reifenservice":
+            raise ValueError("Dieser Vorgang ist keine Reifenbuchung.")
+        if lead.get("auftrag_id"):
+            return int(lead["auftrag_id"])
+        if lead.get("status") == "verloren":
+            raise ValueError("Diese Buchung ist storniert. Bitte einen neuen freien Termin buchen.")
+        hold = db.execute("SELECT datum,uhrzeit FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),)).fetchone()
+        if not hold or parse_date(intake.get("kunden_wunsch_annahme_datum")) != parse_date(hold["datum"]) or clean_text(intake.get("kunden_wunsch_zeitfenster")) != hold["uhrzeit"]:
+            raise ValueError("Bitte zuerst im Reifenportal einen freien Termin reservieren.")
+        intake["reifen_buchung_id"] = int(lead_id)
+        intake["kunden_wunsch_bestaetigt_am"] = now_str()
+        order_id = create_auftrag(
+            "lead", kunde_name=lead["kunde_name"], kunde_email=lead["kunde_email"],
+            fahrzeug=lead["fahrzeug"] or "Reifenservice", kennzeichen=lead["kennzeichen"],
+            kontakt_telefon=lead["kontakt_telefon"], beschreibung=lead["beschreibung"],
+            analyse=lead["beschreibung"], kunden_status_token=lead["kunden_status_token"],
+            schadenart="Reifenservice", schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False),
+            annahme_datum=format_date(hold["datum"]), _db=db,
+        )
+        db.execute("UPDATE auftraege SET status=2, annahme_uhrzeit=? WHERE id=?", (hold["uhrzeit"],order_id))
+        db.execute("INSERT INTO status_log (auftrag_id,status,zeitstempel) VALUES (?,2,?)", (order_id,now_str()))
+        db.execute("UPDATE leads SET auftrag_id=?, status='gewonnen', naechste_aktion='Reifenauftrag bearbeiten', geaendert_am=? WHERE id=?", (order_id,now_str(),int(lead_id)))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    copy_lead_attachments_to_order(lead_id,order_id)
+    return order_id
+
+
+@app.post("/admin/reifenportal/<int:lead_id>/auftrag")
+@admin_required
+def reifen_buchung_uebernehmen(lead_id):
+    try:
+        order_id = reifenauftrag_aus_buchung(lead_id)
+    except (ValueError,TypeError) as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_reifentermine"))
+    schedule_change_backup("reifenauftrag-uebernommen")
+    return redirect(url_for("auftrag_detail", auftrag_id=order_id))
+
+
+@app.post("/admin/reifenportal/<int:lead_id>/termin")
+@admin_required
+def reifen_buchung_termin(lead_id):
+    db = get_db()
+    try:
+        db.execute("UPDATE leads SET geaendert_am=geaendert_am WHERE id=?", (lead_id,))
+        row = db.execute("SELECT * FROM leads WHERE id=?", (lead_id,)).fetchone()
+        if not row:
+            abort(404)
+        lead = dict(row)
+        intake = json.loads(lead.get("portal_json") or "{}")
+        if not isinstance(intake,dict) or intake.get("anliegen") != "reifenservice":
+            abort(404)
+        order = None
+        if lead.get("auftrag_id"):
+            db.execute("UPDATE auftraege SET status=status WHERE id=?",(lead["auftrag_id"],))
+            order = db.execute("SELECT * FROM auftraege WHERE id=?",(lead["auftrag_id"],)).fetchone()
+        if order and (int(order["status"] or 0) >= 3 or order["lexware_invoice_id"] or order["rechnung_nummer"]):
+            raise ValueError("Der Auftrag ist bereits in Arbeit oder abgerechnet. Bitte zuerst im Auftrag prüfen.")
+        storno = request.form.get("aktion") == "stornieren"
+        if storno:
+            db.execute("DELETE FROM reifen_termin_slots WHERE lead_id=?",(lead_id,))
+            intake["reifen_storniert_am"] = now_str()
+        else:
+            if lead["status"] == "verloren":
+                raise ValueError("Stornierte Buchungen bitte neu anlegen.")
+            datum,zeit = clean_text(request.form.get("datum")),clean_text(request.form.get("uhrzeit"))
+            reserviere_reifen_slot(db, lead_id, datum,zeit)
+            intake["kunden_wunsch_annahme_datum"] = format_date(datum)
+            intake["kunden_wunsch_zeitfenster"] = zeit
+        raw = json.dumps(intake,ensure_ascii=False)
+        db.execute("UPDATE leads SET portal_json=?, status=?, geaendert_am=? WHERE id=?",(raw,"verloren" if storno else lead["status"],now_str(),lead_id))
+        if order:
+            order_intake = json.loads(order["schaden_aufnahme_json"] or "{}")
+            order_intake.update(intake)
+            db.execute("UPDATE auftraege SET annahme_datum=?, annahme_uhrzeit=?, schaden_aufnahme_json=?, archiviert=?, geaendert_am=? WHERE id=?",(
+                order["annahme_datum"] if storno else format_date(datum), order["annahme_uhrzeit"] if storno else zeit,
+                json.dumps(order_intake,ensure_ascii=False),1 if storno else 0,now_str(),order["id"]))
+        db.commit()
+    except (ValueError,TypeError) as exc:
+        db.rollback()
+        flash(str(exc),"warning")
+    else:
+        schedule_change_backup("reifen-termin-geaendert")
+        flash("Reifenbuchung storniert." if storno else "Reifentermin gespeichert. Bitte die Änderung persönlich mit dem Kunden abstimmen.","success")
+    finally:
+        db.close()
+    return redirect(url_for("admin_reifentermine"))
+
 def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
     formdata = formdata or {}
     ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
@@ -45079,6 +45233,8 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
         if hasattr(formdata, "getlist")
         else list(formdata.get("pflege_kategorie") or [])
     )
+
+
     mechanik_auswahl = (
         [clean_text(value) for value in formdata.getlist("mechanik_kategorie")]
         if hasattr(formdata, "getlist")
@@ -45096,6 +45252,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             errors=errors or [],
             gesendet=bool(gesendet),
             reifen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenservice"),
+            gebuchter_reifentermin=session.get("website_reifentermin", ""),
             reifen_slots=freie_reifen_slots(clean_text(formdata.get("wunschdatum"))) if ausgewaehltes_anliegen == "reifenservice" else [],
             kundenlink=session.get("website_anfrage_kundenlink", "") if gesendet else "",
             anliegen_optionen=WEBSITE_ANLIEGEN,
@@ -45439,6 +45596,7 @@ def website_anfrage():
         notify_lead_workshop(lead_id, "Neue Anfrage")
         session["website_anfrage_gesendet"] = int(lead_id)
         session["website_anfrage_art"] = anliegen
+        session["website_reifentermin"] = f"{format_date(wunschdatum)} · {wunschzeit} Uhr" if anliegen == "reifenservice" else ""
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))
@@ -49873,12 +50031,26 @@ def auftrag_detail(auftrag_id):
         form = request.form
         aktion = form.get("aktion", "speichern")
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
+        if auftrag_ist_reifen(auftrag) and (
+            format_date(form.get("annahme_datum")) != format_date(auftrag.get("annahme_datum"))
+            or format_time_value(form.get("annahme_uhrzeit")) != format_time_value(auftrag.get("annahme_uhrzeit"))
+        ):
+            flash("Bitte den Reifentermin im Reifenportal ändern. Dort wird die freie Stunde geprüft.","warning")
+            return redirect(url_for("admin_reifentermine"))
         bonus_netto_betrag = positive_money_amount(form.get("bonus_netto_betrag")) or 0.0
         bisheriger_bonus = positive_money_amount(auftrag.get("bonus_netto_betrag")) or 0.0
         bonus_preis_aktualisiert_am = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
         if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
             bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
         db = get_db()
+        if auftrag_ist_reifen(auftrag):
+            db.execute("UPDATE auftraege SET status=status WHERE id=?",(auftrag_id,))
+            termin = db.execute("SELECT annahme_datum,annahme_uhrzeit FROM auftraege WHERE id=?",(auftrag_id,)).fetchone()
+            if not termin or termin["annahme_datum"] != auftrag.get("annahme_datum") or termin["annahme_uhrzeit"] != auftrag.get("annahme_uhrzeit"):
+                db.rollback()
+                db.close()
+                flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.","warning")
+                return redirect(url_for("admin_reifentermine"))
         db.execute(
             """
             UPDATE auftraege
@@ -51453,7 +51625,11 @@ def admin_lead_loeschen(lead_id):
     if not lead:
         abort(404)
     lead_name = lead["kunde_name"] or f"Lead #{lead_id}"
-    delete_lead(lead_id)
+    try:
+        delete_lead(lead_id)
+    except ValueError as exc:
+        flash(str(exc),"warning")
+        return redirect(url_for("admin_lead_detail",lead_id=lead_id))
     schedule_change_backup("lead-deleted")
     flash(
         f"{lead_name} wurde aus den Leads gelöscht. Ein eventuell verbundener Auftrag bleibt erhalten.",
@@ -51524,6 +51700,8 @@ def create_order_from_accepted_lead(lead, intake):
     lead = get_lead(int((lead or {}).get("id") or 0))
     if not lead:
         raise ValueError("Lead nicht gefunden.")
+    if lead.get("ist_reifenanfrage"):
+        return reifenauftrag_aus_buchung(lead["id"])
     if lead["auftrag_id"]:
         return lead["auftrag_id"]
     if lead["website"] != "auto-lackierzentrum":
@@ -51848,6 +52026,9 @@ def admin_kundenwuensche_bestaetigen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
+    if auftrag_ist_reifen(auftrag):
+        flash("Reifentermine bitte im Reifenportal ändern.","info")
+        return redirect(url_for("admin_reifentermine"))
     erwartetes_intake_json = auftrag.get("schaden_aufnahme_json") or ""
     intake = parse_schadenaufnahme_json(erwartetes_intake_json)
     if clean_text(auftrag.get("angebot_status")) != "angenommen" or not clean_text(
@@ -52278,6 +52459,9 @@ def admin_auslese_uebernehmen(auftrag_id):
     if not order:
         abort(404)
     key = request.form.get('feld')
+    if auftrag_ist_reifen(order) and key == 'annahme_datum':
+        flash('Reifentermine bitte im Reifenportal ändern. Dort wird die freie Stunde geprüft.','warning')
+        return redirect(url_for('admin_reifentermine'))
     allowed = {k for k, label in DOCUMENT_REVIEW_FIELDS} - {'rep_max_kosten'}
     if key not in allowed:
         abort(400)
@@ -52362,12 +52546,141 @@ def admin_rechnung_pruefung(auftrag_id):
     return redirect(url_for('rechnung_schreiben', auftrag_id=auftrag_id))
 
 
+@app.template_filter("geld_cent")
+def geld_cent(value):
+    return f"{int(value or 0)/100:,.2f}".replace(",","X").replace(".",",").replace("X",".") + " €"
+
+
+def reifen_rechnungsentwurf(auftrag):
+    raw = auftrag.get("reifen_rechnung_json") or "{}"
+    try:
+        data = json.loads(raw)
+    except (ValueError,TypeError):
+        raise ValueError("Gespeicherte Reifenleistungen sind ungültig. Bitte im Büro prüfen.")
+    if not isinstance(data,dict):
+        raise ValueError("Gespeicherte Reifenleistungen sind ungültig.")
+    kalkulation = data.get("kalkulation")
+    if kalkulation:
+        kalkulation = _gepruefter_snapshot(kalkulation)
+    kunde = data.get("kunde") or {
+        "name":clean_text(auftrag.get("kunde_name")), "strasse":"","plz":"","ort":"",
+        "telefon":clean_text(auftrag.get("kontakt_telefon")), "email":clean_text(auftrag.get("kunde_email")),
+    }
+    if not isinstance(kunde,dict):
+        raise ValueError("Die gespeicherte Rechnungsadresse ist ungültig.")
+    return {
+        "kalkulation":kalkulation, "kunde":kunde,
+        "leistungsdatum":data.get("leistungsdatum") or (parse_date(auftrag.get("fertig_datum")) or date.today()).isoformat(),
+        "auswahl":{p["preis_id"]:p["menge"] for p in (kalkulation or {}).get("positionen",[]) if p["preis_id"] != "lose_raeder"},
+        "lose_raeder":bool((kalkulation or {}).get("lose_raeder")),
+        "revision":hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+    }
+
+
+def reifen_rechnung_gesperrt(auftrag):
+    return bool(invoice_preflight_exists(auftrag) or clean_text(auftrag.get("rechnung_erstellung_status")))
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/reifen-rechnung", methods=["GET","POST"])
+@admin_required
+def reifen_rechnung(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag_ist_reifen(auftrag):
+        abort(404)
+    error = None
+    status = 200
+    try:
+        entwurf = reifen_rechnungsentwurf(auftrag)
+    except ValueError as exc:
+        # Keep corrupted/retired price snapshots visible as an error. Never
+        # silently replace old invoice prices with the current catalogue.
+        error = str(exc)
+        entwurf = {"kalkulation":None,"kunde":{},"auswahl":{},"lose_raeder":False,"leistungsdatum":"","revision":""}
+    locked = reifen_rechnung_gesperrt(auftrag) or bool(error) or bool(auftrag.get("archiviert"))
+    if request.method == "POST":
+        try:
+            if locked:
+                raise ValueError("Die Rechnung ist bereits angelegt oder muss geprüft werden. Bitte den vorhandenen Beleg öffnen.")
+            if request.form.get("revision") != entwurf["revision"]:
+                raise ValueError("Die Leistungen wurden zwischenzeitlich geändert. Bitte die Seite neu laden.")
+            ids = request.form.getlist("leistung")
+            kalkulation = berechne_reifenservice([
+                {"preis_id":key,"menge":request.form.get("menge_"+key,"1")} for key in ids
+            ],lose_raeder=request.form.get("lose_raeder") == "1")
+            datum = clean_text(request.form.get("leistungsdatum"))
+            if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",datum) or not parse_date(datum) or parse_date(datum)>date.today():
+                raise ValueError("Bitte ein gültiges Leistungsdatum bis heute eintragen.")
+            kunde = {key:clean_text(request.form.get("rechnung_"+key))[:180] for key in ("name","strasse","plz","ort")}
+            kunde.update({"telefon":clean_text(auftrag.get("kontakt_telefon")),"email":clean_text(auftrag.get("kunde_email"))})
+            if not kunde["name"]:
+                raise ValueError("Bitte den Rechnungsempfänger eintragen.")
+            data = {"kalkulation":kalkulation,"kunde":kunde,"leistungsdatum":datum,"gespeichert_am":now_str()}
+            db = get_db()
+            try:
+                changed = db.execute("""UPDATE auftraege SET reifen_rechnung_json=?, geaendert_am=?
+                    WHERE id=? AND COALESCE(reifen_rechnung_json,'{}')=?
+                    AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')=''
+                    AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')""",
+                    (json.dumps(data,ensure_ascii=False),now_str(),auftrag_id,auftrag.get("reifen_rechnung_json") or "{}")).rowcount
+                db.commit()
+            finally:
+                db.close()
+            if not changed:
+                raise ValueError("Die Rechnung wurde zwischenzeitlich geändert. Bitte neu laden.")
+        except ValueError as exc:
+            error,status = str(exc),400
+        else:
+            schedule_change_backup("reifen-rechnungsleistungen")
+            flash("Leistungen und Rechnungsempfänger gespeichert.","success")
+            return redirect(url_for("reifen_rechnung",auftrag_id=auftrag_id))
+    return render_template("reifen_rechnung.html",auftrag=auftrag,katalog=reifen_preiskatalog(),entwurf=entwurf,
+        locked=locked,error=error,api_ready=bool(LEXWARE_API_KEY),
+        rechnungsdateien=[d for d in list_dateien(auftrag_id) if d.get("kategorie") in {"rechnung","bonusrechnung"}]),status
+
+
+def reifen_export_daten(auftrag_id):
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag_ist_reifen(auftrag):
+        abort(404)
+    try:
+        entwurf = reifen_rechnungsentwurf(auftrag)
+        if not entwurf["kalkulation"]:
+            raise ValueError("Bitte zuerst die ausgeführten Reifenleistungen speichern.")
+    except ValueError as exc:
+        abort(409,description=str(exc))
+    return auftrag,entwurf
+
+
+@app.get("/admin/auftrag/<int:auftrag_id>/reifen-rechnung/excel")
+@admin_required
+def reifen_rechnung_excel(auftrag_id):
+    auftrag,entwurf = reifen_export_daten(auftrag_id)
+    data = export_reifenservice_xlsx(entwurf["kalkulation"],kunde=entwurf["kunde"],auftrag={
+        "id":auftrag_id,"fahrzeug":auftrag.get("fahrzeug"),"kennzeichen":auftrag.get("kennzeichen"),
+        "leistungsdatum":entwurf["leistungsdatum"],
+    })
+    return send_file(BytesIO(data),mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,download_name=f"Reifenleistungen_Auftrag_{auftrag_id}_Entwurf.xlsx",max_age=0)
+
+
+@app.get("/admin/auftrag/<int:auftrag_id>/reifen-rechnung/druck")
+@admin_required
+def reifen_rechnung_druck(auftrag_id):
+    auftrag,entwurf = reifen_export_daten(auftrag_id)
+    response = make_response(render_template("reifen_rechnung_druck.html",auftrag=auftrag,entwurf=entwurf))
+    response.headers["Cache-Control"]="private, no-store"
+    return response
+
+
 @app.route("/admin/auftrag/<int:auftrag_id>/rechnung", methods=["GET", "POST"])
 @admin_required
 def rechnung_schreiben(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
+
+    if auftrag_ist_reifen(auftrag):
+        return redirect(url_for("reifen_rechnung",auftrag_id=auftrag_id))
 
     if request.method == "POST":
         lexware_kunde_angelegt = 1 if request.form.get("lexware_kunde_angelegt") else 0
@@ -52431,8 +52744,9 @@ def lexware_rechnung_erstellen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
-    if auftrag["status"] < 5:
-        flash("Bitte den Auftrag zuerst auf Zurückgegeben setzen.", "warning")
+    reifen = auftrag_ist_reifen(auftrag)
+    if auftrag["status"] < (4 if reifen else 5):
+        flash("Bitte den Reifenauftrag zuerst auf Fertig setzen." if reifen else "Bitte den Auftrag zuerst auf Zurückgegeben setzen.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     if auftrag.get("lexware_invoice_id"):
         flash("Für diesen Auftrag gibt es bereits einen Lexware-Rechnungsentwurf.", "info")
@@ -52444,8 +52758,20 @@ def lexware_rechnung_erstellen(auftrag_id):
     if request.form.get("rechnung_pruefung_bestaetigt") != "1":
         flash("Bitte Empfänger, Betrag und vorhandene Belege ausdrücklich prüfen.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
+    if reifen and not LEXWARE_API_KEY:
+        flash("Die Verbindung zu Lexware ist noch nicht eingerichtet.","warning")
+        return redirect(url_for("reifen_rechnung",auftrag_id=auftrag_id))
     try:
-        net_amount = float(decimal_input(request.form.get("netto_betrag")) or 0)
+        if reifen:
+            entwurf = reifen_rechnungsentwurf(auftrag)
+            kunde = entwurf["kunde"]
+            if not entwurf["kalkulation"] or request.form.get("reifen_revision") != entwurf["revision"]:
+                raise ValueError("Die Reifenleistungen wurden geändert. Bitte neu prüfen.")
+            if not all(kunde.get(k) for k in ("name","strasse","plz","ort")):
+                raise ValueError("Bitte die vollständige Rechnungsadresse ergänzen.")
+            net_amount = entwurf["kalkulation"]["gesamt"]["netto_cent"]/100
+        else:
+            net_amount = float(decimal_input(request.form.get("netto_betrag")) or 0)
     except ValueError as exc:
         flash(str(exc), "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
@@ -52455,11 +52781,11 @@ def lexware_rechnung_erstellen(auftrag_id):
     rechnung = build_lexware_rechnung_context(auftrag, invoice_net_amount=net_amount)
 
     confirmed = price_state(auftrag.get("preisstand_json")).get("kunde") or {}
-    if confirmed and decimal_input(confirmed['netto']) != decimal_input(str(net_amount)):
+    if not reifen and confirmed and decimal_input(confirmed['netto']) != decimal_input(str(net_amount)):
         flash("Der Betrag weicht vom bestätigten Kundenpreis ab. Bitte zuerst die Preisvereinbarung im Auftrag aktualisieren.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
     db = get_db()
-    reserved = db.execute("UPDATE auftraege SET rechnung_erstellung_status='laeuft' WHERE id=? AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')='' AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')", (auftrag_id,)).rowcount
+    reserved = db.execute("UPDATE auftraege SET rechnung_erstellung_status='laeuft' WHERE id=? AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')='' AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')" + (" AND reifen_rechnung_json=? AND status>=4 AND archiviert=0" if reifen else ""), (auftrag_id,auftrag.get("reifen_rechnung_json") or "{}") if reifen else (auftrag_id,)).rowcount
     db.commit(); db.close()
     if not reserved:
         flash("Die Rechnung wird bereits vorbereitet oder muss geprüft werden. Bitte zuerst in Lexware nachsehen.", "warning")
@@ -53324,6 +53650,9 @@ def kunden_status_terminwunsch(token):
 
 
 def accept_lead_offer_from_portal(token, lead):
+    if lead.get("ist_reifenanfrage"):
+        flash("Ihre Reifenbuchung liegt bereits vor. Eine zusätzliche Angebotsannahme ist nicht erforderlich.","info")
+        return redirect(url_for("kunden_status",token=token))
     if lead["angebot_status"] == "angenommen" and lead["auftrag_id"]:
         flash("Das Angebot wurde bereits angenommen.", "info")
         return redirect(url_for("kunden_status", token=token) + "#auftragsbestaetigung")
@@ -53527,6 +53856,9 @@ def kunden_status_verzoegerung(token):
     auftrag = get_auftrag_by_kunden_status_token(token)
     if not auftrag:
         abort(404)
+    if auftrag_ist_reifen(auftrag):
+        flash("Bitte stimmen Sie eine Änderung Ihres Reifentermins telefonisch mit uns ab.","info")
+        return redirect(url_for("kunden_status",token=token))
     termin_art = clean_text(request.form.get("termin_art")) or "termin"
     termin_labels = {
         "besichtigung": "Besichtigungstermin",

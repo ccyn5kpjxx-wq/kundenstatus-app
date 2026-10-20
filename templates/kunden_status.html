@@ -320,7 +320,7 @@
       {% endif %}
       <div class="section-head">
         <div>
-          <h2 class="h4 mb-1">Termine</h2>
+          <h2 class="h4 mb-1">{{ 'Ihr Reifentermin' if auftrag.get('ist_reifenauftrag') else 'Termine' }}</h2>
           {% if kunden_termine.next %}
           <div class="text-muted">Nächster Termin: <strong>{{ kunden_termine.next.label }} am {{ kunden_termine.next.datum_zeit_text }}</strong></div>
           {% elif auftrag['status']|int >= 5 %}
@@ -331,7 +331,7 @@
           <div class="text-muted">Termine werden von Versicherung oder Werkstatt eingetragen. Wenn ein Termin nicht passt, können Sie hier einen Änderungswunsch senden.</div>
           {% endif %}
         </div>
-        {% if auftrag['status']|int < 3 %}<div>
+        {% if auftrag['status']|int < 3 and not auftrag.get('ist_reifenauftrag') %}<div>
           <span class="badge text-bg-{{ 'success' if terminfreigabe['can_request'] or terminfreigabe['termin_gesetzt'] else 'secondary' }}">
             {{ terminfreigabe['label'] }}
           </span>
@@ -341,7 +341,7 @@
         </div>{% endif %}
       </div>
 
-      {% if auftrag['status']|int < 3 and terminfreigabe['can_request'] and not intake['kunden_angebot_angenommen_am'] %}
+      {% if auftrag['status']|int < 3 and terminfreigabe['can_request'] and not intake['kunden_angebot_angenommen_am'] and not auftrag.get('ist_reifenauftrag') %}
       <div class="appointment-panel mb-3" id="terminvereinbarung">
         {% if meldungen %}
           {% for category, message in meldungen %}
@@ -372,7 +372,7 @@
           <div class="text-muted small">{{ termin.label }}</div>
           <div class="fw-bold">{{ termin.datum_zeit_text }}</div>
           <div class="small text-muted">{{ termin.detail }}</div>
-          {% if termin.can_change %}
+          {% if termin.can_change and not auftrag.get('ist_reifenauftrag') %}
           <details class="change-box mt-2">
             <summary>Änderung anfragen</summary>
             <form method="POST" action="{{ url_for('kunden_status_verzoegerung', token=auftrag['kunden_status_token']) }}" class="mt-2">
@@ -389,11 +389,12 @@
         </div>
         {% endfor %}
       </div>
+      {% if auftrag.get('ist_reifenauftrag') %}<p class="text-muted">Möchten Sie Ihren Reifentermin ändern? Bitte rufen Sie uns an, damit wir eine freie Uhrzeit gemeinsam abstimmen.</p>{% endif %}
     </div>
 
     {% if not ist_anfrage or angebot_status == 'angenommen' %}
     <div class="panel mb-4 portal-progress" data-portal-section="uebersicht">
-      <div class="portal-tab-heading"><h2 class="h4 mb-0">Schritt für Schritt zu Ihrem Fahrzeug.</h2><span class="small text-muted">Ihr Reparaturverlauf</span></div>
+      <div class="portal-tab-heading"><h2 class="h4 mb-0">{{ 'Ihr Reifenservice' if auftrag.get('ist_reifenauftrag') else 'Schritt für Schritt zu Ihrem Fahrzeug.' }}</h2><span class="small text-muted">{{ 'Ihr Auftrag' if auftrag.get('ist_reifenauftrag') else 'Ihr Reparaturverlauf' }}</span></div>
       <div class="timeline">
         {% for step in kunden_timeline %}
         <div class="timeline-step is-{{ step['state'] }}">

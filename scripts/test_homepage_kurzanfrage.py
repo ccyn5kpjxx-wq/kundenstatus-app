@@ -55,7 +55,7 @@ def reifenservice_checks():
     result = [
         check('Privatauswahl bietet Reifenservice statt Geschäftspartnergespräch', selected.status_code == 200 and 'Reifenservice &amp; Einlagerung' in selected.text and 'anliegen=gespraech' not in selected.text),
         check('Alter Fotoauswahl-Link bleibt kompatibel', client.get('/anfrage?anliegen=schaden').status_code == 200),
-        check('Reifenformular zeigt Leistungen und unverbindlichen Terminwunsch', page.status_code == 200 and all(x in text for x in ('Radwechsel / Saisonwechsel', 'Reifenmontage', 'Räder auswuchten', 'Reifeneinlagerung', 'Neue Reifen anfragen', 'name="wunschdatum"', 'name="wunschzeit"', 'erst nach unserer Bestätigung', 'Fotos sind optional'))),
+        check('Reifenformular zeigt Leistungen und unverbindlichen Terminwunsch', page.status_code == 200 and all(x in text for x in ('Radwechsel / Saisonwechsel', 'Reifenmontage', 'Räder auswuchten', 'Reifeneinlagerung', 'Neue Reifen anfragen', 'name="wunschdatum"', 'name="wunschzeit"', 'Die gewählte Stunde wird für Sie reserviert', 'Fotos sind optional'))),
     ]
     def post(changes=(), files=()):
         with portal.PUBLIC_FORM_ATTEMPTS_LOCK:
@@ -77,7 +77,7 @@ def reifenservice_checks():
             check('Folgeaktion ist persönliche Terminabstimmung ohne Werkstattauftrag', 'persönlich abstimmen' in lead['naechste_aktion'] and scalar('SELECT COUNT(*) FROM auftraege') == before),
         ]
         success = client.get(response.headers['Location'])
-        result.append(check('Erfolg bestätigt keinen verbindlichen Termin', 'erst nach unserer Bestätigung' in success.text))
+        result.append(check('Erfolg bestätigt reservierte Uhrzeit ohne Preiszusage', 'Ihr Termin ist reserviert' in success.text))
         for label,changes,error in [
             ('Leere Reifenleistung', [('reifen_leistung',[])], 'mindestens eine Reifenleistung'),
             ('Unbekannte Reifenleistung', [('reifen_leistung',['invalid'])], 'gültige Reifenleistungen'),

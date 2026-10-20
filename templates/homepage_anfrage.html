@@ -140,7 +140,10 @@
   <main>
     <section class="hero">
       <div class="wrap">
-        {% if kurzanfrage and ausgewaehltes_anliegen in kurzanfrage_optionen %}
+        {% if ausgewaehltes_anliegen == 'reifenservice' or reifen_gesendet %}
+        <div class="time-pill">● Freie Termine online</div><div class="eyebrow">Reifenservice in Mosbach</div>
+        <h1>Reifen-Termin jetzt buchen.</h1><p>Service wählen, freie Uhrzeit aussuchen und Termin reservieren. Fotos sind optional.</p>
+        {% elif kurzanfrage and ausgewaehltes_anliegen in kurzanfrage_optionen %}
         <div class="time-pill">● Schnell &amp; unverbindlich</div>
         <div class="eyebrow">Ihre Anfrage direkt bei uns</div>
         <h1>{{ kurzanfrage_optionen[ausgewaehltes_anliegen]['label'] }}</h1>
@@ -246,7 +249,7 @@
         <div class="success" role="status">
           <div class="success-mark" aria-hidden="true">✓</div>
           <h2>{% if reifen_gesendet %}Ihre Reifenbuchung ist eingegangen.{% else %}Ihre Anfrage ist angekommen.{% endif %}</h2>
-          <p>{% if reifen_gesendet %}Vielen Dank. Wir prüfen Ihren Wunschtermin und bestätigen ihn persönlich. Der Termin ist erst nach unserer Bestätigung vereinbart.{% else %}Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.{% endif %}</p>
+          <p>{% if reifen_gesendet %}Ihr Termin ist reserviert: <strong>{{ gebuchter_reifentermin }}</strong>. Bei Rückfragen zu den Arbeiten oder zur Einlagerung melden wir uns persönlich. Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.{% else %}Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.{% endif %}</p>
           <div class="success-actions"><a class="primary" href="tel:+4915227706694">0152 277 066 94</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
         </div>
       {% elif kurzanfrage and formdata.get('anliegen') in kurzanfrage_optionen %}
@@ -255,7 +258,7 @@
           {% if formdata.get('anliegen') == 'reifenservice' %}
           <h2>Ihr nächster Reifentermin.</h2>
           <p>Wählen Sie die gewünschten Arbeiten und Ihren Wunschtermin.</p>
-          <ul><li>Radwechsel, Montage oder Einlagerung</li><li>Wunschdatum und Uhrzeit</li><li>Telefon oder E-Mail für unsere Bestätigung</li></ul>
+          <ul><li>Radwechsel, Montage oder Einlagerung</li><li>Freies Datum und genaue Ankunftszeit</li><li>Telefonnummer für Rückfragen</li></ul>
           {% else %}
           <h2>Kurz schildern. Wir kümmern uns.</h2>
           <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.{% if formdata.get('anliegen') == 'glasschaden' %} Für die eindeutige Scheibenzuordnung benötigen wir lediglich die FIN.{% endif %}</p>
@@ -269,7 +272,7 @@
           <input type="hidden" name="besichtigungsart" value="werkstatt">
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}</h2>
-          <p class="form-intro">{% if formdata.get('anliegen') == 'reifenservice' %}Leistungen auswählen und Wunschtermin senden. Wir bestätigen Ihren Termin persönlich.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
+          <p class="form-intro">{% if formdata.get('anliegen') == 'reifenservice' %}Gewünschte Arbeiten und eine freie Uhrzeit auswählen.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
             <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
@@ -298,7 +301,7 @@
             <fieldset><legend>Welche Reifenleistungen wünschen Sie? *</legend><div class="choice-grid">{% for key,label in reifen_leistungen.items() %}<label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}" {% if key in reifen_auswahl %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><p class="hint">Mehrfachauswahl möglich. Reifengröße und Lagerwunsch können Sie unten ergänzen.</p></fieldset>
             <div class="field"><label for="wunschdatum">Wunschdatum *</label><input id="wunschdatum" name="wunschdatum" type="date" min="{{ today_iso }}" value="{{ formdata.get('wunschdatum','') }}" required></div>
             <div class="field"><label for="wunschzeit">Ankunftszeit *</label><select id="wunschzeit" name="wunschzeit" required><option value="">{% if formdata.get('wunschdatum') %}Freie Uhrzeit auswählen{% else %}Zuerst Datum auswählen{% endif %}</option>{% for zeit in reifen_slots %}<option value="{{ zeit }}" {% if formdata.get('wunschzeit') == zeit %}selected{% endif %}>{{ zeit }} Uhr</option>{% endfor %}</select><p class="hint" id="reifen-slot-hinweis" aria-live="polite">Ein Fahrzeug pro Stunde. Radwechsel ca. 30 Minuten, Reifenmontage mit Wuchten ca. 45–60 Minuten.</p></div>
-            <p class="hint field full">Wir prüfen Leistungen und Einlagerungsmöglichkeiten persönlich. Ihr Wunschtermin ist erst nach unserer Bestätigung vereinbart.</p>
+            <p class="hint field full">Die gewählte Stunde wird für Sie reserviert. Den genauen Leistungsumfang und mögliche Besonderheiten stimmen wir persönlich ab.</p>
             {% elif formdata.get('anliegen') == 'fahrzeugpflege' %}
             <fieldset>
               <legend>Welche Fahrzeugpflege wünschen Sie? *</legend>
