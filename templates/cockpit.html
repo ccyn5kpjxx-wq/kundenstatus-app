@@ -136,7 +136,7 @@
   <nav class="cockpit-modules" aria-label="Weitere Arbeitsbereiche">
     {% if session.get('admin') %}<a class="cockpit-module" href="{{ url_for('admin_mitarbeiter') }}" title="Stammdaten, Lohnzettel und Verträge">Mitarbeiter</a>{% endif %}
     {% set leads_count = admin_leads_count() %}<a class="cockpit-module" href="{{ url_for('admin_leads') }}">Anfragen <span class="module-count {% if leads_count %}is-alert{% endif %}">{{ leads_count }}</span></a>
-    <a class="cockpit-module" href="{{ url_for('admin_reifentermine') }}">Reifentermine <span class="module-count {% if reifentermine %}is-alert{% endif %}">{{ reifentermine|length }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_reifentermine') }}">Reifenportal <span class="module-count {% if reifentermine %}is-alert{% endif %}">{{ reifentermine|length }}</span></a>
     <a class="cockpit-module" href="{{ url_for('admin_aufgaben') }}">Aufgabenplanung <span class="module-count">{{ aufgaben_offen_heute_count() }}</span></a>
     <a class="cockpit-module" href="{{ url_for('admin_versicherungsschaden') }}" title="Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten.">Versicherungsportal <span class="module-count">{{ admin_versicherung_count() }}</span></a>
     <a class="cockpit-module" href="{{ url_for('admin_fahrzeugsuche') }}">Fahrzeugsuche <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span></a>

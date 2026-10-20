@@ -3,6 +3,8 @@ from datetime import date, datetime, timedelta
 import json
 from pathlib import Path
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -22,6 +24,10 @@ class ReifentermineTest(unittest.TestCase):
         portal.init_db()
 
     def setUp(self):
+        db = portal.get_db()
+        db.execute('DELETE FROM reifen_termin_slots')
+        db.commit()
+        db.close()
         self.client = portal.app.test_client()
         self.client.get('/anfrage?anliegen=reifenservice')
         with self.client.session_transaction() as session:
@@ -47,8 +53,8 @@ class ReifentermineTest(unittest.TestCase):
             portal.CSRF_FIELD_NAME: self.csrf, 'anliegen': 'reifenservice',
             'name': 'Reifen Testkunde', 'email': 'reifen-test@example.invalid',
             'telefon': '0171 1234567', 'fahrzeug': 'VW Golf', 'kennzeichen': 'mos test 1',
-            'nachricht': '', 'wunschdatum': (date.today() + timedelta(days=7)).isoformat(),
-            'wunschzeit': '09:30',
+            'nachricht': '', 'wunschdatum': self.day(),
+            'wunschzeit': '09:00',
         })
         data.setlist('reifen_leistung', ['radwechsel', 'einlagerung', 'radwechsel'])
         for key, value in (changes or {}).items():
@@ -64,19 +70,28 @@ class ReifentermineTest(unittest.TestCase):
             db.close()
         return portal.get_lead(lead_id)
 
+    def day(self, offset=7):
+        day = date.today() + timedelta(days=offset)
+        while day.weekday() == 6:
+            day += timedelta(days=1)
+        return day.isoformat()
+
     def login_admin(self):
         with self.client.session_transaction() as session:
             session['admin'] = True
 
     def test_form_and_entry_button(self):
         response = self.client.get('/anfrage?anliegen=reifenservice')
-        self.assertIn('type="time"', response.text)
+        self.assertIn('<select id="wunschzeit"', response.text)
         self.assertIn('id="kennzeichen"', response.text)
         self.assertIn('erst nach unserer Bestätigung', response.text)
-        self.assertIn('Terminanfrage senden', response.text)
+        self.assertIn('Termin buchen', response.text)
         detail = self.client.get('/leistungen/reifenservice')
         self.assertEqual(detail.status_code, 200)
-        self.assertIn('Reifentermin buchen', detail.text)
+        self.assertIn('Reifen-Termin jetzt buchen', detail.text)
+        home = self.client.get('/homepage')
+        self.assertIn('data-reifen-buchung', home.text)
+        self.assertIn('Termin jetzt buchen', home.text)
 
     def test_request_is_structured_without_order_or_price_commitment(self):
         before = self.count('auftraege')
@@ -85,10 +100,10 @@ class ReifentermineTest(unittest.TestCase):
         lead = self.latest()
         self.assertEqual(lead['kennzeichen'], 'MOS TEST 1')
         self.assertEqual(lead['portal_data']['reifen_leistungen'], ['radwechsel', 'einlagerung'])
-        self.assertEqual(lead['portal_data']['kunden_wunsch_zeitfenster'], '09:30')
+        self.assertEqual(lead['portal_data']['kunden_wunsch_zeitfenster'], '09:00')
         self.assertEqual(self.count('auftraege'), before)
         self.assertFalse(lead['auftrag_id'])
-        self.assertIn('noch keine Termin-, Preis- oder Auftragsbestätigung', self.client.get(response.location).text)
+        self.assertIn('Reifenbuchung ist eingegangen', self.client.get(response.location).text)
         portal.notify_lead_workshop.assert_called_once()
 
     def test_invalid_dates_times_and_services_do_not_create_leads(self):
@@ -99,6 +114,7 @@ class ReifentermineTest(unittest.TestCase):
             {'wunschdatum': (date.today() - timedelta(days=1)).isoformat()},
             {'wunschzeit': ''}, {'wunschzeit': '25:01'}, {'wunschzeit': '9:30'},
             {'wunschzeit': '09:61'}, {'wunschzeit': 'vormittags'}, {'wunschzeit': '0١:30'},
+            {'wunschzeit': '09:30'}, {'telefon': ''},
             {'reifen_leistung': []}, {'reifen_leistung': ['hacking']},
             {portal.CSRF_FIELD_NAME: 'invalid'},
         ]
@@ -140,7 +156,7 @@ class ReifentermineTest(unittest.TestCase):
         self.assertNotIn('<script>TEST-REIFEN</script>', overview.text)
         hall = self.client.get('/werkstatt/tafel')
         self.assertEqual(hall.status_code, 200)
-        self.assertIn('Reifen-Terminwünsche', hall.text)
+        self.assertIn('Neue Reifenbuchungen', hall.text)
         self.assertNotIn('reifen-test@example.invalid', hall.text)
         self.assertNotIn('0171 1234567', hall.text)
         with portal.app.test_request_context('/admin/cockpit'):
@@ -149,20 +165,20 @@ class ReifentermineTest(unittest.TestCase):
         self.assertFalse(any(item.get('lead_id') == lead['id'] for item in actions['groups']['angebote']))
         cockpit = self.client.get('/admin/cockpit')
         self.assertEqual(cockpit.status_code, 200)
-        self.assertIn('/admin/reifentermine', cockpit.text)
+        self.assertIn('/admin/reifenportal', cockpit.text)
 
     def test_customer_reschedule_is_reflected_without_duplicate_request(self):
         self.book()
         lead = self.latest()
         before = self.count('leads')
-        new_date = (date.today() + timedelta(days=11)).isoformat()
+        new_date = self.day(11)
         response = self.client.post('/status/' + lead['kunden_status_token'] + '/termin', data={
-            portal.CSRF_FIELD_NAME: self.csrf, 'wunschtermin': new_date, 'zeitfenster': '14:15'
+            portal.CSRF_FIELD_NAME: self.csrf, 'wunschtermin': new_date, 'zeitfenster': '14:00'
         })
         self.assertEqual(response.status_code, 302)
         current = next(item for item in portal.list_reifentermine() if item['id'] == lead['id'])
         self.assertEqual(current['datum_iso'], new_date)
-        self.assertEqual(current['zeit'], '14:15')
+        self.assertEqual(current['zeit'], '14:00')
         self.assertEqual(self.count('leads'), before)
 
     def test_closed_requests_are_not_pending_and_malformed_data_is_safe(self):
@@ -190,6 +206,126 @@ class ReifentermineTest(unittest.TestCase):
         db.close()
         self.assertEqual(before, after)
         self.assertEqual(notifications, self.count('benachrichtigungen'))
+
+    def test_hour_slots_hide_bookings_and_cancellation_releases_time(self):
+        endpoint = '/api/reifenservice/termine?datum=' + self.day()
+        first = self.client.get(endpoint)
+        self.assertEqual(first.headers['Cache-Control'], 'no-store')
+        self.assertIn('09:00', first.json['zeiten'])
+        self.assertNotIn('09:30', first.json['zeiten'])
+        self.assertEqual(self.book().status_code, 302)
+        lead = self.latest()
+        self.assertNotIn('09:00', self.client.get(endpoint).json['zeiten'])
+        count = self.count('leads')
+        self.assertEqual(self.book().status_code, 409)
+        self.assertEqual(self.count('leads'), count)
+        self.assertNotIn(lead['kunde_name'], self.client.get(endpoint).text)
+        db = portal.get_db()
+        db.execute("UPDATE leads SET status='verloren' WHERE id=?", (lead['id'],))
+        db.commit()
+        db.close()
+        self.assertIn('09:00', self.client.get(endpoint).json['zeiten'])
+        self.assertEqual(self.book().status_code, 302)
+        sunday = date.today() + timedelta(days=7)
+        while sunday.weekday() != 6:
+            sunday += timedelta(days=1)
+        self.assertEqual(self.client.get('/api/reifenservice/termine?datum=' + sunday.isoformat()).json['zeiten'], [])
+        self.assertEqual(self.client.get('/api/reifenservice/termine?datum=invalid').json['zeiten'], [])
+
+    def test_parallel_booking_of_same_hour_creates_exactly_one_lead(self):
+        barrier = Barrier(2)
+        def submit(index):
+            client = portal.app.test_client()
+            client.get('/anfrage?anliegen=reifenservice')
+            with client.session_transaction() as session:
+                csrf = session[portal.CSRF_FIELD_NAME]
+            data = {portal.CSRF_FIELD_NAME: csrf, 'anliegen':'reifenservice',
+                    'name':f'Parallel Test {index}', 'telefon':'0171 1234567',
+                    'reifen_leistung':'radwechsel', 'wunschdatum':self.day(), 'wunschzeit':'11:00'}
+            barrier.wait(timeout=5)
+            return client.post('/anfrage', data=data).status_code
+        count = self.count('leads')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(submit, range(2)))
+        self.assertEqual(sorted(results), [302,409])
+        self.assertEqual(self.count('leads'), count+1)
+
+    def test_reschedule_conflict_preserves_previous_reserved_hour(self):
+        self.book()
+        first = self.latest()
+        self.book({'wunschzeit':'10:00'})
+        self.client.post('/status/' + first['kunden_status_token'] + '/termin', data={
+            portal.CSRF_FIELD_NAME:self.csrf, 'wunschtermin':self.day(), 'zeitfenster':'10:00'})
+        lead = portal.get_lead(first['id'])
+        self.assertEqual(lead['portal_data']['kunden_wunsch_zeitfenster'], '09:00')
+        db = portal.get_db()
+        hold = db.execute('SELECT uhrzeit FROM reifen_termin_slots WHERE lead_id=?', (first['id'],)).fetchone()
+        db.close()
+        self.assertEqual(hold['uhrzeit'], '09:00')
+
+    def test_accepted_tire_order_is_classified_and_separate_from_paint(self):
+        self.book()
+        lead = self.latest()
+        db = portal.get_db()
+        db.execute("UPDATE leads SET angebot_status='angebot_abgegeben' WHERE id=?", (lead['id'],))
+        db.commit()
+        db.close()
+        order_id = portal.create_order_from_accepted_lead(lead, lead['portal_data'])
+        tire = portal.get_auftrag(order_id)
+        self.assertEqual(tire['auftragsart_label'], 'Reifenauftrag')
+        self.assertEqual(portal.produktion_schritt_steps(tire), [])
+        self.assertNotIn('Lackierung', str(portal.kunden_produktion_steps(tire)))
+        self.assertNotIn('09:00', portal.freie_reifen_slots(self.day()))
+        paint_id = portal.create_auftrag('privat', kunde_name='Paint Test', fahrzeug='Karosserie-Test',
+                                        beschreibung='Stoßfänger lackieren, Reifen prüfen')
+        paint = portal.get_auftrag(paint_id)
+        self.assertEqual(paint['auftragsart_label'], 'Lackierauftrag')
+        self.assertTrue(portal.produktion_schritt_steps(paint))
+        self.login_admin()
+        portal_page = self.client.get('/admin/reifenportal')
+        self.assertIn(f'data-reifenauftrag="{order_id}"', portal_page.text)
+        self.assertNotIn('Karosserie-Test', portal_page.text)
+        paint_page = self.client.get('/admin')
+        self.assertIn('Karosserie-Test', paint_page.text)
+        self.assertNotIn('MOS TEST 1', paint_page.text)
+        hall = self.client.get('/werkstatt/tafel')
+        self.assertIn('Reifenauftrag', hall.text)
+        self.assertIn('Lackierauftrag', hall.text)
+        tire['status'] = paint['status'] = 4
+        tire['fertig_datum_obj'] = paint['fertig_datum_obj'] = date.today()
+        stats = portal.build_lackier_statistik([tire,paint], fertigmeldungen={})
+        self.assertEqual(stats['gesamt'], 1)
+        self.assertIn('reifen_termin_slots', portal.BACKUP_TABLES)
+        self.assertIn('reifen_terminslots_v1', portal.BACKUP_SCHEMA_FEATURES)
+
+    def test_offer_acceptance_cannot_bypass_reserved_tire_day(self):
+        self.book()
+        lead = self.latest()
+        db = portal.get_db()
+        db.execute("UPDATE leads SET angebot_status='angebot_abgegeben' WHERE id=?", (lead['id'],))
+        db.commit()
+        db.close()
+        count = self.count('auftraege')
+        self.client.post('/status/' + lead['kunden_status_token'] + '/angebot-annehmen', data={
+            portal.CSRF_FIELD_NAME:self.csrf, 'angebot_annehmen_bestaetigt':'1',
+            'wunsch_annahme_datum':self.day(12), 'transport_art':'standard', 'ersatzfahrzeug':'nein'})
+        self.assertEqual(self.count('auftraege'), count)
+        self.assertNotIn('09:00', portal.freie_reifen_slots(self.day()))
+        order_id = portal.create_order_from_accepted_lead(lead, lead['portal_data'])
+        self.client.post('/status/' + lead['kunden_status_token'] + '/termin', data={
+            portal.CSRF_FIELD_NAME:self.csrf, 'wunschtermin':self.day(12), 'zeitfenster':'10:00'})
+        self.assertEqual(portal.get_auftrag(order_id)['schaden_aufnahme']['kunden_wunsch_zeitfenster'], '09:00')
+
+    def test_cancelled_lead_cannot_reactivate_old_reservation(self):
+        self.book()
+        first = self.latest()
+        portal.set_lead_status(first['id'], 'verloren')
+        self.assertEqual(self.book().status_code, 302)
+        for update in (lambda: portal.set_lead_status(first['id'], 'neu'),
+                       lambda: portal.update_lead(first['id'], dict(first, status='neu'))):
+            with self.assertRaises(portal.ReifenSlotBelegt):
+                update()
+        self.assertEqual(portal.get_lead(first['id'])['status'], 'verloren')
 
 
 if __name__ == '__main__':

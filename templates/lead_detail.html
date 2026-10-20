@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Lead #{{ lead['id'] }}{% endblock %}
+{% block title %}{% if lead['ist_reifenanfrage'] %}Reifenportal · Buchung{% else %}Lead{% endif %} #{{ lead['id'] }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -97,11 +97,12 @@
       <span class="badge-soft">{{ lead['reference'] }}</span>
       <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">{{ lead['website_meta']['label'] }}</span>
     </div>
+    {% if lead['ist_reifenanfrage'] %}<div class="fw-bold mb-2">Reifenportal · Reifenbuchung</div>{% endif %}
     <h1 class="mb-2">{{ lead['kunde_name'] or 'Neue Anfrage' }}</h1>
     <p>{{ lead['fahrzeug'] or 'Projekt/Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %} · {{ lead['website_meta']['domain'] }}</p>
   </div>
   <div class="d-flex gap-2 flex-wrap">
-    <a href="{{ url_for('admin_leads') }}" class="btn btn-soft">Zur Lead-Liste</a>
+    {% if lead['ist_reifenanfrage'] %}<a href="{{ url_for('admin_reifentermine') }}" class="btn btn-soft">Zum Reifenportal</a>{% else %}<a href="{{ url_for('admin_leads') }}" class="btn btn-soft">Zur Lead-Liste</a>{% endif %}
     {% if lead['auftrag_id'] %}
     <a href="{{ url_for('auftrag_detail', auftrag_id=lead['auftrag_id']) }}" class="btn btn-brand">Auftrag öffnen</a>
     {% endif %}

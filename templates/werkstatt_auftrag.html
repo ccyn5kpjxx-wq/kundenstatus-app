@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Auftrag {{ auftrag['kennzeichen'] or auftrag['fahrzeug'] }} — Werkstatt-Tafel</title>
+  <title>{{ auftrag['auftragsart_label'] }} {{ auftrag['kennzeichen'] or auftrag['fahrzeug'] }} — Werkstatt-Tafel</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -550,9 +550,9 @@
     {% if auftrag['kennzeichen'] %}
       <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
     {% endif %}
-    <h1>{{ auftrag['fahrzeug'] }}</h1>
+    <h1><small style="display:block; font-size:.8rem;">{{ auftrag['auftragsart_label'] }}</small>{{ auftrag['fahrzeug'] }}</h1>
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
-    {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
+    {% if session.admin %}{% if auftrag['ist_reifenauftrag'] %}<a class="ws-back" href="{{ url_for('admin_reifentermine') }}">← Reifenportal</a>{% else %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}{% endif %}
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -666,7 +666,7 @@
       </div>
       {% endif %}
 
-      {% if auftrag['status'] == 3 %}
+      {% if auftrag['status'] == 3 and not auftrag['ist_reifenauftrag'] %}
       <div class="panel">
         <h2>Arbeitsschritt</h2>
         <div style="display:flex; align-items:stretch; gap:.25rem; margin-bottom:.6rem;">

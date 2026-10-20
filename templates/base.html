@@ -438,7 +438,7 @@
       <a class="{{ nav_class(['admin_aufgaben']) }}"{{ nav_current(['admin_aufgaben']) }} href="{{ url_for('admin_aufgaben') }}">Aufgaben{% set aufgaben_badge = aufgaben_offen_heute_count() %}{% if aufgaben_badge %}<span class="nav-badge is-alert" title="Offene Aufgaben heute">{{ aufgaben_badge }}</span>{% endif %}</a>
       <a class="{{ nav_class(['admin_news']) }}"{{ nav_current(['admin_news']) }} href="{{ url_for('admin_news') }}">News</a>
       <a class="{{ nav_class(['admin_leads']) }}"{{ nav_current(['admin_leads']) }} href="{{ url_for('admin_leads') }}">Leads{% set leads_badge = admin_leads_count() %}{% if leads_badge %}<span class="nav-badge is-alert" title="Neue oder aktive Leads">{{ leads_badge }}</span>{% endif %}</a>
-      <a class="{{ nav_class(['admin_reifentermine']) }}"{{ nav_current(['admin_reifentermine']) }} href="{{ url_for('admin_reifentermine') }}">Reifentermine</a>
+      <a class="{{ nav_class(['admin_reifentermine']) }}"{{ nav_current(['admin_reifentermine']) }} href="{{ url_for('admin_reifentermine') }}">Reifenportal</a>
       <a class="{{ nav_class(['admin_karriere', 'admin_stellenanzeige_neu', 'admin_stellenanzeige_bearbeiten', 'admin_bewerbung_bearbeiten']) }}"{{ nav_current(['admin_karriere', 'admin_stellenanzeige_neu', 'admin_stellenanzeige_bearbeiten', 'admin_bewerbung_bearbeiten']) }} href="{{ url_for('admin_karriere') }}#bewerbungen">Bewerbungen{% set bewerbungen_badge = admin_bewerbungen_count() %}{% if bewerbungen_badge %}<span class="nav-badge" title="Neue Bewerbungen" aria-label="{{ bewerbungen_badge }} neue Bewerbungen">{{ bewerbungen_badge }}</span>{% endif %}</a>
       <a class="{{ nav_class(['admin_fahrzeugsuche']) }}"{{ nav_current(['admin_fahrzeugsuche']) }} href="{{ url_for('admin_fahrzeugsuche') }}">Auktion{% set fs_alert_badge = fahrzeugsuche_auktion_alert_count() %}{% set fs_badge = fs_alert_badge or fahrzeugsuche_count() %}{% if fs_badge %}<span class="nav-badge {% if fs_alert_badge %}is-alert{% endif %}" title="{% if fs_alert_badge %}Auktion startet in Kürze{% else %}Aktive Auktionssuchen{% endif %}">{{ fs_badge }}</span>{% endif %}</a>
       <a class="{{ nav_class(['admin_fahrzeugverkauf']) }}"{{ nav_current(['admin_fahrzeugverkauf']) }} href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf{% set fv_badge = fahrzeugverkauf_count() %}{% if fv_badge %}<span class="nav-badge">{{ fv_badge }}</span>{% endif %}</a>
@@ -463,7 +463,7 @@
 
 <main class="hero-shell" id="hauptinhalt" tabindex="-1">
   <div class="container">
-    {% if werkstatt_internal and request.endpoint != 'betriebs_cockpit' %}<nav class="ws-page-return" aria-label="Zurück zum Cockpit"><a href="{{ url_for('betriebs_cockpit') }}">← Zurück ins Werkstatt-Cockpit</a></nav>{% endif %}
+    {% if werkstatt_internal and request.endpoint != 'betriebs_cockpit' %}<nav class="ws-page-return" aria-label="Zurück zur Übersicht">{% if request.endpoint == 'admin_reifentermine' %}<a href="{{ url_for('werkstatt_tafel') }}">← Zur Werkstatt-Tafel</a>{% elif (lead is defined and lead.ist_reifenanfrage) or (auftrag is defined and auftrag.ist_reifenauftrag) %}<a href="{{ url_for('admin_reifentermine') }}">← Zum Reifenportal</a>{% else %}<a href="{{ url_for('betriebs_cockpit') }}">← Zurück ins Werkstatt-Cockpit</a>{% endif %}</nav>{% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
         <div class="alert alert-{{ cat }} alert-dismissible fade show page-card mb-4" role="alert">

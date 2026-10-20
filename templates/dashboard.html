@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Autohaus-Cockpit{% endblock %}
+{% block title %}Lackierportal{% endblock %}
 {% block extra_css %}
 <style>
   .bulk-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid #e4d6c3; border-radius:18px; background:#f7f0e6; margin-bottom:16px; }
@@ -214,8 +214,8 @@
 <div class="page-card p-4 mb-4" id="auftraege">
   <div class="section-title">
     <div>
-      <h1 class="h4 mb-1">Alle Aufträge</h1>
-      <p>Alle aktiven Fahrzeuge in einer einfachen Liste, nach Herkunft markiert.</p>
+      <h1 class="h4 mb-1">Lackierportal · Lackieraufträge</h1>
+      <p>Alle Aufträge für Karosserie und Lack in einer einfachen Liste, nach Herkunft markiert.</p>
     </div>
   </div>
   <div class="source-mix">
@@ -280,6 +280,7 @@
           </td>
           <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div class="fw-bold">{{ a['fahrzeug'] }}</div>
+            <span class="badge-soft">{{ a['auftragsart_label'] }}</span>
             <span class="badge text-bg-{{ a['quelle_meta']['farbe'] }}">{{ a['quelle_meta']['label'] }}</span>
             {% if a['versicherung_name'] %}<span class="badge text-bg-light border text-dark">{{ a['versicherung_name'] }}</span>{% endif %}
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
@@ -334,7 +335,7 @@
 <div class="page-card p-4">
   <div class="section-title">
     <div>
-      <h2 class="h4 mb-1">Archiv</h2>
+      <h2 class="h4 mb-1">Archiv · Lackieraufträge</h2>
       <p>Hier liegen abgeschlossene oder ausgeblendete Aufträge.</p>
     </div>
   </div>

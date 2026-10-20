@@ -561,7 +561,7 @@
 
   {% if reifentermine %}
   <section aria-labelledby="reifenwuensche-titel" style="margin:1rem; padding:1rem; border:1px solid var(--line); border-radius:18px; background:var(--panel);">
-    <h2 id="reifenwuensche-titel" style="margin:0 0 .5rem;">Reifen-Terminwünsche · {{ reifentermine|length }}</h2>
+    <h2 id="reifenwuensche-titel" style="margin:0 0 .5rem;">Reifenportal · Neue Reifenbuchungen · {{ reifentermine|length }}</h2>
     <p style="margin:0 0 .8rem; color:var(--muted);">Bestätigung durch das Büro offen · noch keine eingeplanten Aufträge.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); gap:.8rem;">
       {% for termin in reifentermine[:6] %}
@@ -573,7 +573,7 @@
       {% endfor %}
     </div>
     {% if reifentermine|length > 6 %}<p>{{ reifentermine|length - 6 }} weitere Terminwünsche im Büro prüfen.</p>{% endif %}
-    {% if session.admin %}<a href="{{ url_for('admin_reifentermine') }}" style="display:inline-block; margin-top:.8rem;">Alle Reifentermine bearbeiten →</a>{% endif %}
+    {% if session.admin %}<a href="{{ url_for('admin_reifentermine') }}" style="display:inline-block; margin-top:.8rem;">Reifenportal öffnen →</a>{% endif %}
   </section>
   {% endif %}
   <div class="board">
@@ -589,6 +589,7 @@
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-nummernzeile">
+          <strong class="auftragsart" style="display:inline-block; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ '#dff2ed' if auftrag['ist_reifenauftrag'] else '#ede4f3' }}; color:{{ '#12685f' if auftrag['ist_reifenauftrag'] else '#593d72' }};">{{ auftrag['auftragsart_label'] }}</strong>
           {% if auftrag['werkstatt_neu'] %}
             <span class="neu-badge" title="Neu vom Autohaus eingeplant">Neu</span>
           {% endif %}
@@ -649,6 +650,7 @@
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
+        {% if not auftrag['ist_reifenauftrag'] %}
         <div class="prod-box" data-prod-box>
           <button type="button" class="prod-toggle" data-prod-toggle aria-expanded="false">
             <span class="prod-toggle-label">{% if auftrag['produktion_schritt_label'] %}Schritt: <strong>{{ auftrag['produktion_schritt_label'] }}</strong>{% else %}Arbeitsschritt setzen{% endif %}</span>
@@ -666,6 +668,7 @@
             {% endfor %}
           </div>
         </div>
+        {% endif %}
         <button type="button" class="schnell-knopf fertig" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="4">✅ Fertig melden →</button>
         {% elif auftrag['status'] == 4 %}
         <button type="button" class="schnell-knopf zurueck" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">↩ Zurück in Arbeit</button>

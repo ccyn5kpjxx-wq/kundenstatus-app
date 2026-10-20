@@ -8238,6 +8238,7 @@ BACKUP_TABLES = (
     "autohaeuser",
     "versicherungen",
     "leads",
+    "reifen_termin_slots",
     "lead_dateien",
     "lead_mail_log",
     "lead_portal_log",
@@ -8373,6 +8374,7 @@ BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
 BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
+BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
 BACKUP_BINARY_FIELDS = {
     "kundenflotten_belege": {
         "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
@@ -9623,6 +9625,16 @@ def init_db():
             geaendert_am         TEXT NOT NULL,
             FOREIGN KEY (autohaus_id) REFERENCES autohaeuser(id),
             FOREIGN KEY (auftrag_id) REFERENCES auftraege(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS reifen_termin_slots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum TEXT NOT NULL,
+            uhrzeit TEXT NOT NULL,
+            lead_id INTEGER NOT NULL UNIQUE,
+            erstellt_am TEXT NOT NULL,
+            UNIQUE (datum, uhrzeit),
+            FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS lead_dateien (
@@ -12557,6 +12569,15 @@ def lead_whatsapp_url(lead):
     return f"https://wa.me/{phone_key}?text={quote(lead_whatsapp_message(lead))}"
 
 
+def auftrag_ist_reifen(auftrag):
+    """Use the explicit service marker; damage repairs may also mention tires."""
+    auftrag = auftrag or {}
+    aufnahme = auftrag.get("schaden_aufnahme")
+    if not isinstance(aufnahme, dict):
+        aufnahme = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    return aufnahme.get("anliegen") == "reifenservice"
+
+
 def hydrate_lead(row):
     lead = dict(row or {})
     lead["status"] = normalize_lead_status(lead.get("status"))
@@ -12615,6 +12636,7 @@ def hydrate_lead(row):
     except (TypeError, ValueError, json.JSONDecodeError):
         portal_data = {}
     lead["portal_data"] = portal_data if isinstance(portal_data, dict) else {}
+    lead["ist_reifenanfrage"] = lead["portal_data"].get("anliegen") == "reifenservice"
     lead["angebot_status"] = clean_text(lead.get("angebot_status")) or "entwurf"
     lead["angebot_text"] = clean_text(lead.get("angebot_text"))
     lead["angebot_text_display"] = lead["angebot_text"] or lead["beschreibung"]
@@ -12954,6 +12976,10 @@ def lead_notification_context():
     return {"lead_notifications": rows}
 
 
+class ReifenSlotBelegt(ValueError):
+    pass
+
+
 def create_lead(payload, attachments=None):
     jetzt = now_str()
     website = normalize_lead_website(payload.get("website"))
@@ -13012,6 +13038,13 @@ def create_lead(payload, attachments=None):
             int(lead_id),
         ),
     )
+    if payload.get("reifen_slot"):
+        try:
+            reserviere_reifen_slot(db, lead_id, *payload["reifen_slot"])
+        except ReifenSlotBelegt:
+            db.rollback()
+            db.close()
+            raise
     for item in attachments or []:
         db.execute(
             """
@@ -13040,8 +13073,25 @@ def create_lead(payload, attachments=None):
     return lead_id
 
 
+def pruefe_reifen_lead_statuswechsel(db, lead_id, status):
+    # Lock before reading: a cancelled reservation may have been assigned to
+    # somebody else. Reopening a lead must never silently revive its old hour.
+    db.execute("UPDATE leads SET status=status WHERE id=?", (int(lead_id),))
+    row = db.execute("SELECT status, portal_json FROM leads WHERE id=?", (int(lead_id),)).fetchone()
+    if row and row["status"] == "verloren" and status != "verloren":
+        try:
+            intake = json.loads(row["portal_json"] or "{}")
+        except (ValueError, TypeError):
+            intake = {}
+        if isinstance(intake, dict) and intake.get("anliegen") == "reifenservice":
+            db.rollback()
+            db.close()
+            raise ReifenSlotBelegt("Diese Reifenbuchung wurde storniert. Bitte einen neuen freien Termin buchen.")
+
+
 def update_lead(lead_id, payload):
     db = get_db()
+    pruefe_reifen_lead_statuswechsel(db, lead_id, normalize_lead_status(payload.get("status")))
     db.execute(
         """
         UPDATE leads
@@ -13258,6 +13308,7 @@ def sync_mietwagen_anfragen_to_leads():
 def set_lead_status(lead_id, status):
     status = normalize_lead_status(status)
     db = get_db()
+    pruefe_reifen_lead_statuswechsel(db, lead_id, status)
     db.execute(
         "UPDATE leads SET status=?, geaendert_am=? WHERE id=?",
         (status, now_str(), lead_id),
@@ -13282,6 +13333,7 @@ def delete_lead(lead_id):
             "SELECT 1 FROM dateien WHERE stored_name=? LIMIT 1", (stored_name,)
         ).fetchone()
     }
+    db.execute("DELETE FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),))
     db.execute("DELETE FROM lead_dateien WHERE lead_id=?", (int(lead_id),))
     db.execute("DELETE FROM lead_mail_log WHERE lead_id=?", (int(lead_id),))
     db.execute("DELETE FROM lead_portal_log WHERE lead_id=?", (int(lead_id),))
@@ -16742,6 +16794,8 @@ def row_to_auftrag(row):
         "whatsapp": "WhatsApp",
     }.get(aufnahme.get("kontaktweg"), "Telefon")
     auftrag["schaden_aufnahme"] = aufnahme
+    auftrag["ist_reifenauftrag"] = auftrag_ist_reifen(auftrag)
+    auftrag["auftragsart_label"] = "Reifenauftrag" if auftrag["ist_reifenauftrag"] else "Lackierauftrag"
     auftrag["schadenart"] = normalize_schadenart(auftrag.get("schadenart"))
     auftrag["schadenart_label"] = schadenart_label(auftrag["schadenart"])
     auftrag["versicherung_freigabe_status"] = normalize_freigabe_status(
@@ -16807,6 +16861,8 @@ def row_to_auftrag(row):
         "",
     )
     auftrag["produktion_schritte"] = produktion_schritt_steps(auftrag)
+    if auftrag["ist_reifenauftrag"]:
+        auftrag["produktion_schritt_label"] = ""
     auftrag["kosten_gutachten_betrag"] = clean_text(auftrag.get("kosten_gutachten_betrag"))
     auftrag["kosten_werkstatt_betrag"] = clean_text(auftrag.get("kosten_werkstatt_betrag"))
     auftrag["kosten_freigabe_betrag"] = clean_text(auftrag.get("kosten_freigabe_betrag"))
@@ -33183,6 +33239,8 @@ def produktion_schritt_index(value):
 
 
 def produktion_schritt_steps(auftrag):
+    if auftrag_ist_reifen(auftrag):
+        return []
     # Werkstatt-Stepper auf der Tafel-Karte: 4 Schritte mit Zustand erledigt/aktiv/offen.
     aktuell_index = produktion_schritt_index((auftrag or {}).get("produktion_schritt"))
     steps = []
@@ -33202,6 +33260,9 @@ def kunden_produktion_steps(auftrag):
     # Karosserie wird bewusst unter "In Vorbereitung" gefaltet (kein "übersprungen" beim Kunden).
     auftrag = auftrag or {}
     status = int(auftrag.get("status") or 1)
+    if auftrag_ist_reifen(auftrag):
+        return [{"label": "Reifenservice", "detail": "Ihre Reifenarbeiten werden gemäß Auftrag ausgeführt.",
+                 "state": "done" if status >= 4 else "active" if status == 3 else "waiting"}]
     schritt = normalize_produktion_schritt(auftrag.get("produktion_schritt"))
     aktiv_map = {"vorarbeit": 0, "karosserie": 0, "lackierung": 1, "finish": 2}
     stufen = (
@@ -37424,7 +37485,7 @@ def build_lackier_statistik(auftraege, reference_date=None, fertigmeldungen=None
     echte_auftraege = [
         auftrag
         for auftrag in (auftraege or [])
-        if auftrag and not auftrag.get("angebotsphase") and auftrag.get("id")
+        if auftrag and not auftrag.get("angebotsphase") and auftrag.get("id") and not auftrag_ist_reifen(auftrag)
     ]
     if fertigmeldungen is None:
         fertigmeldungen = list_erste_fertigmeldungen(
@@ -39157,7 +39218,7 @@ def admin_klickstatistik():
 @app.route("/admin")
 @admin_required
 def dashboard():
-    alle_auftraege = list_auftraege(include_archived=True)
+    alle_auftraege = [a for a in list_auftraege(include_archived=True) if not auftrag_ist_reifen(a)]
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
     angebotsanfragen = list_angebotsanfragen()
@@ -44899,6 +44960,54 @@ WEBSITE_BESICHTIGUNGSARTEN = {
 }
 
 
+def reifen_slot_zeiten(datum):
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", datum or ""):
+        return []
+    tag = parse_date(datum)
+    jetzt = datetime.now(ZoneInfo("Europe/Berlin"))
+    if not tag or tag < jetzt.date() or tag.weekday() == 6:
+        return []
+    # Published opening hours: Monday–Saturday, 07:00–18:00.
+    return [f"{stunde:02d}:00" for stunde in range(7, 18)
+            if datetime.combine(tag, datetime.min.time()).replace(hour=stunde, tzinfo=ZoneInfo("Europe/Berlin")) > jetzt]
+
+
+def freie_reifen_slots(datum):
+    zeiten = reifen_slot_zeiten(datum)
+    if not zeiten:
+        return []
+    db = get_db()
+    try:
+        belegt = {row["uhrzeit"] for row in db.execute(
+            """SELECT s.uhrzeit FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
+               WHERE s.datum=? AND l.status!='verloren'""", (datum,)
+        ).fetchall()}
+    finally:
+        db.close()
+    return [zeit for zeit in zeiten if zeit not in belegt]
+
+
+def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
+    if uhrzeit not in reifen_slot_zeiten(datum):
+        raise ReifenSlotBelegt("Bitte eine freie volle Stunde innerhalb unserer Öffnungszeiten auswählen.")
+    db.execute("DELETE FROM reifen_termin_slots WHERE lead_id IN (SELECT id FROM leads WHERE status='verloren')")
+    db.execute("DELETE FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),))
+    result = db.execute(
+        """INSERT INTO reifen_termin_slots (datum, uhrzeit, lead_id, erstellt_am)
+           VALUES (?, ?, ?, ?) ON CONFLICT (datum, uhrzeit) DO NOTHING""",
+        (datum, uhrzeit, int(lead_id), now_str()),
+    )
+    if result.rowcount != 1:
+        raise ReifenSlotBelegt("Diese Uhrzeit wurde gerade gebucht. Bitte wählen Sie einen anderen freien Termin.")
+
+
+@app.get("/api/reifenservice/termine")
+def reifenservice_termine():
+    response = jsonify({"zeiten": freie_reifen_slots(clean_text(request.args.get("datum")))})
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def reifen_termin_daten(lead):
     """Read-only view of the current customer wish, never a confirmed appointment."""
     try:
@@ -44953,9 +45062,11 @@ def list_reifentermine():
 
 
 @app.route("/admin/reifentermine")
+@app.route("/admin/reifenportal")
 @admin_required
 def admin_reifentermine():
-    response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine()))
+    reifenauftraege = [a for a in list_auftraege() if auftrag_ist_reifen(a)]
+    response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine(), reifenauftraege=reifenauftraege))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -44984,6 +45095,8 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             formdata=formdata,
             errors=errors or [],
             gesendet=bool(gesendet),
+            reifen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenservice"),
+            reifen_slots=freie_reifen_slots(clean_text(formdata.get("wunschdatum"))) if ausgewaehltes_anliegen == "reifenservice" else [],
             kundenlink=session.get("website_anfrage_kundenlink", "") if gesendet else "",
             anliegen_optionen=WEBSITE_ANLIEGEN,
             kurzanfrage_optionen=WEBSITE_KURZANFRAGEN,
@@ -45116,6 +45229,8 @@ def website_anfrage():
             elif not mechanik_kategorien:
                 errors.append("Bitte mindestens eine Mechanik- oder Wartungskategorie auswählen.")
         if anliegen == "reifenservice":
+            if not telefon:
+                errors.append("Bitte Ihre Telefonnummer für die Terminbestätigung angeben.")
             if any(value not in WEBSITE_REIFEN_LEISTUNGEN for value in reifen_leistungen):
                 errors.append("Bitte nur gültige Reifenleistungen auswählen.")
             elif not reifen_leistungen:
@@ -45133,6 +45248,8 @@ def website_anfrage():
                         errors.append("Ihr Wunschtermin darf nicht in der Vergangenheit liegen.")
                 except ValueError:
                     pass  # The common date validation below returns the date error.
+            if wunschdatum and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", wunschdatum) and wunschzeit not in reifen_slot_zeiten(wunschdatum):
+                errors.append("Bitte einen freien Stundentermin von Montag bis Samstag zwischen 07:00 und 17:00 Uhr auswählen.")
         if anliegen == "fahrzeugcheck" and fahrzeugcheck_art not in WEBSITE_FAHRZEUGCHECK_ARTEN:
             errors.append("Bitte die gewünschte Art des Fahrzeugchecks auswählen.")
         if anliegen == "weitere_anfrage" and weitere_anfrage_art not in WEBSITE_WEITERE_ANFRAGE_ARTEN:
@@ -45252,7 +45369,7 @@ def website_anfrage():
             "felgenservice": "Felgenumfang und Termin klären",
             "dellenreparatur": "Dellenreparatur mit mobilem Dienstleister abstimmen",
         }.get(anliegen, "Kundenanfrage persönlich beantworten")
-        lead_id = create_lead(
+        lead_payload = (
             {
                 "quelle": "website",
                 "status": "neu",
@@ -45264,6 +45381,7 @@ def website_anfrage():
                 "kunde_email": email,
                 "fahrzeug": fahrzeug,
                 "kennzeichen": kennzeichen,
+                "reifen_slot": (wunschdatum, wunschzeit) if anliegen == "reifenservice" else None,
                 "portal_data": {
                     "anliegen": "reifenservice",
                     "reifen_leistungen": reifen_leistungen,
@@ -45278,6 +45396,10 @@ def website_anfrage():
                 "notiz": "Öffentliches Anfrageformular. Rückruf oder E-Mail gewünscht; keine WhatsApp-Einwilligung erfasst.",
             }
         )
+        try:
+            lead_id = create_lead(lead_payload)
+        except ReifenSlotBelegt as exc:
+            return render_website_anfrage(formdata=request.form, errors=[str(exc)], status_code=409)
         try:
             for bild in valid_bilder:
                 save_lead_upload_file(
@@ -45316,6 +45438,7 @@ def website_anfrage():
             lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email, "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: " + lead["kunden_status_url"])
         notify_lead_workshop(lead_id, "Neue Anfrage")
         session["website_anfrage_gesendet"] = int(lead_id)
+        session["website_anfrage_art"] = anliegen
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))
@@ -45462,7 +45585,7 @@ HOMEPAGE_LEISTUNGEN = {
             ("Neue Reifen", "Passende Bereifung anhand der Fahrzeugdaten auswählen und die Bestellung abstimmen."),
             ("Reifeneinlagerung", "Räder kennzeichnen, den Zustand erfassen und die Einlagerung sowie den nächsten Wechsel vereinbaren."),
         ],
-        "anliegen": "reifenservice", "aktion": "Reifentermin buchen",
+        "anliegen": "reifenservice", "aktion": "Reifen-Termin jetzt buchen",
         "hinweis": "Reifengröße, gewünschte Leistung und ein Wunschtermin helfen uns bei der Vorbereitung. Fotos können Sie ergänzen, müssen Sie aber nicht.",
     },
     "autoglas": {
@@ -48382,6 +48505,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     schema_features = {clean_text(feature) for feature in schema_features if clean_text(feature)}
     required_tables = (set(BACKUP_TABLES) - set(KUNDENFLOTTEN_BACKUP_TABLES)) - {
         "datei_backups",
+        "reifen_termin_slots",  # Historical backups predate online tire bookings.
         "fahrzeugeinkauf_scan_treffer",
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
         # vorhandenen Sicherungen noch nicht. Alte Pakete bleiben importierbar.
@@ -48427,6 +48551,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Employment contracts postdate the initial private employee portal.
         "mitarbeiter_arbeitsvertraege",
     }
+    if "reifen_terminslots_v1" in schema_features:
+        required_tables.add("reifen_termin_slots")
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
     if "werkstatt_assistent_v2" in schema_features:
@@ -49734,6 +49860,8 @@ def auftrag_detail(auftrag_id):
 
     back_context = clean_text(request.values.get("back"))
     detail_back_url = url_for("kalender") if back_context == "kalender" else url_for("dashboard")
+    if auftrag_ist_reifen(auftrag) and back_context != "kalender":
+        detail_back_url = url_for("admin_reifentermine")
     detail_self_url = (
         url_for("auftrag_detail", auftrag_id=auftrag_id, back=back_context)
         if back_context == "kalender"
@@ -51137,7 +51265,11 @@ def admin_lead_detail(lead_id):
         abort(404)
     if request.method == "POST":
         payload = lead_payload_from_form(request.form)
-        update_lead(lead_id, payload)
+        try:
+            update_lead(lead_id, payload)
+        except ReifenSlotBelegt as exc:
+            flash(str(exc), "warning")
+            return redirect(url_for("admin_lead_detail", lead_id=lead_id))
         schedule_change_backup("lead-updated")
         flash("Lead gespeichert.", "success")
         return redirect(url_for("admin_lead_detail", lead_id=lead_id))
@@ -51304,7 +51436,11 @@ def admin_lead_status(lead_id, status):
     lead = get_lead(lead_id)
     if not lead:
         abort(404)
-    new_status = set_lead_status(lead_id, status)
+    try:
+        new_status = set_lead_status(lead_id, status)
+    except ReifenSlotBelegt as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin_lead_detail", lead_id=lead_id))
     schedule_change_backup("lead-status")
     flash(f"Lead-Status auf {LEAD_STATUS[new_status]['label']} gesetzt.", "success")
     return redirect(url_for("admin_lead_detail", lead_id=lead_id))
@@ -53093,6 +53229,14 @@ def kunden_status_terminwunsch(token):
         if nachricht:
             portal_data["kunden_wunsch_hinweis"] = nachricht
         db = get_db()
+        if lead["ist_reifenanfrage"]:
+            try:
+                reserviere_reifen_slot(db, lead["id"], wunsch_obj.isoformat(), zeitfenster)
+            except ReifenSlotBelegt as exc:
+                db.rollback()
+                db.close()
+                flash(str(exc), "warning")
+                return redirect(url_for("kunden_status", token=token) + "#terminwunsch")
         db.execute(
             """
             UPDATE leads SET portal_json=?,
@@ -53114,6 +53258,9 @@ def kunden_status_terminwunsch(token):
         schedule_change_backup("lead-portal-terminwunsch")
         flash("Ihr Terminwunsch ist angekommen und wird von der Werkstatt geprüft.", "success")
         return redirect(url_for("kunden_status", token=token) + "#terminwunsch")
+    if auftrag_ist_reifen(auftrag):
+        flash("Bitte stimmen Sie eine Änderung Ihres gebuchten Reifentermins telefonisch mit uns ab.", "info")
+        return redirect(url_for("kunden_status", token=token))
     dateien = list_dateien(auftrag["id"])
     prozess = build_versicherung_prozess(auftrag, dateien, context="kunde") if auftrag.get("versicherung_id") else None
     teile = list_versicherung_teile(auftrag["id"]) if auftrag.get("versicherung_id") else []
@@ -53199,6 +53346,9 @@ def accept_lead_offer_from_portal(token, lead):
 
     wunsch_annahme = format_date(request.form.get("wunsch_annahme_datum"))
     wunsch_abholung = format_date(request.form.get("wunsch_abholung_datum"))
+    if lead.get("ist_reifenanfrage") and wunsch_annahme != format_date(lead["portal_data"].get("kunden_wunsch_annahme_datum")):
+        flash("Bitte ändern Sie zuerst Ihren Reifentermin über die freien Uhrzeiten. Der bisher reservierte Termin bleibt bestehen.", "warning")
+        return redirect(url_for("kunden_status", token=token) + "#terminwunsch")
     annahme_obj = parse_date(wunsch_annahme)
     abholung_obj = parse_date(wunsch_abholung)
     if not annahme_obj:

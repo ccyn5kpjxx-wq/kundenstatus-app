@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Reifentermine{% endblock %}
+{% block title %}Reifenportal{% endblock %}
 {% block extra_css %}
 <style>
   .reifen-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:1rem; }
@@ -12,12 +12,13 @@
 </style>
 {% endblock %}
 {% block content %}
-<div class="page-header"><div><h1>Reifentermine</h1><p>Neue Terminwünsche von der Homepage: Leistungen und Zeit prüfen, dann den Kunden kontaktieren.</p></div></div>
+<div class="page-header"><div><h1>Reifenportal</h1><p>Reifenbuchungen, Einlagerung und Reifenaufträge.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Gemeinsame Werkstatt-Tafel →</a></div>
+<h2 class="h4">Neue Reifenbuchungen</h2>
 <p class="text-muted">{{ reifentermine|length }} offene Anfrage(n) · Ein Terminwunsch ist noch keine verbindliche Zusage. Eingeplante Aufträge stehen weiterhin im Kalender und auf der Werkstatttafel.</p>
 <div class="reifen-grid">
   {% for termin in reifentermine %}
   <article class="reifen-card" data-reifentermin="{{ termin.id }}">
-    <span class="badge-soft">Terminwunsch · Bestätigung offen</span>
+    <span class="badge-soft">Reifenbuchung · Bestätigung offen</span>
     <h2>{{ termin.kunde_name or 'Kundenanfrage' }}</h2>
     <p class="reifen-date">{{ termin.termin_label }}</p>
     <p>{{ termin.fahrzeug or 'Fahrzeug noch abstimmen' }}{% if termin.kennzeichen %} · {{ termin.kennzeichen }}{% endif %}</p>
@@ -26,10 +27,23 @@
       {% if termin.kontakt_telefon %}<a href="tel:{{ termin.kontakt_telefon }}">{{ termin.kontakt_telefon }}</a>{% endif %}
       {% if termin.kunde_email %}<a href="mailto:{{ termin.kunde_email }}">{{ termin.kunde_email }}</a>{% endif %}
     </div>
-    <a class="btn btn-brand" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Anfrage bearbeiten →</a>
+    <a class="btn btn-brand" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Reifenbuchung bearbeiten →</a>
   </article>
   {% else %}
   <div class="reifen-card"><h2>Keine offenen Reifen-Terminwünsche</h2><p>Neue Kundenanfragen erscheinen hier automatisch.</p></div>
   {% endfor %}
+</div>
+<h2 class="h4 mt-4">Reifenaufträge</h2>
+<div class="reifen-grid">
+  {% for auftrag in reifenauftraege %}
+  <article class="reifen-card" data-reifenauftrag="{{ auftrag.id }}">
+    <span class="badge-soft">Reifenauftrag · {{ auftrag.status_meta.label }}</span>
+    <h2>{{ auftrag.fahrzeug }}{% if auftrag.kennzeichen %} · {{ auftrag.kennzeichen }}{% endif %}</h2>
+    <p>{{ auftrag.kunde_name or 'Kunde noch offen' }}</p>
+    <p class="reifen-date">{% if auftrag.annahme_datum %}{{ auftrag.annahme_datum }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}{% else %}Termin noch abstimmen{% endif %}</p>
+    <p>{{ auftrag.werkstatt_angebot_text or auftrag.beschreibung }}</p>
+    <a class="btn btn-brand" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">Reifenauftrag öffnen →</a>
+  </article>
+  {% else %}<p class="text-muted">Noch keine übernommenen Reifenaufträge.</p>{% endfor %}
 </div>
 {% endblock %}
