@@ -3,15 +3,24 @@
 <section class="inspektionscheckliste" id="inspektionscheckliste" aria-labelledby="inspektionscheckliste-titel" data-order-module="arbeiten">
   <div class="inspektionscheckliste-kopf">
     <div>
-      <p class="inspektionscheckliste-kicker">Arbeitsplan · Inspektion</p>
-      <h2 id="inspektionscheckliste-titel">Inspektionscheckliste</h2>
+      <p class="inspektionscheckliste-kicker">Große Inspektion</p>
+      <h2 id="inspektionscheckliste-titel">Inspektionsplan</h2>
     </div>
     {% if pruefliste.get('vorhanden') %}
     <span class="inspektionscheckliste-stand">{{ pruefliste['gesamt'] - pruefliste['offen'] }} von {{ pruefliste['gesamt'] }} bearbeitet</span>
     {% endif %}
   </div>
   {% if pruefliste.get('vorhanden') %}
-    <p class="inspektionscheckliste-hinweis">{{ pruefliste['vorlage_titel'] }}</p>
+    {% if pruefliste.get('bearbeitbar') %}
+    <ol class="inspektionscheckliste-schritte" aria-label="So arbeitest du den Plan ab">
+      <li><strong>Aufgabe öffnen</strong><span>Auf einen Punkt klicken und die Anleitung lesen.</span></li>
+      <li><strong>Prüfen oder ausführen</strong><span>Ergebnis wählen. Messwerte oder Probleme kurz dazuschreiben.</span></li>
+      <li><strong>Speichern</strong><span>Erst speichern, dann den nächsten Punkt öffnen.</span></li>
+    </ol>
+    <p class="inspektionscheckliste-kurzinfo">Zusatzarbeiten erst mit dem Büro absprechen und vom Kunden freigeben lassen.</p>
+    {% else %}
+    <p class="inspektionscheckliste-bedienung">Du kannst den Plan hier ansehen. Zum Ändern bitte das Büro fragen.</p>
+    {% endif %}
     <progress class="inspektionscheckliste-fortschritt" value="{{ pruefliste['gesamt'] - pruefliste['offen'] }}" max="{{ pruefliste['gesamt'] or 1 }}" aria-label="Bearbeitete Inspektionspunkte">{{ pruefliste['gesamt'] - pruefliste['offen'] }} von {{ pruefliste['gesamt'] }}</progress>
     <ul class="inspektionscheckliste-zaehler" aria-label="Gespeicherte Prüfergebnisse">
       <li class="erledigt">{{ pruefliste['erledigt'] }} erledigt</li>
@@ -19,13 +28,12 @@
       <li class="nicht_zutreffend">{{ pruefliste['nicht_zutreffend'] }} nicht zutreffend</li>
       <li class="offen">{{ pruefliste['offen'] }} offen</li>
     </ul>
-    {% if pruefliste.get('hinweis') %}<p class="inspektionscheckliste-hinweis">{{ pruefliste['hinweis'] }}</p>{% endif %}
-    {% if pruefliste.get('bearbeitbar') %}
-    <p class="inspektionscheckliste-bedienung">Prüfpunkt öffnen, Ergebnis und Befund eintragen, dann <strong>einzeln speichern</strong>. Erst danach den nächsten Punkt bearbeiten.</p>
-    {% else %}
-    <p class="inspektionscheckliste-bedienung">Diese Checkliste ist zur Ansicht geöffnet. Änderungen sind in diesem Auftragsstand nicht möglich.</p>
-    {% endif %}
-    {% set ergebnisse = [('offen', 'Offen'), ('erledigt', 'Erledigt'), ('mangel', 'Mangel'), ('nicht_zutreffend', 'Nicht zutreffend')] %}
+    <details class="inspektionscheckliste-umfang">
+      <summary>Hinweise zum Arbeitsumfang</summary>
+      <p class="inspektionscheckliste-hinweis">{{ pruefliste['vorlage_titel'] }}</p>
+      {% if pruefliste.get('hinweis') %}<p class="inspektionscheckliste-hinweis">{{ pruefliste['hinweis'] }}</p>{% endif %}
+    </details>
+    {% set ergebnisse = [('offen', 'Offen'), ('erledigt', 'Erledigt'), ('mangel', 'Mangel'), ('nicht_zutreffend', 'Trifft nicht zu')] %}
     {% set gruppenstand = namespace(name=none) %}
     {% for punkt in pruefliste['punkte'] %}
       {% if punkt['gruppe'] != gruppenstand.name %}
@@ -44,25 +52,25 @@
             {{ csrf_field()|safe }}
             <input type="hidden" name="version" value="{{ punkt['version'] }}">
             <input type="hidden" name="next" value="{{ inspektionscheckliste_next }}#inspektionspunkt-{{ punkt['id'] }}">
-            <label for="inspektionspunkt-ergebnis-{{ punkt['id'] }}">Ergebnis</label>
+            <label for="inspektionspunkt-ergebnis-{{ punkt['id'] }}">Ergebnis auswählen</label>
             <select id="inspektionspunkt-ergebnis-{{ punkt['id'] }}" name="ergebnis"{% if punkt['hinweis'] %} aria-describedby="inspektionspunkt-hinweis-{{ punkt['id'] }}"{% endif %}>
               {% for key, label in ergebnisse %}<option value="{{ key }}"{% if punkt['ergebnis'] == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
-            <label for="inspektionspunkt-notiz-{{ punkt['id'] }}">Befund / Notiz</label>
-            <textarea id="inspektionspunkt-notiz-{{ punkt['id'] }}" name="notiz" rows="2" maxlength="600" aria-describedby="inspektionspunkt-begruendung-{{ punkt['id'] }}" placeholder="Zum Beispiel Messwert, gewechseltes Teil oder festgestellter Mangel">{{ punkt['notiz'] or '' }}</textarea>
-            <p class="inspektionscheckliste-hinweis" id="inspektionspunkt-begruendung-{{ punkt['id'] }}">Bei „Mangel“ oder „Nicht zutreffend“ ist eine Begründung erforderlich.</p>
-            <div class="inspektionspunkt-aktionen"><button type="submit">Prüfpunkt speichern</button><span data-inspektionspunkt-ungespeichert hidden>Noch nicht gespeichert</span></div>
+            <label for="inspektionspunkt-notiz-{{ punkt['id'] }}">Notiz – was hast du festgestellt?</label>
+            <textarea id="inspektionspunkt-notiz-{{ punkt['id'] }}" name="notiz" rows="2" maxlength="600" aria-describedby="inspektionspunkt-begruendung-{{ punkt['id'] }}" placeholder="Messwert, gewechseltes Teil oder Problem kurz notieren">{{ punkt['notiz'] or '' }}</textarea>
+            <p class="inspektionscheckliste-hinweis" id="inspektionspunkt-begruendung-{{ punkt['id'] }}">Bei „Mangel“ oder „Trifft nicht zu“ bitte kurz den Grund dazuschreiben.</p>
+            <div class="inspektionspunkt-aktionen"><button type="submit">Speichern</button><span data-inspektionspunkt-ungespeichert hidden>Noch nicht gespeichert</span></div>
           </form>
           {% elif punkt['notiz'] %}
           <p class="inspektionspunkt-notiz">{{ punkt['notiz'] }}</p>
           {% else %}
-          <p class="inspektionscheckliste-hinweis">Kein Befund eingetragen.</p>
+          <p class="inspektionscheckliste-hinweis">Noch keine Notiz eingetragen.</p>
           {% endif %}
           {% if punkt['geaendert_am'] %}<p class="inspektionspunkt-aktualisiert">Gespeichert: {{ punkt['geaendert_am'] }}{% if punkt['geaendert_von'] %} · {{ punkt['geaendert_von'] }}{% endif %}</p>{% endif %}
         </div>
       </details>
     {% endfor %}
-    <p class="inspektionscheckliste-fuss">Ein Mangel ist zu prüfen und mit dem Büro abzustimmen. Das Abhaken ändert den Auftragsstatus nicht.</p>
+    <p class="inspektionscheckliste-fuss">Zum Schluss die Endkontrolle und die Fertigmeldung mit dem Büro abstimmen.</p>
   {% else %}
     <p class="inspektionscheckliste-hinweis">Für diesen Inspektionsauftrag ist noch keine Checkliste angelegt.</p>
     {% if pruefliste.get('anlegbar') %}

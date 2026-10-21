@@ -15,6 +15,15 @@
 .inspektionscheckliste-kicker { margin: 0 0 .3rem; color: #145d66; font-size: .8rem; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .inspektionscheckliste h2 { margin: 0; color: var(--ic-ink); font-size: 1.35rem; letter-spacing: -.02em; text-transform: none; }
 .inspektionscheckliste-stand { font-size: .9rem; font-weight: 750; }
+.inspektionscheckliste-schritte { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; padding: 0; margin: 1rem 0 .7rem; list-style: none; counter-reset: inspektionsschritt; }
+.inspektionscheckliste-schritte li { position: relative; padding: .8rem .7rem .8rem 2.5rem; background: #eef5f3; border-radius: 10px; counter-increment: inspektionsschritt; }
+.inspektionscheckliste-schritte li::before { content: counter(inspektionsschritt); position: absolute; left: .7rem; top: .8rem; display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: #145d66; color: #fff; font-size: .8rem; font-weight: 750; }
+.inspektionscheckliste-schritte strong, .inspektionscheckliste-schritte span { display: block; }
+.inspektionscheckliste-schritte strong { margin-bottom: .3rem; font-size: .95rem; }
+.inspektionscheckliste-schritte span { color: var(--ic-muted); font-size: .88rem; line-height: 1.45; }
+.inspektionscheckliste-kurzinfo { margin: .65rem 0; font-size: .9rem; line-height: 1.5; }
+.inspektionscheckliste-umfang { margin: .7rem 0 1rem; border-bottom: 1px solid var(--ic-border); }
+.inspektionscheckliste-umfang > summary { min-height: 44px; padding: .65rem 0; cursor: pointer; color: #145d66; font-size: .9rem; font-weight: 650; }
 .inspektionscheckliste-hinweis { margin: .65rem 0; color: var(--ic-muted); font-size: .92rem; line-height: 1.55; }
 .inspektionscheckliste-fortschritt { display: block; width: 100%; height: .55rem; margin-top: .9rem; border: 0; border-radius: 1rem; accent-color: #145d66; }
 .inspektionscheckliste-fortschritt::-webkit-progress-bar { border-radius: 1rem; background: #e6eeea; }
@@ -49,6 +58,9 @@
 .inspektionspunkt-aktualisiert { margin: .75rem 0 0; color: var(--ic-muted); font-size: .75rem; }
 .inspektionspunkt-notiz { margin: .65rem 0; white-space: pre-wrap; }
 .inspektionscheckliste-fuss { margin: 1rem 0 0; color: var(--ic-muted); font-size: .85rem; line-height: 1.5; }
+@media (max-width: 640px) {
+  .inspektionscheckliste-schritte { grid-template-columns: 1fr; }
+}
 @media (max-width: 420px) {
   .inspektionspunkt > summary { gap: .4rem; padding: .65rem .5rem; }
   .inspektionspunkt-status { max-width: 7rem; }
@@ -57,6 +69,6 @@
 }
 @media print {
   .inspektionscheckliste { break-inside: auto; border-color: #999; background: #fff; }
-  .inspektionscheckliste button, .inspektionspunkt-aktionen, .inspektionscheckliste-bedienung { display: none; }
+  .inspektionscheckliste button, .inspektionspunkt-aktionen, .inspektionscheckliste-bedienung, .inspektionscheckliste-schritte { display: none; }
   .inspektionspunkt { break-inside: avoid; }
 }
