@@ -89,9 +89,10 @@
 .compact-home .current-heading h2{font-size:16px;line-height:1.3;margin:0;letter-spacing:-.02em}
 .current-heading>span{font-size:10px;letter-spacing:.05em;color:#ecebe6}
 .current-stack{display:grid;gap:16px;min-width:0}
-.current-feature{position:relative;min-width:0;overflow:hidden;border:1px solid #ffffffa0;border-radius:14px;background:#202720;box-shadow:0 16px 40px #0003;color:#fff}
-.current-feature-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 40%}
-.current-feature-copy{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;min-height:380px;height:100%;padding:122px 22px 22px;background:linear-gradient(180deg,transparent 0%,#10181035 22%,#101810ee 51%,#101810 100%)}
+.current-feature{position:relative;display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #ffffffa0;border-radius:14px;background:#202720;box-shadow:0 16px 40px #0003;color:#fff}
+.current-feature-photo{display:block;flex:none;width:100%;height:auto;aspect-ratio:3/2;object-fit:contain;object-position:center;background:#202720}
+.current-feature-copy{position:relative;display:flex;flex:1;flex-direction:column;align-items:flex-start;justify-content:flex-start;min-height:0;padding:18px 22px 22px;background:#101810}
+.current-feature-copy>.current-booking{margin-top:auto}
 .current-kicker{display:block;font-size:10px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
 .current-feature .current-kicker{display:inline-block;padding:5px 8px;border-radius:4px;background:#bc1b13;color:#fff}
 .current-feature h3{font-size:31px;line-height:1.08;letter-spacing:-.035em;margin:9px 0 11px;color:#fff;max-width:310px;overflow-wrap:break-word}
@@ -118,9 +119,9 @@
 .home-overview .move-strip a{color:#ac2018}
 .compact-home.home-overview .intro.hero-wide::after{display:none}
 .home-overview .hero-wide .intro-photo::after{background:linear-gradient(90deg,#090d0be6 0%,#090d0bab 31%,#090d0b25 62%,#090d0b18 100%)}
-@media(max-width:1000px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:minmax(0,1fr) minmax(300px,.95fr);gap:28px;padding-inline:28px}.current-feature-copy{padding:110px 18px 18px}.current-feature h3{font-size:29px}.hero-wide:has(.current-deck) h1{font-size:clamp(40px,5vw,55px)}}
+@media(max-width:1000px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:minmax(0,1fr) minmax(300px,.95fr);gap:28px;padding-inline:28px}.current-feature-copy{padding:18px}.current-feature h3{font-size:29px}.hero-wide:has(.current-deck) h1{font-size:clamp(40px,5vw,55px)}}
 @media(max-width:760px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:1fr;min-height:0;padding:28px 20px 38px;gap:36px}.current-deck{grid-row:1;max-width:520px;justify-self:start}.hero-wide:has(.current-deck) .intro-copy{grid-row:2;max-width:520px}.hero-wide:has(.current-deck) h1{font-size:clamp(38px,7vw,52px)}.current-feature h3{max-width:none;font-size:31px}.home-overview .hero-wide .intro-photo::after{background:linear-gradient(180deg,#090d0b65,#090d0b90 58%,#090d0bf0 75%,#090d0bd4)}}
-@media(max-width:380px){.current-feature-copy{padding:104px 16px 18px;min-height:390px}.current-feature h3{font-size:27px}.compact-home .current-booking{font-size:12px;padding-inline:12px}.current-heading{gap:8px}.current-heading>span{font-size:9px}.current-stack.is-ready{padding-right:calc((var(--card-count,4) - 1)*10px)}.current-stack.is-ready .current-card{transform:translate(calc(var(--card-position)*10px),calc(var(--card-position)*-10px))}}
+@media(max-width:380px){.current-feature-copy{padding:16px 16px 18px}.current-feature h3{font-size:27px}.compact-home .current-booking{font-size:12px;padding-inline:12px}.current-heading{gap:8px}.current-heading>span{font-size:9px}.current-stack.is-ready{padding-right:calc((var(--card-count,4) - 1)*10px)}.current-stack.is-ready .current-card{transform:translate(calc(var(--card-position)*10px),calc(var(--card-position)*-10px))}}
 
 /* Keep the complete alignment scene visible on smaller screens. */
 @media(max-width:850px){:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-hero{display:block;min-height:0;padding-bottom:0}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-inner{padding-bottom:26px}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo{position:relative;inset:auto;height:auto;aspect-ratio:3/2}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo img{height:auto;object-fit:contain;object-position:center}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo::after{display:none}}
