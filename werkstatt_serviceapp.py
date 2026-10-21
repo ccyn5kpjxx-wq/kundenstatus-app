@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from markupsafe import Markup
 
 
 class ServiceApp:
@@ -140,6 +141,7 @@ def register_service_app(p, fleet):
     @bp.context_processor
     def common():
         return {'service_actor': service.principal(), 'service_csrf': csrf(),
+                'csrf_field': lambda: Markup(p.csrf_field()),
                 'service_demo': bool(p.app.config.get('SERVICE_APP_DEMO'))}
 
     def actor_required():

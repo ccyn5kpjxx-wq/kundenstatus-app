@@ -209,6 +209,7 @@ class ServiceAppTests(unittest.TestCase):
         self.assertTrue(order_id)
         self.assertEqual(p.service_process.case_for_order(order_id), case_id)
         self.assertEqual(len(self.sql('SELECT * FROM kundenflotten_auftraege WHERE auftrag_id=?', (order_id,))), 1)
+        self.assertEqual(self.sql('SELECT art FROM kundenflotten_auftraege WHERE auftrag_id=?', (order_id,))[0][0], 'karosserie')
         started = self.admin.post(f'/admin/status/{order_id}/3', data={'csrf_token': self.csrf(self.admin)})
         self.assertEqual(started.status_code, 302)
         context = p.build_lexware_rechnung_context(p.get_auftrag(order_id), 120)
@@ -349,6 +350,9 @@ class ServiceAppTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn('Verantwortlichkeiten festlegen', page.text)
         self.assertIn('Rechnungsempfänger', page.text)
+        parties_form = re.search(r'<form[^>]+action="[^"]*aktion=parteien".*?</form>', page.text, re.S).group(0)
+        self.assertRegex(parties_form, r'<input[^>]+name="csrf_token"')
+        self.assertNotIn('&lt;input', parties_form)
         self.assertFalse(p.service_process.view(case_id, {'role': 'werkstatt', 'id': 'test'})['online_payment_enabled'])
         self.assertEqual(self.driver.get('/admin/service').status_code, 302)
 
