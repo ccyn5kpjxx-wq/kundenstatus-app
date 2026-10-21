@@ -12651,6 +12651,7 @@ def hydrate_lead(row):
         portal_data = {}
     lead["portal_data"] = portal_data if isinstance(portal_data, dict) else {}
     lead["ist_reifenanfrage"] = lead["portal_data"].get("anliegen") == "reifenservice"
+    lead["ist_bremsenanfrage"] = lead["portal_data"].get("anliegen") == "bremsenservice"
     lead["angebot_status"] = clean_text(lead.get("angebot_status")) or "entwurf"
     lead["angebot_text"] = clean_text(lead.get("angebot_text"))
     lead["angebot_text_display"] = lead["angebot_text"] or lead["beschreibung"]
@@ -44872,6 +44873,7 @@ WEBSITE_ANLIEGEN = {
     "reparaturanfrage": "Reparaturanfrage",
     "mechanikanfrage": "Mechanik & Wartung",
     "reifenservice": "Reifenservice & Einlagerung",
+    "bremsenservice": "Bremsen anfragen",
     "fahrzeugpflege": "Fahrzeugpflege & Aufbereitung",
     "mietwagenanfrage": "Mietwagenanfrage",
     "fahrzeugcheck": "Fahrzeugcheck",
@@ -44885,7 +44887,12 @@ WEBSITE_ANLIEGEN = {
     "dellenreparatur": "Dellenreparatur",
 }
 
+BREMSEN_ACHSEN = {"vorne": "Vorderachse", "hinten": "Hinterachse", "beide": "Vorder- und Hinterachse"}
+TEILE_QUALITAETEN = {"preisbewusst": "Preisbewusst", "marke": "Markenqualität", "premium": "Premium"}
+
 WEBSITE_KURZANFRAGEN = {
+    "bremsenservice": {"label": "Bremsen anfragen", "kurz": "Bremsen prüfen oder instandsetzen lassen",
+        "frage": "Weitere Hinweise", "placeholder": "z. B. Geräusche, Warnanzeige oder weitere Hinweise (optional)"},
     "reifenservice": {
         "label": "Reifenservice & Einlagerung",
         "kurz": "Räder wechseln, Reifen montieren oder einlagern",
@@ -45281,6 +45288,9 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             formdata=formdata,
             errors=errors or [],
             gesendet=bool(gesendet),
+            bremsen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "bremsenservice"),
+            bremsen_achsen=BREMSEN_ACHSEN,
+            teile_qualitaeten=TEILE_QUALITAETEN,
             reifen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenservice"),
             gebuchter_reifentermin=session.get("website_reifentermin", ""),
             reifen_slots=freie_reifen_slots(clean_text(formdata.get("wunschdatum"))) if ausgewaehltes_anliegen == "reifenservice" else [],
@@ -45339,7 +45349,7 @@ def website_anfrage():
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
-        kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen == "reifenservice" else ""
+        kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen in {"reifenservice","bremsenservice"} else ""
         fin = re.sub(
             r"[^A-Za-z0-9]",
             "",
@@ -45367,6 +45377,8 @@ def website_anfrage():
             if clean_text(value)
         ))
         wunschzeit = clean_text(request.form.get("wunschzeit"))[:100] if anliegen == "reifenservice" else ""
+        bremsen_achse = clean_text(request.form.get("bremsen_achse"))
+        teile_qualitaet = clean_text(request.form.get("teile_qualitaet"))
         fahrzeugcheck_art = clean_text(request.form.get("fahrzeugcheck_art"))
         weitere_anfrage_art = clean_text(request.form.get("weitere_anfrage_art"))
         mietwagen_fahrzeug = clean_text(request.form.get("mietwagen_fahrzeug"))
@@ -45397,13 +45409,13 @@ def website_anfrage():
             email_empfaenger = parse_email_recipients(email)
             if len(email_empfaenger) != 1 or clean_text(email_empfaenger[0]).lower() != email:
                 errors.append("Bitte genau eine gültige E-Mail-Adresse angeben.")
-        if anliegen == "glasschaden" and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", fin):
+        if anliegen in {"glasschaden","bremsenservice"} and not re.fullmatch(r"[A-HJ-NPR-Z0-9]{17}", fin):
             errors.append(
                 "Bitte die vollständige 17-stellige Fahrzeug-Identifizierungsnummer (FIN) angeben."
             )
-        if anliegen in {"kaufberatung", "leasingrueckgabe"} and len(fahrzeug) < 2:
+        if anliegen in {"kaufberatung", "leasingrueckgabe", "bremsenservice"} and len(fahrzeug) < 2:
             errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
-        if anliegen in WEBSITE_KURZANFRAGEN and anliegen != "reifenservice" and len(nachricht) < 5:
+        if anliegen in WEBSITE_KURZANFRAGEN and anliegen not in {"reifenservice","bremsenservice"} and len(nachricht) < 5:
             errors.append("Bitte Ihr Anliegen kurz beschreiben.")
         if anliegen == "fahrzeugpflege":
             if any(value not in WEBSITE_PFLEGE_KATEGORIEN for value in pflege_kategorien):
@@ -45415,6 +45427,13 @@ def website_anfrage():
                 errors.append("Bitte nur gültige Mechanik- oder Wartungskategorien auswählen.")
             elif not mechanik_kategorien:
                 errors.append("Bitte mindestens eine Mechanik- oder Wartungskategorie auswählen.")
+        if anliegen == "bremsenservice":
+            if not telefon:
+                errors.append("Bitte Ihre Telefonnummer für die persönliche Abstimmung angeben.")
+            if bremsen_achse not in BREMSEN_ACHSEN:
+                errors.append("Bitte Vorderachse, Hinterachse oder beide Achsen auswählen.")
+            if teile_qualitaet not in TEILE_QUALITAETEN:
+                errors.append("Bitte eine gültige Teilequalität auswählen.")
         if anliegen == "reifenservice":
             if not telefon:
                 errors.append("Bitte Ihre Telefonnummer für die Terminbestätigung angeben.")
@@ -45489,8 +45508,11 @@ def website_anfrage():
         if fahrzeug:
             fahrzeug_label = "Gewünschtes Mietfahrzeug" if anliegen == "mietwagenanfrage" else "Fahrzeug"
             beschreibungsteile.append(f"{fahrzeug_label}: {fahrzeug}")
-        if anliegen == "glasschaden":
+        if anliegen in {"glasschaden","bremsenservice"}:
             beschreibungsteile.append(f"FIN: {fin}")
+        if anliegen == "bremsenservice":
+            beschreibungsteile.append("Bremsen: " + BREMSEN_ACHSEN[bremsen_achse])
+            beschreibungsteile.append("Teilequalität: " + TEILE_QUALITAETEN[teile_qualitaet])
         if wunschdatum:
             beschreibungsteile.append(f"Wunschdatum: {wunschdatum}")
         if ist_fahrzeugcheck:
@@ -45545,6 +45567,7 @@ def website_anfrage():
             "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
             "mechanikanfrage": "Mechanik- oder Wartungsbedarf prüfen und Kunden zurückrufen",
             "reifenservice": "Reifenservice / Einlagerung prüfen und Termin persönlich abstimmen",
+            "bremsenservice": "Passende Bremsenteile anhand FIN prüfen, Angebot vorbereiten und Termin persönlich abstimmen",
             "fahrzeugpflege": "Aufbereitungsumfang prüfen und Kunden zurückrufen",
             "mietwagenanfrage": "Mietwagen-Verfügbarkeit prüfen und Kunden kontaktieren",
             "fahrzeugcheck": "Gewünschten Fahrzeugcheck besprechen und Termin abstimmen",
@@ -45571,6 +45594,9 @@ def website_anfrage():
                 "reifen_slot": (wunschdatum, wunschzeit) if anliegen == "reifenservice" else None,
                 "portal_data": {
                     "anliegen": anliegen,
+                    "fin": fin if anliegen == "bremsenservice" else "",
+                    "bremsen_achse": bremsen_achse if anliegen == "bremsenservice" else "",
+                    "teile_qualitaet": teile_qualitaet if anliegen == "bremsenservice" else "",
                     "leistungsherkunft": clean_text(request.form.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.form.get("leistungsart")), {}).get("anliegen") == anliegen else "",
                     "mechanik_kategorien": mechanik_kategorien if anliegen == "mechanikanfrage" else [],
                     "pflege_kategorien": pflege_kategorien if anliegen == "fahrzeugpflege" else [],
@@ -51790,6 +51816,7 @@ def create_order_from_accepted_lead(lead, intake):
         "lead",
         autohaus_id=lead["autohaus_id"] or None,
         kunde_name=lead["kunde_name"],
+        fin_nummer=clean_text(lead["portal_data"].get("fin")) if lead.get("ist_bremsenanfrage") else "",
         kunde_email=lead["kunde_email"],
         fahrzeug=lead["fahrzeug"] or "Kundenanfrage",
         kennzeichen=lead["kennzeichen"],

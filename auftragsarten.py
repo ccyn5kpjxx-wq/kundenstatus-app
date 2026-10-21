@@ -55,6 +55,8 @@ def leistungsart_aus_anfrage(daten):
     anliegen = daten.get("anliegen")
     if anliegen == "reifenservice":
         return "reifenservice"
+    if anliegen == "bremsenservice":
+        return "bremsen"
     if anliegen == "reparaturanfrage" and daten.get("leistungsherkunft") == "dellen-smart-repair":
         return "dellen_smart_repair"
     if anliegen == "mechanikanfrage":
