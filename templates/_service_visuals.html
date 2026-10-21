@@ -1,0 +1,19 @@
+{% macro icon(name, extra='') -%}
+<svg class="sa-svg {{ extra }}" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+{% if name == 'home' %}<path d="m3 10 9-7 9 7v10H3Z"/><path d="M9 20v-7h6v7"/>
+{% elif name == 'car' %}<path d="m5 7 2-3h10l2 3 2 4v7H3v-7Z"/><path d="M4 11h16M7 15h2m6 0h2M5 18v2m14-2v2"/>
+{% elif name == 'calendar' %}<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 10h18m-13 4h1m3 0h1m3 0h1m-9 3h1m3 0h1"/>
+{% elif name == 'tire' %}<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="m12 7 1.5 3.5L17 12l-3.5 1.5L12 17l-1.5-3.5L7 12l3.5-1.5Z"/>
+{% elif name == 'camera' %}<path d="M8 5 6 8H3v12h18V8h-3l-2-3Z"/><circle cx="12" cy="13.5" r="3.5"/>
+{% elif name == 'tool' %}<path d="M14 5a5 5 0 0 0-6 6L3 16a3 3 0 0 0 5 5l5-5a5 5 0 0 0 6-6l-4 3-4-4Z"/>
+{% elif name == 'document' %}<path d="M14 3H5v18h14V8Z"/><path d="M14 3v6h5M8 13h8m-8 4h6"/>
+{% elif name == 'phone' %}<path d="m5 3 4 4-2 3a15 15 0 0 0 7 7l3-2 4 4-2 3C10 23 1 14 2 5Z"/>
+{% elif name == 'shield' %}<path d="m12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6Z"/><path d="m8 12 3 3 5-6"/>
+{% elif name == 'arrow' %}<path d="M4 12h15m-6-6 6 6-6 6"/>
+{% elif name == 'chevron' %}<path d="m9 5 7 7-7 7"/>
+{% elif name == 'bell' %}<path d="M6 9a6 6 0 1 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9m4 12h4"/>
+{% elif name == 'check' %}<path d="m5 12 4 4L19 6"/>
+{% elif name == 'building' %}<path d="M4 21V3h12v18m0-12h4v12M2 21h20M8 7h4m-4 4h4m-4 4h4m-3 6v-3h2v3"/>
+{% elif name == 'logout' %}<path d="M10 4H4v16h6m4-12 4 4-4 4m-6-4h13"/>
+{% endif %}</svg>
+{%- endmacro %}

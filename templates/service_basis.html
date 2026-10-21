@@ -1,5 +1,47 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>{% block title %}Mein Gärtner Service{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static',filename='service-app.css') }}"></head><body>
-<header class="sa-header"><a class="sa-brand" href="{{ url_for('serviceapp.index') }}"><img src="{{ url_for('static',filename='logo-transparent.png') }}" width="165" height="60" alt="Gärtner Karosserie & Lack"><span>Mein Service</span></a><nav aria-label="Service-Navigation"><a href="{{ url_for('serviceapp.index') }}">Übersicht</a>{% if session.get('admin') %}<a href="{{ url_for('serviceapp.admin_index') }}">Werkstatt</a>{% endif %}{% if service_actor %}<span class="sa-role">{{ 'Fuhrparkleitung' if service_actor.role == 'fuhrparkleitung' else 'Fahrerzugang' }}</span><form method="post" action="{{ '/flotte/abmelden' if service_actor.role == 'fuhrparkleitung' else '/service/abmelden' }}"><input type="hidden" name="csrf_token" value="{{ service_csrf }}"><button class="sa-text">Abmelden</button></form>{% else %}<a href="/service/anmelden">Anmelden</a>{% endif %}</nav></header>
-{% if service_demo %}<div class="sa-demo">Lokale Pilotansicht · ausschließlich synthetische Beispieldaten · kein Versand und keine Zahlung · <a href="/demo">Beispielrolle wechseln</a></div>{% endif %}
-<main id="inhalt" class="sa-main">{% for category,message in get_flashed_messages(with_categories=true) %}<p class="sa-notice" role="status">{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main>
-<footer class="sa-footer">Gärtner GmbH Karosserie + Lack · Mosbach <a href="tel:+4915227706694">Persönlich anrufen</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer></body></html>
+{% from '_service_visuals.html' import icon %}
+{% from '_homepage_images.html' import image_attrs %}
+{% set current_vehicle = vehicle.id if vehicle is defined else car.id if car is defined else none %}
+{% set workshop = session.get('admin') and not service_actor %}
+<!doctype html><html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#171c24"><title>{% block title %}Mein Gärtner Service{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static',filename='service-app.css') }}"></head>
+<body>
+<a class="sa-skip" href="#inhalt">Zum Inhalt</a>
+<aside class="sa-sidebar">
+  <a class="sa-brand" href="{{ url_for('serviceapp.index') }}"><img {{ image_attrs('logo-transparent.png',sizes='145px') }} width="145" height="55" alt="Gärtner Karosserie & Lack"><span>Mein Service<span class="sa-brand-dot"></span></span></a>
+  <p class="sa-nav-caption">{{ 'Ihr Arbeitsbereich' if workshop else 'Ihr Serviceportal' }}</p>
+  <nav class="sa-side-nav" aria-label="Hauptnavigation">
+    <a class="{{ 'active' if request.endpoint == 'serviceapp.index' else '' }}" href="{{ url_for('serviceapp.index') }}">{{ icon('home') }}<span>Übersicht</span></a>
+    {% if service_actor %}
+    <a class="{{ 'active' if current_vehicle else '' }}" href="{{ url_for('serviceapp.index') }}#fahrzeuge">{{ icon('car') }}<span>{{ 'Mein Fuhrpark' if service_actor.role == 'fuhrparkleitung' else 'Meine Fahrzeuge' }}</span></a>
+    <a href="{{ url_for('serviceapp.vehicle',vehicle_id=current_vehicle) ~ '#termine' if current_vehicle else url_for('serviceapp.index') ~ '#hinweise' }}">{{ icon('calendar') }}<span>Termine & Hinweise</span></a>
+    {% if current_vehicle %}<a href="{{ url_for('serviceapp.vehicle',vehicle_id=current_vehicle) }}#belege">{{ icon('document') }}<span>Meine Belege</span></a>{% endif %}
+    {% else %}
+    <a href="{{ url_for('website_anfrage',anliegen='reifenservice') }}#kurzanfrage">{{ icon('tire') }}<span>Reifentermin buchen</span></a>
+    <a href="{{ url_for('website_anfrage',anliegen='reparaturanfrage') }}#kurzanfrage">{{ icon('camera') }}<span>Schaden melden</span></a>
+    {% endif %}
+    {% if session.get('admin') %}<a class="{{ 'active' if request.endpoint in ['serviceapp.admin_index','serviceapp.admin_case'] else '' }}" href="{{ url_for('serviceapp.admin_index') }}">{{ icon('tool') }}<span>Werkstatt</span></a>{% endif %}
+  </nav>
+  <div class="sa-sidebar-bottom"><div class="sa-contact-box"><span class="sa-contact-symbol">{{ icon('phone') }}</span><strong>Wir sind für Sie da.</strong><p>Ein kurzer Anruf.<br>Eine klare Antwort.</p><a href="tel:+4915227706694">0152 277 066 94 {{ icon('arrow') }}</a></div><span class="sa-sidebar-foot">Gärtner · Mosbach</span></div>
+</aside>
+<div class="sa-workspace">
+<header class="sa-header">
+  <a class="sa-mobile-brand" href="{{ url_for('serviceapp.index') }}"><img {{ image_attrs('logo-transparent.png',sizes='145px') }} width="118" height="46" alt="Gärtner – Übersicht"></a>
+  <div class="sa-breadcrumb">Mein Gärtner <span>/</span> <strong>{{ 'Werkstatt' if workshop else 'Mein Fahrzeug' if current_vehicle else 'Übersicht' }}</strong></div>
+  <nav class="sa-account-nav" aria-label="Service-Navigation">
+  {% if service_actor %}
+    <div class="sa-user"><span class="sa-avatar">{{ (service_actor.name or 'G')[:1]|upper }}</span><div><strong>{{ service_actor.name }}</strong><small>{{ 'Fuhrparkleitung' if service_actor.role == 'fuhrparkleitung' else 'Fahrerzugang' }}</small></div></div>
+    <form method="post" action="{{ '/flotte/abmelden' if service_actor.role == 'fuhrparkleitung' else '/service/abmelden' }}"><input type="hidden" name="csrf_token" value="{{ service_csrf }}"><button class="sa-icon-button" aria-label="Abmelden" title="Abmelden">{{ icon('logout') }}</button></form>
+  {% else %}<a class="sa-login" href="{{ url_for('serviceapp.admin_index') if workshop else '/service/anmelden' }}">{{ icon('shield') }}{{ 'Werkstatt' if workshop else 'Mein Zugang' }}</a>{% endif %}
+  </nav>
+</header>
+{% if service_demo %}<div class="sa-demo"><span class="sa-demo-dot"></span>Lokale Vorschau · Beispieldaten · kein Versand oder Zahlung <a href="/demo">Beispielrolle wechseln {{ icon('arrow') }}</a></div>{% endif %}
+<main id="inhalt" class="sa-main">{% for category,message in get_flashed_messages(with_categories=true) %}<p class="sa-notice {{ category }}" role="status">{{ icon('check') }}{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main>
+<footer class="sa-footer"><span>Gärtner GmbH Karosserie + Lack</span><div><a href="tel:+4915227706694">Kontakt</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></footer>
+</div>
+<nav class="sa-bottom-nav" aria-label="Mobile Navigation">
+<a class="{{ 'active' if request.endpoint == 'serviceapp.index' else '' }}" href="{{ url_for('serviceapp.index') }}">{{ icon('home') }}<span>Übersicht</span></a>
+{% if service_actor %}<a href="{{ url_for('serviceapp.index') }}#fahrzeuge">{{ icon('car') }}<span>Fahrzeuge</span></a><a href="{{ url_for('serviceapp.vehicle',vehicle_id=current_vehicle) ~ '#termine' if current_vehicle else url_for('serviceapp.index') ~ '#hinweise' }}">{{ icon('calendar') }}<span>Hinweise</span></a>
+{% else %}<a href="{{ url_for('website_anfrage',anliegen='reifenservice') }}#kurzanfrage">{{ icon('tire') }}<span>Reifentermin</span></a><a href="/service/anmelden">{{ icon('shield') }}<span>Mein Zugang</span></a>{% endif %}
+<a href="tel:+4915227706694">{{ icon('phone') }}<span>Kontakt</span></a>
+</nav>
+</body></html>
