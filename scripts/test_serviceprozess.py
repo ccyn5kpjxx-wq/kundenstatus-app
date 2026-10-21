@@ -357,6 +357,29 @@ class ServiceProcessTests(unittest.TestCase):
         with self.fleet.db() as db:
             self.assertEqual(self.service.approved_invoice_snapshot(db,10)["snapshot"]["angebot"]["brutto_cent"],4000)
 
+    def assert_bound_homepage_kind(self,intake,expected):
+        self.modify("UPDATE leads SET portal_json=? WHERE id=1",(json.dumps(intake),))
+        self.approve();self.bind_order()
+        with self.fleet.db() as db:
+            link=db.execute("SELECT art FROM kundenflotten_auftraege WHERE auftrag_id=10").fetchone()
+            self.assertEqual(link["art"],expected)
+            self.assertEqual(json.loads(db.execute("SELECT portal_json FROM leads WHERE id=1").fetchone()["portal_json"]),intake)
+
+    def test_homepage_repair_request_is_bodywork_in_fleet_board(self):
+        self.assert_bound_homepage_kind({"anliegen":"reparaturanfrage"},"karosserie")
+
+    def test_homepage_mechanical_inspection_request_is_service(self):
+        self.assert_bound_homepage_kind({"anliegen":"mechanikanfrage","mechanik_kategorien":["inspektion"]},"service")
+
+    def test_homepage_explicit_mechanical_oil_change_is_oil_service(self):
+        self.assert_bound_homepage_kind({"anliegen":"mechanikanfrage","mechanik_kategorien":["inspektion","oelwechsel"]},"oel")
+
+    def test_homepage_explicit_brakes_prioritize_heading_without_losing_other_work(self):
+        self.assert_bound_homepage_kind({"anliegen":"mechanikanfrage","mechanik_kategorien":["oelwechsel","bremsen"]},"bremsen")
+
+    def test_homepage_tire_request_keeps_existing_tire_kind(self):
+        self.assert_bound_homepage_kind({"anliegen":"reifenservice","reifen_leistungen":["radwechsel","einlagerung"]},"reifen")
+
     def test_restore_preserves_revisions_and_approval_history(self):
         self.approve()
         with self.fleet.db() as db:

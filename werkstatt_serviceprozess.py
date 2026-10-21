@@ -418,8 +418,17 @@ class ServiceProcess:
                 except ValueError: intake={}
                 kind={"reifenservice":"reifen","reifen":"reifen","reifeneinlagerung":"reifen",
                       "bremsen":"bremsen","bremsenservice":"bremsen","inspektion":"service","mechanik":"service",
+                      "reparaturanfrage":"karosserie","mechanikanfrage":"service",
                       "oelwechsel":"oel","oelservice":"oel","hu":"hu","lackierung":"karosserie","unfallschaden":"karosserie",
                       "smart-repair":"karosserie","smartrepair":"karosserie"}.get(intake.get("anliegen"),"sonstiges")
+                if intake.get("anliegen") == "mechanikanfrage":
+                    # The homepage stores its checkbox list under this plural
+                    # key. Preserve all requested work; choose one clear board
+                    # heading, with explicit brake work before an oil service.
+                    categories=intake.get("mechanik_kategorien")
+                    if isinstance(categories,list):
+                        if "bremsen" in categories: kind="bremsen"
+                        elif "oelwechsel" in categories: kind="oel"
                 db.execute("INSERT INTO kundenflotten_auftraege (id,fahrzeug_id,auftrag_id,art,erstellt_am) VALUES (?,?,?,?,?)",(uuid4().hex,row["fahrzeug_id"],order_id,kind,_stamp()))
         return row["id"]
 
