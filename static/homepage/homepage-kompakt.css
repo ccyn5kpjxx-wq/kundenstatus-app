@@ -82,39 +82,45 @@
 
 .contact-band .opening-hours{margin-top:18px;font-size:14px;line-height:1.6}.opening-hours strong{font-weight:750}
 
-/* Seasonal priorities stay visible beside the main message, without a carousel. */
+/* The whole seasonal card stack stays visible; readers choose when to turn it. */
 .compact-home.home-overview .intro.hero-wide{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:clamp(28px,5vw,72px);min-height:640px;padding-block:54px}
 .current-deck{position:relative;isolation:isolate;z-index:1;min-width:0;width:100%;max-width:440px;justify-self:end}
-.current-deck::before{content:"";position:absolute;z-index:-1;inset:39px -7px 7px 7px;border:1px solid #ffffff40;border-radius:16px;background:#ffffff12;transform:rotate(2deg);pointer-events:none}
-.current-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 14px;padding:7px 10px;border:1px solid #ffffff30;border-radius:8px;background:#101810d9;color:#fff}
+.current-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 18px;padding:9px 12px;border:1px solid #ffffff30;border-radius:8px;background:#101810e8;color:#fff}
 .compact-home .current-heading h2{font-size:16px;line-height:1.3;margin:0;letter-spacing:-.02em}
 .current-heading>span{font-size:10px;letter-spacing:.05em;color:#ecebe6}
-.current-feature{position:relative;overflow:hidden;border:1px solid #ffffff80;border-radius:14px;background:#202720;box-shadow:0 16px 40px #0003;color:#fff}
+.current-stack{display:grid;gap:16px;min-width:0}
+.current-feature{position:relative;min-width:0;overflow:hidden;border:1px solid #ffffffa0;border-radius:14px;background:#202720;box-shadow:0 16px 40px #0003;color:#fff}
 .current-feature-photo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 40%}
-.current-feature-copy{position:relative;padding:106px 22px 22px;background:linear-gradient(180deg,transparent 0%,#10181045 22%,#101810ed 51%,#101810 100%)}
+.current-feature-copy{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;min-height:380px;height:100%;padding:122px 22px 22px;background:linear-gradient(180deg,transparent 0%,#10181035 22%,#101810ee 51%,#101810 100%)}
 .current-kicker{display:block;font-size:10px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
 .current-feature .current-kicker{display:inline-block;padding:5px 8px;border-radius:4px;background:#bc1b13;color:#fff}
-.current-feature h3{font-size:31px;line-height:1.08;letter-spacing:-.035em;margin:9px 0 11px;color:#fff;max-width:310px}
+.current-feature h3{font-size:31px;line-height:1.08;letter-spacing:-.035em;margin:9px 0 11px;color:#fff;max-width:310px;overflow-wrap:break-word}
 .current-feature p{font-size:13px;line-height:1.5;margin:0 0 18px;color:#fff}
-.compact-home .current-booking{display:flex;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:13px 16px;border:1px solid #fff;border-radius:7px;background:#fff;color:#a6130c;font-size:13px;font-weight:800;text-decoration:none}
+.compact-home .current-booking{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:13px 16px;border:1px solid #fff;border-radius:7px;background:#fff;color:#a6130c;font-size:13px;line-height:1.45;font-weight:800;text-decoration:none}
 .current-booking:hover{background:#fff0ed!important;color:#89110b!important}
-.current-booking:focus-visible{outline:3px solid #fff;outline-offset:4px;box-shadow:0 0 0 6px #7c110b}
-.current-more{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
-.compact-home .current-small{display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #ffffffb3;border-radius:12px;background:#faf6f0;color:var(--ink);text-decoration:none;box-shadow:0 8px 22px #0002}
-.current-small-photo{display:block;width:100%;height:76px;object-fit:cover}
-.current-small-copy{display:flex;flex:1;flex-direction:column;align-items:flex-start;width:100%;padding:14px 16px 16px}
-.current-small .current-kicker{color:#ac2018}
-.current-small h3{font-size:18px;line-height:1.25;letter-spacing:-.025em;margin:7px 0 7px}
-.current-small p{font-size:12px;line-height:1.5;color:#5b5f58;margin:0 0 14px}
-.current-link{display:flex;justify-content:space-between;gap:8px;width:100%;margin-top:auto;color:#a31c15;font-size:11px;font-weight:750}
-.current-small:hover{background:#fff;border-color:#e92217}
+.current-booking:focus-visible{outline:3px solid #fff;outline-offset:3px;box-shadow:0 0 0 5px #7c110b}
+.current-stack.is-ready{padding-top:30px;padding-right:42px;gap:0;touch-action:pan-y;isolation:isolate}
+.current-stack.is-ready .current-card{grid-area:1/1;transform:translate(calc(var(--card-position)*14px),calc(var(--card-position)*-10px));z-index:calc(4 - var(--card-position));transition:transform .25s ease,filter .25s ease;filter:brightness(.76);pointer-events:none}
+.current-stack.is-ready .current-card .current-feature-copy{visibility:hidden}
+.current-stack.is-ready .current-card.is-current{filter:none;pointer-events:auto}
+.current-stack.is-ready .current-card.is-current .current-feature-copy{visibility:visible}
+.current-controls[hidden]{display:none}
+.current-navigation{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:16px}
+.compact-home .current-position{flex:1;margin:0;text-align:center;font-size:12px;font-weight:750;color:#fff}
+.current-arrow{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;border:1px solid #ffffff80;border-radius:50%;background:#101810e8;color:#fff;font:inherit;font-size:22px;cursor:pointer}
+.current-arrow:hover{background:#b91b14;border-color:#fff}
+.current-choices{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
+.current-choices button{min-width:0;min-height:40px;padding:8px 4px;border:1px solid #ffffff65;border-radius:7px;background:#101810e8;color:#fff;font:inherit;font-size:11px;font-weight:750;cursor:pointer}
+.current-choices button[aria-pressed="true"]{background:#fff;color:#a6130c;border-color:#fff}
+.current-choices button:hover:not([aria-pressed="true"]){border-color:#fff;background:#4d211c;color:#fff}
+.current-deck button:focus-visible{outline:3px solid #fff;outline-offset:3px;box-shadow:0 0 0 6px #7c110b}
 .home-overview .move-strip{background:var(--paper);color:var(--ink);padding-top:8px}
 .home-overview .move-strip a{color:#ac2018}
 .compact-home.home-overview .intro.hero-wide::after{display:none}
 .home-overview .hero-wide .intro-photo::after{background:linear-gradient(90deg,#090d0be6 0%,#090d0bab 31%,#090d0b25 62%,#090d0b18 100%)}
-@media(max-width:1000px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:minmax(0,1fr) minmax(300px,.95fr);gap:28px;padding-inline:28px}.current-feature-copy{padding:94px 18px 18px}.current-feature h3{font-size:29px}.hero-wide:has(.current-deck) h1{font-size:clamp(40px,5vw,55px)}.current-small-copy{padding:14px 12px}.current-small h3{font-size:17px}}
-@media(max-width:760px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:1fr;min-height:0;padding:28px 20px 38px;gap:36px}.current-deck{grid-row:1;max-width:520px;justify-self:start}.hero-wide:has(.current-deck) .intro-copy{grid-row:2;max-width:520px}.hero-wide:has(.current-deck) h1{font-size:clamp(38px,7vw,52px)}.current-feature h3{max-width:none;font-size:31px}.current-small-copy{padding:14px}.current-deck::before{right:0}.home-overview .hero-wide .intro-photo::after{background:linear-gradient(180deg,#090d0b65,#090d0b90 58%,#090d0bf0 75%,#090d0bd4)}}
-@media(max-width:380px){.current-more{grid-template-columns:1fr}.compact-home .current-small{flex-direction:row}.current-small-photo{width:86px;height:auto;min-height:160px;align-self:stretch}.current-small-copy{padding:14px}.current-small p{margin-bottom:12px}.current-feature-copy{padding:88px 17px 18px}.current-feature h3{font-size:29px}.compact-home .current-booking{font-size:12px;padding-inline:12px}.current-heading{gap:8px}.current-heading>span{font-size:9px}}
+@media(max-width:1000px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:minmax(0,1fr) minmax(300px,.95fr);gap:28px;padding-inline:28px}.current-feature-copy{padding:110px 18px 18px}.current-feature h3{font-size:29px}.hero-wide:has(.current-deck) h1{font-size:clamp(40px,5vw,55px)}}
+@media(max-width:760px){.compact-home.home-overview .intro.hero-wide{grid-template-columns:1fr;min-height:0;padding:28px 20px 38px;gap:36px}.current-deck{grid-row:1;max-width:520px;justify-self:start}.hero-wide:has(.current-deck) .intro-copy{grid-row:2;max-width:520px}.hero-wide:has(.current-deck) h1{font-size:clamp(38px,7vw,52px)}.current-feature h3{max-width:none;font-size:31px}.home-overview .hero-wide .intro-photo::after{background:linear-gradient(180deg,#090d0b65,#090d0b90 58%,#090d0bf0 75%,#090d0bd4)}}
+@media(max-width:380px){.current-feature-copy{padding:104px 16px 18px;min-height:390px}.current-feature h3{font-size:27px}.compact-home .current-booking{font-size:12px;padding-inline:12px}.current-heading{gap:8px}.current-heading>span{font-size:9px}.current-stack.is-ready{padding-right:30px}.current-stack.is-ready .current-card{transform:translate(calc(var(--card-position)*10px),calc(var(--card-position)*-10px))}}
 
 /* Keep the complete alignment scene visible on smaller screens. */
 @media(max-width:850px){:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-hero{display:block;min-height:0;padding-bottom:0}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-inner{padding-bottom:26px}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo{position:relative;inset:auto;height:auto;aspect-ratio:3/2}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo img{height:auto;object-fit:contain;object-position:center}:is([data-service="achsvermessung"],[data-service="klimaservice"]) .service-detail-photo::after{display:none}}

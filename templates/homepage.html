@@ -33,20 +33,58 @@
     <section class="intro hero-wide" aria-labelledby="hero-title">
       <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
       <div class="intro-photo"><img src="{{ url_for('static', filename=jahreszeit.hero_bild) }}" alt="{{ jahreszeit.hero_alt }}" width="1672" height="941" fetchpriority="high"></div>
-      <aside class="current-deck" id="aktuell" aria-labelledby="current-title">
+      <aside class="current-deck" id="aktuell" aria-labelledby="current-title" aria-roledescription="Kartenstapel" data-current-deck>
         <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>{{ jahreszeit.label }}</span></div>
-        <article class="current-feature" data-reifen-buchung>
-          <img class="current-feature-photo" src="{{ url_for('static', filename=jahreszeit.reifen_bild) }}" alt="" width="{{ 1200 if jahreszeit.key == 'herbst' else 1672 }}" height="{{ 675 if jahreszeit.key == 'herbst' else 941 }}" decoding="async">
-          <div class="current-feature-copy">
-            <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
-            <h3>{{ jahreszeit.reifen_titel }}</h3>
-            <p>Radwechsel und Einlagerung.<br>Freie Uhrzeit direkt online wählen.</p>
-            <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
+        <div class="current-stack" id="aktuelle-karten">
+          <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="1 von 4 · Reifen">
+            <img class="current-feature-photo" src="{{ url_for('static', filename=jahreszeit.reifen_bild) }}" alt="" width="{{ 1200 if jahreszeit.key == 'herbst' else 1672 }}" height="{{ 675 if jahreszeit.key == 'herbst' else 941 }}" decoding="async">
+            <div class="current-feature-copy">
+              <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
+              <h3>{{ jahreszeit.reifen_titel }}</h3>
+              <p>Radwechsel und Einlagerung.<br>Freie Uhrzeit direkt online wählen.</p>
+              <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
+          <article class="current-card current-feature" data-current-card data-card-title="Bremsen" role="group" aria-roledescription="Karte" aria-label="2 von 4 · Bremsen">
+            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/leistungsfotos-v2/bremsenservice.jpg') }}" alt="" width="1200" height="800" decoding="async">
+            <div class="current-feature-copy">
+              <span class="current-kicker">Bremsencheck</span>
+              <h3>Gut bremsen.<br>Sicher ankommen.</h3>
+              <p>Bei Nässe und Kälte wichtig.<br>Bremsen prüfen und instand halten.</p>
+              <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=bremsenservice#kurzanfrage">Bremsentermin online buchen <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
+          <article class="current-card current-feature" data-current-card data-card-title="Ölcheck" role="group" aria-roledescription="Karte" aria-label="3 von 4 · Ölcheck">
+            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-oelservice-20261021.webp') }}" alt="" width="1200" height="675" decoding="async">
+            <div class="current-feature-copy">
+              <span class="current-kicker">Ölcheck</span>
+              <h3>Gut versorgt.</h3>
+              <p>Ölstand im Blick.<br>Motor gut versorgen.</p>
+              <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=mechanikanfrage&amp;mechanik_kategorie=oelwechsel#kurzanfrage">Ölservice anfragen <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
+          <article class="current-card current-feature" data-current-card data-card-title="Aufbereitung" role="group" aria-roledescription="Karte" aria-label="4 von 4 · Aufbereitung">
+            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/fahrzeugpflege.webp') }}" alt="" width="683" height="1024" decoding="async">
+            <div class="current-feature-copy">
+              <span class="current-kicker">Aufbereitung</span>
+              <h3>Frisch gepflegt.</h3>
+              <p>Schmutz entfernen.<br>Lack und Innenraum pflegen.</p>
+              <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=fahrzeugpflege#kurzanfrage">Pflege anfragen <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
+        </div>
+        <div class="current-controls" data-deck-controls hidden>
+          <div class="current-navigation">
+            <button type="button" class="current-arrow" data-deck-prev aria-label="Vorherige Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">←</span></button>
+            <p class="current-position" aria-live="polite" aria-atomic="true" data-deck-status>1 von 4 · Reifen</p>
+            <button type="button" class="current-arrow" data-deck-next aria-label="Nächste Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">→</span></button>
           </div>
-        </article>
-        <div class="current-more">
-          <a class="current-small" href="{{ portal_links.anfrage }}?anliegen=mechanikanfrage&amp;mechanik_kategorie=oelwechsel#kurzanfrage"><img class="current-small-photo" src="{{ url_for('static', filename='homepage/karte-oelservice-20261021.webp') }}" alt="" width="1200" height="675" decoding="async"><div class="current-small-copy"><span class="current-kicker">Ölcheck</span><h3>Gut versorgt.</h3><p>Ölstand im Blick.<br>Motor gut versorgen.</p><span class="current-link">Ölservice anfragen <span aria-hidden="true">↗</span></span></div></a>
-          <a class="current-small" href="{{ portal_links.anfrage }}?anliegen=fahrzeugpflege#kurzanfrage"><img class="current-small-photo" src="{{ url_for('static', filename='homepage/fahrzeugpflege.webp') }}" alt="" width="683" height="1024" decoding="async"><div class="current-small-copy"><span class="current-kicker">Aufbereitung</span><h3>Frisch gepflegt.</h3><p>Schmutz entfernen.<br>Lack und Innenraum pflegen.</p><span class="current-link">Pflege anfragen <span aria-hidden="true">↗</span></span></div></a>
+          <div class="current-choices" aria-label="Thema direkt auswählen">
+            <button type="button" data-deck-index="0" aria-pressed="true" aria-controls="aktuelle-karten">Reifen</button>
+            <button type="button" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Bremsen</button>
+            <button type="button" data-deck-index="2" aria-pressed="false" aria-controls="aktuelle-karten">Ölcheck</button>
+            <button type="button" data-deck-index="3" aria-pressed="false" aria-controls="aktuelle-karten">Pflege</button>
+          </div>
         </div>
       </aside>
     </section>
@@ -104,5 +142,6 @@
     followLegacyLink(); window.addEventListener('hashchange', followLegacyLink);
   })();
   </script>
+  <script src="{{ url_for('static', filename='homepage/aktuelles-karten.js') }}" defer></script>
   {% include "_besucher_tracking.html" %}
 </body></html>
