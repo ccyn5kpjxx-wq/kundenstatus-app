@@ -471,6 +471,14 @@
               <h3 class="h5 mb-1">3. Fahrzeugdaten prüfen und ergänzen</h3>
               <p class="text-muted mb-0">Für die Zuordnung genügt Fahrzeug oder Kennzeichen.</p>
             </div>
+            <div class="col-12">
+              <label class="form-label" for="leistungsart">Auftragsart / Leistung</label>
+              <select id="leistungsart" name="leistungsart" class="form-select form-select-lg">
+                {% for key, meta in auftragsarten.items() %}
+                <option value="{{ key }}" {% if form.get('leistungsart', 'lackierung') == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                {% endfor %}
+              </select>
+            </div>
             <div class="col-md-8">
               <label class="form-label" for="fahrzeug">Fahrzeug</label>
               <input type="text" id="fahrzeug" name="fahrzeug" class="form-control form-control-lg" placeholder="z. B. Hyundai Tucson" value="{{ form.get('fahrzeug', '') }}" aria-describedby="vehicle-minimum-error">

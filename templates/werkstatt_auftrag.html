@@ -550,7 +550,7 @@
     {% if auftrag['kennzeichen'] %}
       <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
     {% endif %}
-    <h1><small style="display:block; font-size:.8rem;">{{ auftrag['auftragsart_label'] }}</small>{{ auftrag['fahrzeug'] }}</h1>
+    <h1><small style="display:block; width:fit-content; margin-bottom:.4rem; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</small>{{ auftrag['fahrzeug'] }}</h1>
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
     {% if session.admin %}{% if auftrag['ist_reifenauftrag'] %}<a class="ws-back" href="{{ url_for('admin_reifentermine') }}">← Reifenportal</a><a class="ws-back" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Reifenleistungen &amp; Rechnung →</a>{% else %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}{% endif %}
   </div>
@@ -666,7 +666,7 @@
       </div>
       {% endif %}
 
-      {% if auftrag['status'] == 3 and not auftrag['ist_reifenauftrag'] %}
+      {% if auftrag['status'] == 3 and auftrag['ist_lackierauftrag'] %}
       <div class="panel">
         <h2>Arbeitsschritt</h2>
         <div style="display:flex; align-items:stretch; gap:.25rem; margin-bottom:.6rem;">

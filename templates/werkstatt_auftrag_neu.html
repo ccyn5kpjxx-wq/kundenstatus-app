@@ -136,7 +136,7 @@
 
     label { display: block; margin-bottom: .38rem; font-weight: 800; }
 
-    input, textarea {
+    input, select, textarea {
       width: 100%;
       min-height: 50px;
       border: 1.5px solid #cfc2b0;
@@ -148,7 +148,7 @@
     }
 
     textarea { min-height: 104px; resize: vertical; }
-    input:focus, textarea:focus { outline: 3px solid rgba(162,63,45,.16); border-color: var(--brand); }
+    input:focus, select:focus, textarea:focus { outline: 3px solid rgba(162,63,45,.16); border-color: var(--brand); }
 
     .help { display: block; margin-top: .35rem; color: var(--muted); font-size: .82rem; line-height: 1.4; }
 
@@ -303,6 +303,14 @@
           <div class="field full">
             <label for="fin_nummer">FIN / Fahrzeug-Identifizierungsnummer</label>
             <input id="fin_nummer" name="fin_nummer" type="text" value="{{ request.form.get('fin_nummer', '') }}" maxlength="17" autocapitalize="characters" spellcheck="false" placeholder="17-stellige FIN">
+          </div>
+          <div class="field full">
+            <label for="leistungsart">Auftragsart / Leistung</label>
+            <select id="leistungsart" name="leistungsart">
+              {% for key, meta in auftragsarten.items() %}
+              <option value="{{ key }}" {% if request.form.get('leistungsart', 'lackierung') == key %}selected{% endif %}>{{ meta['label'] }}</option>
+              {% endfor %}
+            </select>
           </div>
           <div class="field full">
             <label for="beschreibung">Was soll gemacht werden?</label>

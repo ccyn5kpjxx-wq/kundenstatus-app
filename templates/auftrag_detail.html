@@ -276,7 +276,7 @@
 <header class="order-focus-header page-card p-4 mb-3">
   {% if cockpit_demo %}<div class="alert alert-info py-2">Lokale Vorschau · Beispieldaten · keine Nachrichten oder Rechnungen werden versendet</div>{% endif %}
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
-    <div><div class="small text-muted mb-1">{{ auftrag['auftragsart_label'] }} {{ auftrag['id'] }} · {{ auftrag['autohaus_name'] or 'Direktkunde' }}</div><h1 class="h2 mb-1">{{ auftrag['fahrzeug'] }}</h1><div>{{ auftrag['kunde_name'] or 'Kunde noch ergänzen' }} <span class="ms-2 order-plate">{{ auftrag['kennzeichen'] or 'Kennzeichen offen' }}</span></div></div>
+    <div><span class="badge mb-2" style="background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</span><div class="small text-muted mb-1">Auftrag {{ auftrag['id'] }} · {{ auftrag['autohaus_name'] or 'Direktkunde' }}</div><h1 class="h2 mb-1">{{ auftrag['fahrzeug'] }}</h1><div>{{ auftrag['kunde_name'] or 'Kunde noch ergänzen' }} <span class="ms-2 order-plate">{{ auftrag['kennzeichen'] or 'Kennzeichen offen' }}</span></div></div>
     <div><span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} p-2">{{ auftrag['status_meta']['label'] }}</span><div class="mt-2 text-end"><a href="{{ detail_back_url }}" class="small">Zur Auftragsliste</a></div></div>
   </div>
   <div class="order-keyfacts mt-4">
@@ -874,7 +874,20 @@
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button type="submit" name="aktion" value="speichern" class="btn btn-brand btn-lg">Änderungen speichern</button>
         </div>
-<div class="col-12"><details class="order-field-group"><summary>Kunde, Fahrzeug und technische Daten bearbeiten</summary><div class="row g-3 mt-1">
+<div class="col-12"><details class="order-field-group"><summary>Auftragsart, Kunde und Fahrzeug bearbeiten</summary><div class="row g-3 mt-1">
+        <div class="col-12">
+          <label class="form-label" for="leistungsart">Auftragsart / Leistung</label>
+          <select id="leistungsart" name="leistungsart" class="form-select form-select-lg" {% if auftrag['hat_reifenbuchung'] %}disabled aria-describedby="leistungsart-hinweis"{% endif %}>
+            <option value="" {% if not auftrag['leistungsart'] %}selected{% endif %}>Auftragsart prüfen / noch offen</option>
+            {% for key, meta in auftragsarten.items() %}
+            <option value="{{ key }}" {% if auftrag['leistungsart'] == key %}selected{% endif %}>{{ meta['label'] }}</option>
+            {% endfor %}
+          </select>
+          {% if auftrag['hat_reifenbuchung'] %}
+            <input type="hidden" name="leistungsart" value="reifenservice">
+            <div id="leistungsart-hinweis" class="form-text">Die Auftragsart bleibt mit der gebuchten Reifenzeit verbunden.</div>
+          {% endif %}
+        </div>
         <div class="col-md-6">
           <label class="form-label">Autohaus</label>
           <select name="autohaus_id" class="form-select form-select-lg">

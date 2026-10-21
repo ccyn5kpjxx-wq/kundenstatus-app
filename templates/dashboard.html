@@ -280,7 +280,7 @@
           </td>
           <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div class="fw-bold">{{ a['fahrzeug'] }}</div>
-            <span class="badge-soft">{{ a['auftragsart_label'] }}</span>
+            <span class="badge-soft" style="background:{{ a['auftragsart_bg'] }}; color:{{ a['auftragsart_farbe'] }};">{{ a['auftragsart_label'] }}</span>
             <span class="badge text-bg-{{ a['quelle_meta']['farbe'] }}">{{ a['quelle_meta']['label'] }}</span>
             {% if a['versicherung_name'] %}<span class="badge text-bg-light border text-dark">{{ a['versicherung_name'] }}</span>{% endif %}
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
@@ -435,6 +435,7 @@
           <td data-mobile-label="Autohaus">{{ a['autohaus_name'] or 'Ohne Autohaus' }}</td>
           <td class="auftrag-vehicle-cell" data-mobile-label="Fahrzeug">
             <div>{{ a['fahrzeug'] }}</div>
+            <span class="badge-soft" style="background:{{ a['auftragsart_bg'] }}; color:{{ a['auftragsart_farbe'] }};">{{ a['auftragsart_label'] }}</span>
             {% if a['kennzeichen'] %}<div class="small"><code>{{ a['kennzeichen'] }}</code></div>{% endif %}
             {% if a['hat_offene_reklamation'] %}
             <div class="small text-danger fw-bold mt-1">Reklamation offen ({{ a['offene_reklamationen_count'] }})</div>

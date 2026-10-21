@@ -202,6 +202,14 @@
                   <label class="form-label" for="kunde_name">Endkunde / Referenz</label>
                   <input id="kunde_name" type="text" name="kunde_name" class="form-control form-control-lg" value="{{ form.get('kunde_name', '') }}" autocomplete="name">
                 </div>
+                <div class="col-12">
+                  <label class="form-label" for="leistungsart">Auftragsart / Leistung</label>
+                  <select id="leistungsart" name="leistungsart" class="form-select form-select-lg">
+                    {% for key, meta in auftragsarten.items() %}
+                    <option value="{{ key }}" {% if form.get('leistungsart', 'lackierung') == key %}selected{% endif %}>{{ meta['label'] }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
                 <div class="col-md-8">
                   <label class="form-label" for="fahrzeug">Fahrzeug</label>
                   <input id="fahrzeug" type="text" name="fahrzeug" class="form-control form-control-lg" value="{{ form.get('fahrzeug', '') }}" placeholder="z. B. Hyundai Tucson" data-vehicle-input aria-describedby="vehicle-minimum-error">
