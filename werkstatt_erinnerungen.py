@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import re
+import sqlite3
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -79,8 +80,55 @@ class ReminderService:
             raise ValueError("Die aktuelle Fahrerzuordnung konnte nicht geprüft werden.")
         return company, vehicle, driver, assignment
 
-    @staticmethod
-    def _items(db, vehicle, today):
+    def _tire_items(self, db, vehicle, today):
+        """Read existing reservations only through their explicit service binding.
+
+        Small fleet-only apps deliberately have no lead/booking tables. Detect
+        that capability before any SELECT so a missing Postgres relation never
+        aborts the caller's transaction. No schema or parallel visit is created.
+        """
+        required = {
+            "reifen_termin_slots": {"datum", "uhrzeit", "lead_id"},
+            "leads": {"id", "status", "geaendert_am", "portal_json"},
+            "serviceprozesse": {"id", "lead_id", "firma_id", "fahrzeug_id", "revision", "geaendert_am"},
+        }
+        columns = getattr(self.p, "get_table_columns", None)
+        if callable(columns):
+            available = lambda table: columns(db, table)
+        elif isinstance(db, sqlite3.Connection):
+            available = lambda table: {row["name"] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+        else:
+            return []
+        if any(not fields.issubset(available(table)) for table, fields in required.items()):
+            return []
+        rows = db.execute("""SELECT s.datum,s.uhrzeit,s.lead_id,l.status AS lead_status,
+                l.geaendert_am AS lead_geaendert_am,l.portal_json,
+                p.id AS prozess_id,p.revision AS prozess_revision,p.geaendert_am AS prozess_geaendert_am
+            FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
+            JOIN serviceprozesse p ON p.lead_id=l.id
+            WHERE p.firma_id=? AND p.fahrzeug_id=? AND l.status!='verloren'""",
+                          (vehicle["firma_id"], vehicle["id"])).fetchall()
+        result = []
+        for row in rows:
+            source = dict(row)
+            try:
+                intake = json.loads(source["portal_json"])
+                day = date.fromisoformat(source["datum"])
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(intake, dict) or intake.get("anliegen") != "reifenservice":
+                continue
+            if (not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", source["datum"])
+                    or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", str(source["uhrzeit"]))
+                    or day > today + timedelta(days=30)):
+                continue
+            state = "ueberfaellig" if day < today else "faellig" if day == today else "bald"
+            result.append({"id": "reifen:" + str(source["lead_id"]), "source_type": "reifen", "source": source,
+                           "title": "Gebuchter Reifentermin", "kind": "Reifenservice", "due": state,
+                           "date": day.isoformat(), "time": source["uhrzeit"], "km": None})
+        return result
+
+    def _items(self, db, vehicle, today):
         items = []
         plans = db.execute("SELECT * FROM kundenflotten_plaene WHERE fahrzeug_id=? AND status='offen'", (vehicle["id"],)).fetchall()
         for row in plans:
@@ -108,13 +156,14 @@ class ReminderService:
             items.append({"id": "termin:" + appointment["id"], "source_type": "termin", "source": appointment,
                           "title": "Bestätigter Werkstatttermin", "kind": KINDS.get(appointment["art"], "Werkstattservice"),
                           "due": state, "date": day.isoformat(), "km": None})
-        return sorted(items, key=lambda item: (_URGENCY[item["due"]], item["date"] or "9999-12-31", item["id"]))
+        items.extend(self._tire_items(db, vehicle, today))
+        return sorted(items, key=lambda item: (_URGENCY[item["due"]], item["date"] or "9999-12-31", item.get("time", ""), item["id"]))
 
     @staticmethod
     def _public_item(item, vehicle):
         return {"id": item["id"], "vehicle_id": vehicle["id"], "plate": vehicle["kennzeichen"],
                 "vehicle": vehicle["modell"], "title": item["title"], "kind": item["kind"],
-                "due": item["due"], "due_date": item["date"], "due_km": item["km"],
+                "due": item["due"], "due_date": item["date"], "due_time": item.get("time", ""), "due_km": item["km"],
                 "km_recorded_at": vehicle["km_datum"], "source_type": item["source_type"]}
 
     def list_due(self, company_id, today=None):
@@ -123,7 +172,7 @@ class ReminderService:
             self.fleet.row(db, "kundenflotten_firmen", company_id)
             vehicles = [dict(row) for row in db.execute("SELECT * FROM kundenflotten_fahrzeuge WHERE firma_id=? ORDER BY kennzeichen,id", (company_id,)).fetchall()]
             result = [self._public_item(item, vehicle) for vehicle in vehicles for item in self._items(db, vehicle, today)]
-        return sorted(result, key=lambda item: (_URGENCY[item["due"]], item["due_date"] or "9999-12-31", item["plate"], item["id"]))
+        return sorted(result, key=lambda item: (_URGENCY[item["due"]], item["due_date"] or "9999-12-31", item["due_time"], item["plate"], item["id"]))
 
     def vehicle_inbox(self, company_id, vehicle_id, today=None):
         today = _today(today)
@@ -159,7 +208,9 @@ class ReminderService:
             result.update(contact_ready=False, contact_note="Für dieses Fahrzeug ist keine aktive Fahrerzuordnung freigegeben.")
         date_text = f" am {item['date'][8:10]}.{item['date'][5:7]}.{item['date'][:4]}" if item["date"] else ""
         km_text = f" bei {item['km']:,} km".replace(",", ".") if item["km"] is not None else ""
-        if item["source_type"] == "termin":
+        if item["source_type"] == "reifen":
+            message = f"Für Ihr Fahrzeug {vehicle['kennzeichen']} ist der Reifentermin{date_text} um {item['time']} Uhr gebucht."
+        elif item["source_type"] == "termin":
             message = f"Für Ihr Fahrzeug {vehicle['kennzeichen']} ist ein {item['kind']}-Termin{date_text} bestätigt. Bitte beachten Sie die persönlich vereinbarten Ankunftsdetails."
         else:
             message = f"Für Ihr Fahrzeug {vehicle['kennzeichen']} steht {item['title']}{date_text}{' oder' if date_text and km_text else ''}{km_text} an. Bitte stimmen Sie die nächsten Schritte mit Ihrer Werkstatt ab."

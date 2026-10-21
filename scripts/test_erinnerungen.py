@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 import sqlite3
+import json
 import sys
 import tempfile
 import unittest
@@ -102,6 +103,28 @@ class ReminderTests(unittest.TestCase):
 
     def count(self):
         return self.sql("SELECT COUNT(*) AS n FROM kundenflotten_erinnerung_tests")[0]["n"]
+
+    def booking_tables(self):
+        # The fleet-only fixture intentionally lacks these optional capabilities
+        # unless a tire-specific test creates synthetic source tables.
+        self.sql("""CREATE TABLE leads (id INTEGER PRIMARY KEY,status TEXT NOT NULL,
+            geaendert_am TEXT NOT NULL,portal_json TEXT NOT NULL)""")
+        self.sql("""CREATE TABLE reifen_termin_slots (datum TEXT NOT NULL,uhrzeit TEXT NOT NULL,
+            lead_id INTEGER NOT NULL UNIQUE,PRIMARY KEY(datum,uhrzeit))""")
+        self.sql("""CREATE TABLE serviceprozesse (id TEXT PRIMARY KEY,lead_id INTEGER UNIQUE,
+            firma_id TEXT NOT NULL,fahrzeug_id TEXT NOT NULL,revision INTEGER NOT NULL,
+            geaendert_am TEXT NOT NULL)""")
+
+    def booking(self, *, company=None, vehicle=None, day=None, time="09:00", status="neu", bound=True,
+                intake=None):
+        lead = self.sql("SELECT COALESCE(MAX(id),0)+1 AS n FROM leads")[0]["n"]
+        portal = json.dumps(intake if intake is not None else {"anliegen": "reifenservice", "internal": "PRIVATE-BOOKING-DATA"})
+        self.sql("INSERT INTO leads VALUES(?,?,?,?)", (lead, status, "lead-version-1", portal))
+        self.sql("INSERT INTO reifen_termin_slots VALUES(?,?,?)", ((day or self.today).isoformat(), time, lead))
+        if bound:
+            self.sql("INSERT INTO serviceprozesse VALUES(?,?,?,?,1,?)",
+                     (uuid4().hex, lead, company or self.company, vehicle or self.vehicle, "process-version-1"))
+        return "reifen:" + str(lead)
 
     def test_date_or_mileage_existing_rules_and_no_invented_interval(self):
         overdue = self.plan(faellig_datum=(self.today - timedelta(days=1)).isoformat())
@@ -292,6 +315,119 @@ class ReminderTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.record(item, **changes)
         self.assertEqual(self.count(), 0)
+
+    def test_bound_tire_booking_is_read_only_with_exact_date_time_and_safe_preview(self):
+        self.booking_tables()
+        item = self.booking(time="10:00")
+        appointment = self.appointment()
+        with closing(self.p.get_db()) as db:
+            before = list(db.iterdump())
+        items = self.service.vehicle_inbox(self.company, self.vehicle, today=self.today)
+        tire = next(row for row in items if row["id"] == item)
+        self.assertEqual(tire["due_date"], self.today.isoformat())
+        self.assertEqual(tire["due_time"], "10:00")
+        self.assertEqual(tire["source_type"], "reifen")
+        self.assertEqual(next(row for row in items if row["id"] == appointment)["due_time"], "")
+        preview = self.preview(item)
+        self.assertIn("10:00 Uhr gebucht", preview["message"])
+        self.assertIn(self.today.strftime("%d.%m.%Y"), preview["message"])
+        self.assertNotIn("PRIVATE-BOOKING-DATA", str(items) + str(preview))
+        self.assertNotIn("lead-version", str(items) + str(preview))
+        with closing(self.p.get_db()) as db:
+            self.assertEqual(list(db.iterdump()), before)
+
+    def test_unbound_foreign_cancelled_and_non_tire_leads_are_not_reminders(self):
+        self.booking_tables()
+        excluded = [self.booking(bound=False, time="07:00"),
+                    self.booking(company=self.other, time="08:00"),
+                    self.booking(vehicle=self.other_vehicle, time="09:00"),
+                    self.booking(status="verloren", time="10:00"),
+                    self.booking(intake={"anliegen": "reparaturanfrage"}, time="11:00"),
+                    self.booking(company=self.other, vehicle=self.other_vehicle, time="12:00")]
+        self.assertEqual(self.service.vehicle_inbox(self.company, self.vehicle, today=self.today), [])
+        self.assertEqual(self.service.list_due(self.company, today=self.today), [])
+        for item in excluded:
+            with self.assertRaises(StaleReminder):
+                self.preview(item)
+
+    def test_tire_horizon_and_time_order_use_actual_reservations(self):
+        self.booking_tables()
+        later = self.booking(time="15:00", status="gewonnen")
+        earlier = self.booking(time="08:00")
+        boundary = self.booking(day=self.today + timedelta(days=30), time="09:00")
+        future = self.booking(day=self.today + timedelta(days=31), time="09:00")
+        overdue = self.booking(day=self.today - timedelta(days=1), time="09:00")
+        items = self.service.list_due(self.company, today=self.today)
+        self.assertEqual([item["id"] for item in items], [overdue, earlier, later, boundary])
+        self.assertNotIn(future, str(items))
+        self.assertEqual(items[0]["due"], "ueberfaellig")
+
+    def test_slot_time_and_date_shift_invalidate_previous_snapshot(self):
+        self.booking_tables()
+        item = self.booking()
+        previous = self.preview(item)
+        self.sql("UPDATE reifen_termin_slots SET uhrzeit='10:00' WHERE lead_id=?", (int(item[7:]),))
+        with self.assertRaises(StaleReminder):
+            self.record(item, previous)
+        self.assertEqual(self.preview(item)["due_time"], "10:00")
+        previous = self.preview(item)
+        tomorrow = self.today + timedelta(days=1)
+        self.sql("UPDATE reifen_termin_slots SET datum=? WHERE lead_id=?", (tomorrow.isoformat(), int(item[7:])))
+        with self.assertRaises(StaleReminder):
+            self.record(item, previous)
+        self.assertEqual(self.preview(item)["due_date"], tomorrow.isoformat())
+        self.assertEqual(self.count(), 0)
+
+    def test_booking_version_binding_revision_and_cancellation_invalidate_snapshot(self):
+        self.booking_tables()
+        item = self.booking()
+        number = int(item[7:])
+        for query, values in (
+                ("UPDATE leads SET geaendert_am=? WHERE id=?", ("lead-version-2", number)),
+                ("UPDATE leads SET portal_json=? WHERE id=?", (json.dumps({"anliegen": "reifenservice", "reifen_leistungen": ["montage"]}), number)),
+                ("UPDATE serviceprozesse SET revision=revision+1 WHERE lead_id=?", (number,))):
+            previous = self.preview(item)
+            self.sql(query, values)
+            with self.assertRaises(StaleReminder):
+                self.record(item, previous)
+        previous = self.preview(item)
+        self.sql("UPDATE leads SET status='verloren' WHERE id=?", (number,))
+        with self.assertRaises(StaleReminder):
+            self.record(item, previous)
+        self.assertEqual(self.service.vehicle_inbox(self.company, self.vehicle, today=self.today), [])
+        self.assertEqual(self.count(), 0)
+
+    def test_tire_source_binding_withdrawal_blocks_even_a_test_replay(self):
+        self.booking_tables()
+        item = self.booking()
+        previous = self.preview(item)
+        request = uuid4().hex
+        self.assertFalse(self.record(item, previous, request_id=request)["sent"])
+        self.sql("UPDATE serviceprozesse SET fahrzeug_id=? WHERE lead_id=?", (self.other_vehicle, int(item[7:])))
+        with self.assertRaises(StaleReminder):
+            self.record(item, previous, request_id=request)
+        self.assertEqual(self.count(), 1)
+
+    def test_optional_table_capability_fails_closed_without_hiding_fleet_plans(self):
+        plan = self.plan()
+        self.assertEqual(self.service.vehicle_inbox(self.company, self.vehicle, today=self.today)[0]["id"], plan)
+        self.booking_tables()
+        self.booking()
+        for table in ("reifen_termin_slots", "leads", "serviceprozesse"):
+            self.sql("ALTER TABLE " + table + " RENAME TO hidden_" + table)
+            self.assertEqual([row["id"] for row in self.service.vehicle_inbox(self.company, self.vehicle, today=self.today)], [plan])
+            self.sql("ALTER TABLE hidden_" + table + " RENAME TO " + table)
+
+    def test_app_column_capability_adapter_and_malformed_legacy_sources(self):
+        self.booking_tables()
+        self.p.get_table_columns = lambda db, table: {r["name"] for r in db.execute("PRAGMA table_info(" + table + ")")}
+        valid = self.booking(time="07:00")
+        broken_json = self.booking(time="08:00")
+        self.sql("UPDATE leads SET portal_json='not-json' WHERE id=?", (int(broken_json[7:]),))
+        self.booking(time="25:00")
+        malformed = self.booking(time="10:00")
+        self.sql("UPDATE reifen_termin_slots SET datum='not-a-date' WHERE lead_id=?", (int(malformed[7:]),))
+        self.assertEqual([row["id"] for row in self.service.list_due(self.company, today=self.today)], [valid])
 
 
 if __name__ == "__main__":
