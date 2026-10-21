@@ -42,9 +42,9 @@ class ServiceProcessTests(unittest.TestCase):
                 CREATE TABLE leads(id INTEGER PRIMARY KEY,auftrag_id INTEGER,angebot_text TEXT,angebot_preis TEXT,angebot_status TEXT,kennzeichen TEXT,portal_json TEXT);
                 INSERT INTO leads VALUES(1,NULL,'Bremsen vorne erneuern','200,00 EUR netto','angebot_abgegeben','MOS-AA 100','{"anliegen":"bremsen"}');
                 INSERT INTO leads VALUES(2,NULL,'Ölwechsel','100,00 EUR netto','angebot_abgegeben','MOS-BB 200','{}');
-                CREATE TABLE auftraege(id INTEGER PRIMARY KEY,werkstatt_angebot_text TEXT,werkstatt_angebot_preis TEXT,angebot_status TEXT,kennzeichen TEXT,fin_nummer TEXT,preisstand_json TEXT);
-                INSERT INTO auftraege VALUES(10,'Bremsen vorne erneuern','200,00 EUR netto','angenommen','MOS-AA 100','','{}');
-                INSERT INTO auftraege VALUES(11,'Altauftrag','100,00 EUR netto','angenommen','MOS-AA 100','','{}');''')
+                CREATE TABLE auftraege(id INTEGER PRIMARY KEY,werkstatt_angebot_text TEXT,werkstatt_angebot_preis TEXT,angebot_status TEXT,kennzeichen TEXT,fin_nummer TEXT,preisstand_json TEXT,reifen_rechnung_json TEXT);
+                INSERT INTO auftraege VALUES(10,'Bremsen vorne erneuern','200,00 EUR netto','angenommen','MOS-AA 100','','{}','{}');
+                INSERT INTO auftraege VALUES(11,'Altauftrag','100,00 EUR netto','angenommen','MOS-AA 100','','{}','{}');''')
             ensure_schema(db)
             ensure_schema(db)
         self.admin={"role":"werkstatt","id":"admin-synthetic"}
@@ -303,6 +303,59 @@ class ServiceProcessTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(invoice_db,10)
         finally:
             invoice_db.rollback();invoice_db.close();other.close()
+
+    def test_tire_scope_swap_with_equal_totals_invalidates_invoice_approval(self):
+        from reifenservice import berechne_reifenservice
+        first=berechne_reifenservice([{"preis_id":"radwechsel_18_20","menge":1}])
+        second=berechne_reifenservice([{"preis_id":"montage_17_18","menge":2}],lose_raeder=True)
+        self.assertEqual(first["gesamt"],second["gesamt"])
+        self.approve();self.bind_order()
+        self.modify("UPDATE auftraege SET werkstatt_angebot_text='Reifenservice',werkstatt_angebot_preis='33,61 EUR netto',reifen_rechnung_json=? WHERE id=10",(json.dumps({"kalkulation":first}),))
+        self.offer=self.service.sync_offer(self.case,self.admin)
+        self.approve()
+        with self.fleet.db() as db:
+            original=self.service.approved_invoice_snapshot(db,10)
+            self.assertEqual(original["snapshot"]["angebot"]["reifen_kalkulation"],first)
+        self.modify("UPDATE auftraege SET reifen_rechnung_json=? WHERE id=10",(json.dumps({"kalkulation":second}),))
+        with self.fleet.db() as db:
+            with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(db,10)
+            with self.assertRaises(ValueError): self.service.assert_can_start(db,10)
+
+    def test_first_actual_tire_selection_requires_new_approval(self):
+        from reifenservice import berechne_reifenservice
+        self.approve();self.bind_order()
+        tire=berechne_reifenservice([{"preis_id":"radwechsel_18_20","menge":1}])
+        self.modify("UPDATE auftraege SET reifen_rechnung_json=? WHERE id=10",(json.dumps({"kalkulation":tire}),))
+        with self.fleet.db() as db:
+            with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(db,10)
+
+    def test_tire_draft_formatting_and_timestamp_do_not_change_financial_scope(self):
+        from reifenservice import berechne_reifenservice
+        self.approve();self.bind_order()
+        tire=berechne_reifenservice([{"preis_id":"radwechsel_18_20","menge":1}])
+        self.modify("UPDATE auftraege SET werkstatt_angebot_preis='33,61 EUR netto',reifen_rechnung_json=? WHERE id=10",(json.dumps({"kalkulation":tire,"gespeichert_am":"first"}),))
+        self.offer=self.service.sync_offer(self.case,self.admin);self.approve()
+        self.modify("UPDATE auftraege SET reifen_rechnung_json=? WHERE id=10",(json.dumps({"gespeichert_am":"later","kunde":{"name":"Not authoritative"},"kalkulation":tire},indent=2),))
+        with self.fleet.db() as db:
+            self.assertEqual(self.service.approved_invoice_snapshot(db,10)["snapshot_hash"],self.offer["snapshot_hash"])
+
+    def test_corrupted_tire_selection_is_never_treated_as_empty(self):
+        self.approve();self.bind_order()
+        for value in ("{broken",'[]','{"kalkulation":{"positionen":[]}}','{"kalkulation":[]}','{"kalkulation":{}}'):
+            self.modify("UPDATE auftraege SET reifen_rechnung_json=? WHERE id=10",(value,))
+            with self.fleet.db() as db:
+                with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(db,10)
+
+    def test_tire_calculation_amount_must_match_the_offer_basis(self):
+        from reifenservice import berechne_reifenservice
+        self.approve();self.bind_order()
+        tire=berechne_reifenservice([{"preis_id":"radwechsel_18_20","menge":1}])
+        self.modify("UPDATE auftraege SET reifen_rechnung_json=? WHERE id=10",(json.dumps({"kalkulation":tire}),))
+        with self.assertRaises(ValueError): self.service.sync_offer(self.case,self.admin)
+        self.modify("UPDATE auftraege SET werkstatt_angebot_preis='40,00 EUR brutto' WHERE id=10")
+        self.offer=self.service.sync_offer(self.case,self.admin);self.approve()
+        with self.fleet.db() as db:
+            self.assertEqual(self.service.approved_invoice_snapshot(db,10)["snapshot"]["angebot"]["brutto_cent"],4000)
 
     def test_restore_preserves_revisions_and_approval_history(self):
         self.approve()

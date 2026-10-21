@@ -196,8 +196,30 @@ class ServiceProcess:
             gross = int((Decimal(net) * (1 + rate / 100)).quantize(Decimal("1"),rounding=ROUND_HALF_UP))
         if confirmed.get("netto") and _money(confirmed["netto"]) != net:
             raise ValueError("Angebot und bestätigter Kundenpreis weichen ab. Bitte zuerst abgleichen.")
-        return {"umfang": scope, "preis_original": price, "netto_cent": net,
+        result={"umfang": scope, "preis_original": price, "netto_cent": net,
                 "mwst_satz": str(rate), "mwst_cent": gross-net, "brutto_cent": gross, "waehrung": "EUR"}
+        # Actual tire invoice positions are a second, structured representation
+        # of scope. Equal totals do not make different services interchangeable.
+        # Keep an empty draft neutral during lead -> order conversion; once an
+        # actual selection is saved it requires a fresh approval of that exact
+        # validated catalogue snapshot. Customer-address/editorial timestamps in
+        # this draft are not authoritative; the explicit parties above are.
+        if row["auftrag_id"] is not None and source.get("reifen_rechnung_json"):
+            try: tire=json.loads(source["reifen_rechnung_json"])
+            except (TypeError,ValueError): raise ValueError("Die gespeicherten Reifenleistungen müssen geprüft werden.") from None
+            if not isinstance(tire,dict):
+                raise ValueError("Die gespeicherten Reifenleistungen müssen geprüft werden.")
+            if "kalkulation" in tire and tire["kalkulation"] is not None:
+                from reifenservice import _gepruefter_snapshot
+                calculation=_gepruefter_snapshot(tire["kalkulation"])
+                totals=calculation["gesamt"]
+                gross_offer=(match[2] or "netto").lower() == "brutto"
+                if rate != Decimal(calculation["mwst_satz"]) or (totals["brutto_cent"] != gross if gross_offer else totals["netto_cent"] != net):
+                    raise ValueError("Angebotspreis und gespeicherte Reifenleistungen stimmen nicht überein. Bitte zuerst abgleichen.")
+                # Catalogue totals sum legally rounded gross line amounts; do
+                # not introduce a cent difference by rounding the total again.
+                result.update(netto_cent=totals["netto_cent"],mwst_cent=totals["mwst_cent"],brutto_cent=totals["brutto_cent"],reifen_kalkulation=calculation)
+        return result
 
     def _snapshot(self, db, row, *, lock=False):
         if row["firma_id"]:
