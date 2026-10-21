@@ -269,6 +269,7 @@
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
           {{ csrf_field()|safe }}
           <input type="hidden" name="anliegen" value="{{ formdata.get('anliegen') }}">
+          <input type="hidden" name="leistungsart" value="{{ formdata.get('leistungsart','') }}">
           <input type="hidden" name="besichtigungsart" value="werkstatt">
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}</h2>
@@ -375,6 +376,7 @@
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
             <div class="field full"><label for="anliegen">Anliegen *</label><select id="anliegen" name="anliegen" required>{% for key,label in anliegen_optionen.items() %}{% if key not in kurzanfrage_optionen %}<option value="{{ key }}" {% if formdata.get('anliegen','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></div>
+            <input type="hidden" name="leistungsart" value="{{ formdata.get('leistungsart','') }}">
             <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
             <div class="field"><label for="fahrzeug">Fahrzeug</label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. VW Golf 8" value="{{ formdata.get('fahrzeug','') }}"></div>
             <div class="field"><label for="telefon">Telefon</label><input id="telefon" name="telefon" maxlength="80" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}"><p class="hint">Telefon oder E-Mail ist erforderlich.</p></div>
