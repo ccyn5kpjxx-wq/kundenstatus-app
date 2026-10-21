@@ -73,7 +73,7 @@ def main():
         "Alle Karten ohne JavaScript lesbar und verlinkt": all("hidden" not in card and "inert" not in card for card in deck.cards) and hero_html.count('class="button current-booking"') == 4,
         "Kartenpfeile und Themen sind beschriftete native Buttons": len(deck.controls) == 2 and all(tag == "button" and data.get("type") == "button" and data.get("aria-label") and data.get("aria-controls") == "aktuelle-karten" for tag, data in deck.controls) and len(deck.choices) == 4 and all(tag == "button" and data.get("aria-pressed") in ("true", "false") for tag, data in deck.choices),
         "Kartenwechsel erreichbar und Status barrierearm": deck_script.status_code == 200 and '/static/homepage/aktuelles-karten.js' in html and 'aria-live="polite" aria-atomic="true" data-deck-status' in hero_html,
-        "Bremsenkarte mit Terminlink und vorhandenem Werkstattfoto": '/anfrage?anliegen=bremsenservice#kurzanfrage' in hero_html and 'Bremsentermin online buchen' in hero_html and '/static/homepage/leistungsfotos-v2/bremsenservice.jpg' in hero_html and client.get('/static/homepage/leistungsfotos-v2/bremsenservice.jpg').status_code == 200,
+        "Bremsenkarte mit Anfragelink und vorhandenem Werkstattfoto": '/anfrage?anliegen=bremsenservice#kurzanfrage' in hero_html and 'Bremsen anfragen' in hero_html and 'Bremsentermin online buchen' not in hero_html and '/static/homepage/leistungsfotos-v2/bremsenservice.jpg' in hero_html and client.get('/static/homepage/leistungsfotos-v2/bremsenservice.jpg').status_code == 200,
         "Newslinks starten mit passendem Anliegen": 'value="oelwechsel" checked' in oil_form and 'name="pflege_kategorie"' in care_form,
         "Leistungsuebersicht bleibt vollstaendig ohne zweiten Buchungsbutton": services_html.count('class="service-item"') == 9 and 'href="/leistungen/reifenservice"' in services_html and 'data-reifen-buchung' not in services_html,
         "Umzugshinweis und Stylesheet verfuegbar": "1. November 2026" in html and "Alte Neckarelzer Straße 18" in html and css.status_code == 200,
@@ -265,7 +265,7 @@ def main():
             "Public-only sperrt Admin": public_client.get("/admin").status_code == 404,
             "Public-only sperrt Formularspeicherung": public_client.get("/anfrage").status_code == 404,
             "Homepage verlinkt persistentes Portal": "https://portal.example.test/anfrage?anliegen=" in public_html,
-            "Bremsenbuchung auf oeffentlicher Seite verlinkt Portalhost": 'https://portal.example.test/anfrage?anliegen=bremsenservice#kurzanfrage' in public_html,
+            "Bremsenanfrage auf oeffentlicher Seite verlinkt Portalhost": 'https://portal.example.test/anfrage?anliegen=bremsenservice#kurzanfrage' in public_html,
             "Vorschau blockiert Suchmaschinen": "Disallow: /" in public_client.get("/robots.txt").get_data(as_text=True),
         }
         portal.PUBLIC_SITE_INDEXABLE = True

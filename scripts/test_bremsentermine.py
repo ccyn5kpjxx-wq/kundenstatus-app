@@ -1,6 +1,7 @@
 """Brake enquiries preserve parts information without reserving a workshop slot."""
 from datetime import date, timedelta
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -44,6 +45,47 @@ class BremsenAnfrageTest(unittest.TestCase):
     def latest(self):
         db=portal.get_db();lid=db.execute('SELECT MAX(id) FROM leads').fetchone()[0];db.close()
         return portal.get_lead(lid)
+
+    def test_form_and_confirmation_do_not_offer_a_reserved_appointment(self):
+        response=self.client.get('/anfrage?anliegen=bremsenservice')
+        self.assertEqual(response.status_code,200)
+        html=response.get_data(as_text=True)
+        form=re.search(r'<form class="form-card".*?</form>',html,re.S).group(0)
+        for field in ('name','telefon','fahrzeug','fin','bremsen_achse','teile_qualitaet'):
+            with self.subTest(field=field):
+                tag=re.search(r'<(?:input|select)\b[^>]*name="'+field+r'"[^>]*>',form).group(0)
+                self.assertRegex(tag,r'\brequired\b')
+        self.assertNotIn('name="wunschzeit"',form)
+        self.assertNotIn('Termin buchen',form)
+        self.assertIn('Anfrage senden',form)
+        wish=re.search(r'<input\b[^>]*name="wunschdatum"[^>]*>',form).group(0)
+        self.assertNotRegex(wish,r'\brequired\b')
+        self.assertEqual(self.post().status_code,302)
+        confirmation=self.client.get('/anfrage?gesendet=1').get_data(as_text=True)
+        self.assertIn('Das Absenden reserviert keinen Termin.',confirmation)
+        self.assertNotIn('Ihr Termin ist reserviert:',confirmation)
+
+    def test_parts_choices_survive_validation_and_all_combinations_are_accepted(self):
+        invalid=self.post(telefon='',bremsen_achse='hinten',teile_qualitaet='premium',
+                          name='<script>Beispiel</script>')
+        self.assertEqual(invalid.status_code,400)
+        html=invalid.get_data(as_text=True)
+        self.assertIn('value="hinten" selected',html)
+        self.assertIn('value="premium" selected',html)
+        self.assertIn('value="WVWZZZ1JZXW000001"',html)
+        self.assertIn('&lt;script&gt;Beispiel&lt;/script&gt;',html)
+        self.assertNotIn('<script>Beispiel</script>',html)
+        before=self.counts()
+        for axle in ('vorne','hinten','beide'):
+            for quality in ('preisbewusst','marke','premium'):
+                with self.subTest(axle=axle,quality=quality):
+                    self.assertEqual(self.post(bremsen_achse=axle,teile_qualitaet=quality).status_code,302)
+                    data=self.latest()['portal_data']
+                    self.assertEqual((data['bremsen_achse'],data['teile_qualitaet']),(axle,quality))
+        after=self.counts()
+        self.assertEqual(after['leads'],before['leads']+9)
+        self.assertEqual(after['auftraege'],before['auftraege'])
+        self.assertEqual(after['reifen_termin_slots'],before['reifen_termin_slots'])
 
     def test_request_stores_parts_choices_without_booking_or_order(self):
         before=self.counts()
