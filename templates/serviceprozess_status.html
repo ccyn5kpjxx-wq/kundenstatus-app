@@ -1,0 +1,36 @@
+{# Embedded in an authenticated page. Driver projection contains no money/parties. #}
+<section class="service-process" aria-labelledby="service-process-{{ service_case.id }}">
+  <h2 id="service-process-{{ service_case.id }}">Auftrag &amp; Freigabe</h2>
+  <p><strong>{{ service_case.status }}</strong></p>
+  {% if service_case.revision is defined %}
+    {% if service_case.snapshot.angebot is defined %}
+    <p>{{ service_case.snapshot.angebot.umfang }}</p>
+    <p><strong>{{ ('%.2f'|format(service_case.snapshot.angebot.brutto_cent / 100)).replace('.', ',') }} € brutto</strong>
+      · {{ ('%.2f'|format(service_case.snapshot.angebot.netto_cent / 100)).replace('.', ',') }} € netto
+      · {{ service_case.snapshot.angebot.mwst_satz }} % MwSt.</p>
+    {% endif %}
+    {% if not service_case.angebot_aktuell %}<p>Die Werkstatt prüft den aktuellen Angebotsstand.</p>{% endif %}
+    {% if service_case.parteien %}
+    <dl>
+      <dt>Auftraggeber</dt><dd>{{ service_case.parteien.auftraggeber.name }}</dd>
+      <dt>Kostenfreigabe</dt><dd>{{ service_case.parteien.freigebender.name }}</dd>
+      <dt>Rechnung an</dt><dd>{{ service_case.parteien.rechnungsempfaenger.name }}<br>{{ service_case.parteien.rechnungsempfaenger.strasse }}<br>{{ service_case.parteien.rechnungsempfaenger.plz }} {{ service_case.parteien.rechnungsempfaenger.ort }}</dd>
+      <dt>Zahler</dt><dd>{{ service_case.parteien.zahler.name }}</dd>
+      <dt>Zahlungsweg</dt><dd>{{ 'Zahlung vor Ort' if service_case.parteien.zahlungsweg == 'vor_ort' else 'Firmenrechnung' }}</dd>
+      {% if service_case.parteien.selbstbeteiligung_cent is not none %}<dt>Dokumentierte Selbstbeteiligung</dt><dd>{{ ('%.2f'|format(service_case.parteien.selbstbeteiligung_cent / 100)).replace('.', ',') }} € · {{ service_case.parteien.selbstbeteiligung_quelle }}. Eine Aufteilung der Rechnung wird gesondert geprüft.</dd>{% endif %}
+    </dl>
+    {% endif %}
+    {% if service_case.can_approve and service_approval_action|default('') %}
+    <form method="post" action="{{ service_approval_action }}">
+      {{ csrf_field() }}
+      <input type="hidden" name="revision" value="{{ service_case.revision }}">
+      <input type="hidden" name="snapshot_hash" value="{{ service_case.snapshot_hash }}">
+      <input type="hidden" name="request_id" value="{{ service_request_id }}">
+      {% if service_role == 'werkstatt' %}<label>Vorhandener schriftlicher Freigabenachweis<input name="external_reference" maxlength="500" required placeholder="Dokument / Datum / zuständige Person"></label>{% endif %}
+      <label><input type="checkbox" name="bestaetigt" value="1" required> Leistungsumfang, Kosten und Zuständigkeiten dieser Angebotsfassung sind geprüft.</label>
+      <button type="submit">{{ 'Schriftliche Freigabe dokumentieren' if service_role == 'werkstatt' else 'Kosten freigeben' }}</button>
+    </form>
+    {% endif %}
+    <p>Onlinezahlung ist noch nicht eingerichtet.</p>
+  {% endif %}
+</section>

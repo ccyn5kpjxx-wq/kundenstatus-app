@@ -1,0 +1,21 @@
+{# Workshop-only form; route must map flat names to save_parties' nested data. #}
+<section aria-labelledby="service-responsibility-heading">
+  <h2 id="service-responsibility-heading">Verantwortlichkeiten festlegen</h2>
+  <p>Fahrermeldung, Kostenfreigabe und Zahlung sind getrennte Schritte.</p>
+  <form method="post" action="{{ service_parties_action }}">
+    {{ csrf_field() }}<input type="hidden" name="revision" value="{{ service_case.revision }}">
+    {% for key,label in [('auftraggeber','Auftraggeber'),('freigebender','Kostenfreigebender'),('rechnungsempfaenger','Rechnungsempfänger'),('zahler','Zahler')] %}
+      <label>{{ label }}<input name="{{ key }}_name" value="{{ service_case.parteien.get(key, {}).get('name', '') }}" maxlength="200" required></label>
+    {% endfor %}
+    <label>Persönliche ID des zuständigen Freigebers (falls festgelegt)<input name="freigebender_identity_id" value="{{ service_case.parteien.get('freigebender', {}).get('identity_id', '') }}" maxlength="100"></label>
+    {% for key,label in [('strasse','Rechnungsstraße und Hausnummer'),('plz','Postleitzahl'),('ort','Ort'),('land','Ländercode')] %}
+      <label>{{ label }}<input name="rechnungsempfaenger_{{ key }}" value="{{ service_case.parteien.get('rechnungsempfaenger', {}).get(key, 'DE' if key == 'land' else '') }}" maxlength="200" required></label>
+    {% endfor %}
+    <label>Zahlungsweg<select name="zahlungsweg"><option value="vor_ort" {% if service_case.parteien.get('zahlungsweg') == 'vor_ort' %}selected{% endif %}>Vor Ort</option><option value="firmenrechnung" {% if service_case.parteien.get('zahlungsweg') == 'firmenrechnung' %}selected{% endif %}>Firmenrechnung</option></select></label>
+    <label>Fallart<select name="fallart">{% for key,label in [('direkt','Direktkunde'),('firma','Firmenauftrag'),('extern','Extern gesteuerter / Versicherungsfall')] %}<option value="{{ key }}" {% if service_case.parteien.get('fallart') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Geprüfte Selbstbeteiligung (€), sonst leer<input name="selbstbeteiligung" inputmode="decimal" value="{% if service_case.parteien.get('selbstbeteiligung_cent') is not none %}{{ '%.2f'|format(service_case.parteien.selbstbeteiligung_cent / 100) }}{% endif %}"></label>
+    <label>Nachweis zur Selbstbeteiligung<input name="selbstbeteiligung_quelle" maxlength="500" value="{{ service_case.parteien.get('selbstbeteiligung_quelle', '') }}"></label>
+    <button type="submit">Verantwortlichkeiten speichern</button>
+  </form>
+  <p>Eine Änderung hebt die bisherige Kostenfreigabe auf. Onlinezahlung ist nicht eingerichtet.</p>
+</section>
