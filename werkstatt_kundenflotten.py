@@ -415,6 +415,9 @@ class Kundenflotten:
                 if channel != "keine" and (not consent or (channel == "email" and not email) or (channel in {"telefon", "whatsapp"} and not phone)):
                     raise ValueError("Für den Kontaktkanal bitte Kontaktdaten und die dokumentierte Zustimmung angeben.")
                 previous = db.execute("SELECT name FROM kundenflotten_fahrer WHERE fahrzeug_id=?", (key,)).fetchone()
+                if hasattr(self.p, 'service_access'):
+                    from werkstatt_servicezugang import revoke_vehicle
+                    revoke_vehicle(db, key)
                 db.execute("DELETE FROM kundenflotten_fahrer WHERE fahrzeug_id=?", (key,))
                 db.execute("INSERT INTO kundenflotten_fahrer VALUES (?,?,?,?,?,?,?)", (key, name, email, phone, channel, consent, _timestamp()))
                 self.history(db, key, "fahrer", f"Fahrerzuordnung: {previous['name'] if previous else 'noch keine'} → {name}; Kontaktkanal {channel}. Kein Versand.")

@@ -65,6 +65,9 @@ from werkstatt_kundenflotten import (register_kundenflotten, ensure_kundenflotte
     BACKUP_TABLES as KUNDENFLOTTEN_BACKUP_TABLES, SCHEMA_FEATURE as KUNDENFLOTTEN_SCHEMA_FEATURE,
     CORE_BACKUP_TABLES as KUNDENFLOTTEN_CORE_TABLES, ORDER_SCHEMA_FEATURE as KUNDENFLOTTEN_ORDER_FEATURE,
     PORTAL_TABLES as KUNDENFLOTTEN_PORTAL_TABLES, PORTAL_FEATURE as KUNDENFLOTTEN_PORTAL_FEATURE)
+import werkstatt_servicezugang as servicezugang
+import werkstatt_serviceprozess as serviceprozess
+import werkstatt_erinnerungen as serviceerinnerungen
 
 try:
     import psycopg
@@ -8379,8 +8382,11 @@ MOS_IMPORT_PROTECTED_TABLES = (
 BACKUP_FORMAT_VERSION = 4
 BACKUP_EXTERNALIZED_BINARY_FORMAT_VERSION = 2
 BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
+SERVICE_BACKUP_TABLES = servicezugang.BACKUP_TABLES + serviceprozess.BACKUP_TABLES + serviceerinnerungen.BACKUP_TABLES
+BACKUP_TABLES += SERVICE_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
 BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
+BACKUP_SCHEMA_FEATURES += (servicezugang.SCHEMA_FEATURE, serviceprozess.SCHEMA_FEATURE, serviceerinnerungen.SCHEMA_FEATURE)
 BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
 BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
@@ -11371,6 +11377,9 @@ def init_db():
     )
 
     ensure_kundenflotten_schema(db)
+    servicezugang.ensure_schema(db)
+    serviceprozess.ensure_schema(db)
+    serviceerinnerungen.ensure_schema(db)
     backfill_existing_upload_backups(db)
     backfill_legacy_mietvertrag_versionen(db)
     inspektionscheckliste.init_schema(db)
@@ -12281,6 +12290,19 @@ def schaden_zonen_labels(selected):
     ]
 
 
+def service_status_path(*, lead_id=None, order_id=None):
+    if not globals().get('service_process'):
+        return ''
+    db = get_db()
+    try:
+        row = db.execute('SELECT fahrzeug_id FROM serviceprozesse WHERE ' +
+                         ('auftrag_id=?' if order_id else 'lead_id=?'),
+                         (order_id or lead_id,)).fetchone()
+        return '/service/fahrzeug/' + row['fahrzeug_id'] if row else ''
+    finally:
+        db.close()
+
+
 def kunden_status_url(auftrag, force_request_host=False):
     aktiv = (auftrag or {}).get("kunden_status_aktiv")
     if aktiv is not None and not strict_bool(aktiv):
@@ -12296,7 +12318,8 @@ def kunden_status_url(auftrag, force_request_host=False):
         if force_request_host
         else (PORTAL_BASE_URL or get_public_base_url())
     )
-    path = url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}"
+    path = service_status_path(order_id=(auftrag or {}).get('id')) or (
+        url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}")
     return f"{base}{path}" if base and path.startswith("/") else path
 
 
@@ -12312,7 +12335,8 @@ def lead_kunden_status_url(lead, force_request_host=False):
         if force_request_host
         else (PORTAL_BASE_URL or get_public_base_url())
     )
-    path = url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}"
+    path = service_status_path(lead_id=(lead or {}).get('id')) or (
+        url_for("kunden_status", token=token) if has_request_context() else f"/status/{token}")
     return f"{base}{path}" if base and path.startswith("/") else path
 
 
@@ -18058,7 +18082,7 @@ def build_versicherung_prozesskalender(auftrag, teile=None, prozess=None):
     }
 
 
-def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
+def _legacy_build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
     if auftrag_ist_reifen(auftrag):
         entwurf = reifen_rechnungsentwurf(auftrag)
         kalkulation = entwurf["kalkulation"]
@@ -18137,6 +18161,42 @@ def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
         "lexware_kunden_url": LEXWARE_KUNDEN_URL,
         "lexware_rechnungen_url": LEXWARE_RECHNUNGEN_URL,
     }
+
+
+def managed_service_invoice_context(auftrag, approved, invoice_net_amount=None):
+    offer = approved['snapshot']['angebot']
+    if invoice_net_amount is not None and int((Decimal(str(invoice_net_amount)) * 100).quantize(Decimal('1'))) != offer['netto_cent']:
+        raise ValueError('Rechnungsbetrag und Kostenfreigabe weichen ab. Zusatzarbeiten zuerst erneut freigeben lassen.')
+    # Build solely from the locked, approved version. Never mix an old order's
+    # scope or the reporting driver's contact details into the invoice party.
+    context = {
+        'kunde': {**approved['recipient'], 'email': '', 'telefon': '', 'kontakt_name': '',
+                  'quelle': 'Geprüfter Service-Rechnungsempfänger'},
+        'positionen': [{'bezeichnung': offer['umfang'], 'preis': offer['preis_original']}],
+        'belegtext': f"Service · Auftrag #{auftrag['id']} · {clean_text(auftrag.get('fahrzeug'))} · {clean_text(auftrag.get('kennzeichen'))}",
+        'bonus_text': '', 'bonus_remark': '', 'tax_rate': float(offer['mwst_satz']),
+        'netto_betrag': offer['netto_cent'] / 100,
+    }
+    if auftrag_ist_reifen(auftrag):
+        tire = _legacy_build_lexware_rechnung_context(auftrag, invoice_net_amount)
+        if int((Decimal(str(tire['netto_betrag'])) * 100).quantize(Decimal('1'))) != offer['netto_cent']:
+            raise ValueError('Die ausgeführten Reifenleistungen weichen von der Kostenfreigabe ab.')
+        context.update(reifen_kalkulation=tire['reifen_kalkulation'],
+                       positionen=tire['positionen'], leistungsdatum=tire['leistungsdatum'])
+    return context
+
+
+def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
+    db = get_db()
+    try:
+        approved = service_process.approved_invoice_snapshot(db, auftrag['id'])
+        if approved:
+            fresh = dict(db.execute('SELECT * FROM auftraege WHERE id=?', (auftrag['id'],)).fetchone())
+            return managed_service_invoice_context(fresh, approved, invoice_net_amount)
+    finally:
+        db.rollback()
+        db.close()
+    return _legacy_build_lexware_rechnung_context(auftrag, invoice_net_amount)
 
 
 def parse_money_amount(value):
@@ -21340,7 +21400,7 @@ def create_lexware_contact(kunde):
 
 
 def build_lexware_contact_address(kunde):
-    address = {"countryCode": "DE"}
+    address = {"countryCode": clean_text(kunde.get('land')) or "DE"}
     if clean_text(kunde.get("strasse")):
         address["street"] = clean_text(kunde.get("strasse"))
     if clean_text(kunde.get("plz")):
@@ -21430,6 +21490,22 @@ def build_lexware_invoice_line_item(position, description, net_amount, tax_rate=
 
 
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
+    db = get_db()
+    try:
+        approved = service_process.approved_invoice_snapshot(db, auftrag['id'])
+        if approved:
+            fresh = dict(db.execute('SELECT * FROM auftraege WHERE id=?', (auftrag['id'],)).fetchone())
+            rechnung = managed_service_invoice_context(fresh, approved, net_amount)
+            # Retain source/approval locks across every provider write, including
+            # contact creation. The provider cannot receive a stale approval.
+            return _create_lexware_invoice_draft(fresh, rechnung, net_amount, managed_service=True)
+    finally:
+        db.rollback()
+        db.close()
+    return _create_lexware_invoice_draft(auftrag, rechnung, net_amount)
+
+
+def _create_lexware_invoice_draft(auftrag, rechnung, net_amount, *, managed_service=False):
     contact_id, contact_created, can_reference_contact = ensure_lexware_contact(rechnung["kunde"])
     position = rechnung["positionen"][0] if rechnung["positionen"] else {}
     description = clean_text(rechnung.get("lexware_beschreibung")) or build_invoice_lexware_description(
@@ -21439,7 +21515,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
     remark = (clean_text(rechnung.get("bonus_remark")) or "Vielen Dank für Ihren Auftrag.")[:LEXWARE_REMARK_MAX_LENGTH]
     invoice_address = (
         {"contactId": contact_id}
-        if can_reference_contact
+        if can_reference_contact and not managed_service
         else build_lexware_invoice_address(rechnung["kunde"])
     )
     reifen = rechnung.get("reifen_kalkulation")
@@ -21471,7 +21547,7 @@ def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
             "shippingType": "service" if reifen else "delivery",
         },
         "title": "Rechnung",
-        "introduction": rechnung["belegtext"] if reifen else "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
+        "introduction": rechnung["belegtext"] if reifen or managed_service else "Die ausgeführten Karosserie- und Lackierarbeiten stellen wir Ihnen hiermit in Rechnung.",
         "remark": remark,
     }
     created = lexware_request("POST", "/v1/invoices", payload)
@@ -36265,6 +36341,12 @@ def angebot_annehmen(auftrag_id):
         updates["beschreibung"] = fallback_text
 
     db = get_db()
+    try:
+        service_process.assert_can_accept(db, order_id=auftrag_id)
+    except ValueError as exc:
+        db.rollback()
+        db.close()
+        raise ValueError(str(exc)) from None
     assignments = ", ".join(f"{field}=?" for field in updates)
     db.execute(
         f"UPDATE auftraege SET {assignments} WHERE id=?",
@@ -44647,6 +44729,7 @@ def homepage_portal_links():
         "fahrer_demo": link("oeffentliche_kundenapp_demo", "/kunden-app/demo"),
         "partner": link("partner_login", "/partner"),
         "flotte": link("flottenportal.login", "/flotte/anmelden"),
+        "service": link("serviceapp.index", "/service"),
         "versicherung": link("versicherung_login", "/versicherung"),
         "karriere": link("oeffentliche_karriere", "/karriere"),
     }
@@ -45181,6 +45264,7 @@ def reifenauftrag_aus_buchung(lead_id):
         row = db.execute("SELECT * FROM leads WHERE id=?", (int(lead_id),)).fetchone()
         if not row:
             raise ValueError("Reifenbuchung nicht gefunden.")
+        service_process.assert_can_accept(db, lead_id=int(lead_id))
         lead = dict(row)
         intake = json.loads(lead.get("portal_json") or "{}")
         if not isinstance(intake, dict) or intake.get("anliegen") != "reifenservice":
@@ -45205,6 +45289,10 @@ def reifenauftrag_aus_buchung(lead_id):
         db.execute("UPDATE auftraege SET status=2, annahme_uhrzeit=? WHERE id=?", (hold["uhrzeit"],order_id))
         db.execute("INSERT INTO status_log (auftrag_id,status,zeitstempel) VALUES (?,2,?)", (order_id,now_str()))
         db.execute("UPDATE leads SET auftrag_id=?, status='gewonnen', naechste_aktion='Reifenauftrag bearbeiten', geaendert_am=? WHERE id=?", (order_id,now_str(),int(lead_id)))
+        if db.execute('SELECT id FROM serviceprozesse WHERE lead_id=?', (int(lead_id),)).fetchone():
+            db.execute("UPDATE auftraege SET angebot_status='angenommen',werkstatt_angebot_text=?,werkstatt_angebot_preis=? WHERE id=?", (lead['angebot_text'],lead['angebot_preis'],order_id))
+            db.execute("UPDATE leads SET angebot_status='angenommen' WHERE id=?", (int(lead_id),))
+            service_process.bind_order(lead_id, order_id, db=db)
         db.commit()
     except Exception:
         db.rollback()
@@ -45339,6 +45427,12 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
 def website_anfrage():
     """Zentrales Anfrageformular des Portals für Homepage-Kontakte."""
     if request.method == "POST":
+        service_context = None
+        if request.form.get('service_context'):
+            try:
+                service_context = service_app.validate_submission(request.form['service_context'])
+            except (LookupError, PermissionError) as exc:
+                abort(403, description=str(exc))
         limited, wait_seconds = public_form_rate_limit_status("homepage-anfrage")
         if limited:
             return render_website_anfrage(
@@ -45364,6 +45458,9 @@ def website_anfrage():
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
         kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen in {"reifenservice","bremsenservice"} else ""
+        if service_context:
+            fahrzeug = service_context['vehicle']['modell']
+            kennzeichen = service_context['vehicle']['kennzeichen']
         fin = re.sub(
             r"[^A-Za-z0-9]",
             "",
@@ -45616,6 +45713,10 @@ def website_anfrage():
                     "pflege_kategorien": pflege_kategorien if anliegen == "fahrzeugpflege" else [],
                     "fahrzeugcheck_art": fahrzeugcheck_art if anliegen == "fahrzeugcheck" else "",
                     "reifen_leistungen": reifen_leistungen if anliegen == "reifenservice" else [],
+                    "service_vehicle_id": service_context['vehicle']['id'] if service_context else '',
+                    "service_company_id": service_context['vehicle']['firma_id'] if service_context else '',
+                    "service_reported_by": service_context['actor']['id'] if service_context else '',
+                    "service_reported_role": service_context['actor']['role'] if service_context else '',
                     "kunden_wunsch_annahme_datum": format_date(wunschdatum),
                     "kunden_wunsch_zeitfenster": wunschzeit,
                     "kunden_wunsch_hinweis": nachricht,
@@ -45647,6 +45748,12 @@ def website_anfrage():
                 ],
                 status_code=503,
             )
+        if service_context:
+            try:
+                service_app.bind_request(lead_id, service_context)
+            except (LookupError, PermissionError, ValueError) as exc:
+                delete_lead(lead_id)
+                return render_website_anfrage(formdata=request.form, errors=[str(exc)], status_code=409)
         schedule_change_backup("website-anfrage-erfolgreich")
         sende_website_lead_benachrichtigung(
             lead_id,
@@ -45664,9 +45771,25 @@ def website_anfrage():
             anliegen_label,
         )
         lead = get_lead(lead_id)
-        session["website_anfrage_kundenlink"] = lead["kunden_status_url"]
+        kunden_buchungs_url = (
+            url_for('serviceapp.vehicle', vehicle_id=service_context['vehicle']['id'], _external=True)
+            if service_context else lead["kunden_status_url"]
+        )
+        session["website_anfrage_kundenlink"] = kunden_buchungs_url
         if email:
-            lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email, "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: " + lead["kunden_status_url"])
+            if anliegen == "reifenservice":
+                lead_notice(
+                    lead_id, "Ihr Reifen-Termin ist reserviert", "E-Mail", email,
+                    f"Ihr Reifen-Termin ist reserviert: {format_date(wunschdatum)} · {wunschzeit} Uhr. "
+                    "Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten. "
+                    "Wir reservieren einen Stundenblock mit Planungspuffer. "
+                    "Die Arbeitszeit kann je nach Fahrzeug und Leistungsumfang abweichen. "
+                    "Den genauen Leistungsumfang und Preis stimmen wir mit Ihnen ab. "
+                    "Ihre Buchung und Unterlagen finden Sie hier: " + kunden_buchungs_url,
+                )
+            else:
+                lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email,
+                    ("Ihre Meldung ist angekommen. Den Stand finden Sie in Ihrem geschützten Servicebereich: " if service_context else "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: ") + kunden_buchungs_url)
         notify_lead_workshop(lead_id, "Neue Anfrage")
         session["website_anfrage_gesendet"] = int(lead_id)
         session["website_anfrage_art"] = anliegen
@@ -48761,7 +48884,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     ):
         raise ValueError("Datenpaket ungültig: schema_features ist fehlerhaft.")
     schema_features = {clean_text(feature) for feature in schema_features if clean_text(feature)}
-    required_tables = (set(BACKUP_TABLES) - set(KUNDENFLOTTEN_BACKUP_TABLES)) - {
+    required_tables = (set(BACKUP_TABLES) - set(KUNDENFLOTTEN_BACKUP_TABLES) - set(SERVICE_BACKUP_TABLES)) - {
         "datei_backups",
         "inspektions_checklisten",  # Historical archives predate inspection records.
         "inspektions_checkpunkte",
@@ -48829,6 +48952,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.add("kundenflotten_auftraege")
     if KUNDENFLOTTEN_PORTAL_FEATURE in schema_features:
         required_tables.update(KUNDENFLOTTEN_PORTAL_TABLES)
+    for module in (servicezugang, serviceprozess, serviceerinnerungen):
+        if module.SCHEMA_FEATURE in schema_features:
+            required_tables.update(module.BACKUP_TABLES)
     if "werkstatt_mitarbeiter_einladung_v1" in schema_features:
         required_tables.add("assistent_einladungen")
     if "werkstatt_mitarbeiter_portal_v1" in schema_features:
@@ -49278,6 +49404,8 @@ def ensure_kundenflotten_state_for_import(*, export=None, imported_db=None, targ
             if name in tables and not isinstance(tables[name], list):
                 raise ValueError("Datenpaket ungültig: Kundenflotten-Tabelle ist keine Liste.")
         source_tables = set(tables)
+    servicezugang.ensure_state_for_import(get_db=get_db, export=export, imported_db=imported_db, target=target)
+    serviceprozess.ensure_serviceprocess_for_import(get_db=get_db, export=export, imported_db=imported_db)
     missing = set(KUNDENFLOTTEN_BACKUP_TABLES) - source_tables
     if not missing:
         ensure_originals_for_import(get_db=get_db,reference_map=lambda:backup_binary_reference_map(export),export=export,imported_db=imported_db,target=target)
@@ -51822,91 +51950,103 @@ def copy_lead_attachments_to_order(lead_id, auftrag_id):
 
 
 def create_order_from_accepted_lead(lead, intake):
-    lead = get_lead(int((lead or {}).get("id") or 0))
-    if not lead:
-        raise ValueError("Lead nicht gefunden.")
-    if lead.get("ist_reifenanfrage"):
-        return reifenauftrag_aus_buchung(lead["id"])
-    if lead["auftrag_id"]:
-        return lead["auftrag_id"]
-    if lead["website"] != "auto-lackierzentrum":
-        raise ValueError("Dieser Lead gehört nicht zur Werkstatt-Pipeline.")
-    if lead["angebot_status"] != "angebot_abgegeben":
-        raise ValueError("Das Angebot kann derzeit nicht angenommen werden.")
-
-    jetzt = now_str()
-    auftrag_id = create_auftrag(
-        "lead",
-        autohaus_id=lead["autohaus_id"] or None,
-        kunde_name=lead["kunde_name"],
-        fin_nummer=clean_text(lead["portal_data"].get("fin")) if lead.get("ist_bremsenanfrage") else "",
-        kunde_email=lead["kunde_email"],
-        fahrzeug=lead["fahrzeug"] or "Kundenanfrage",
-        kennzeichen=lead["kennzeichen"],
-        schadenart=lead["schadenart"],
-        beschreibung=lead["beschreibung"],
-        analyse=lead["beschreibung"],
-        kontakt_telefon=lead["kontakt_telefon"],
-        kunden_status_token=lead["kunden_status_token"],
-        schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False),
-        kundenkontakt_kanal="qr",
-        schaden_mietwagen=clean_text(intake.get("kunden_wunsch_ersatzfahrzeug")) or "unbekannt",
-        transport_art=clean_text(intake.get("kunden_wunsch_transport_art")) or "standard",
-        notiz_intern="\n".join(
-            line
-            for line in (
-                f"Nach Angebotsannahme aus Lead #{lead['id']} erstellt.",
-                f"Quelle: {lead['quelle_meta']['label']}.",
-                lead["notiz"],
-            )
-            if line
-        ),
-        werkstatt_angebot_text=lead["angebot_text"],
-        werkstatt_angebot_preis=lead["angebot_preis"],
-        angebotsphase=0,
-        angebot_abgesendet=0,
-    )
+    # Tire reservations already have an atomic conversion path.
+    current = get_lead(int((lead or {}).get("id") or 0))
+    if current and current.get("ist_reifenanfrage"):
+        return reifenauftrag_aus_buchung(current["id"])
     db = get_db()
-    db.execute(
-        """
-        UPDATE auftraege
-        SET angebot_status='angenommen', werkstatt_angebot_text=?,
-            werkstatt_angebot_preis=?, werkstatt_angebot_notiz=?, werkstatt_angebot_am=?,
-            transport_art=?, schaden_mietwagen=?, abhol_adresse=?, werkstatt_neu=1,
-            schaden_aufnahme_json=?, geaendert_am=?
-        WHERE id=?
-        """,
-        (
-            lead["angebot_text"],
-            lead["angebot_preis"],
-            lead["angebot_notiz"],
-            lead["angebot_am"] or jetzt,
-            clean_text(intake.get("kunden_wunsch_transport_art")) or "standard",
-            clean_text(intake.get("kunden_wunsch_ersatzfahrzeug")) or "unbekannt",
-            clean_text(intake.get("kunden_wunsch_abhol_adresse")),
-            json.dumps(intake, ensure_ascii=False),
-            jetzt,
-            int(auftrag_id),
-        ),
-    )
-    db.execute(
-        """
-        UPDATE leads
-        SET auftrag_id=?, status='gewonnen', angebot_status='angenommen',
-            angebot_angenommen_am=?, portal_json=?,
-            naechste_aktion='Terminwünsche prüfen und Auftrag einplanen', geaendert_am=?
-        WHERE id=? AND COALESCE(auftrag_id, 0)=0
-        """,
-        (
-            int(auftrag_id),
-            jetzt,
-            json.dumps(intake, ensure_ascii=False),
-            jetzt,
-            int(lead["id"]),
-        ),
-    )
-    db.commit()
-    db.close()
+    try:
+        lead_id = int((lead or {}).get("id") or 0)
+        db.execute("UPDATE leads SET id=id WHERE id=?", (lead_id,))
+        lead = get_lead(lead_id)
+        if not lead:
+            raise ValueError("Lead nicht gefunden.")
+        if lead["auftrag_id"]:
+            return lead["auftrag_id"]
+        if lead["website"] != "auto-lackierzentrum":
+            raise ValueError("Dieser Lead gehört nicht zur Werkstatt-Pipeline.")
+        if lead["angebot_status"] != "angebot_abgegeben":
+            raise ValueError("Das Angebot kann derzeit nicht angenommen werden.")
+
+        service_process.assert_can_accept(db, lead_id=lead["id"])
+        jetzt = now_str()
+        auftrag_id = create_auftrag(
+            "lead",
+            autohaus_id=lead["autohaus_id"] or None,
+            kunde_name=lead["kunde_name"],
+            fin_nummer=clean_text(lead["portal_data"].get("fin")) if lead.get("ist_bremsenanfrage") else "",
+            kunde_email=lead["kunde_email"],
+            fahrzeug=lead["fahrzeug"] or "Kundenanfrage",
+            kennzeichen=lead["kennzeichen"],
+            schadenart=lead["schadenart"],
+            beschreibung=lead["beschreibung"],
+            analyse=lead["beschreibung"],
+            kontakt_telefon=lead["kontakt_telefon"],
+            kunden_status_token=lead["kunden_status_token"],
+            schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False),
+            kundenkontakt_kanal="qr",
+            schaden_mietwagen=clean_text(intake.get("kunden_wunsch_ersatzfahrzeug")) or "unbekannt",
+            transport_art=clean_text(intake.get("kunden_wunsch_transport_art")) or "standard",
+            notiz_intern="\n".join(
+                line
+                for line in (
+                    f"Nach Angebotsannahme aus Lead #{lead['id']} erstellt.",
+                    f"Quelle: {lead['quelle_meta']['label']}.",
+                    lead["notiz"],
+                )
+                if line
+            ),
+            werkstatt_angebot_text=lead["angebot_text"],
+            werkstatt_angebot_preis=lead["angebot_preis"],
+            angebotsphase=0,
+            angebot_abgesendet=0,
+            _db=db,
+        )
+        db.execute(
+            """
+            UPDATE auftraege
+            SET angebot_status='angenommen', werkstatt_angebot_text=?,
+                werkstatt_angebot_preis=?, werkstatt_angebot_notiz=?, werkstatt_angebot_am=?,
+                transport_art=?, schaden_mietwagen=?, abhol_adresse=?, werkstatt_neu=1,
+                schaden_aufnahme_json=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (
+                lead["angebot_text"],
+                lead["angebot_preis"],
+                lead["angebot_notiz"],
+                lead["angebot_am"] or jetzt,
+                clean_text(intake.get("kunden_wunsch_transport_art")) or "standard",
+                clean_text(intake.get("kunden_wunsch_ersatzfahrzeug")) or "unbekannt",
+                clean_text(intake.get("kunden_wunsch_abhol_adresse")),
+                json.dumps(intake, ensure_ascii=False),
+                jetzt,
+                int(auftrag_id),
+            ),
+        )
+        db.execute(
+            """
+            UPDATE leads
+            SET auftrag_id=?, status='gewonnen', angebot_status='angenommen',
+                angebot_angenommen_am=?, portal_json=?,
+                naechste_aktion='Terminwünsche prüfen und Auftrag einplanen', geaendert_am=?
+            WHERE id=? AND COALESCE(auftrag_id, 0)=0
+            """,
+            (
+                int(auftrag_id),
+                jetzt,
+                json.dumps(intake, ensure_ascii=False),
+                jetzt,
+                int(lead["id"]),
+            ),
+        )
+        service_process.bind_order(lead["id"], auftrag_id, db=db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     copy_lead_attachments_to_order(lead["id"], auftrag_id)
     details = [
         "Der Kunde hat das Werkstatt-Angebot im persönlichen Lead-Portal angenommen.",
@@ -51925,7 +52065,6 @@ def create_order_from_accepted_lead(lead, intake):
         quelle="kunde",
     )
     return auftrag_id
-
 
 @app.route("/admin/leads/<int:lead_id>/angebot", methods=["POST"])
 @admin_required
@@ -52034,6 +52173,13 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
     abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
 
     db = get_db()
+    if neuer_status >= 3:
+        try:
+            service_process.assert_can_start(db, auftrag_id)
+        except ValueError as exc:
+            db.rollback()
+            db.close()
+            abort(409, description=str(exc))
     db.execute(
         """
         UPDATE auftraege
@@ -52864,13 +53010,25 @@ def rechnung_schreiben(auftrag_id):
     if auftrag["status"] < 5:
         flash("Rechnung am besten erst nach Zurückgabe schreiben.", "warning")
 
+    try:
+        invoice_context = build_lexware_rechnung_context(auftrag)
+    except (ValueError, PermissionError) as exc:
+        return service_invoice_review_needed(auftrag_id, exc)
     return render_template(
         "rechnung.html",
         auftrag=auftrag,
-        rechnung=build_lexware_rechnung_context(auftrag),
+        rechnung=invoice_context,
         rechnung_vorhanden=invoice_preflight_exists(auftrag),
         rechnungsdateien=[d for d in list_dateien(auftrag_id) if d.get("kategorie") in {"rechnung", "bonusrechnung"}],
     )
+
+
+def service_invoice_review_needed(auftrag_id, error):
+    case_id = service_process.case_for_order(auftrag_id)
+    if case_id and app.config.get('SERVICE_APP_ENABLED'):
+        flash('Rechnung noch nicht freigegeben: ' + str(error), 'warning')
+        return redirect(url_for('serviceapp.admin_case', case_id=case_id), code=303)
+    abort(409, description=str(error))
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/rechnung/lexware", methods=["POST"])
@@ -52902,7 +53060,7 @@ def lexware_rechnung_erstellen(auftrag_id):
             kunde = entwurf["kunde"]
             if not entwurf["kalkulation"] or request.form.get("reifen_revision") != entwurf["revision"]:
                 raise ValueError("Die Reifenleistungen wurden geändert. Bitte neu prüfen.")
-            if not all(kunde.get(k) for k in ("name","strasse","plz","ort")):
+            if not service_process.case_for_order(auftrag_id) and not all(kunde.get(k) for k in ("name","strasse","plz","ort")):
                 raise ValueError("Bitte die vollständige Rechnungsadresse ergänzen.")
             net_amount = entwurf["kalkulation"]["gesamt"]["netto_cent"]/100
         else:
@@ -52913,7 +53071,10 @@ def lexware_rechnung_erstellen(auftrag_id):
     if not net_amount or net_amount <= 0:
         flash("Bitte einen Netto-Rechnungsbetrag eintragen.", "warning")
         return redirect(url_for("rechnung_schreiben", auftrag_id=auftrag_id))
-    rechnung = build_lexware_rechnung_context(auftrag, invoice_net_amount=net_amount)
+    try:
+        rechnung = build_lexware_rechnung_context(auftrag, invoice_net_amount=net_amount)
+    except (ValueError, PermissionError) as exc:
+        return service_invoice_review_needed(auftrag_id, exc)
 
     confirmed = price_state(auftrag.get("preisstand_json")).get("kunde") or {}
     if not reifen and confirmed and decimal_input(confirmed['netto']) != decimal_input(str(net_amount)):
@@ -53854,13 +54015,16 @@ def accept_lead_offer_from_portal(token, lead):
             "kunden_wunsch_bestaetigt_am": "",
         }
     )
+    try:
+        create_order_from_accepted_lead(lead, intake)
+    except (ValueError, PermissionError) as exc:
+        abort(409, description=str(exc))
     add_lead_portal_event(
         lead["id"],
         "Angebot angenommen",
         "Das Angebot wurde verbindlich angenommen. Die Werkstatt prüft jetzt die Terminwünsche.",
         quelle="kunde",
     )
-    create_order_from_accepted_lead(lead, intake)
     schedule_change_backup("lead-angebot-angenommen-auftrag")
     flash(
         "Vielen Dank. Ihr Auftrag ist jetzt angelegt; die Werkstatt bestätigt als Nächstes Ihre Terminwünsche.",
@@ -59241,6 +59405,34 @@ employee_portal_init_schema = employee_portal.init_schema
 from werkstatt_mitarbeiter_app import register_employee_app
 register_employee_app(sys.modules[__name__])
 kundenflotten = register_kundenflotten(sys.modules[__name__])
+app.config['SERVICE_APP_ENABLED'] = env_flag('SERVICE_APP_ENABLED', False)
+service_access = servicezugang.register_service_access(sys.modules[__name__], kundenflotten)
+service_process = serviceprozess.ServiceProcess(sys.modules[__name__], kundenflotten)
+
+
+def service_actor_current(db, actor):
+    # Actors are constructed server-side by authenticated routes, never from a form.
+    if actor.get('role') == 'werkstatt':
+        return True
+    if actor.get('role') == 'fuhrparkleitung':
+        row = db.execute('SELECT firma_id,version,aktiv FROM kundenflotten_zugaenge WHERE id=?', (actor.get('id'),)).fetchone()
+        return bool(row and row['aktiv'] == 1 and row['version'] == actor.get('version') and row['firma_id'] == actor.get('company_id'))
+    return False
+
+
+def service_assignment_context(db, company_id, vehicle_id):
+    driver = db.execute('SELECT * FROM kundenflotten_fahrer WHERE fahrzeug_id=?', (vehicle_id,)).fetchone()
+    fingerprint = servicezugang.driver_fingerprint(driver)
+    rows = db.execute('''SELECT a.id,a.version,z.version AS zugang_version FROM service_zuordnungen a
+        JOIN service_zugaenge z ON z.id=a.zugang_id AND z.aktiv=1
+        WHERE a.firma_id=? AND a.fahrzeug_id=? AND a.aktiv=1 AND a.fahrer_fingerprint=? ORDER BY a.id''',
+        (company_id,vehicle_id,fingerprint)).fetchall()
+    return {'active': bool(rows), 'assignments': [dict(row) for row in rows]}
+
+
+service_reminders = serviceerinnerungen.ReminderService(sys.modules[__name__], kundenflotten, assignment_context=service_assignment_context)
+from werkstatt_serviceapp import register_service_app
+service_app = register_service_app(sys.modules[__name__], kundenflotten)
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
 # and the shared workshop login remain independent.

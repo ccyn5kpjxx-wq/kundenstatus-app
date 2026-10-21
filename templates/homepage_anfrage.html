@@ -282,6 +282,7 @@
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
           {{ csrf_field()|safe }}
+          {% if formdata.get("service_context") %}<input type="hidden" name="service_context" value="{{ formdata.get('service_context') }}"><p class="hint">Dem ausgewählten Firmenfahrzeug zugeordnet. <a href="/service">Zur Service-App</a>. Kostenfreigabe durch die zuständige Person.</p>{% endif %}
           <input type="hidden" name="anliegen" value="{{ formdata.get('anliegen') }}">
           <input type="hidden" name="leistungsart" value="{{ formdata.get('leistungsart','') }}">
           <input type="hidden" name="besichtigungsart" value="werkstatt">
@@ -390,6 +391,7 @@
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
           {{ csrf_field()|safe }}
+          {% if formdata.get("service_context") %}<input type="hidden" name="service_context" value="{{ formdata.get('service_context') }}"><p class="hint">Dem ausgewählten Firmenfahrzeug zugeordnet. <a href="/service">Zur Service-App</a>. Kostenfreigabe durch die zuständige Person.</p>{% endif %}
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>Was können wir für Sie tun?</h2>
           <p class="form-intro">Pflichtfelder sind mit * gekennzeichnet.</p>

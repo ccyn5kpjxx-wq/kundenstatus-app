@@ -21,6 +21,7 @@
       <span class="eyebrow">Gärtner · Portale &amp; Zugänge</span>
       <h1 id="portal-title">{{ 'Ihr Geschäftszugang.' if business_access else 'Ihr Zugang. Ganz einfach.' }}</h1>
       <p>{{ 'Autohaus, Fuhrpark oder Versicherung: Öffnen Sie direkt Ihren geschützten Bereich.' if business_access else 'Für Ihr eigenes Fahrzeug oder für die Zusammenarbeit mit Ihrem Unternehmen.' }}</p>
+      {% if config.SERVICE_APP_ENABLED %}<p><a class="button red" href="{{ portal_links.service }}">Service-App öffnen →</a><br>Service melden, Reifentermin buchen oder eigene Fahrzeuge verwalten.</p>{% endif %}
     </section>
     <section class="portal-choices {{ 'business-choices' if business_access else '' }}" aria-label="{{ 'Geschäftszugänge' if business_access else 'Zugang auswählen' }}">
       {% if business_access %}
