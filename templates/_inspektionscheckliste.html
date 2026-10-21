@@ -1,0 +1,133 @@
+{% set pruefliste = auftrag.get('inspektionscheckliste', {}) %}
+{% if pruefliste.get('sichtbar') %}
+<section class="inspektionscheckliste" id="inspektionscheckliste" aria-labelledby="inspektionscheckliste-titel" data-order-module="arbeiten">
+  <div class="inspektionscheckliste-kopf">
+    <div>
+      <p class="inspektionscheckliste-kicker">Arbeitsplan · Inspektion</p>
+      <h2 id="inspektionscheckliste-titel">Inspektionscheckliste</h2>
+    </div>
+    {% if pruefliste.get('vorhanden') %}
+    <span class="inspektionscheckliste-stand">{{ pruefliste['gesamt'] - pruefliste['offen'] }} von {{ pruefliste['gesamt'] }} bearbeitet</span>
+    {% endif %}
+  </div>
+  {% if pruefliste.get('vorhanden') %}
+    <p class="inspektionscheckliste-hinweis">{{ pruefliste['vorlage_titel'] }}</p>
+    <progress class="inspektionscheckliste-fortschritt" value="{{ pruefliste['gesamt'] - pruefliste['offen'] }}" max="{{ pruefliste['gesamt'] or 1 }}" aria-label="Bearbeitete Inspektionspunkte">{{ pruefliste['gesamt'] - pruefliste['offen'] }} von {{ pruefliste['gesamt'] }}</progress>
+    <ul class="inspektionscheckliste-zaehler" aria-label="Gespeicherte Prüfergebnisse">
+      <li class="erledigt">{{ pruefliste['erledigt'] }} erledigt</li>
+      <li class="mangel">{{ pruefliste['mangel'] }} Mangel</li>
+      <li class="nicht_zutreffend">{{ pruefliste['nicht_zutreffend'] }} nicht zutreffend</li>
+      <li class="offen">{{ pruefliste['offen'] }} offen</li>
+    </ul>
+    {% if pruefliste.get('hinweis') %}<p class="inspektionscheckliste-hinweis">{{ pruefliste['hinweis'] }}</p>{% endif %}
+    {% if pruefliste.get('bearbeitbar') %}
+    <p class="inspektionscheckliste-bedienung">Prüfpunkt öffnen, Ergebnis und Befund eintragen, dann <strong>einzeln speichern</strong>. Erst danach den nächsten Punkt bearbeiten.</p>
+    {% else %}
+    <p class="inspektionscheckliste-bedienung">Diese Checkliste ist zur Ansicht geöffnet. Änderungen sind in diesem Auftragsstand nicht möglich.</p>
+    {% endif %}
+    {% set ergebnisse = [('offen', 'Offen'), ('erledigt', 'Erledigt'), ('mangel', 'Mangel'), ('nicht_zutreffend', 'Nicht zutreffend')] %}
+    {% set gruppenstand = namespace(name=none) %}
+    {% for punkt in pruefliste['punkte'] %}
+      {% if punkt['gruppe'] != gruppenstand.name %}
+      <h3 class="inspektionscheckliste-gruppe">{{ punkt['gruppe'] }}</h3>
+      {% set gruppenstand.name = punkt['gruppe'] %}
+      {% endif %}
+      <details class="inspektionspunkt" id="inspektionspunkt-{{ punkt['id'] }}"{% if punkt['ergebnis'] == 'mangel' %} open{% endif %}>
+        <summary>
+          <span class="inspektionspunkt-titel">{{ punkt['titel'] }}</span>
+          <span class="inspektionspunkt-status {{ punkt['ergebnis'] }}">{% for key, label in ergebnisse %}{% if punkt['ergebnis'] == key %}{{ label }}{% endif %}{% endfor %}</span>
+        </summary>
+        <div class="inspektionspunkt-inhalt">
+          {% if punkt['hinweis'] %}<p class="inspektionscheckliste-hinweis" id="inspektionspunkt-hinweis-{{ punkt['id'] }}">{{ punkt['hinweis'] }}</p>{% endif %}
+          {% if pruefliste.get('bearbeitbar') %}
+          <form method="POST" action="{{ url_for('werkstatt_inspektionscheckliste_punkt', auftrag_id=auftrag['id'], punkt_id=punkt['id']) }}" data-inspektionspunkt-form>
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="version" value="{{ punkt['version'] }}">
+            <input type="hidden" name="next" value="{{ inspektionscheckliste_next }}#inspektionspunkt-{{ punkt['id'] }}">
+            <label for="inspektionspunkt-ergebnis-{{ punkt['id'] }}">Ergebnis</label>
+            <select id="inspektionspunkt-ergebnis-{{ punkt['id'] }}" name="ergebnis"{% if punkt['hinweis'] %} aria-describedby="inspektionspunkt-hinweis-{{ punkt['id'] }}"{% endif %}>
+              {% for key, label in ergebnisse %}<option value="{{ key }}"{% if punkt['ergebnis'] == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <label for="inspektionspunkt-notiz-{{ punkt['id'] }}">Befund / Notiz</label>
+            <textarea id="inspektionspunkt-notiz-{{ punkt['id'] }}" name="notiz" rows="2" maxlength="600" aria-describedby="inspektionspunkt-begruendung-{{ punkt['id'] }}" placeholder="Zum Beispiel Messwert, gewechseltes Teil oder festgestellter Mangel">{{ punkt['notiz'] or '' }}</textarea>
+            <p class="inspektionscheckliste-hinweis" id="inspektionspunkt-begruendung-{{ punkt['id'] }}">Bei „Mangel“ oder „Nicht zutreffend“ ist eine Begründung erforderlich.</p>
+            <div class="inspektionspunkt-aktionen"><button type="submit">Prüfpunkt speichern</button><span data-inspektionspunkt-ungespeichert hidden>Noch nicht gespeichert</span></div>
+          </form>
+          {% elif punkt['notiz'] %}
+          <p class="inspektionspunkt-notiz">{{ punkt['notiz'] }}</p>
+          {% else %}
+          <p class="inspektionscheckliste-hinweis">Kein Befund eingetragen.</p>
+          {% endif %}
+          {% if punkt['geaendert_am'] %}<p class="inspektionspunkt-aktualisiert">Gespeichert: {{ punkt['geaendert_am'] }}{% if punkt['geaendert_von'] %} · {{ punkt['geaendert_von'] }}{% endif %}</p>{% endif %}
+        </div>
+      </details>
+    {% endfor %}
+    <p class="inspektionscheckliste-fuss">Ein Mangel ist zu prüfen und mit dem Büro abzustimmen. Das Abhaken ändert den Auftragsstatus nicht.</p>
+  {% else %}
+    <p class="inspektionscheckliste-hinweis">Für diesen Inspektionsauftrag ist noch keine Checkliste angelegt.</p>
+    {% if pruefliste.get('anlegbar') %}
+    <p class="inspektionscheckliste-hinweis">Die Vorlage enthält Prüf- und Wartungspunkte. Den fahrzeugspezifischen Umfang vor Arbeitsbeginn mit Wartungsplan, Kilometerstand und Wartungshistorie abgleichen.</p>
+    <details>
+      <summary>Vorlage prüfen ({{ pruefliste.get('vorlage_punkte', [])|length }} Punkte)</summary>
+      <p class="inspektionscheckliste-hinweis">{{ pruefliste['vorlage_titel'] }}</p>
+      <ol>
+        {% for vorlagenpunkt in pruefliste.get('vorlage_punkte', []) %}
+        <li>
+          <strong>{{ vorlagenpunkt['gruppe'] }}: {{ vorlagenpunkt['titel'] }}</strong>
+          {% if vorlagenpunkt['hinweis'] %}<p class="inspektionscheckliste-hinweis">{{ vorlagenpunkt['hinweis'] }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </details>
+    <form method="POST" action="{{ url_for('admin_inspektionscheckliste_anlegen', auftrag_id=auftrag['id']) }}">
+      {{ csrf_field()|safe }}
+      <input type="hidden" name="next" value="{{ inspektionscheckliste_next }}#inspektionscheckliste">
+      <button type="submit">Inspektionscheckliste aus Vorlage anlegen</button>
+    </form>
+    {% else %}
+    <p class="inspektionscheckliste-bedienung">Bitte das Büro bitten, den Prüfumfang festzulegen und die Checkliste anzulegen.</p>
+    {% endif %}
+  {% endif %}
+</section>
+<script>
+(() => {
+  const checkliste = document.getElementById('inspektionscheckliste');
+  if (!checkliste) return;
+  const formulare = [...checkliste.querySelectorAll('[data-inspektionspunkt-form]')];
+  const stand = form => JSON.stringify([form.elements.ergebnis.value, form.elements.notiz.value]);
+  const gespeichert = new Map(formulare.map(form => [form, stand(form)]));
+  let wirdGespeichert = null;
+  const ungespeichert = () => formulare.some(form => form !== wirdGespeichert && stand(form) !== gespeichert.get(form));
+  const aktualisieren = () => {
+    window.inspektionschecklisteUngespeichert = ungespeichert();
+    formulare.forEach(form => { form.querySelector('[data-inspektionspunkt-ungespeichert]').hidden = stand(form) === gespeichert.get(form); });
+  };
+  formulare.forEach(form => {
+    form.addEventListener('input', aktualisieren);
+    form.addEventListener('change', aktualisieren);
+    form.addEventListener('submit', event => {
+      wirdGespeichert = form;
+      aktualisieren();
+      setTimeout(() => {
+        if (event.defaultPrevented && wirdGespeichert === form) { wirdGespeichert = null; aktualisieren(); }
+      }, 0);
+    });
+  });
+  window.addEventListener('beforeunload', event => {
+    if (ungespeichert()) {
+      event.preventDefault(); event.returnValue = '';
+      // If navigation is cancelled, every edited point must remain protected.
+      setTimeout(() => { wirdGespeichert = null; aktualisieren(); }, 0);
+    }
+  });
+  window.addEventListener('pageshow', () => { wirdGespeichert = null; aktualisieren(); });
+  const punktOeffnen = () => {
+    if (!location.hash.startsWith('#inspektionspunkt-')) return;
+    const punkt = document.getElementById(location.hash.slice(1));
+    if (punkt && checkliste.contains(punkt)) punkt.open = true;
+  };
+  punktOeffnen();
+  window.addEventListener('hashchange', punktOeffnen);
+})();
+</script>
+{% endif %}

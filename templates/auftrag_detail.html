@@ -2,6 +2,7 @@
 {% block title %}{{ auftrag['auftragsart_label'] }} · Auftragsdetails{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='inspektionscheckliste.css') }}">
 <style>
   .process-panel {
     background: linear-gradient(135deg, rgba(247, 241, 232, .96), rgba(255, 253, 249, .96));
@@ -289,6 +290,7 @@
 <section class="page-card p-4 mb-3" id="order-work-summary">
   <div class="d-flex justify-content-between flex-wrap gap-2"><h2 class="h5">Was ist zu tun?</h2><a href="#auftragsdaten" class="small">Arbeiten bearbeiten</a></div>
   <p class="mb-0 text-break">{{ auftrag['analyse_text'] or auftrag['werkstatt_angebot_text_display'] or 'Arbeitsumfang im Auftrag ergänzen.' }}</p>
+  {% if auftrag.get('inspektionscheckliste', {}).get('sichtbar') %}<p class="mt-2 mb-0"><a href="#inspektionscheckliste">Inspektionscheckliste öffnen →</a></p>{% endif %}
   {% if auftrag['beschreibung'] %}<details class="mt-2"><summary>Vollständigen Arbeitsumfang lesen</summary><div class="mt-2 text-break" style="white-space:pre-wrap">{{ auftrag['beschreibung'] }}</div></details>{% endif %}
   {% if auftrag['analyse_pruefen'] and not auftrag['analyse_werkstatt_geprueft'] %}<div class="order-next"><strong>Nächster Schritt:</strong> Dokumentdaten prüfen. <a href="#dokument-pruefung">Prüfansicht öffnen</a></div>
   {% elif auftrag['status']|int in [2,3] and not auftrag['fertig_datum'] %}<div class="order-next"><strong>Nächster Schritt:</strong> Fertigstellung abstimmen. <a href="#auftragsdaten">Termin ergänzen</a></div>
@@ -310,6 +312,9 @@
           <span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }}">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
         </div>
       </div>
+
+      {% set inspektionscheckliste_next = url_for('auftrag_detail', auftrag_id=auftrag['id']) %}
+      {% include '_inspektionscheckliste.html' %}
 
       {% if auftrag['status'] == 1 and auftrag['quelle'] == 'werkstatt' %}
       <div class="alert alert-warning border border-warning-subtle mb-4">
@@ -1509,7 +1514,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function category(node){
     if(node.id==='preise'||node.id==='werkstatt-angebot')return 'preise';
     if(node.id==='dateifreigaben'||node.id==='dokument-pruefung'||node.dataset.orderModule==='dokumente')return 'dokumente';
-    if(node.id==='kundenkommunikation'||node.matches('form[data-upload-form]'))return 'arbeiten';
+    if(node.id==='kundenkommunikation'||node.dataset.orderModule==='arbeiten'||node.matches('form[data-upload-form]'))return 'arbeiten';
     if(node.classList.contains('process-panel'))return 'uebersicht';
     const title=(node.querySelector('h3,h4,summary')?.textContent||'').trim();
     if(/Rechnung|Bonus|Angebot/.test(title))return 'preise';

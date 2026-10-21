@@ -54,6 +54,7 @@ from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_re
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
+import inspektionscheckliste
 import mos_handover
 import mos_order_receipt
 import mos_public_booking
@@ -8254,6 +8255,8 @@ BACKUP_TABLES = (
     "fahrzeugverkaeufe",
     "fahrzeugverkauf_dateien",
     "auftraege",
+    "inspektions_checklisten",
+    "inspektions_checkpunkte",
     "kunden_termin_mail_versand",
     "mietfahrzeuge",
     "mietvorgaenge",
@@ -8379,6 +8382,7 @@ BACKUP_TABLES += KUNDENFLOTTEN_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2", "werkstatt_avatar_v1", "werkstatt_avatar_uploads_v1", "werkstatt_mailquellen_v1", "werkstatt_personal_v1", "werkstatt_materialfotos_v1", "werkstatt_gedaechtnis_v1", "werkstatt_einkaufseingang_v1", "werkstatt_materialautomatik_v1", "werkstatt_materialdialog_v1", "werkstatt_bestellvergleich_v1", "werkstatt_liefereingang_v1", "werkstatt_mitarbeiter_einladung_v1", "werkstatt_mitarbeiter_portal_v1", "werkstatt_arbeitsvertraege_v1", "werkstatt_schule_v1", "werkstatt_krankheit_v1", "werkstatt_bestellbestaetigung_v1")
 BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
 BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
+BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
     "kundenflotten_belege": {
         "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
@@ -11369,6 +11373,7 @@ def init_db():
     ensure_kundenflotten_schema(db)
     backfill_existing_upload_backups(db)
     backfill_legacy_mietvertrag_versionen(db)
+    inspektionscheckliste.init_schema(db)
 
     db.commit()
     db.close()
@@ -32433,6 +32438,8 @@ def delete_auftrag(auftrag_id, safety_backup=True):
     db.execute("DELETE FROM whatsapp_nachrichten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM kunden_termin_mail_versand WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM lieferanten_anfragen WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM inspektions_checkpunkte WHERE auftrag_id=?", (auftrag_id,))
+    db.execute("DELETE FROM inspektions_checklisten WHERE auftrag_id=?", (auftrag_id,))
     db.execute("UPDATE leads SET auftrag_id=NULL WHERE auftrag_id=?", (auftrag_id,))
     db.execute("DELETE FROM auftraege WHERE id=?", (auftrag_id,))
     db.commit()
@@ -48748,6 +48755,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     schema_features = {clean_text(feature) for feature in schema_features if clean_text(feature)}
     required_tables = (set(BACKUP_TABLES) - set(KUNDENFLOTTEN_BACKUP_TABLES)) - {
         "datei_backups",
+        "inspektions_checklisten",  # Historical archives predate inspection records.
+        "inspektions_checkpunkte",
         "reifen_termin_slots",  # Historical backups predate online tire bookings.
         "fahrzeugeinkauf_scan_treffer",
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
@@ -48849,6 +48858,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.update({"assistent_mailquellen_laeufe", "assistent_mailquellen_ordner",
                                 "assistent_mailquellen_nachrichten", "assistent_mailquellen_absender",
                                 "assistent_mailquellen_dateien"})
+    if inspektionscheckliste.SCHEMA_FEATURE in schema_features:
+        required_tables.update(inspektionscheckliste.BACKUP_TABLES)
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
@@ -49109,6 +49120,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
         ensure_employee_private_state_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
         ensure_employee_orders_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
         ensure_material_external_claims_for_import(export=export, target=target, archive=archive, names=names)
+        inspektionscheckliste.ensure_state_for_import(sys.modules[__name__], export=export, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -49196,6 +49208,7 @@ def import_sqlite_rows_into_current_database(imported_db):
         ensure_employee_private_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_employee_orders_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_material_external_claims_for_import(imported_db=imported_db, target=target)
+        inspektionscheckliste.ensure_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         for table_name in reversed(BACKUP_TABLES):
             target.execute(f"DELETE FROM {table_name}")
 
@@ -49479,6 +49492,7 @@ def admin_daten_import():
                     ensure_employee_invitation_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_employee_private_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
                     ensure_employee_orders_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
+                    inspektionscheckliste.ensure_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_material_external_claims_for_import(
                         export=backup_export, imported_db=imported_db, archive=archive, names=names
                     )
@@ -50305,6 +50319,7 @@ def auftrag_detail(auftrag_id):
     chat_nachrichten = list_chat_nachrichten(auftrag_id)
     mark_chat_gelesen(auftrag_id, "admin")
     versicherung_prozess = build_versicherung_prozess(auftrag, dateien, context="admin") if auftrag.get("versicherung_id") else None
+    inspektionscheckliste.load_many(sys.modules[__name__], [auftrag], admin=True)
     return render_template(
         "auftrag_detail.html",
         auftrag=auftrag,
@@ -54859,6 +54874,86 @@ def werkstatt_tafel_guard():
     return redirect(url_for("werkstatt_login"))
 
 
+def inspektionscheckliste_ziel(auftrag_id, *, admin=False):
+    """Only return to this order or the internal board; no caller-provided hosts."""
+    fallback = url_for("auftrag_detail" if admin else "werkstatt_auftrag", auftrag_id=auftrag_id)
+    value = clean_text(request.form.get("next"))
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return fallback + "#inspektionscheckliste"
+    allowed = {url_for("werkstatt_auftrag", auftrag_id=auftrag_id), url_for("werkstatt_tafel")}
+    if admin:
+        allowed.add(url_for("auftrag_detail", auftrag_id=auftrag_id))
+    if (parsed.scheme or parsed.netloc or parsed.query or parsed.path not in allowed
+            or "\\" in value or any(ord(char) < 32 for char in value)):
+        return fallback + "#inspektionscheckliste"
+    if parsed.fragment and not re.fullmatch(r"inspektionscheckliste|inspektionspunkt-\d+", parsed.fragment):
+        return parsed.path + "#inspektionscheckliste"
+    return value
+
+
+def inspektionscheckliste_antwort(auftrag_id, *, punkt=None, angelegt=None, status=200):
+    if request.headers.get("X-Requested-With") == "fetch":
+        db = get_db()
+        try:
+            order = dict(db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone())
+        finally:
+            db.close()
+        inspektionscheckliste.load_many(sys.modules[__name__], [order], admin=bool(session.get("admin")))
+        return jsonify({"ok": True, "punkt": punkt, "angelegt": angelegt,
+                        "inspektionscheckliste": order["inspektionscheckliste"]}), status
+    flash("Inspektionscheckliste angelegt." if angelegt else
+          ("Die vorhandene Inspektionscheckliste bleibt erhalten." if angelegt is False
+           else "Prüfpunkt gespeichert."), "success")
+    return redirect(inspektionscheckliste_ziel(auftrag_id, admin=bool(session.get("admin"))))
+
+
+def inspektionscheckliste_fehler(exc):
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify({"ok": False, "error": str(exc)}), exc.status
+    auftrag_id = int((request.view_args or {}).get("auftrag_id") or 0)
+    ziel = inspektionscheckliste_ziel(auftrag_id, admin=bool(session.get("admin")))
+    return render_template_string("""<!doctype html><html lang="de"><head>
+      <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Prüfpunkt nicht gespeichert</title>
+      <style>body{font:18px/1.6 system-ui;margin:3rem auto;padding:0 1rem;max-width:44rem;color:#243235}a{color:#17695b}textarea{box-sizing:border-box;width:100%;min-height:8rem;padding:.8rem;font:inherit}</style>
+      </head><body><h1>Prüfpunkt nicht gespeichert</h1><p>{{ fehler }}</p>
+      <p>Deine Eingabe wurde nicht übernommen. Öffne den aktuellen Auftrag und prüfe den Stand vor dem erneuten Speichern.</p>
+      {% if notiz %}<label for="notiz">Deine eingegebene Notiz zum Kopieren</label><textarea id="notiz" readonly>{{ notiz }}</textarea>{% endif %}
+      <p><a href="{{ ziel }}">Zurück zur Inspektionscheckliste</a></p></body></html>""",
+      fehler=str(exc), ziel=ziel, notiz=clean_text(request.form.get("notiz"))[:2000]), exc.status
+
+
+@app.route("/admin/auftrag/<int:auftrag_id>/inspektionscheckliste/anlegen", methods=["POST"])
+@admin_required
+def admin_inspektionscheckliste_anlegen(auftrag_id):
+    try:
+        created = inspektionscheckliste.create_checklist(sys.modules[__name__], auftrag_id)
+    except inspektionscheckliste.ChecklistError as exc:
+        return inspektionscheckliste_fehler(exc)
+    if created:
+        schedule_change_backup("inspektionscheckliste-anlegen")
+    return inspektionscheckliste_antwort(auftrag_id, angelegt=created, status=201 if created else 200)
+
+
+@app.route("/werkstatt/auftrag/<int:auftrag_id>/inspektionscheckliste/<int:punkt_id>", methods=["POST"])
+def werkstatt_inspektionscheckliste_punkt(auftrag_id, punkt_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    try:
+        punkt = inspektionscheckliste.save_point(
+            sys.modules[__name__], auftrag_id, punkt_id, request.form.get("version"),
+            request.form.get("ergebnis"), request.form.get("notiz", ""),
+            admin=bool(session.get("admin")),
+        )
+    except inspektionscheckliste.ChecklistError as exc:
+        return inspektionscheckliste_fehler(exc)
+    schedule_change_backup("inspektionscheckliste-pruefpunkt")
+    return inspektionscheckliste_antwort(auftrag_id, punkt=punkt)
+
+
 @app.route("/werkstatt", methods=["GET", "POST"])
 def werkstatt_login():
     if request.method == "POST":
@@ -54895,6 +54990,7 @@ def werkstatt_tafel():
         for auftrag in list_auftraege()
         if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
+    inspektionscheckliste.load_many(sys.modules[__name__], auftraege, admin=bool(session.get("admin")))
     reifentermine = list_reifentermine()
     spalten = (
         {
@@ -55063,6 +55159,7 @@ def werkstatt_auftrag(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
+    inspektionscheckliste.load_many(sys.modules[__name__], [auftrag], admin=bool(session.get("admin")))
     kundenlink_url = clean_text(auftrag.get("kunden_status_url"))
     kundenlink_uebergabe_warnung = kundenlink_braucht_uebergabe_warnung(kundenlink_url)
     if auftrag.get("werkstatt_neu"):

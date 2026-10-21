@@ -540,6 +540,7 @@
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=farben-2" media="screen">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2" media="screen">
+  <link rel="stylesheet" href="{{ url_for('static', filename='inspektionscheckliste.css') }}">
 </head>
 <body class="ws-legacy ws-legacy-auftrag" data-auftrag-id="{{ auftrag['id'] }}">
   <div class="topbar">
@@ -596,6 +597,10 @@
 
   <div class="inhalt">
     <div>
+      {% set inspektionscheckliste_next = url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) %}
+      {% include '_inspektionscheckliste.html' %}
+
+      {% if auftrag['leistungsart'] != 'inspektion' %}
       <div class="panel" style="border:2px solid {% if auftrag['messung_erforderlich'] == 'ja' %}var(--danger){% else %}var(--line){% endif %};">
         <h2>🎨 Farbton &amp; Lackmessung</h2>
 
@@ -638,6 +643,7 @@
           <button type="submit" style="justify-self:start; background:var(--brand); color:#fff; border:none; border-radius:12px; padding:.55rem 1.2rem; font-weight:600; cursor:pointer; font-size:1rem;">Lackdaten speichern</button>
         </form>
       </div>
+      {% endif %}
 
       {% if auftrag['status'] == 1 %}
       <div class="panel">
@@ -960,7 +966,7 @@
       if (toastLeiste) setTimeout(() => toastLeiste.remove(), 6000);
       let timer = null;
       const zurueck = () => {
-        if (window.werkstattFotoUploadAktiv) { reset(); return; }
+        if (window.werkstattFotoUploadAktiv || window.inspektionschecklisteUngespeichert) { reset(); return; }
         window.location.href = "{{ url_for('werkstatt_tafel') }}";
       };
       const reset = () => {
