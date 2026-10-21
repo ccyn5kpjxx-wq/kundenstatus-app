@@ -55,6 +55,8 @@ def leistungsart_aus_anfrage(daten):
     anliegen = daten.get("anliegen")
     if anliegen == "reifenservice":
         return "reifenservice"
+    if anliegen == "reparaturanfrage" and daten.get("leistungsherkunft") == "dellen-smart-repair":
+        return "dellen_smart_repair"
     if anliegen == "mechanikanfrage":
         kategorien = daten.get("mechanik_kategorien", [])
         if not isinstance(kategorien, list):
@@ -77,8 +79,15 @@ def auftrag_leistungsart(auftrag):
     return normalize_leistungsart((auftrag or {}).get("leistungsart")) or leistungsart_aus_anfrage(aufnahme_daten(auftrag))
 
 
+def auftragsart_anzeige(auftrag):
+    key = auftrag_leistungsart(auftrag)
+    meta = AUFTRAGSARTEN.get(key, OFFENE_AUFTRAGSART)
+    return {"leistungsart": key, "auftragsart_label": meta["label"],
+            "auftragsart_bg": meta["bg"], "auftragsart_farbe": meta["farbe"]}
+
+
 def verwendet_lackierablauf(auftrag):
     key = auftrag_leistungsart(auftrag)
     # Unclassified historical records retain their existing process/statistics.
     # New classified mechanical, glass and care jobs never use paint stages.
-    return not key or key in {"lackierung", "dellen_smart_repair", "felgenservice"}
+    return not key or key == "lackierung"

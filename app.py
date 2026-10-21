@@ -53,7 +53,7 @@ import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
-                          hat_reifenbuchung, verwendet_lackierablauf)
+                          auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
 import mos_handover
 import mos_order_receipt
 import mos_public_booking
@@ -16827,11 +16827,7 @@ def row_to_auftrag(row):
         "whatsapp": "WhatsApp",
     }.get(aufnahme.get("kontaktweg"), "Telefon")
     auftrag["schaden_aufnahme"] = aufnahme
-    auftrag["leistungsart"] = auftrag_leistungsart(auftrag)
-    meta = AUFTRAGSARTEN.get(auftrag["leistungsart"], OFFENE_AUFTRAGSART)
-    auftrag["auftragsart_label"] = meta["label"]
-    auftrag["auftragsart_bg"] = meta["bg"]
-    auftrag["auftragsart_farbe"] = meta["farbe"]
+    auftrag.update(auftragsart_anzeige(auftrag))
     auftrag["hat_reifenbuchung"] = hat_reifenbuchung(auftrag)
     auftrag["ist_reifenauftrag"] = auftrag_ist_reifen(auftrag)
     auftrag["ist_lackierauftrag"] = verwendet_lackierablauf(auftrag)
@@ -16900,7 +16896,7 @@ def row_to_auftrag(row):
         "",
     )
     auftrag["produktion_schritte"] = produktion_schritt_steps(auftrag)
-    if auftrag["ist_reifenauftrag"]:
+    if not auftrag["ist_lackierauftrag"]:
         auftrag["produktion_schritt_label"] = ""
     auftrag["kosten_gutachten_betrag"] = clean_text(auftrag.get("kosten_gutachten_betrag"))
     auftrag["kosten_werkstatt_betrag"] = clean_text(auftrag.get("kosten_werkstatt_betrag"))
@@ -23722,6 +23718,7 @@ def list_admin_auftrag_suche(query, limit=8):
     for index, auftrag in enumerate(list_auftraege(include_archived=True, include_angebote=True)):
         suchfelder = [
             auftrag.get("fahrzeug"),
+            auftrag.get("auftragsart_label"),
             auftrag.get("kennzeichen"),
             auftrag.get("auftragsnummer"),
             auftrag.get("fin_nummer"),
@@ -23764,6 +23761,7 @@ def list_admin_auftrag_suche(query, limit=8):
                     "autohaus": clean_text(auftrag.get("autohaus_name")),
                     "status": clean_text(status.get("label")) or "Offen",
                     "status_farbe": clean_text(status.get("farbe")) or "secondary",
+                    "auftragsart_label": auftrag.get("auftragsart_label", ""),
                     "meta": " · ".join(meta),
                     "url": url_for("auftrag_detail", auftrag_id=auftrag["id"]),
                 },
@@ -23864,7 +23862,7 @@ def list_admin_postfach_items(limit=80):
     rows = db.execute(
         """
         SELECT c.id, c.auftrag_id, c.absender, c.nachricht, c.erstellt_am,
-               a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.versicherung_id,
+               a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.auftragsnummer, a.versicherung_id,
                h.name AS autohaus_name
         FROM chat_nachrichten c
         JOIN auftraege a ON a.id = c.auftrag_id
@@ -23889,6 +23887,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": (
                     url_for("admin_versicherung_schaden_detail", auftrag_id=row["auftrag_id"])
                     if ist_versicherung and row["versicherung_id"] and has_request_context()
@@ -23900,7 +23899,7 @@ def list_admin_postfach_items(limit=80):
     rows = db.execute(
         """
         SELECT v.id, v.auftrag_id, v.titel, v.beschreibung, v.erstellt_am,
-               a.fahrzeug, a.kennzeichen, a.versicherung_id, h.name AS autohaus_name
+               a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.versicherung_id, h.name AS autohaus_name
         FROM versicherung_aufgaben v
         JOIN auftraege a ON a.id = v.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -23923,6 +23922,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": (
                     url_for("admin_versicherung_schaden_detail", auftrag_id=row["auftrag_id"])
                     if row["versicherung_id"] and has_request_context()
@@ -23933,7 +23933,7 @@ def list_admin_postfach_items(limit=80):
 
     rows = db.execute(
         """
-        SELECT a.id, a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.analyse_text,
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.auftragsnummer, a.analyse_text,
                a.beschreibung, a.geaendert_am, h.name AS autohaus_name
         FROM auftraege a
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -23959,6 +23959,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": admin_auftrag_detail_url(row["id"]),
                 "whatsapp_auftrag_id": row["id"],
             }
@@ -23966,7 +23967,7 @@ def list_admin_postfach_items(limit=80):
 
     rows = db.execute(
         """
-        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_text, a.beschreibung,
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.analyse_text, a.beschreibung,
                a.erstellt_am, h.name AS autohaus_name
         FROM auftraege a
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -23992,6 +23993,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": admin_auftrag_detail_url(row["id"]),
                 "whatsapp_auftrag_id": row["id"],
             }
@@ -24000,7 +24002,7 @@ def list_admin_postfach_items(limit=80):
     rows = db.execute(
         """
         SELECT v.id, v.auftrag_id, v.meldung, v.erstellt_am,
-               a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+               a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, h.name AS autohaus_name
         FROM verzoegerungen v
         JOIN auftraege a ON a.id = v.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -24023,6 +24025,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": admin_auftrag_detail_url(row["auftrag_id"]),
             }
         )
@@ -24030,7 +24033,7 @@ def list_admin_postfach_items(limit=80):
     rows = db.execute(
         """
         SELECT r.id, r.auftrag_id, r.meldung, r.erstellt_am,
-               a.fahrzeug, a.kennzeichen, a.archiviert, h.name AS autohaus_name
+               a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.archiviert, h.name AS autohaus_name
         FROM reklamationen r
         JOIN auftraege a ON a.id = r.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -24053,13 +24056,14 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": admin_auftrag_detail_url(row["auftrag_id"]),
             }
         )
 
     rows = db.execute(
         """
-        SELECT a.id, a.fahrzeug, a.kennzeichen, a.analyse_hinweis, a.geaendert_am,
+        SELECT a.id, a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, a.analyse_hinweis, a.geaendert_am,
                h.name AS autohaus_name
         FROM auftraege a
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -24085,6 +24089,7 @@ def list_admin_postfach_items(limit=80):
                 "autohaus_name": row["autohaus_name"],
                 "fahrzeug": row["fahrzeug"],
                 "kennzeichen": row["kennzeichen"],
+                **auftragsart_anzeige(dict(row)),
                 "ziel_url": admin_auftrag_detail_url(row["id"]),
             }
         )
@@ -37435,7 +37440,7 @@ def dashboard_daten(auftraege):
     db = get_db()
     rows = db.execute(
         """
-        SELECT v.*, a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        SELECT v.*, a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, h.name AS autohaus_name
         FROM verzoegerungen v
         JOIN auftraege a ON a.id = v.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -37443,10 +37448,10 @@ def dashboard_daten(auftraege):
         ORDER BY v.erstellt_am DESC, v.id DESC
         """
     ).fetchall()
-    offene_verzoegerungen = [dict(row) for row in rows]
+    offene_verzoegerungen = [dict(row) | auftragsart_anzeige(dict(row)) for row in rows]
     rows = db.execute(
         """
-        SELECT r.*, a.fahrzeug, a.kennzeichen, h.name AS autohaus_name
+        SELECT r.*, a.fahrzeug, a.kennzeichen, a.leistungsart, a.schaden_aufnahme_json, h.name AS autohaus_name
         FROM reklamationen r
         JOIN auftraege a ON a.id = r.auftrag_id
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -37455,7 +37460,7 @@ def dashboard_daten(auftraege):
         """
     ).fetchall()
     db.close()
-    offene_reklamationen = [dict(row) for row in rows]
+    offene_reklamationen = [dict(row) | auftragsart_anzeige(dict(row)) for row in rows]
     for reklamation in offene_reklamationen:
         reklamation["dateien"] = list_dateien_by_reklamation(reklamation["id"])
 
@@ -45566,6 +45571,7 @@ def website_anfrage():
                 "reifen_slot": (wunschdatum, wunschzeit) if anliegen == "reifenservice" else None,
                 "portal_data": {
                     "anliegen": anliegen,
+                    "leistungsherkunft": clean_text(request.form.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.form.get("leistungsart")), {}).get("anliegen") == anliegen else "",
                     "mechanik_kategorien": mechanik_kategorien if anliegen == "mechanikanfrage" else [],
                     "pflege_kategorien": pflege_kategorien if anliegen == "fahrzeugpflege" else [],
                     "fahrzeugcheck_art": fahrzeugcheck_art if anliegen == "fahrzeugcheck" else "",
@@ -45644,7 +45650,8 @@ def website_anfrage():
     ))
     return render_website_anfrage(
         formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart,
-                  "mechanik_kategorie": mechanik_vorauswahl},
+                  "mechanik_kategorie": mechanik_vorauswahl,
+                  "leistungsart": clean_text(request.args.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.args.get("leistungsart")), {}).get("anliegen") == vorauswahl else ""},
         gesendet=bestaetigt,
     )
 
@@ -52686,12 +52693,21 @@ def reifen_rechnung(auftrag_id):
             data = {"kalkulation":kalkulation,"kunde":kunde,"leistungsdatum":datum,"gespeichert_am":now_str()}
             db = get_db()
             try:
+                db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+                frisch = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+                if not frisch or not auftrag_ist_reifen(dict(frisch)):
+                    raise ValueError("Die Auftragsart wurde inzwischen geändert. Bitte den Auftrag neu öffnen.")
+                if frisch["archiviert"] or reifen_rechnung_gesperrt(dict(frisch)):
+                    raise ValueError("Die Rechnung wurde inzwischen gesperrt. Bitte den Auftrag neu öffnen.")
                 changed = db.execute("""UPDATE auftraege SET reifen_rechnung_json=?, geaendert_am=?
                     WHERE id=? AND COALESCE(reifen_rechnung_json,'{}')=?
                     AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')=''
                     AND COALESCE(rechnung_nummer,'')='' AND COALESCE(rechnung_status,'') NOT IN ('geschrieben','lexware_entwurf')""",
                     (json.dumps(data,ensure_ascii=False),now_str(),auftrag_id,auftrag.get("reifen_rechnung_json") or "{}")).rowcount
                 db.commit()
+            except Exception:
+                db.rollback()
+                raise
             finally:
                 db.close()
             if not changed:
@@ -55195,6 +55211,8 @@ def werkstatt_auftrag_produktion(auftrag_id, schritt):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
+    if not verwendet_lackierablauf(auftrag):
+        abort(400, description="Lackierschritte sind für diese Auftragsart nicht vorgesehen.")
     ziel_schritt = normalize_produktion_schritt(schritt)
     if not ziel_schritt:
         abort(400)

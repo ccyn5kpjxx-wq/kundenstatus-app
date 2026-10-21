@@ -272,11 +272,11 @@ class ReifentermineTest(unittest.TestCase):
         db.close()
         order_id = portal.create_order_from_accepted_lead(lead, lead['portal_data'])
         tire = portal.get_auftrag(order_id)
-        self.assertEqual(tire['auftragsart_label'], 'Reifenauftrag')
+        self.assertEqual(tire['auftragsart_label'], 'Reifenservice')
         self.assertEqual(portal.produktion_schritt_steps(tire), [])
         self.assertNotIn('Lackierung', str(portal.kunden_produktion_steps(tire)))
         self.assertNotIn('09:00', portal.freie_reifen_slots(self.day()))
-        paint_id = portal.create_auftrag('privat', kunde_name='Paint Test', fahrzeug='Karosserie-Test',
+        paint_id = portal.create_auftrag('privat', leistungsart='lackierung', kunde_name='Paint Test', fahrzeug='Karosserie-Test',
                                         beschreibung='Stoßfänger lackieren, Reifen prüfen')
         paint = portal.get_auftrag(paint_id)
         self.assertEqual(paint['auftragsart_label'], 'Lackierauftrag')
@@ -289,7 +289,7 @@ class ReifentermineTest(unittest.TestCase):
         self.assertIn('Karosserie-Test', paint_page.text)
         self.assertNotIn('MOS TEST 1', paint_page.text)
         hall = self.client.get('/werkstatt/tafel')
-        self.assertIn('Reifenauftrag', hall.text)
+        self.assertIn('Reifenservice', hall.text)
         self.assertIn('Lackierauftrag', hall.text)
         tire['status'] = paint['status'] = 4
         tire['fertig_datum_obj'] = paint['fertig_datum_obj'] = date.today()
