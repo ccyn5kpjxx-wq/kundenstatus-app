@@ -1,0 +1,16 @@
+{% from "_homepage_image_data.html" import images %}
+{% macro image_url(filename) -%}
+{{ url_for('static', filename=images.get(filename, {}).get('src', filename)) }}
+{%- endmacro %}
+{% macro image_attrs(filename, sizes='100vw', dimensions=false) -%}
+  {%- set image = images.get(filename) -%}
+  {%- if image -%}
+src="{{ url_for('static', filename=image.src) }}" srcset="{% for variant in image.variants %}{{ url_for('static', filename=variant.path) }} {{ variant.width }}w{% if not loop.last %}, {% endif %}{% endfor %}" sizes="{{ sizes }}"{% if dimensions %} width="{{ image.width }}" height="{{ image.height }}"{% endif %}
+  {%- else -%}
+src="{{ url_for('static', filename=filename) }}"
+  {%- endif -%}
+{%- endmacro %}
+{% macro image_preload(filename, sizes='100vw') -%}
+  {%- set image = images[filename] -%}
+<link rel="preload" as="image" href="{{ url_for('static', filename=image.src) }}" imagesrcset="{% for variant in image.variants %}{{ url_for('static', filename=variant.path) }} {{ variant.width }}w{% if not loop.last %}, {% endif %}{% endfor %}" imagesizes="{{ sizes }}" type="image/webp">
+{%- endmacro %}

@@ -25,7 +25,7 @@
       {% for slug, bereich, titel, beschreibung, datei, alt, position in arbeitsmotive %}
       <figure class="arbeitsbild" id="arbeit-{{ slug }}">
         <a class="arbeitsbild-foto" href="{{ url_for('oeffentliche_leistung_detail', slug=arbeit_zu_leistung[slug]) }}" aria-label="{{ titel }} – Leistungen ansehen">
-          <img src="{{ url_for('static', filename=datei) }}" alt="{{ alt }}" width="600" height="450" style="object-position:{{ position }}" loading="lazy" decoding="async">
+          <img {{ image_attrs(datei, sizes='(max-width:680px) calc(100vw - 24px), (max-width:1000px) 50vw, 400px') }} alt="{{ alt }}" width="600" height="450" style="object-position:{{ position }}" loading="lazy" decoding="async">
           <span class="arbeitsbild-zoom" aria-hidden="true">→</span>
         </a>
         <figcaption><span class="arbeitsbild-bereich">{{ '%02d'|format(loop.index) }} / {{ bereich }}</span><h3>{{ titel }}</h3><p>{{ beschreibung }}</p><a class="arbeitsbild-detail" href="{{ url_for('oeffentliche_leistung_detail', slug=arbeit_zu_leistung[slug]) }}">Leistungen ansehen →</a></figcaption>

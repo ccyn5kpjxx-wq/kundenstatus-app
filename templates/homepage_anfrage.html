@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_homepage_images.html" import image_attrs, image_preload %}
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -134,7 +135,7 @@
 <body>
   <header class="top">
     <nav class="wrap nav" aria-label="Navigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"><span>Gärtner GmbH Karosserie + Lack</span></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='104px', dimensions=true) }} alt="Gärtner GmbH Karosserie + Lack" decoding="async"><span>Gärtner GmbH Karosserie + Lack</span></a>
       <a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Homepage</a>
     </nav>
   </header>

@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% from "_homepage_images.html" import image_attrs, image_preload, image_url %}
 <html lang="de">
 <head>
   <meta charset="UTF-8">
@@ -20,7 +21,7 @@
       background-color:#171817;
       background-image:
         linear-gradient(rgba(10,11,10,.1),rgba(10,11,10,.16)),
-        url("{{ url_for('static', filename='homepage/ziegelwand-graffiti-karriere-v1.webp') }}");
+        url("{{ image_url('homepage/ziegelwand-graffiti-karriere-v1.webp') }}");
       background-position:center center;
       background-size:cover;
       background-repeat:no-repeat;
@@ -125,7 +126,7 @@
   <a class="skip-link" href="#inhalt">Direkt zum Inhalt</a>
   <header>
     <nav class="wrap nav" aria-label="Hauptnavigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"><span>Gärtner</span></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='230px', dimensions=true) }} alt="Gärtner GmbH Karosserie + Lack" decoding="async"><span>Gärtner</span></a>
       <div class="nav-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#stellen">Stellen</a><a class="nav-cta" href="#bewerbung">Rückruf anfordern</a></div>
     </nav>
   </header>
@@ -134,7 +135,7 @@
     <section class="hero">
       <div class="wrap hero-grid">
         <div class="hero-copy"><div class="eyebrow">Karriere bei Gärtner</div><h1>Gutes Handwerk braucht gute Leute.</h1><p>Wir möchten unser Team in Mosbach verstärken. Wählen Sie den Bereich, der zu Ihnen passt, und hinterlassen Sie Name und Telefonnummer. Wir melden uns persönlich zurück.</p><div class="hero-points"><span>Kein Anschreiben nötig</span><span>Kein Lebenslauf-Zwang</span><span>Persönlicher Rückruf</span></div></div>
-        <div class="hero-photo"><img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}" alt="Daniel, Hannes und Abdul in der Gärtner Werkstatt" width="1448" height="1086"></div>
+        <div class="hero-photo"><img {{ image_attrs('homepage/team-daniel-hannes-abdul-v2.png', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Daniel, Hannes und Abdul in der Gärtner Werkstatt" width="1448" height="1086" decoding="async"></div>
       </div>
     </section>
 

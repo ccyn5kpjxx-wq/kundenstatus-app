@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_homepage_images.html" import image_attrs, image_preload, image_url %}
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -11,7 +12,7 @@
   <meta property="og:locale" content="de_DE">
   <meta property="og:title" content="Gärtner GmbH Karosserie + Lack | Meisterbetrieb in Mosbach">
   <meta property="og:description" content="Schaden digital melden, Mietwagen anfragen und Reparaturstatus sicher verfolgen.">
-  <link rel="preload" as="image" href="{{ url_for('static', filename=jahreszeit.hero_bild) }}" type="image/webp">
+  {{ image_preload(jahreszeit.hero_bild) }}
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"AutoBodyShop","name":"Gärtner GmbH Karosserie + Lack","url":"https://auto-lackierzentrum.de/","telephone":"+49 152 27706694","email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":"Alte Neckarelzer Straße 18/1","postalCode":"74821","addressLocality":"Mosbach","addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
   </script>
@@ -22,7 +23,7 @@
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header">
     <nav class="wrap site-nav" aria-label="Hauptnavigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie + Lack" width="210" height="60"></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="Gärtner Karosserie + Lack" width="210" height="60" decoding="async"></a>
       <button class="menu-toggle" aria-expanded="false" aria-controls="hauptmenue">Menü <span aria-hidden="true">☰</span></button>
       <div class="nav-links" id="hauptmenue"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Geschäftspartner</a><a href="{{ url_for('oeffentliches_team') }}">Über uns</a><a href="#kontakt">Kontakt</a><a class="mobile-portal-link" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge</a></div>
       <a class="button nav-portal" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge <span aria-hidden="true">↗</span></a>
@@ -32,12 +33,12 @@
   <main id="inhalt">
     <section class="intro hero-wide" aria-labelledby="hero-title">
       <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
-      <div class="intro-photo"><img src="{{ url_for('static', filename=jahreszeit.hero_bild) }}" alt="{{ jahreszeit.hero_alt }}" width="1672" height="941" fetchpriority="high"></div>
+      <div class="intro-photo"><img {{ image_attrs(jahreszeit.hero_bild, sizes='100vw') }} alt="{{ jahreszeit.hero_alt }}" width="1672" height="941" fetchpriority="high" decoding="async"></div>
       <aside class="current-deck" id="aktuell" aria-labelledby="current-title" aria-roledescription="Kartenstapel" data-current-deck>
         <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>{{ jahreszeit.label }}</span></div>
         <div class="current-stack" id="aktuelle-karten">
           <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="1 von 5 · Reifen">
-            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-reifen-v2-20261021.webp') }}" alt="Komplettes Rad mit Reifen und silberner Felge" width="1536" height="1024" decoding="async">
+            <img class="current-feature-photo" {{ image_attrs('homepage/karte-reifen-v2-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="Komplettes Rad mit Reifen und silberner Felge" width="1536" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
               <h3>{{ jahreszeit.reifen_titel }}</h3>
@@ -46,7 +47,7 @@
             </div>
           </article>
           <article class="current-card current-feature" data-current-card data-card-title="Bremsen" role="group" aria-roledescription="Karte" aria-label="2 von 5 · Bremsen">
-            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-bremsen-v2-20261021.webp') }}" alt="Bremsscheibe und Bremssattel bei abgenommenem Rad" width="1536" height="1024" decoding="async">
+            <img class="current-feature-photo" {{ image_attrs('homepage/karte-bremsen-v2-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="Bremsscheibe und Bremssattel bei abgenommenem Rad" width="1536" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Bremsencheck</span>
               <h3>Gut bremsen.<br>Sicher ankommen.</h3>
@@ -55,7 +56,7 @@
             </div>
           </article>
           <article class="current-card current-feature" data-current-card data-card-title="Ölcheck" role="group" aria-roledescription="Karte" aria-label="3 von 5 · Ölcheck">
-            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-oelservice-20261021.webp') }}" alt="" width="1200" height="675" decoding="async">
+            <img class="current-feature-photo" {{ image_attrs('homepage/karte-oelservice-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="" width="1200" height="675" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Ölcheck</span>
               <h3>Gut versorgt.</h3>
@@ -64,7 +65,7 @@
             </div>
           </article>
           <article class="current-card current-feature" data-current-card data-card-title="Aufbereitung" role="group" aria-roledescription="Karte" aria-label="4 von 5 · Aufbereitung">
-            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-pflege-v2-20261021.webp') }}" alt="Von außen mit Reinigungsschaum eingeschäumtes Auto" width="1536" height="1024" decoding="async">
+            <img class="current-feature-photo" {{ image_attrs('homepage/karte-pflege-v2-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="Von außen mit Reinigungsschaum eingeschäumtes Auto" width="1536" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Aufbereitung</span>
               <h3>Frisch gepflegt.</h3>
@@ -73,7 +74,7 @@
             </div>
           </article>
           <article class="current-card current-feature" data-current-card data-card-title="Leasing-Check" role="group" aria-roledescription="Karte" aria-label="5 von 5 · Leasing-Check">
-            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-leasing-v2-20261021.webp') }}" alt="Lackschonende Dellenbearbeitung an einer Autotür" width="1536" height="1024" decoding="async">
+            <img class="current-feature-photo" {{ image_attrs('homepage/karte-leasing-v2-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="Lackschonende Dellenbearbeitung an einer Autotür" width="1536" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Leasing-Check &amp; Smart Repair</span>
               <h3>Leasing zurückgeben.<br>Kosten im Blick.</h3>
@@ -99,20 +100,20 @@
       </aside>
     </section>
     <section class="audiences wrap" aria-label="Der passende Einstieg für Sie" id="fuer-sie">
-      <a class="audience" href="{{ portal_links.auswahl }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Autoschlüssel" width="1200" height="1800" loading="lazy"><div><h2>Privatkunden</h2><span class="text-link">Anfrage starten →</span></div></a>
-      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Beratung im Autohaus" width="1200" height="800" loading="lazy"><div><h2>Autohäuser &amp;<br>Werkstätten</h2><span class="text-link">Zusammenarbeiten →</span></div></a>
-      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Geordnete Firmenflotte" width="1200" height="674" loading="lazy"><div><h2>Firmenflotten</h2><span class="text-link">Fuhrpark betreuen lassen →</span></div></a>
+      <a class="audience" href="{{ portal_links.auswahl }}"><img {{ image_attrs('homepage/zielgruppen/privatkunden.jpg', sizes='(max-width:760px) 40vw, 180px') }} alt="Privatkundin mit Autoschlüssel" width="1200" height="1800" loading="lazy" decoding="async"><div><h2>Privatkunden</h2><span class="text-link">Anfrage starten →</span></div></a>
+      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img {{ image_attrs('homepage/zielgruppen/autohaeuser.jpg', sizes='(max-width:760px) 40vw, 180px') }} alt="Beratung im Autohaus" width="1200" height="800" loading="lazy" decoding="async"><div><h2>Autohäuser &amp;<br>Werkstätten</h2><span class="text-link">Zusammenarbeiten →</span></div></a>
+      <a class="audience" href="{{ url_for('oeffentliche_geschaeftspartner') }}"><img {{ image_attrs('homepage/zielgruppen/firmenflotten.jpg', sizes='(max-width:760px) 40vw, 180px') }} alt="Geordnete Firmenflotte" width="1200" height="674" loading="lazy" decoding="async"><div><h2>Firmenflotten</h2><span class="text-link">Fuhrpark betreuen lassen →</span></div></a>
     </section>
     <section class="services section-pad" id="leistungen" aria-labelledby="services-title"><div class="wrap">
       <div class="section-head"><div><h2 id="services-title">Was Ihr Fahrzeug braucht.</h2></div><a class="text-link" href="{{ url_for('oeffentliche_leistungen') }}">Leistungen &amp; Arbeitsbilder →</a></div>
       <div class="service-grid">
       {% for slug, leistung in leistungen.items() %}
-      <a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="" width="120" height="100" loading="lazy"><div><h3>{{ leistung.titel }}</h3></div><span aria-hidden="true">↗</span></a>
+      <a class="service-item" href="{{ url_for('oeffentliche_leistung_detail', slug=slug) }}"><img {{ image_attrs('homepage/' ~ leistung.bild, sizes='90px') }} alt="" width="120" height="100"{% if slug in ['klimaservice', 'achsvermessung'] %} style="object-fit:contain;background:#e8e7e3"{% endif %} loading="lazy" decoding="async"><div><h3>{{ leistung.titel }}</h3></div><span aria-hidden="true">↗</span></a>
       {% endfor %}
       </div><p class="service-note">Auch HU/AU: Wir organisieren die Prüfung über unseren externen Prüfpartner.</p>
     </div></section>
     <section class="trust wrap section-pad" id="vertrauen" aria-labelledby="trust-title">
-      <div class="trust-photo"><img src="{{ url_for('static', filename='images/margita-hoefer-aufrecht-20261020.jpg') }}" alt="Margita Höfer, Büro und Partnerbetreuung" width="1122" height="1402" loading="lazy"></div>
+      <div class="trust-photo"><img {{ image_attrs('images/margita-hoefer-aufrecht-20261020.jpg', sizes='(max-width:560px) 90px, (max-width:980px) 140px, 165px') }} alt="Margita Höfer, Büro und Partnerbetreuung" width="1122" height="1402" loading="lazy" decoding="async"></div>
       <div class="trust-copy"><h2 id="trust-title">Persönlich für Sie da.</h2><p>Ein fester Kontakt. Klare Absprachen.</p><a class="text-link" href="{{ url_for('oeffentliches_team') }}">Unser Team kennenlernen →</a><div class="trust-bottom"><span>Margita Höfer · Büro &amp; Partnerbetreuung</span><a href="tel:+4917660477486">0176 60477486</a><a class="trust-email" href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div></div>
       <aside class="trust-proof"><ul><li>Meisterbetrieb für Karosserie &amp; Lack</li><li>Klare Angebote</li><li>Hol- &amp; Bringservice nach Vereinbarung</li></ul><a class="text-link" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer">Google-Bewertungen ansehen ↗</a></aside>
     </section>
@@ -127,11 +128,11 @@
         </div>
         <div class="location-views">
           <div class="location-gallery">
-            <figure><a href="{{ url_for('static', filename='homepage/neue-location-empfang-kundensicht-v1.webp') }}" target="_blank" rel="noopener" aria-label="Blick vom Kundeneingang in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-empfang-kundensicht-v1.webp') }}" alt="Weiße Empfangstheke mit Logo, Wartebereich und Kaffeeplatz" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick vom Kundeneingang</figcaption></figure>
-            <figure><a href="{{ url_for('static', filename='homepage/neue-location-empfang-eingang-v1.webp') }}" target="_blank" rel="noopener" aria-label="Blick zur Eingangstür in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-empfang-eingang-v1.webp') }}" alt="Empfangstheke an der Rampe und zwei Stühle im Wartebereich" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick zur Eingangstür</figcaption></figure>
+            <figure><a href="{{ image_url('homepage/neue-location-empfang-kundensicht-v1.webp') }}" target="_blank" rel="noopener" aria-label="Blick vom Kundeneingang in groß öffnen"><img {{ image_attrs('homepage/neue-location-empfang-kundensicht-v1.webp', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Weiße Empfangstheke mit Logo, Wartebereich und Kaffeeplatz" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick vom Kundeneingang</figcaption></figure>
+            <figure><a href="{{ image_url('homepage/neue-location-empfang-eingang-v1.webp') }}" target="_blank" rel="noopener" aria-label="Blick zur Eingangstür in groß öffnen"><img {{ image_attrs('homepage/neue-location-empfang-eingang-v1.webp', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Empfangstheke an der Rampe und zwei Stühle im Wartebereich" width="1448" height="1086" loading="lazy" decoding="async"></a><figcaption>Blick zur Eingangstür</figcaption></figure>
           </div>
           <p class="location-preview-note">Zum Vergrößern anklicken.</p>
-          <details class="location-entrance"><summary>Unser Eingang</summary><figure><a href="{{ url_for('static', filename='homepage/neue-location-eingang-rot-weiss-v1.webp') }}" target="_blank" rel="noopener" aria-label="Unseren Eingang in groß öffnen"><img src="{{ url_for('static', filename='homepage/neue-location-eingang-rot-weiss-v1.webp') }}" alt="Eingang 18/1 mit anthrazitfarbenem Rahmen und rot-weißer Beschilderung" width="1086" height="1448" loading="lazy" decoding="async"></a><figcaption>Unser Eingang</figcaption></figure></details>
+          <details class="location-entrance"><summary>Unser Eingang</summary><figure><a href="{{ image_url('homepage/neue-location-eingang-rot-weiss-v1.webp') }}" target="_blank" rel="noopener" aria-label="Unseren Eingang in groß öffnen"><img {{ image_attrs('homepage/neue-location-eingang-rot-weiss-v1.webp', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Eingang 18/1 mit anthrazitfarbenem Rahmen und rot-weißer Beschilderung" width="1086" height="1448" loading="lazy" decoding="async"></a><figcaption>Unser Eingang</figcaption></figure></details>
         </div>
       </div>
     </section>

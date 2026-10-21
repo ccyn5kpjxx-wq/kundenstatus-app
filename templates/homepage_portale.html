@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_homepage_images.html" import image_attrs, image_preload %}
 <html lang="de">
 <head>
   <meta charset="utf-8">
@@ -12,7 +13,7 @@
 <body class="compact-home portal-page">
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header"><nav class="wrap site-nav" aria-label="Hauptnavigation">
-    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie und Lack" width="210" height="80"></a>
+    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="Gärtner Karosserie und Lack" width="210" height="80" decoding="async"></a>
     <a class="portal-back" href="{{ url_for('oeffentliche_portale') if business_access else url_for('oeffentliche_homepage') }}">← {{ 'Alle Zugänge' if business_access else 'Startseite' }}</a>
   </nav></header>
   <main id="inhalt" class="wrap">
@@ -24,24 +25,24 @@
     <section class="portal-choices {{ 'business-choices' if business_access else '' }}" aria-label="{{ 'Geschäftszugänge' if business_access else 'Zugang auswählen' }}">
       {% if business_access %}
       <a class="portal-choice" href="{{ portal_links.partner }}">
-        <img class="dealership-photo" src="{{ url_for('static', filename='homepage/zielgruppen/autohaeuser.jpg') }}" alt="Beratung im Autohaus" width="1200" height="800">
+        <img class="dealership-photo" {{ image_attrs('homepage/zielgruppen/autohaeuser.jpg', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Beratung im Autohaus" width="1200" height="800" decoding="async">
         <div class="portal-choice-copy"><span class="eyebrow">Ihr Partnerbetrieb</span><h2>Autohäuser &amp;<br>Werkstätten</h2><p>Fahrzeuge, Termine, Angebote und Unterlagen für Ihre Aufträge.</p><span class="portal-action">Autohaus-Zugang öffnen <span aria-hidden="true">↗</span></span></div>
       </a>
       <a class="portal-choice" href="{{ portal_links.flotte if config.FLOTTENPORTAL_ENABLED else url_for('oeffentliche_geschaeftspartner') ~ '#kontakt' }}">
-        <img src="{{ url_for('static', filename='homepage/zielgruppen/firmenflotten.jpg') }}" alt="Firmenfahrzeuge einer Flotte" width="1200" height="674">
+        <img {{ image_attrs('homepage/zielgruppen/firmenflotten.jpg', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Firmenfahrzeuge einer Flotte" width="1200" height="674" decoding="async">
         <div class="portal-choice-copy"><span class="eyebrow">Ihr Unternehmen</span><h2>Firmenflotten</h2><p>{{ 'Ihre Fahrzeuge, Fälligkeiten, Werkstattfälle und Belege im Überblick.' if config.FLOTTENPORTAL_ENABLED else 'Wir richten den geschützten Zugang für Ihren Fuhrpark persönlich mit Ihnen ein.' }}</p><span class="portal-action">{{ 'Fuhrpark-Zugang öffnen' if config.FLOTTENPORTAL_ENABLED else 'Fuhrpark-Zugang anfragen' }} <span aria-hidden="true">↗</span></span></div>
       </a>
       <a class="portal-choice" href="{{ portal_links.versicherung }}">
-        <img src="{{ url_for('static', filename='homepage/schadenaufnahme-christopher-v1.png') }}" alt="Schadenaufnahme am Fahrzeug" width="1536" height="1024">
+        <img {{ image_attrs('homepage/schadenaufnahme-christopher-v1.png', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Schadenaufnahme am Fahrzeug" width="1536" height="1024" decoding="async">
         <div class="portal-choice-copy"><span class="eyebrow">Ihre Schadenbearbeitung</span><h2>Versicherungen</h2><p>Freigegebene Schadenfälle, Dokumente und Rückmeldungen einsehen.</p><span class="portal-action">Versicherungszugang öffnen <span aria-hidden="true">↗</span></span></div>
       </a>
       {% else %}
       <a class="portal-choice" href="{{ portal_links.status }}">
-        <img class="private-photo" src="{{ url_for('static', filename='homepage/zielgruppen/privatkunden.jpg') }}" alt="Privatkundin mit Fahrzeugschlüssel" width="1200" height="1800">
+        <img class="private-photo" {{ image_attrs('homepage/zielgruppen/privatkunden.jpg', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Privatkundin mit Fahrzeugschlüssel" width="1200" height="1800" decoding="async">
         <div class="portal-choice-copy"><span class="eyebrow">Für Ihr eigenes Fahrzeug</span><h2>Privat</h2><p>Direkt zum persönlichen Reparaturzugang. Halten Sie Ihren Zugangscode oder Statuslink bereit.</p><span class="portal-action">Persönlichen Zugang öffnen <span aria-hidden="true">↗</span></span></div>
       </a>
       <a class="portal-choice" href="{{ url_for('oeffentliche_portale', bereich='geschaeftlich') }}">
-        <img src="{{ url_for('static', filename='homepage/fuhrparkmanagement/fuhrpark-buero.webp') }}" alt="Organisation und persönliche Betreuung im Büro" width="1536" height="1024">
+        <img {{ image_attrs('homepage/fuhrparkmanagement/fuhrpark-buero.webp', sizes='(max-width:760px) calc(100vw - 40px), 600px') }} alt="Organisation und persönliche Betreuung im Büro" width="1536" height="1024" decoding="async">
         <div class="portal-choice-copy"><span class="eyebrow">Für Unternehmen &amp; Partner</span><h2>Geschäftlich</h2><p>Die Zugänge für Autohäuser, Werkstätten, Firmenflotten und Versicherungen.</p><span class="portal-action">Geschäftszugänge auswählen <span aria-hidden="true">→</span></span></div>
       </a>
       {% endif %}

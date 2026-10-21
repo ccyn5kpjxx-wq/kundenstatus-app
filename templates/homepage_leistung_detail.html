@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_homepage_images.html" import image_attrs, image_preload %}
 <html lang="de">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,7 +12,7 @@
 <body class="compact-home service-detail-page" data-service="{{ slug }}">
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header"><nav class="wrap site-nav" aria-label="Leistungsnavigation">
-    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner Karosserie + Lack" width="210" height="60"></a>
+    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="Gärtner Karosserie + Lack" width="210" height="60" decoding="async"></a>
     <a class="detail-home" href="{{ url_for('oeffentliche_homepage') }}">Startseite</a>
     <a class="button light detail-overview" href="{{ url_for('oeffentliche_leistungen') }}">Alle Leistungen</a>
   </nav></header>
@@ -27,7 +28,7 @@
         <p class="detail-reassurance">Unverbindlich anfragen. Umfang, Preis und Termin stimmen wir persönlich mit Ihnen ab.</p>
       </div>
       </div>
-      <figure class="service-detail-photo"><img src="{{ url_for('static', filename='homepage/' ~ leistung.bild) }}" alt="{{ leistung.titel }} – Einblick in die Arbeit" width="900" height="750" fetchpriority="high"></figure>
+      <figure class="service-detail-photo"><img {{ image_attrs('homepage/' ~ leistung.bild, sizes='100vw') }} alt="{{ leistung.titel }} – Einblick in die Arbeit" width="900" height="750" fetchpriority="high" decoding="async"></figure>
     </section>
     {% if slug == 'reifenservice' %}{% include "_homepage_reifenpreise.html" %}{% endif %}
     <section class="service-detail-work section-pad" aria-labelledby="work-title"><div class="wrap">

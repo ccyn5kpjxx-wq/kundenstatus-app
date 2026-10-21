@@ -34,6 +34,9 @@ def main():
     oil_form = client.get('/anfrage?anliegen=mechanikanfrage&mechanik_kategorie=oelwechsel').get_data(as_text=True)
     care_form = client.get('/anfrage?anliegen=fahrzeugpflege').get_data(as_text=True)
     saison = portal.homepage_jahreszeit()
+    image_data = portal.app.jinja_env.get_template("_homepage_image_data.html").module.images
+    def image_path(filename):
+        return "/static/" + image_data[filename]["src"]
     class DeckMarkup(HTMLParser):
         def __init__(self):
             super().__init__()
@@ -69,14 +72,14 @@ def main():
         "Strukturierte Unternehmensdaten": '"@type":"AutoBodyShop"' in html,
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
-        "Passendes saisonales Titelbild vorhanden": f'/static/{saison["hero_bild"]}' in html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
+        "Passendes saisonales Titelbild vorhanden": image_path(saison["hero_bild"]) in html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
         "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
         "Fuenf Themen im Kartenstapel, Reifen und Bremsen zuerst": [card.get("data-card-title") for card in deck.cards] == ["Reifen", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
         "Alle Karten ohne JavaScript lesbar und verlinkt": all("hidden" not in card and "inert" not in card for card in deck.cards) and hero_html.count('class="button current-booking"') == 5,
         "Kartenpfeile und Themen sind beschriftete native Buttons": len(deck.controls) == 2 and all(tag == "button" and data.get("type") == "button" and data.get("aria-label") and data.get("aria-controls") == "aktuelle-karten" for tag, data in deck.controls) and len(deck.choices) == 5 and all(tag == "button" and data.get("aria-pressed") in ("true", "false") for tag, data in deck.choices),
         "Leasingkarte bietet Check vor Rueckgabe und Smart Repair": all(x in hero_html for x in ('Leasing-Check &amp; Smart Repair','Unnötige Rückgabekosten vermeiden.','Dellen und kleine Lackschäden vorab prüfen.','?anliegen=leasingrueckgabe#kurzanfrage')) and client.get('/static/homepage/karte-leasing-v2-20261021.webp').status_code == 200,
         "Kartenwechsel erreichbar und Status barrierearm": deck_script.status_code == 200 and '/static/homepage/aktuelles-karten.js' in html and 'aria-live="polite" aria-atomic="true" data-deck-status' in hero_html,
-        "Bremsenkarte mit Anfragelink und vollstaendigem Bremsenmotiv": '/anfrage?anliegen=bremsenservice#kurzanfrage' in hero_html and 'Bremsen anfragen' in hero_html and 'Bremsentermin online buchen' not in hero_html and '/static/homepage/karte-bremsen-v2-20261021.webp' in hero_html and client.get('/static/homepage/karte-bremsen-v2-20261021.webp').status_code == 200,
+        "Bremsenkarte mit Anfragelink und vollstaendigem Bremsenmotiv": '/anfrage?anliegen=bremsenservice#kurzanfrage' in hero_html and 'Bremsen anfragen' in hero_html and 'Bremsentermin online buchen' not in hero_html and image_path('homepage/karte-bremsen-v2-20261021.webp') in hero_html and client.get('/static/homepage/karte-bremsen-v2-20261021.webp').status_code == 200,
         "Newslinks starten mit passendem Anliegen": 'value="oelwechsel" checked' in oil_form and 'name="pflege_kategorie"' in care_form,
         "Leistungsuebersicht bleibt vollstaendig ohne zweiten Buchungsbutton": services_html.count('class="service-item"') == 9 and 'href="/leistungen/reifenservice"' in services_html and 'data-reifen-buchung' not in services_html,
         "Aktuelle Werkstattadresse ohne zukuenftigen Umzugshinweis": "Alte Neckarelzer Straße 18/1" in html and "Binauer" not in html and "Mosbach-Lohrbach" not in html and "1. November 2026" not in html and "01.11.2026" not in html and css.status_code == 200,
@@ -106,19 +109,19 @@ def main():
         with patch.object(portal, "homepage_jahreszeit", return_value=expected):
             seasonal_response = client.get("/homepage")
         seasonal_html = seasonal_response.get_data(as_text=True)
-        hero_path = '/static/' + expected['hero_bild']
+        hero_path = image_path(expected['hero_bild'])
         season_checks[f"Homepage mit vollstaendigen {key}-Motiven"] = (
             seasonal_response.status_code == 200
             and f'data-jahreszeit="{key}"' in seasonal_html
             and f'rel="preload" as="image" href="{hero_path}"' in seasonal_html
             and f'class="intro-photo"><img src="{hero_path}"' in seasonal_html
             and expected['reifen_titel'] in seasonal_html
-            and '/static/homepage/karte-reifen-v2-20261021.webp' in seasonal_html
+            and image_path('homepage/karte-reifen-v2-20261021.webp') in seasonal_html
             and client.get(hero_path).status_code == 200
             and client.get('/static/homepage/karte-reifen-v2-20261021.webp').status_code == 200
         )
     season_checks["Oel- und Pflegekarten mit erreichbaren Bildern"] = all(
-        '/static/homepage/' + name in hero_html and client.get('/static/homepage/' + name).status_code == 200
+        image_path('homepage/' + name) in hero_html and client.get('/static/homepage/' + name).status_code == 200
         for name in ('karte-oelservice-20261021.webp', 'karte-pflege-v2-20261021.webp')
     )
     checks.update(season_checks)

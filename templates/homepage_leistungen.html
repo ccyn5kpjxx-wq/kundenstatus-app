@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_homepage_images.html" import image_attrs, image_preload %}
 <html lang="de">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -11,7 +12,7 @@
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
 </head>
-<body class="services-detail"><header class="top"><nav class="wrap nav" aria-label="Leistungsnavigation"><a href="{{ url_for('oeffentliche_homepage') }}"><img class="logo" src="{{ url_for('static',filename='logo-transparent.png') }}" alt="Gärtner Karosserie + Lack"></a><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Startseite</a></nav></header><main>
+<body class="services-detail"><header class="top"><nav class="wrap nav" aria-label="Leistungsnavigation"><a href="{{ url_for('oeffentliche_homepage') }}"><img class="logo" {{ image_attrs('logo-transparent.png', sizes='230px', dimensions=true) }} alt="Gärtner Karosserie + Lack" decoding="async"></a><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Startseite</a></nav></header><main>
 <h1 class="visually-hidden">Unsere Werkstattleistungen</h1>
 {% include "_homepage_arbeitsbilder.html" %}
 <section class="wrap extra-services" id="weitere-leistungen"><h2>Auch dafür sind wir da.</h2><div class="extra-grid"><article><h3>Leasingrückgabe &amp; Kaufcheck</h3><p>Wir dokumentieren sichtbare Auffälligkeiten und besprechen sinnvolle Maßnahmen vor Rückgabe oder Kauf.</p><a href="{{ portal_links.anfrage }}?anliegen=leasingrueckgabe#kurzanfrage">Leasing-Check anfragen →</a><br><a href="{{ portal_links.anfrage }}?anliegen=kaufberatung#kurzanfrage">Kaufcheck anfragen →</a></article><article><h3>Fahrzeugaufbereitung</h3><p>Innen- und Außenpflege, Politur und Wachsversiegelung.</p><a href="{{ url_for('oeffentliche_leistung_detail', slug='fahrzeugaufbereitung') }}">Aufbereitung entdecken →</a></article><article><h3>Industrielackierung</h3><p>Robuste Beschichtungen für Bauteile und individuelle Projekte nach Abstimmung.</p><a href="{{ portal_links.anfrage }}?anliegen=lackanfrage#kurzanfrage">Projekt besprechen →</a></article><article><h3>Felgenservice</h3><p>Lackierung und optische Instandsetzung nach Prüfung der Felge.</p><a href="{{ portal_links.anfrage }}?anliegen=lackanfrage#kurzanfrage">Felgenservice anfragen →</a></article></div></section>
