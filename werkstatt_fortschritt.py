@@ -256,6 +256,18 @@ class WorkshopProgress:
             # It also runs for replay, so revoked operational release is respected.
             if authorize is not None:
                 authorize(db, order_id)
+            # All work routes, including native employee controls, share this
+            # transaction. A legacy controller's status helper is not involved
+            # here, so enforce current service-cost approval before audit/replay
+            # as well as before a new mutation. Unbound legacy orders remain
+            # allowed by the policy; portals without this optional feature keep
+            # their existing behavior.
+            service_process = getattr(self.p, "service_process", None)
+            if service_process is not None:
+                try:
+                    service_process.assert_can_start(db, order_id)
+                except ValueError as exc:
+                    raise ProgressError("cost_approval_required", str(exc), 409) from None
             # A concurrent equal key waits on the database unique constraint.
             # Reservations and mutations commit together; failures leave neither.
             inserted = db.execute("""INSERT INTO assistent_fortschritt_audit
