@@ -55,7 +55,7 @@ def reifenservice_checks():
     result = [
         check('Privatauswahl bietet Reifenservice statt Geschäftspartnergespräch', selected.status_code == 200 and 'Reifenservice &amp; Einlagerung' in selected.text and 'anliegen=gespraech' not in selected.text),
         check('Alter Fotoauswahl-Link bleibt kompatibel', client.get('/anfrage?anliegen=schaden').status_code == 200),
-        check('Reifenformular zeigt Leistungen und unverbindlichen Terminwunsch', page.status_code == 200 and all(x in text for x in ('Radwechsel / Saisonwechsel', 'Reifenmontage', 'Räder auswuchten', 'Reifeneinlagerung', 'Neue Reifen anfragen', 'name="wunschdatum"', 'name="wunschzeit"', 'Die gewählte Stunde wird für Sie reserviert', 'Fotos sind optional'))),
+        check('Reifenformular zeigt Leistungen, voraussichtliche Dauer und Planungspuffer', page.status_code == 200 and all(x in text for x in ('Radwechsel / Saisonwechsel', 'Reifenmontage', 'Räder auswuchten', 'Reifeneinlagerung', 'Neue Reifen anfragen', 'name="wunschdatum"', 'name="wunschzeit"', '30–45 Minuten', 'Stundenblock mit Planungspuffer', 'Fotos sind optional'))),
     ]
     def post(changes=(), files=()):
         with portal.PUBLIC_FORM_ATTEMPTS_LOCK:

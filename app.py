@@ -45547,7 +45547,7 @@ def website_anfrage():
                 errors.append("Bitte eine gültige Teilequalität auswählen.")
         if anliegen == "reifenservice":
             if not telefon:
-                errors.append("Bitte Ihre Telefonnummer für die Terminbestätigung angeben.")
+                errors.append("Bitte Ihre Telefonnummer für Rückfragen zu Ihrer Buchung angeben.")
             if any(value not in WEBSITE_REIFEN_LEISTUNGEN for value in reifen_leistungen):
                 errors.append("Bitte nur gültige Reifenleistungen auswählen.")
             elif not reifen_leistungen:

@@ -85,11 +85,13 @@ class ReifentermineTest(unittest.TestCase):
         response = self.client.get('/anfrage?anliegen=reifenservice')
         self.assertIn('<select id="wunschzeit"', response.text)
         self.assertIn('id="kennzeichen"', response.text)
-        self.assertIn('Die gewählte Stunde wird für Sie reserviert', response.text)
+        self.assertIn('Stundenblock mit Planungspuffer', response.text)
+        self.assertIn('Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.', response.text)
         self.assertIn('Termin buchen', response.text)
         detail = self.client.get('/leistungen/reifenservice')
         self.assertEqual(detail.status_code, 200)
         self.assertIn('Reifen-Termin jetzt buchen', detail.text)
+        self.assertIn('Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.', detail.text)
         home = self.client.get('/homepage')
         self.assertIn('data-reifen-buchung', home.text)
         self.assertIn('Reifentermin online buchen', home.text)
@@ -104,7 +106,15 @@ class ReifentermineTest(unittest.TestCase):
         self.assertEqual(lead['portal_data']['kunden_wunsch_zeitfenster'], '09:00')
         self.assertEqual(self.count('auftraege'), before)
         self.assertFalse(lead['auftrag_id'])
-        self.assertIn('Reifenbuchung ist eingegangen', self.client.get(response.location).text)
+        confirmation = self.client.get(response.location).text
+        self.assertIn('Reifenbuchung ist eingegangen', confirmation)
+        self.assertIn('Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.', confirmation)
+        portal.lead_notice.assert_called_once()
+        notice = portal.lead_notice.call_args.args
+        self.assertEqual(notice[1], 'Ihr Reifen-Termin ist reserviert')
+        self.assertIn('09:00 Uhr', notice[4])
+        self.assertIn('30–45 Minuten', notice[4])
+        self.assertIn('Stundenblock mit Planungspuffer', notice[4])
         portal.notify_lead_workshop.assert_called_once()
 
     def test_invalid_dates_times_and_services_do_not_create_leads(self):
