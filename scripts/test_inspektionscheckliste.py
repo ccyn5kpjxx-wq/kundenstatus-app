@@ -93,7 +93,7 @@ class InspectionChecklistTest(unittest.TestCase):
         context = self.context(ident)
         self.assertFalse(context["vorhanden"])
         self.assertTrue(context["anlegbar"])
-        self.assertEqual(len(context["vorlage_punkte"]), 24)
+        self.assertEqual(len(context["vorlage_punkte"]), len(checklists.VORLAGE))
         self.assertFalse("inspektionscheckliste" in portal.get_auftrag(ident))
 
     def test_explicit_creation_is_complete_idempotent_and_keeps_evidence(self):
@@ -101,14 +101,14 @@ class InspectionChecklistTest(unittest.TestCase):
         response = self.initialize(ident)
         self.assertEqual(response.status_code, 201)
         context = response.get_json()["inspektionscheckliste"]
-        self.assertEqual((context["gesamt"], context["offen"]), (24, 24))
-        self.assertEqual(len({p["key"] for p in context["punkte"]}), 24)
+        self.assertEqual((context["gesamt"], context["offen"]), (len(checklists.VORLAGE), len(checklists.VORLAGE)))
+        self.assertEqual(len({p["key"] for p in context["punkte"]}), len(checklists.VORLAGE))
         point = context["punkte"][0]
         self.assertEqual(self.save(ident, point, "mangel", "Befestigung prüfen").status_code, 200)
         self.assertEqual(self.initialize(ident).status_code, 200)
         preserved = self.point(ident)
         self.assertEqual((preserved["ergebnis"], preserved["version"], preserved["notiz"]), ("mangel", 2, "Befestigung prüfen"))
-        self.assertEqual(self.sql("SELECT COUNT(*) n FROM inspektions_checkpunkte WHERE auftrag_id=?", (ident,), rows=True)[0]["n"], 24)
+        self.assertEqual(self.sql("SELECT COUNT(*) n FROM inspektions_checkpunkte WHERE auftrag_id=?", (ident,), rows=True)[0]["n"], len(checklists.VORLAGE))
 
     def test_access_csrf_and_person_identity_are_not_invented(self):
         ident = self.order()
@@ -218,7 +218,7 @@ class InspectionChecklistTest(unittest.TestCase):
         self.assertEqual(sorted(results), [False, True])
         for point in self.context(ident)["punkte"]:
             self.assertEqual(self.save(ident, point).status_code, 200)
-        self.assertEqual(self.context(ident)["erledigt"], 24)
+        self.assertEqual(self.context(ident)["erledigt"], len(checklists.VORLAGE))
         raw = self.sql("SELECT status,produktion_schritt FROM auftraege WHERE id=?", (ident,), rows=True)[0]
         self.assertEqual(raw["status"], 3)
         self.assertFalse(raw["produktion_schritt"])
@@ -308,7 +308,7 @@ class InspectionChecklistTest(unittest.TestCase):
         ident = self.order()
         self.initialize(ident)
         portal.init_db()
-        self.assertEqual(self.context(ident)["gesamt"], 24)
+        self.assertEqual(self.context(ident)["gesamt"], len(checklists.VORLAGE))
         portal.delete_auftrag(ident, safety_backup=False)
         for table in checklists.BACKUP_TABLES:
             self.assertFalse(self.sql(f"SELECT * FROM {table} WHERE auftrag_id=?", (ident,), rows=True))
