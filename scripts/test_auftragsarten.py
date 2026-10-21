@@ -101,6 +101,10 @@ class AuftragsartenTest(unittest.TestCase):
 
     def test_service_page_origin_preserves_smart_repair_and_cannot_override_brakes(self):
         form=self.client.get('/anfrage?anliegen=reparaturanfrage&leistungsart=dellen-smart-repair')
+        self.assertIn('name="leistungsart" value="dellen-smart-repair"', form.text)
+        detail=self.client.get('/leistungen/dellen-smart-repair')
+        self.assertEqual(detail.status_code,200)
+        self.assertIn('leistungsart=dellen-smart-repair',detail.text)
         # The hidden origin is a hint; the server validates its service/anliegen pair.
         for anliegen, hint, categories, expected in (
             ('reparaturanfrage','dellen-smart-repair',[], 'dellen_smart_repair'),
