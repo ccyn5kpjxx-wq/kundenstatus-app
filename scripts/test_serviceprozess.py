@@ -247,6 +247,63 @@ class ServiceProcessTests(unittest.TestCase):
             self.p.LEXWARE_TAX_RATE=rate
             with self.assertRaises(ValueError): self.service.sync_offer(self.case,self.admin)
 
+    def test_atomic_invoice_snapshot_contains_exact_current_approved_state(self):
+        self.approve();self.bind_order()
+        with self.fleet.db() as db:
+            invoice=self.service.approved_invoice_snapshot(db,10)
+            self.assertEqual(invoice["case_id"],self.case)
+            self.assertEqual(invoice["revision"],self.offer["revision"])
+            self.assertEqual(invoice["snapshot_hash"],self.offer["snapshot_hash"])
+            self.assertEqual(invoice["snapshot"],self.offer["snapshot"])
+            self.assertEqual(invoice["recipient"],self.parties["rechnungsempfaenger"])
+            self.assertEqual(invoice["snapshot"]["angebot"]["umfang"],"Bremsen vorne erneuern")
+            self.assertEqual(invoice["snapshot"]["angebot"]["netto_cent"],20000)
+            self.assertIsNone(self.service.approved_invoice_snapshot(db,11))
+
+    def test_invoice_snapshot_uses_no_other_connection_or_ui_view(self):
+        self.approve();self.bind_order()
+        db=self.db()
+        try:
+            with patch.object(self.p,"get_db",side_effect=AssertionError("No second DB")), \
+                 patch.object(self.fleet,"db",side_effect=AssertionError("No second transaction")), \
+                 patch.object(self.service,"view",side_effect=AssertionError("No UI view")):
+                invoice=self.service.approved_invoice_snapshot(db,10)
+                self.assertEqual(invoice["recipient"]["strasse"],"Testweg 1")
+                self.assertEqual(self.service.invoice_recipient(db,10),invoice["recipient"])
+        finally:
+            db.rollback();db.close()
+
+    def test_invoice_snapshot_rejects_scope_edit_before_read(self):
+        self.approve();self.bind_order()
+        self.modify("UPDATE auftraege SET werkstatt_angebot_text='Zusätzliche Arbeiten' WHERE id=10")
+        with self.fleet.db() as db:
+            with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(db,10)
+
+    def test_invoice_snapshot_rejects_changed_recipient_even_with_same_amount(self):
+        self.approve();self.bind_order()
+        self.parties["rechnungsempfaenger"]["name"]="Neue Rechnungsempfängerin"
+        self.service.save_parties(self.case,self.parties,self.admin,self.offer["revision"])
+        with self.fleet.db() as db:
+            with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(db,10)
+
+    def test_invoice_transaction_keeps_source_and_recipient_locked_until_end(self):
+        self.approve();self.bind_order()
+        invoice_db,other=self.db(),self.db()
+        try:
+            invoice=self.service.approved_invoice_snapshot(invoice_db,10)
+            other.execute("PRAGMA busy_timeout=30")
+            for query,args in (("UPDATE auftraege SET werkstatt_angebot_text=? WHERE id=10",("unapproved change",)),
+                               ("UPDATE serviceprozesse SET parteien_json='{}' WHERE id=?",(self.case,))):
+                with self.assertRaises(sqlite3.OperationalError): other.execute(query,args)
+                other.rollback()
+            self.assertEqual(invoice["snapshot"]["angebot"]["umfang"],"Bremsen vorne erneuern")
+            invoice_db.commit()
+            other.execute("UPDATE auftraege SET werkstatt_angebot_text='change after completion' WHERE id=10")
+            other.commit()
+            with self.assertRaises(ValueError): self.service.approved_invoice_snapshot(invoice_db,10)
+        finally:
+            invoice_db.rollback();invoice_db.close();other.close()
+
     def test_restore_preserves_revisions_and_approval_history(self):
         self.approve()
         with self.fleet.db() as db:

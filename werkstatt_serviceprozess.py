@@ -346,13 +346,30 @@ class ServiceProcess:
             if actor["role"] not in {"werkstatt","fuhrparkleitung"}:
                 raise ValueError("Annahme nur durch eine kostenberechtigte Person.")
 
-    def invoice_recipient(self, db, order_id):
+    def approved_invoice_snapshot(self, db, order_id):
+        """Read one complete, current approval in the caller's transaction.
+
+        No second connection or UI projection is used. The process, current
+        vehicle association and source order remain locked until the caller
+        commits or rolls back. Invoice builders must use this snapshot for both
+        scope and money, and may keep this transaction through provider creation
+        so concurrent changes cannot mix a new scope with an old recipient.
+        Historical orders without a managed service case return ``None``.
+        """
         row=db.execute("SELECT id FROM serviceprozesse WHERE auftrag_id=?",(order_id,)).fetchone()
         if not row:
             return None
         row=self._row(db,row["id"],lock=True)
-        self._approved(db,row,lock=True)
-        return json.loads(row["parteien_json"])["rechnungsempfaenger"]
+        snapshot=self._snapshot(db,row,lock=True)
+        digest=_hash(snapshot)
+        if row["freigabe_revision"] != row["revision"] or not row["freigabe_am"] or digest != row["freigabe_hash"]:
+            raise ValueError("Rechnung erst nach gültiger Kostenfreigabe für den aktuellen Umfang, Preis und Rechnungsempfänger erstellen.")
+        return {"case_id":row["id"],"revision":row["revision"],"snapshot_hash":digest,
+                "snapshot":snapshot,"recipient":dict(snapshot["parteien"]["rechnungsempfaenger"])}
+
+    def invoice_recipient(self, db, order_id):
+        approved=self.approved_invoice_snapshot(db,order_id)
+        return approved["recipient"] if approved else None
 
     def bind_order(self, lead_id, order_id, db=None):
         if db is None:
