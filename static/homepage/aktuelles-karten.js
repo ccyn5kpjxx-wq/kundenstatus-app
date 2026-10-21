@@ -8,6 +8,7 @@
     const status = deck.querySelector('[data-deck-status]');
     const choices = [...deck.querySelectorAll('[data-deck-index]')];
     if (!stack || cards.length < 2 || !controls || !previous || !next || !status) return;
+    stack.style.setProperty('--card-count', String(cards.length));
 
     let current = 0;
     const show = requested => {

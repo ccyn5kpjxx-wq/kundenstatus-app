@@ -36,7 +36,7 @@
       <aside class="current-deck" id="aktuell" aria-labelledby="current-title" aria-roledescription="Kartenstapel" data-current-deck>
         <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>{{ jahreszeit.label }}</span></div>
         <div class="current-stack" id="aktuelle-karten">
-          <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="1 von 4 · Reifen">
+          <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="1 von 5 · Reifen">
             <img class="current-feature-photo" src="{{ url_for('static', filename=jahreszeit.reifen_bild) }}" alt="" width="{{ 1200 if jahreszeit.key == 'herbst' else 1672 }}" height="{{ 675 if jahreszeit.key == 'herbst' else 941 }}" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
@@ -45,7 +45,7 @@
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
             </div>
           </article>
-          <article class="current-card current-feature" data-current-card data-card-title="Bremsen" role="group" aria-roledescription="Karte" aria-label="2 von 4 · Bremsen">
+          <article class="current-card current-feature" data-current-card data-card-title="Bremsen" role="group" aria-roledescription="Karte" aria-label="2 von 5 · Bremsen">
             <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/leistungsfotos-v2/bremsenservice.jpg') }}" alt="" width="1200" height="800" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Bremsencheck</span>
@@ -54,7 +54,7 @@
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=bremsenservice#kurzanfrage">Bremsen anfragen <span aria-hidden="true">→</span></a>
             </div>
           </article>
-          <article class="current-card current-feature" data-current-card data-card-title="Ölcheck" role="group" aria-roledescription="Karte" aria-label="3 von 4 · Ölcheck">
+          <article class="current-card current-feature" data-current-card data-card-title="Ölcheck" role="group" aria-roledescription="Karte" aria-label="3 von 5 · Ölcheck">
             <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/karte-oelservice-20261021.webp') }}" alt="" width="1200" height="675" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Ölcheck</span>
@@ -63,7 +63,7 @@
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=mechanikanfrage&amp;mechanik_kategorie=oelwechsel#kurzanfrage">Ölservice anfragen <span aria-hidden="true">→</span></a>
             </div>
           </article>
-          <article class="current-card current-feature" data-current-card data-card-title="Aufbereitung" role="group" aria-roledescription="Karte" aria-label="4 von 4 · Aufbereitung">
+          <article class="current-card current-feature" data-current-card data-card-title="Aufbereitung" role="group" aria-roledescription="Karte" aria-label="4 von 5 · Aufbereitung">
             <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/fahrzeugpflege.webp') }}" alt="" width="683" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">Aufbereitung</span>
@@ -72,11 +72,20 @@
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=fahrzeugpflege#kurzanfrage">Pflege anfragen <span aria-hidden="true">→</span></a>
             </div>
           </article>
+          <article class="current-card current-feature" data-current-card data-card-title="Leasing-Check" role="group" aria-roledescription="Karte" aria-label="5 von 5 · Leasing-Check">
+            <img class="current-feature-photo" src="{{ url_for('static', filename='homepage/leistungsfotos-v2/dellen-hagel.jpg') }}" alt="" width="1200" height="800" decoding="async">
+            <div class="current-feature-copy">
+              <span class="current-kicker">Leasing-Check &amp; Smart Repair</span>
+              <h3>Leasing zurückgeben.<br>Kosten im Blick.</h3>
+              <p>Dellen und kleine Lackschäden vorab prüfen.<br>Unnötige Rückgabekosten vermeiden.</p>
+              <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=leasingrueckgabe#kurzanfrage">Leasing-Check anfragen <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
         </div>
         <div class="current-controls" data-deck-controls hidden>
           <div class="current-navigation">
             <button type="button" class="current-arrow" data-deck-prev aria-label="Vorherige Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">←</span></button>
-            <p class="current-position" aria-live="polite" aria-atomic="true" data-deck-status>1 von 4 · Reifen</p>
+            <p class="current-position" aria-live="polite" aria-atomic="true" data-deck-status>1 von 5 · Reifen</p>
             <button type="button" class="current-arrow" data-deck-next aria-label="Nächste Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">→</span></button>
           </div>
           <div class="current-choices" aria-label="Thema direkt auswählen">
@@ -84,6 +93,7 @@
             <button type="button" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Bremsen</button>
             <button type="button" data-deck-index="2" aria-pressed="false" aria-controls="aktuelle-karten">Ölcheck</button>
             <button type="button" data-deck-index="3" aria-pressed="false" aria-controls="aktuelle-karten">Pflege</button>
+            <button type="button" data-deck-index="4" aria-pressed="false" aria-controls="aktuelle-karten">Leasing</button>
           </div>
         </div>
       </aside>
