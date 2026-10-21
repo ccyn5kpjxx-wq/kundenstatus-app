@@ -6,6 +6,7 @@
   <meta name="robots" content="noindex, nofollow">
   <title>{% if formdata.get('anliegen') == 'bremsenservice' or bremsen_gesendet %}Bremsenservice anfragen{% elif formdata.get('anliegen') == 'reifenservice' or reifen_gesendet %}Reifen-Termin buchen{% elif kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | Gärtner GmbH Karosserie + Lack</title>
   <meta name="description" content="Unverbindliche Privatkunden-Anfrage für Lack, Glasschaden, Reparatur, Bremsenservice, Reifenservice, Einlagerung, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
+  {% if formdata.get('anliegen') == 'reifenservice' and not gesendet %}<link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifenpreise.css') }}">{% endif %}
   <style>
     :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --teal:#0b6b67; --shadow:0 26px 70px rgba(49,42,33,.14); }
     * { box-sizing:border-box; }
@@ -268,6 +269,7 @@
           <ul><li>FIN im Fahrzeugschein unter Feld E</li><li>Achse und Teilequalität auswählen</li><li>Wir stimmen den Termin persönlich ab</li></ul>
           {% elif formdata.get('anliegen') == 'reifenservice' %}
           <h2>Ihr nächster Reifentermin.</h2>
+          <button class="tire-price-open tire-price-desktop" type="button" data-tire-price-open aria-haspopup="dialog" aria-controls="reifenpreise">Preise</button>
           <p>Wählen Sie die gewünschten Arbeiten und Ihren Wunschtermin.</p>
           <ul><li>Radwechsel, Montage oder Einlagerung</li><li>Freies Datum und genaue Ankunftszeit</li><li>Telefonnummer für Rückfragen</li></ul>
           {% else %}
@@ -284,6 +286,7 @@
           <input type="hidden" name="besichtigungsart" value="werkstatt">
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}</h2>
+          {% if formdata.get('anliegen') == 'reifenservice' %}<button class="tire-price-open tire-price-mobile" type="button" data-tire-price-open aria-haspopup="dialog" aria-controls="reifenpreise">Preise</button>{% endif %}
           <p class="form-intro">{% if formdata.get('anliegen') == 'bremsenservice' %}Fahrzeugdaten und gewünschte Arbeiten angeben. Wir melden uns persönlich.{% elif formdata.get('anliegen') == 'reifenservice' %}Gewünschte Arbeiten und eine freie Uhrzeit auswählen.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
@@ -490,5 +493,6 @@
       });
     })();
   </script>
+  {% if formdata.get('anliegen') == 'reifenservice' and not gesendet %}{% with reifen_buchung=true %}{% include "_homepage_reifenpreise.html" %}{% endwith %}{% endif %}
 </body>
 </html>
