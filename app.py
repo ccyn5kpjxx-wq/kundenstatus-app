@@ -51,6 +51,9 @@ import xml.etree.ElementTree as ET
 from backup_storage import BackupStorage
 import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
+from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
+                          leistungsart_aus_anfrage, auftrag_leistungsart,
+                          hat_reifenbuchung, verwendet_lackierablauf)
 import mos_handover
 import mos_order_receipt
 import mos_public_booking
@@ -10820,6 +10823,7 @@ def init_db():
     ensure_column(db, "benachrichtigungen", "kunden_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "reifen_rechnung_json", "TEXT DEFAULT '{}'")
+    ensure_column(db, "auftraege", "leistungsart", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "rechnung_erstellung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
@@ -12573,11 +12577,19 @@ def lead_whatsapp_url(lead):
 
 def auftrag_ist_reifen(auftrag):
     """Use the explicit service marker; damage repairs may also mention tires."""
-    auftrag = auftrag or {}
-    aufnahme = auftrag.get("schaden_aufnahme")
-    if not isinstance(aufnahme, dict):
-        aufnahme = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
-    return aufnahme.get("anliegen") == "reifenservice"
+    return auftrag_leistungsart(auftrag) == "reifenservice"
+
+
+def leistungsart_formular(form, fallback="lackierung"):
+    value = clean_text(form.get("leistungsart", fallback))
+    if value and not normalize_leistungsart(value):
+        abort(400, description="Bitte eine gültige Auftragsart auswählen.")
+    return value
+
+
+@app.context_processor
+def auftragsarten_context():
+    return {"auftragsarten": AUFTRAGSARTEN}
 
 
 def hydrate_lead(row):
@@ -16153,6 +16165,7 @@ def create_auftrag_aus_lackierauftrag(autohaus, daten):
     beschreibung = lackierauftrag_beschreibung_aus_positionen(daten)
     return create_auftrag(
         "autohaus",
+        leistungsart="lackierung",
         autohaus_id=autohaus["id"],
         kunde_name=clean_text((daten or {}).get("versicherungsnehmer")),
         fahrzeug=clean_text((daten or {}).get("typ")),
@@ -16814,8 +16827,14 @@ def row_to_auftrag(row):
         "whatsapp": "WhatsApp",
     }.get(aufnahme.get("kontaktweg"), "Telefon")
     auftrag["schaden_aufnahme"] = aufnahme
+    auftrag["leistungsart"] = auftrag_leistungsart(auftrag)
+    meta = AUFTRAGSARTEN.get(auftrag["leistungsart"], OFFENE_AUFTRAGSART)
+    auftrag["auftragsart_label"] = meta["label"]
+    auftrag["auftragsart_bg"] = meta["bg"]
+    auftrag["auftragsart_farbe"] = meta["farbe"]
+    auftrag["hat_reifenbuchung"] = hat_reifenbuchung(auftrag)
     auftrag["ist_reifenauftrag"] = auftrag_ist_reifen(auftrag)
-    auftrag["auftragsart_label"] = "Reifenauftrag" if auftrag["ist_reifenauftrag"] else "Lackierauftrag"
+    auftrag["ist_lackierauftrag"] = verwendet_lackierablauf(auftrag)
     auftrag["schadenart"] = normalize_schadenart(auftrag.get("schadenart"))
     auftrag["schadenart_label"] = schadenart_label(auftrag["schadenart"])
     auftrag["versicherung_freigabe_status"] = normalize_freigabe_status(
@@ -32472,7 +32491,10 @@ def create_auftrag(
     farbton="",
     farbton_2="",
     _db=None,
+    leistungsart="",
 ):
+    if leistungsart and not normalize_leistungsart(leistungsart):
+        raise ValueError("Unbekannte Auftragsart.")
     jetzt = now_str()
     db = _db if _db is not None else get_db()
     db.execute(
@@ -32551,6 +32573,8 @@ def create_auftrag(
         ),
     )
     auftrag_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    art = normalize_leistungsart(leistungsart) or leistungsart_aus_anfrage(parse_schadenaufnahme_json(schaden_aufnahme_json))
+    db.execute("UPDATE auftraege SET leistungsart=? WHERE id=?", (art, auftrag_id))
     db.execute(
         "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, 1, ?)",
         (auftrag_id, jetzt),
@@ -33290,7 +33314,7 @@ def produktion_schritt_index(value):
 
 
 def produktion_schritt_steps(auftrag):
-    if auftrag_ist_reifen(auftrag):
+    if not verwendet_lackierablauf(auftrag):
         return []
     # Werkstatt-Stepper auf der Tafel-Karte: 4 Schritte mit Zustand erledigt/aktiv/offen.
     aktuell_index = produktion_schritt_index((auftrag or {}).get("produktion_schritt"))
@@ -33311,8 +33335,9 @@ def kunden_produktion_steps(auftrag):
     # Karosserie wird bewusst unter "In Vorbereitung" gefaltet (kein "übersprungen" beim Kunden).
     auftrag = auftrag or {}
     status = int(auftrag.get("status") or 1)
-    if auftrag_ist_reifen(auftrag):
-        return [{"label": "Reifenservice", "detail": "Ihre Reifenarbeiten werden gemäß Auftrag ausgeführt.",
+    if not verwendet_lackierablauf(auftrag):
+        meta = AUFTRAGSARTEN.get(auftrag_leistungsart(auftrag), OFFENE_AUFTRAGSART)
+        return [{"label": meta["label"], "detail": "Die vereinbarten Arbeiten werden ausgeführt.",
                  "state": "done" if status >= 4 else "active" if status == 3 else "waiting"}]
     schritt = normalize_produktion_schritt(auftrag.get("produktion_schritt"))
     aktiv_map = {"vorarbeit": 0, "karosserie": 0, "lackierung": 1, "finish": 2}
@@ -37536,7 +37561,7 @@ def build_lackier_statistik(auftraege, reference_date=None, fertigmeldungen=None
     echte_auftraege = [
         auftrag
         for auftrag in (auftraege or [])
-        if auftrag and not auftrag.get("angebotsphase") and auftrag.get("id") and not auftrag_ist_reifen(auftrag)
+        if auftrag and not auftrag.get("angebotsphase") and auftrag.get("id") and verwendet_lackierablauf(auftrag)
     ]
     if fertigmeldungen is None:
         fertigmeldungen = list_erste_fertigmeldungen(
@@ -45540,12 +45565,15 @@ def website_anfrage():
                 "kennzeichen": kennzeichen,
                 "reifen_slot": (wunschdatum, wunschzeit) if anliegen == "reifenservice" else None,
                 "portal_data": {
-                    "anliegen": "reifenservice",
-                    "reifen_leistungen": reifen_leistungen,
+                    "anliegen": anliegen,
+                    "mechanik_kategorien": mechanik_kategorien if anliegen == "mechanikanfrage" else [],
+                    "pflege_kategorien": pflege_kategorien if anliegen == "fahrzeugpflege" else [],
+                    "fahrzeugcheck_art": fahrzeugcheck_art if anliegen == "fahrzeugcheck" else "",
+                    "reifen_leistungen": reifen_leistungen if anliegen == "reifenservice" else [],
                     "kunden_wunsch_annahme_datum": format_date(wunschdatum),
                     "kunden_wunsch_zeitfenster": wunschzeit,
                     "kunden_wunsch_hinweis": nachricht,
-                } if anliegen == "reifenservice" else {},
+                },
                 "schadenart": "unbekannt",
                 "beschreibung": " · ".join(beschreibungsteile),
                 "naechste_aktion": naechste_aktion,
@@ -49808,6 +49836,7 @@ def neuer_auftrag():
     autohaeuser = list_autohaeuser()
     if request.method == "POST":
         form = request.form
+        leistungsart = leistungsart_formular(form)
         aktion = form.get("aktion", "speichern")
         dateien = request.files.getlist("dateien")
         gewaehlte_dateien = [file for file in dateien if file and file.filename]
@@ -49947,6 +49976,7 @@ def neuer_auftrag():
 
         auftrag_id = create_auftrag(
             "intern",
+            leistungsart=leistungsart,
             autohaus_id=int(form.get("autohaus_id")) if form.get("autohaus_id") else None,
             kunde_name=clean_text(form.get("kunde_name")),
             fahrzeug=clean_text(form.get("fahrzeug")),
@@ -50053,9 +50083,10 @@ def auftrag_detail(auftrag_id):
     autohaeuser = list_autohaeuser()
     if request.method == "POST":
         form = request.form
+        neue_art = leistungsart_formular(form, fallback="") if "leistungsart" in form else None
         aktion = form.get("aktion", "speichern")
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
-        if auftrag_ist_reifen(auftrag) and (
+        if hat_reifenbuchung(auftrag) and (
             format_date(form.get("annahme_datum")) != format_date(auftrag.get("annahme_datum"))
             or format_time_value(form.get("annahme_uhrzeit")) != format_time_value(auftrag.get("annahme_uhrzeit"))
         ):
@@ -50067,7 +50098,21 @@ def auftrag_detail(auftrag_id):
         if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
             bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
         db = get_db()
-        if auftrag_ist_reifen(auftrag):
+        if neue_art is not None:
+            db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+            zeile = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+            if not zeile:
+                db.rollback()
+                db.close()
+                abort(404)
+            frisch = dict(zeile)
+            hat_reifenrechnung = clean_text(frisch.get("reifen_rechnung_json")) not in ("", "{}")
+            if (hat_reifenbuchung(frisch) or hat_reifenrechnung) and neue_art != "reifenservice":
+                db.rollback()
+                db.close()
+                abort(400, description="Die Auftragsart einer Reifenbuchung oder gespeicherten Reifenabrechnung bleibt Reifenservice.")
+            db.execute("UPDATE auftraege SET leistungsart=? WHERE id=?", (neue_art, auftrag_id))
+        if hat_reifenbuchung(auftrag):
             db.execute("UPDATE auftraege SET status=status WHERE id=?",(auftrag_id,))
             termin = db.execute("SELECT annahme_datum,annahme_uhrzeit FROM auftraege WHERE id=?",(auftrag_id,)).fetchone()
             if not termin or termin["annahme_datum"] != auftrag.get("annahme_datum") or termin["annahme_uhrzeit"] != auftrag.get("annahme_uhrzeit"):
@@ -52483,7 +52528,7 @@ def admin_auslese_uebernehmen(auftrag_id):
     if not order:
         abort(404)
     key = request.form.get('feld')
-    if auftrag_ist_reifen(order) and key == 'annahme_datum':
+    if hat_reifenbuchung(order) and key == 'annahme_datum':
         flash('Reifentermine bitte im Reifenportal ändern. Dort wird die freie Stunde geprüft.','warning')
         return redirect(url_for('admin_reifentermine'))
     allowed = {k for k, label in DOCUMENT_REVIEW_FIELDS} - {'rep_max_kosten'}
@@ -54860,6 +54905,7 @@ def werkstatt_auftrag_anlegen():
         return guard
 
     if request.method == "POST":
+        leistungsart = leistungsart_formular(request.form)
         kunde_name = clean_text(request.form.get("kunde_name"))
         kontakt_telefon = clean_text(request.form.get("kontakt_telefon"))
         fahrzeug = clean_text(request.form.get("fahrzeug"))
@@ -54896,6 +54942,7 @@ def werkstatt_auftrag_anlegen():
         )
         auftrag_id = create_auftrag(
             "werkstatt",
+            leistungsart=leistungsart,
             kunde_name=kunde_name,
             fahrzeug=fahrzeug,
             fin_nummer=fin_nummer,
@@ -56077,6 +56124,7 @@ def partner_neuer_auftrag(slug):
 
     if request.method == "POST":
         form = request.form
+        leistungsart = leistungsart_formular(form)
         aktion = form.get("aktion", "speichern")
         dateien = request.files.getlist("dateien")
         erlaubte_dateien = get_allowed_uploads(dateien)
@@ -56157,6 +56205,7 @@ def partner_neuer_auftrag(slug):
         analyse = clean_text(form.get("analyse_text")) or analyse_text(beschreibung)
         auftrag_id = create_auftrag(
             "autohaus",
+            leistungsart=leistungsart,
             autohaus_id=autohaus["id"],
             kunde_name=clean_text(form.get("kunde_name")),
             fahrzeug=clean_text(form.get("fahrzeug")),
