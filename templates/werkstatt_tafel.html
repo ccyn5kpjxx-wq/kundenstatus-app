@@ -359,6 +359,8 @@
       overflow: hidden;
     }
 
+    .karte[data-reifenbuchung] .arbeit { display: block; }
+
     .chips {
       display: flex;
       flex-wrap: wrap;
@@ -560,32 +562,30 @@
     {% endif %}
   {% endwith %}
 
-  {% if reifentermine %}
-  <section aria-labelledby="reifenwuensche-titel" style="margin:1rem; padding:1rem; border:1px solid var(--line); border-radius:18px; background:var(--panel);">
-    <h2 id="reifenwuensche-titel" style="margin:0 0 .5rem;">Reifenportal · Neue Reifenbuchungen · {{ reifentermine|length }}</h2>
-    <p style="margin:0 0 .8rem; color:var(--muted);">Bestätigung durch das Büro offen · noch keine eingeplanten Aufträge.</p>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); gap:.8rem;">
-      {% for termin in reifentermine[:6] %}
-      <article style="min-width:0; overflow-wrap:anywhere; padding:.9rem; border:1px solid var(--line); border-radius:12px;">
-        <strong>{{ termin.termin_label }}</strong>
-        <div>{{ termin.kunde_name or 'Kundenanfrage' }} · {{ termin.fahrzeug or 'Fahrzeug noch offen' }}{% if termin.kennzeichen %} · {{ termin.kennzeichen }}{% endif %}</div>
-        <div style="margin-top:.4rem;">{{ termin.leistungen|join(' · ') }}</div>
-      </article>
-      {% endfor %}
-    </div>
-    {% if reifentermine|length > 6 %}<p>{{ reifentermine|length - 6 }} weitere Terminwünsche im Büro prüfen.</p>{% endif %}
-    {% if session.admin %}<a href="{{ url_for('admin_reifentermine') }}" style="display:inline-block; margin-top:.8rem;">Reifenportal öffnen →</a>{% endif %}
-  </section>
-  {% endif %}
   <div class="board">
     {% for spalte in spalten %}
     <div class="spalte s-{{ spalte.key }}" data-ziel-status="{{ spalte.ziel_status }}">
       <div class="spalte-kopf">
         <span class="schritt-nr">{{ loop.index }}</span>
         <h2>{{ spalte.titel }}</h2>
-        <span class="zaehler">{{ spalte.auftraege | length }}</span>
+        <span class="zaehler">{{ (spalte.auftraege | length) + (spalte.get('reifenbuchungen', []) | length) }}</span>
       </div>
       <div class="spalte-hinweis">Dringendste zuerst ↓</div>
+      {% for termin in spalte.get('reifenbuchungen', []) %}
+      <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="false">
+        <div class="karte-nummernzeile">
+          <strong class="auftragsart" style="display:inline-block; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftragsarten['reifenservice']['bg'] }}; color:{{ auftragsarten['reifenservice']['farbe'] }};">Reifenservice</strong>
+        </div>
+        <div class="karte-kopf">
+          {% if termin.kennzeichen %}<span class="kennzeichen">{{ termin.kennzeichen }}</span>{% else %}<span class="kennzeichen leer">ohne Kennzeichen</span>{% endif %}
+        </div>
+        <div class="fahrzeug">{{ termin.fahrzeug or 'Reifenservice' }}</div>
+        <div class="arbeit">{{ termin.kunde_name or 'Kunde noch offen' }}<br>{{ termin.leistungen|join(' · ') }}</div>
+        <div class="chips"><span class="chip">Termin: <strong>{{ termin.termin_label }}{% if termin.zeit %} Uhr{% endif %}</strong></span></div>
+        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
+        {% if session.admin %}<a class="schnell-knopf" style="display:block; text-align:center; text-decoration:none;" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Im Büro öffnen →</a>{% endif %}
+      </article>
+      {% endfor %}
       {% for auftrag in spalte.auftraege %}
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
@@ -676,7 +676,7 @@
         {% endif %}
       </a>
       {% else %}
-      <div class="leer-hinweis">Nichts in dieser Spalte.</div>
+      {% if not spalte.get('reifenbuchungen') %}<div class="leer-hinweis">Nichts in dieser Spalte.</div>{% endif %}
       {% endfor %}
     </div>
     {% if not loop.last %}
@@ -974,7 +974,7 @@
       });
 
       // Drag & Drop zwischen den Spalten (Desktop / Maus)
-      document.querySelectorAll('.karte').forEach((karte) => {
+      document.querySelectorAll('.karte[data-auftrag][draggable="true"]').forEach((karte) => {
         karte.addEventListener('dragstart', (e) => {
           dragAktiv = true;
           karte.classList.add('dragging');

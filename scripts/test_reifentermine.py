@@ -1,6 +1,7 @@
 """Public tire request -> protected workshop views, using disposable test data."""
 from datetime import date, datetime, timedelta
 import json
+import re
 from pathlib import Path
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -156,7 +157,10 @@ class ReifentermineTest(unittest.TestCase):
         self.assertNotIn('<script>TEST-REIFEN</script>', overview.text)
         hall = self.client.get('/werkstatt/tafel')
         self.assertEqual(hall.status_code, 200)
-        self.assertIn('Neue Reifenbuchungen', hall.text)
+        self.assertNotIn('Neue Reifenbuchungen', hall.text)
+        self.assertNotIn('reifenwuensche-titel', hall.text)
+        self.assertIn('data-reifenbuchung="' + str(lead['id']) + '"', hall.text)
+        self.assertIn('&lt;script&gt;TEST-REIFEN&lt;/script&gt;', hall.text)
         self.assertNotIn('reifen-test@example.invalid', hall.text)
         self.assertNotIn('0171 1234567', hall.text)
         with portal.app.test_request_context('/admin/cockpit'):
@@ -166,6 +170,65 @@ class ReifentermineTest(unittest.TestCase):
         cockpit = self.client.get('/admin/cockpit')
         self.assertEqual(cockpit.status_code, 200)
         self.assertIn('/admin/reifenportal', cockpit.text)
+
+    def test_board_integrates_all_bookings_and_hall_permissions_without_get_writes(self):
+        leads=[]
+        for hour in range(7,14):
+            self.assertEqual(self.book({'wunschzeit':f'{hour:02d}:00'}).status_code,302)
+            leads.append(self.latest())
+        portal.set_app_setting(portal.WERKSTATT_TAFEL_CODE_SETTING,'REIFEN-TAFEL-TEST')
+        with self.client.session_transaction() as session:
+            session['werkstatt_tafel']=portal.werkstatt_tafel_session_token()
+        db=portal.get_db()
+        before={table:[tuple(row) for row in db.execute('SELECT * FROM '+table).fetchall()]
+                for table in ('leads','auftraege','reifen_termin_slots','benachrichtigungen','status_log')}
+        db.close()
+        for _ in range(2):
+            with patch.object(portal,'render_template',wraps=portal.render_template) as render:
+                response=self.client.get('/werkstatt/tafel')
+            self.assertEqual(response.status_code,200)
+            columns=render.call_args.kwargs['spalten']
+            first=columns[0]
+            self.assertEqual(first['key'],'angelegt')
+            projected={x['id'] for x in first['reifenbuchungen']}
+            self.assertTrue(all(x['id'] in projected for x in leads))
+            self.assertFalse(any(x.get('reifenbuchungen') for x in columns[1:]))
+            first_column=response.text.split('class="spalte s-angelegt"',1)[1].split('class="fluss-pfeil"',1)[0]
+            self.assertIn('<span class="zaehler">'+str(len(first['auftraege'])+len(first['reifenbuchungen']))+'</span>',first_column)
+            self.assertNotIn('Nichts in dieser Spalte.',first_column)
+            self.assertNotIn('Neue Reifenbuchungen',response.text)
+            for lead in leads:
+                cards=re.findall(r'<article class="karte"[^>]*data-reifenbuchung="'+str(lead['id'])+r'".*?</article>',first_column,re.S)
+                self.assertEqual(len(cards),1)
+                self.assertIn('draggable="false"',cards[0])
+                self.assertIn('Reifenservice',cards[0])
+                self.assertIn(lead['portal_data']['kunden_wunsch_zeitfenster'],cards[0])
+                self.assertNotIn('data-auftrag=',cards[0])
+                self.assertNotIn('data-status-knopf',cards[0])
+                self.assertNotIn('data-prod-knopf',cards[0])
+                self.assertNotIn('/admin/',cards[0])
+                self.assertNotIn(lead['kunden_status_token'],response.text)
+            self.assertNotIn('reifen-test@example.invalid',response.text)
+            self.assertNotIn('0171 1234567',response.text)
+        db=portal.get_db()
+        after={table:[tuple(row) for row in db.execute('SELECT * FROM '+table).fetchall()] for table in before}
+        db.close()
+        self.assertEqual(before,after)
+
+    def test_board_booking_becomes_one_scheduled_order_after_office_takeover(self):
+        self.book()
+        lead=self.latest()
+        self.login_admin()
+        initial=self.client.get('/werkstatt/tafel')
+        self.assertIn('/admin/leads/'+str(lead['id'])+'#kundenportal',initial.text)
+        marker='data-reifenbuchung="'+str(lead['id'])+'"'
+        self.assertEqual(initial.text.count(marker),1)
+        order_id=portal.reifenauftrag_aus_buchung(lead['id'])
+        updated=self.client.get('/werkstatt/tafel')
+        self.assertNotIn(marker,updated.text)
+        scheduled=updated.text.split('class="spalte s-eingeplant"',1)[1].split('class="fluss-pfeil"',1)[0]
+        self.assertEqual(len(re.findall(r'<a class="karte"[^>]*data-auftrag="'+str(order_id)+'"',scheduled)),1)
+        self.assertEqual(portal.get_auftrag(order_id)['leistungsart'],'reifenservice')
 
     def test_customer_reschedule_is_reflected_without_duplicate_request(self):
         self.book()

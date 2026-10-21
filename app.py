@@ -54868,6 +54868,7 @@ def werkstatt_tafel():
         for auftrag in list_auftraege()
         if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
+    reifentermine = list_reifentermine()
     spalten = (
         {
             "key": "angelegt",
@@ -54875,6 +54876,7 @@ def werkstatt_tafel():
             "icon": "📝",
             "ziel_status": 1,
             "auftraege": [a for a in auftraege if a["status"] == 1],
+            "reifenbuchungen": reifentermine,
         },
         {
             "key": "eingeplant",
@@ -54904,8 +54906,7 @@ def werkstatt_tafel():
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
-        reifentermine=list_reifentermine(),
-        anzahl=len(auftraege),
+        anzahl=len(auftraege) + len(reifentermine),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
         server_now_iso=jetzt.isoformat(timespec="seconds"),
