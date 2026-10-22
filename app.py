@@ -12294,14 +12294,25 @@ def schaden_zonen_labels(selected):
 def service_status_path(*, lead_id=None, order_id=None):
     if not globals().get('service_process'):
         return ''
+    cache = None
+    key = ('order', order_id) if order_id else ('lead', lead_id)
+    if has_request_context() and request.method == 'GET':
+        cache = getattr(g, 'service_status_paths', None)
+        if cache is None:
+            cache = g.service_status_paths = {}
+        if key in cache:
+            return cache[key]
     db = get_db()
     try:
         row = db.execute('SELECT fahrzeug_id FROM serviceprozesse WHERE ' +
                          ('auftrag_id=?' if order_id else 'lead_id=?'),
                          (order_id or lead_id,)).fetchone()
-        return '/service/fahrzeug/' + row['fahrzeug_id'] if row else ''
     finally:
         db.close()
+    path = '/service/fahrzeug/' + row['fahrzeug_id'] if row else ''
+    if cache is not None:
+        cache[key] = path
+    return path
 
 
 def kunden_status_url(auftrag, force_request_host=False):
@@ -21564,9 +21575,12 @@ def _create_lexware_invoice_draft(auftrag, rechnung, net_amount, *, managed_serv
     }
 
 
-def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=False):
+def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=False,
+                   *, include_unset_archived=False):
     db = get_db()
     archived_filter = "" if include_archived else "AND a.archiviert = 0"
+    if not include_archived and include_unset_archived:
+        archived_filter = "AND (a.archiviert = 0 OR a.archiviert IS NULL)"
     angebots_filter = "" if include_angebote else "AND a.angebotsphase = 0"
     if autohaus_id is None:
         rows = db.execute(
@@ -39483,8 +39497,8 @@ def cockpit_aktionsuebersicht(auftraege):
 @app.route("/admin/cockpit")
 @admin_required
 def betriebs_cockpit():
-    alle_auftraege = list_auftraege(include_archived=True)
-    auftraege = [a for a in alle_auftraege if not a["archiviert"]]
+    # Preserve legacy unset archive flags while filtering before expensive hydration.
+    auftraege = list_auftraege(include_unset_archived=True)
     cockpit_data = dashboard_daten(auftraege)
     current_datetime = datetime.now()
     try:
