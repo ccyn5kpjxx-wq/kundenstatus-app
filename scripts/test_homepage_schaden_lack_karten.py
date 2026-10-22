@@ -113,6 +113,7 @@ def main():
     damage_form = client.get(damage_url)
     check('Insurance intake opens without login and has a POST action', damage_form.status_code == 200 and 'action="/privat/schaden"' in damage_form.text and 'method="post"' in damage_form.text.lower())
     check('Insurance form is not cached', 'no-store' in damage_form.headers.get('Cache-Control',''))
+    check('Insurance form directs customers to the current workshop address', 'Alte Neckarelzer Straße 18/1' in damage_form.text and 'Binauer Höhe' not in damage_form.text)
     keys = portal.schadenaufnahme_session_keys(public_mode=True)
     with client.session_transaction() as session:
         csrf, form_token = session[portal.CSRF_FIELD_NAME], session[keys['form']]
@@ -147,6 +148,7 @@ def main():
     check('Customer status is protected pending contact verification', not case.get('kunden_status_aktiv') and not case.get('kunden_status_url'))
     confirmation = client.get(created.headers['Location'])
     check('Insurance confirmation displays the saved submission', confirmation.status_code == 200 and 'Ihre Schadenmeldung ist angekommen' in confirmation.text and 'Karten Unfall Testkunde' in confirmation.text)
+    check('Insurance confirmation also shows the current workshop address', 'Alte Neckarelzer Straße 18/1' in confirmation.text and 'Binauer Höhe' not in confirmation.text)
     other_client = portal.app.test_client()
     foreign = other_client.get(created.headers['Location'])
     check('Another browser cannot read the saved case through its confirmation URL', 'Karten Unfall Testkunde' not in foreign.text and 'MOS TEST 42' not in foreign.text)
