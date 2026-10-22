@@ -8,6 +8,7 @@ the route after legal review and a real mail acceptance test.
 
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer
 from email.utils import formataddr
 from hashlib import sha256
 import hmac
@@ -185,6 +186,7 @@ def _message(row, cfg):
     msg.set_content('Wir bestätigen den Eingang Ihrer Erklärung. Der vollständige Inhalt '
                     'einschließlich Abgabe- und Zugangszeit steht nachfolgend.\n\n'
                     + row['declaration_text'])
+    add_workshop_mail_footer(msg)
     return msg
 
 

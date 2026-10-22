@@ -29,6 +29,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer
 from email.utils import format_datetime, getaddresses
 import hashlib
 import json
@@ -361,6 +362,7 @@ class OrderDispatch:
                       f'Bestellreferenz: {entry["id"]}', '']
         lines += ['Bitte bestätigen Sie die Bestellung und den Liefertermin.', '', 'Gärtner GmbH Karosserie + Lack']
         message.set_content('\n'.join(lines))
+        add_workshop_mail_footer(message)
         return message
 
     def _record_result(self, batch_id, owner, result, now, blocked_message=None):

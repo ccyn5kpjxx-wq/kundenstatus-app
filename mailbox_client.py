@@ -3,6 +3,7 @@ import base64
 import email
 from email import policy
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer
 from email.utils import getaddresses, formatdate, make_msgid, formataddr
 from html.parser import HTMLParser
 import io
@@ -248,7 +249,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
         if reply_id and re.fullmatch(r'<[^<>\s]+>',reply_id):
             references=list(dict.fromkeys(re.findall(r'<[^<>\s]+>',reference_text)+[reply_id]))[-30:]
             msg['In-Reply-To']=reply_id;msg['References']=' '.join(references)
-        signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nGärtner GmbH Karosserie + Lack\nBinauer Höhe 4 · 74821 Mosbach-Lohrbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
+        signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nGärtner GmbH Karosserie + Lack\nAlte Neckarelzer Straße 18/1 · 74821 Mosbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
         quote_text='\n\n--- Ursprüngliche Nachricht ---\n'+quoted if quoted else ''
         msg.set_content(body+'\n\n'+signature_text+quote_text)
         signature=render_template('_mail_signature.html')
@@ -256,6 +257,7 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
         for url,cid,_,_ in images:signature=signature.replace(url,'cid:'+cid)
         quoted_html='<hr><blockquote style="white-space:pre-wrap">'+html.escape(quoted)+'</blockquote>' if quoted else ''
         msg.add_alternative('<div style="white-space:pre-wrap">'+html.escape(body)+'</div><br>'+signature+quoted_html,subtype='html')
+        add_workshop_mail_footer(msg)
         for url,cid,maintype,subtype in images:
             payload=(Path(current_app.static_folder)/url.removeprefix('/static/')).read_bytes()
             msg.get_payload()[-1].add_related(payload,maintype=maintype,subtype=subtype,cid='<'+cid+'>',disposition='inline')

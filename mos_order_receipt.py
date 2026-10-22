@@ -8,6 +8,7 @@ when the paid hold ends in manual review. SMTP happens only in an enabled worker
 
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer, BUSINESS_ADDRESS as MAIL_BUSINESS_ADDRESS
 from email.utils import formataddr
 from hashlib import sha256
 import json
@@ -114,8 +115,9 @@ def _message(row):
         'einer Fahrzeugübergabe. Falls die Bestellung geprüft werden muss, '
         'informiert Sie die Werkstatt über das Ergebnis.\n\n'
         'Vermieter: ' + LEGAL_NAME + '\n'
-        + BUSINESS_ADDRESS + '\n'
+        + MAIL_BUSINESS_ADDRESS + '\n'
         + business_letter_details() + '\n')
+    add_workshop_mail_footer(message)
     return message
 
 

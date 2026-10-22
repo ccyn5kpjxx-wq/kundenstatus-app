@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import wraps
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer
 
 import requests
 import assistent_cockpit as cockpit
@@ -854,6 +855,7 @@ def register_assistant(p):
             body += f"\nUnsere bisherige, noch zu prüfende Preisangabe: {item['gesamt_cent']/100:.2f} EUR brutto insgesamt.\n"
         body += "\nDies ist eine unverbindliche Anfrage, keine Bestellung.\n\nFreundliche Grüße\nGärtner GmbH Karosserie + Lack\n"
         message.set_content(body)
+        add_workshop_mail_footer(message)
         return p.app.response_class(message.as_bytes(), mimetype="message/rfc822", headers={"Content-Disposition": f'attachment; filename="Teileanfrage-Auftrag-{row["auftrag_id"]}.eml"'})
 
     @bp.post("/vorschlag")

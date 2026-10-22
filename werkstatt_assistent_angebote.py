@@ -11,6 +11,7 @@ be exported by supplying a filename or filesystem path.
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer
 from email.utils import format_datetime
 import hashlib
 import hmac
@@ -281,11 +282,16 @@ class OfferService:
                 return blocked('Anhang wurde geändert; neue Vorschau und ausdrückliche Bestätigung erforderlich.', ['attachments'])
             major, minor = actual['mime'].split('/')
             message.add_attachment(content, maintype=major, subtype=minor, filename=actual['name'])
+        # A replay may refer to an immutable outbox message composed before the
+        # current postal footer. Recognize exactly that same approved payload;
+        # never rewrite its EML/fingerprint or turn a replay into SMTP permission.
+        legacy_fingerprint = _fingerprint(message)
+        add_workshop_mail_footer(message)
         existing = self.outbox.status(token)
         if existing:
             with self.db() as db:
                 saved = db.execute('SELECT fingerprint FROM mailbox_outbox WHERE token=?', (token,)).fetchone()
-            if not saved or saved['fingerprint'] != _fingerprint(message):
+            if not saved or saved['fingerprint'] not in {legacy_fingerprint, _fingerprint(message)}:
                 return blocked('Versandvorgang gehört zu anderem Inhalt; nicht erneut senden.')
             # A confirmation replay is never permission to retry SMTP, including
             # a known rejection. Check history before our own audit changes the

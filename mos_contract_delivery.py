@@ -8,6 +8,7 @@ from base64 import b64decode
 from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import EmailMessage
+from werkstatt_mail_identity import add_workshop_mail_footer, BUSINESS_ADDRESS as MAIL_BUSINESS_ADDRESS
 from email.utils import formataddr, parseaddr
 from hashlib import sha256
 import json
@@ -62,7 +63,7 @@ def _message(hold_id, recipient, pdf, cancelled):
             'Mietvertrags mit den damals vereinbarten Mietbedingungen.\n\n'
             'Buchungsreferenz: ' + hold_id + '\n\n'
             'Vermieter: ' + LEGAL_NAME + '\n'
-            + BUSINESS_ADDRESS + '\n'
+            + MAIL_BUSINESS_ADDRESS + '\n'
             + business_letter_details() + '\n')
     if cancelled:
         body += ('\nDie Buchung wurde inzwischen storniert. Diese Vertragskopie ist keine '
@@ -70,6 +71,7 @@ def _message(hold_id, recipient, pdf, cancelled):
     message.set_content(body)
     message.add_attachment(pdf, maintype='application', subtype='pdf',
                            filename='MOS-Mietvertrag-' + hold_id + '.pdf')
+    add_workshop_mail_footer(message)
     return message
 
 

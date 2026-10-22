@@ -21,6 +21,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import formataddr, getaddresses, parsedate_to_datetime, formatdate, make_msgid
 from functools import wraps
+from werkstatt_mail_identity import add_workshop_mail_footer, append_workshop_footer
 from html import escape, unescape
 import hmac
 import hashlib
@@ -27647,9 +27648,11 @@ def get_schaden_mail_config():
     }
 
 
-def add_standard_mail_headers(message):
+def add_standard_mail_headers(message, *, werkstatt_footer=True):
     """Ergänzt Date + Message-ID, falls fehlend. Ihr Fehlen ist ein häufiger
     Grund, warum Mails (z. B. die Endkunden-Status-Mail) im Spam landen."""
+    if werkstatt_footer:
+        add_workshop_mail_footer(message)
     try:
         if not message["Date"]:
             message["Date"] = formatdate(localtime=True)
@@ -27881,7 +27884,7 @@ def send_lead_email(lead, empfaenger, betreff, nachricht):
     message["Reply-To"] = config["address"]
     message["X-Gaertner-Lead-ID"] = str(int((lead or {}).get("id") or 0))
     message.set_content(nachricht)
-    add_standard_mail_headers(message)
+    add_standard_mail_headers(message, werkstatt_footer=config["website"] in {"auto-lackierzentrum", "autovermietung-mos"})
     try:
         if config["ssl"]:
             smtp_context = smtplib.SMTP_SSL(
@@ -27979,6 +27982,8 @@ def fallback_lead_mail_draft(lead):
             f"Preis folgt erst nach fachlicher Prüfung oder Besichtigung.{portal_absatz}\n\n"
             f"Ihre Referenz: {reference}\n\nFreundliche Grüße\nGärtner GmbH Karosserie + Lack"
         )
+    if website in {"auto-lackierzentrum", "autovermietung-mos"}:
+        body = append_workshop_footer(body)
     return {
         "analyse": "Anfrage erfasst. Der Antwortentwurf wurde ohne KI als sichere Standardantwort vorbereitet.",
         "fehlende_angaben": ["Fachliche Prüfung und gegebenenfalls ergänzende Angaben"],
@@ -28729,7 +28734,7 @@ def baue_endkunden_fertig_mail(auftrag):
         "",
         "Mit besten Grüßen",
         "Ihr Team von Gärtner GmbH Karosserie + Lack",
-        "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+        "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
     ]
     return "\n".join(zeilen)
 
@@ -28756,7 +28761,7 @@ def baue_endkunden_danke_mail(auftrag):
         "",
         "Mit besten Grüßen",
         "Ihr Team von Gärtner GmbH Karosserie + Lack",
-        "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+        "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
     ]
     return "\n".join(zeilen)
 
@@ -28818,7 +28823,7 @@ def baue_endkunden_terminbestaetigung_mail(auftrag):
             "",
             "Mit freundlichen Grüßen",
             "Ihr Team von Gärtner GmbH Karosserie + Lack",
-            "Binauer Höhe 4, 74821 Mosbach · Telefon +49 1522 7706694",
+            "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
         ]
     )
     return "\n".join(zeilen)
@@ -39912,7 +39917,7 @@ def admin_rundmail_senden():
                         message["Reply-To"] = config["smtp_user"]
                         message.set_content(
                             paket["text"]
-                            + "\n\n--\nGärtner GmbH Karosserie + Lack\nBinauer Höhe 4, 74821 Mosbach\nTelefon +49 1522 7706694"
+                            + "\n\n--\nGärtner GmbH Karosserie + Lack\nAlte Neckarelzer Straße 18/1, 74821 Mosbach\nTelefon +49 1522 7706694"
                         )
                         add_standard_mail_headers(message)
                         smtp.send_message(message)
