@@ -8,7 +8,8 @@
     const status = deck.querySelector('[data-deck-status]');
     const choices = [...deck.querySelectorAll('[data-deck-index]')];
     if (!stack || cards.length < 2 || !controls || !previous || !next || !status) return;
-    stack.style.setProperty('--card-count', String(cards.length));
+    const visibleLayers = Math.min(cards.length, 5);
+    stack.style.setProperty('--card-count', String(visibleLayers));
 
     let current = 0;
     const show = requested => {
@@ -17,7 +18,8 @@
       current = index;
       cards.forEach((card, number) => {
         const active = number === current;
-        card.style.setProperty('--card-position', String((number - current + cards.length) % cards.length));
+        const position = (number - current + cards.length) % cards.length;
+        card.style.setProperty('--card-position', String(Math.min(position, visibleLayers - 1)));
         card.classList.toggle('is-current', active);
         card.setAttribute('aria-hidden', String(!active));
         card.inert = !active;

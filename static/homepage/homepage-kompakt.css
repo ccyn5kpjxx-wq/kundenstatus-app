@@ -96,6 +96,7 @@
 .current-kicker{display:block;font-size:10px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
 .current-feature .current-kicker{display:inline-block;padding:5px 8px;border-radius:4px;background:#bc1b13;color:#fff}
 .current-feature h3{font-size:31px;line-height:1.08;letter-spacing:-.035em;margin:9px 0 11px;color:#fff;max-width:310px;overflow-wrap:break-word}
+.current-feature.current-feature-brief h3{max-width:none;font-size:clamp(18px,5.5vw,29px);line-height:1.12}
 .current-feature p{font-size:13px;line-height:1.5;margin:0 0 18px;color:#fff}
 .compact-home .current-booking{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:48px;padding:13px 16px;border:1px solid #fff;border-radius:7px;background:#fff;color:#a6130c;font-size:13px;line-height:1.45;font-weight:800;text-decoration:none}
 .current-booking:hover{background:#fff0ed!important;color:#89110b!important}

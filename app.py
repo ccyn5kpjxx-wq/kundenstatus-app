@@ -44730,6 +44730,7 @@ def homepage_portal_links():
     return {
         "auswahl": link("website_anfrage", "/anfrage?anliegen=auswahl", anliegen="auswahl"),
         "schaden": link("website_anfrage", "/anfrage?anliegen=schaden", anliegen="schaden"),
+        "schadenaufnahme": link("privat_schadenaufnahme", "/privat/schaden"),
         "status": link("privat_status_zugang", "/privat/status"),
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
