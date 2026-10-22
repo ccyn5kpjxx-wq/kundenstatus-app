@@ -1,6 +1,8 @@
-# Gärtner Service-App: erste lokale Version
+# Gärtner Service-App: Betrieb und lokale Vorschau
 
-Stand: 21.10.2026. Lokaler Pilot, keine Veröffentlichung oder echten Nachrichten.
+Stand: 22.10.2026. Geprüfter Betriebsstand mit getrenntem lokalem Demo-Server.
+Die Bereitstellung und die tatsächliche Laufzeitkonfiguration werden im jeweiligen
+Releaseprotokoll festgehalten. Die Demo ist kein produktiver Einstieg.
 
 ## Lokale Vorführung
 
@@ -100,9 +102,24 @@ Der optionale lokale Testtransport erfordert **beide** Flags `TESTING=True` und
   Mietwagen-Zahlungsintegration ist nicht für Werkstattaufträge freigeschaltet.
 - Keine automatische Versicherer-/SPN-/riparo-/MHC-Kostenfreigabe oder
   Teilebestellung. Fachliche Prüfung und dokumentierte Zuständigkeit bleiben nötig.
-- Kein Produktiv-Pilot und keine realen Einladungen. Vor einem PostgreSQL-Pilot
-  insbesondere konkurrierende Freigabe/Übernahme und Lockreihenfolge testen;
-  die vorliegende Konkurrenzprüfung wurde mit SQLite durchgeführt.
+- Reale Einladungen werden ausschließlich vom berechtigten Büro eingerichtet;
+  der normale Start legt weder Demo-Konten noch Fahrerfreigaben an.
+
+## PostgreSQL: gemeinsame Reihenfolge vor Zeilensperren
+
+Freigabe, Auftragsübernahme, Rechnung und Mitarbeiterfortschritt nehmen zuerst
+das gemeinsame reentrante Operation-Gate. Erst danach werden Auftrags-,
+Fahrzeug- und Freigabezeilen gesperrt. Das PostgreSQL-Advisory-Lock schützt diese
+Reihenfolge auch über mehrere Prozesse. Die Rechnung hält den geprüften
+Leistungs- und Empfängerstand bis zur Provider-Rückkehr. Bei einem belegten Gate
+antwortet eine weitere HTTP-Anfrage nach zwei Sekunden mit 503/Retry-After: 2;
+sie führt keine teilweise Änderung aus.
+
+Fünf gezielte Tests auf einer frischen synthetischen PostgreSQL-18.6-Datenbank
+prüfen reguläre und Reifenübernahme gegen Freigabe, Rechnung gegen
+Mitarbeiter-/Status-/Parteienänderungen, echte Zeilensperren und verschachtelte
+Advisory Locks. Dieselben Tests reproduzieren vor dem Fix die drei betroffenen
+Konkurrenzfehler. Produktivdaten und echte Provider werden dafür nicht benutzt.
 
 ## Normale App: standardmäßig ausgeschaltet
 
@@ -110,6 +127,11 @@ Der optionale lokale Testtransport erfordert **beide** Flags `TESTING=True` und
 im normalen Start standardmäßig aus. Der Service-Einstieg und die zusätzlichen
 Links erscheinen nur bei entsprechender Konfiguration. Das Demo-Skript aktiviert
 die Funktionen ausschließlich für seine isolierte temporäre Datenbank.
+
+Für den freigegebenen Portalbetrieb werden alle drei Umgebungsvariablen auf
+`1` gesetzt. `TESTING`, `SERVICE_APP_DEMO` und
+`SERVICE_APP_TEST_TRANSPORT_ENABLED` bleiben aus. Der Einstieg liegt auf dem
+Portalhost; öffentliche Homepage-Links verwenden dafür `PORTAL_BASE_URL`.
 
 Gezielte Prüfungen liegen in `scripts/test_service_app.py`,
 `test_servicezugang.py`, `test_serviceprozess.py`, `test_service_progress_guard.py`

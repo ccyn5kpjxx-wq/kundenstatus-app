@@ -6,6 +6,7 @@ obtain the explicit requested action. Actor/request_id must be server-controlled
 identity and a stable retry key, not model-generated authorization evidence.
 """
 
+from contextlib import nullcontext
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -230,6 +231,14 @@ class WorkshopProgress:
         return self._update(order_id, action, expected_status, expected_changed_at, actor, request_id)
 
     def _update(self, order_id, action, expected_status, expected_changed_at, actor, request_id, native=None, authorize=None):
+        # All callers take the same gate before authorization can lock an order.
+        # Legacy standalone adapters without the optional portal lock stay usable.
+        gate = getattr(self.p, "portal_originals_operation_lock", None)
+        with gate() if gate is not None else nullcontext():
+            return self._update_locked(order_id, action, expected_status, expected_changed_at,
+                                       actor, request_id, native=native, authorize=authorize)
+
+    def _update_locked(self, order_id, action, expected_status, expected_changed_at, actor, request_id, native=None, authorize=None):
         order_id = _identifier(order_id, "Auftrags-ID")
         allowed = NATIVE_ACTION_LABELS if native is not None else ACTIONS
         if not isinstance(action, str) or action not in allowed:

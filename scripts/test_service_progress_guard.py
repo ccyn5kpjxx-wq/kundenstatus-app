@@ -7,6 +7,7 @@ import tempfile
 from threading import RLock
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from flask import Flask, abort, jsonify, request, session
@@ -167,6 +168,61 @@ class ServiceProgressGuardTests(unittest.TestCase):
         del self.p.service_process
         self.assertEqual(self.client.post('/employee/order/1/status', data=self.form()).status_code, 200)
         self.assertEqual(self.progress.read(1)['status'], 3)
+
+    def test_missing_approval_is_checked_under_gate_before_database_access(self):
+        held = []
+
+        @contextmanager
+        def gate():
+            with self.lock:
+                held.append(True)
+                try:
+                    yield
+                finally:
+                    held.pop()
+
+        def guarded_db():
+            self.assertTrue(held, 'Service row locks must follow the shared operation gate')
+            return self.db()
+
+        state = self.progress.read(1)
+        with patch.object(self.p, 'portal_originals_operation_lock', gate), patch.object(self.p, 'get_db', guarded_db):
+            with self.assertRaises(ProgressError) as error:
+                self.progress.update(1, 'lackierbereit', state['status'], state['geaendert_am'], 'employee:test', uuid4().hex)
+        self.assertEqual(error.exception.code, 'cost_approval_required')
+        self.assertEqual(held, [])
+        self.assertEqual(self.progress.read(1)['status'], 2)
+        self.assertEqual(self.sql('SELECT * FROM assistent_fortschritt_audit'), [])
+
+    def test_authorization_callback_takes_order_locks_inside_shared_gate(self):
+        held = []
+
+        @contextmanager
+        def gate():
+            with self.lock:
+                held.append(True)
+                try:
+                    yield
+                finally:
+                    held.pop()
+
+        def authorize(db, order_id):
+            self.assertTrue(held, 'Employee authorization must not lock an order before the gate')
+            db.execute('UPDATE auftraege SET id=id WHERE id=?', (order_id,))
+
+        state = self.progress.read(2)
+        with patch.object(self.p, 'portal_originals_operation_lock', gate):
+            result = self.progress._update(2, 'lackierbereit', state['status'], state['geaendert_am'],
+                                           'employee:test', uuid4().hex, authorize=authorize)
+        self.assertTrue(result['fortschritt']['lackierbereit'])
+        self.assertEqual(held, [])
+
+    def test_standalone_legacy_adapter_without_shared_gate_remains_compatible(self):
+        del self.p.portal_originals_operation_lock
+        state = self.progress.read(2)
+        result = self.progress.update(2, 'lackierbereit', state['status'], state['geaendert_am'],
+                                      'standalone:test', uuid4().hex)
+        self.assertTrue(result['fortschritt']['lackierbereit'])
 
 
 if __name__ == '__main__':

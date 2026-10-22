@@ -18186,6 +18186,7 @@ def managed_service_invoice_context(auftrag, approved, invoice_net_amount=None):
     return context
 
 
+@portal_originals_locked
 def build_lexware_rechnung_context(auftrag, invoice_net_amount=None):
     db = get_db()
     try:
@@ -21489,6 +21490,7 @@ def build_lexware_invoice_line_item(position, description, net_amount, tax_rate=
     }
 
 
+@portal_originals_locked
 def create_lexware_invoice_draft(auftrag, rechnung, net_amount):
     db = get_db()
     try:
@@ -36321,6 +36323,7 @@ def update_linked_lead_action(auftrag_id, action):
     db.close()
 
 
+@portal_originals_locked
 def angebot_annehmen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     angebot_preis = clean_text((auftrag or {}).get("werkstatt_angebot_preis"))
@@ -45256,6 +45259,7 @@ def admin_reifentermine():
     return response
 
 
+@portal_originals_locked
 def reifenauftrag_aus_buchung(lead_id):
     """Claim the existing reservation and create exactly one scheduled order."""
     db = get_db()
@@ -51949,6 +51953,7 @@ def copy_lead_attachments_to_order(lead_id, auftrag_id):
     return copied
 
 
+@portal_originals_locked
 def create_order_from_accepted_lead(lead, intake):
     # Tire reservations already have an atomic conversion path.
     current = get_lead(int((lead or {}).get("id") or 0))
@@ -52172,43 +52177,45 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
     fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
     abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
 
-    db = get_db()
-    if neuer_status >= 3:
-        try:
-            service_process.assert_can_start(db, auftrag_id)
-        except ValueError as exc:
-            db.rollback()
-            db.close()
-            abort(409, description=str(exc))
-    db.execute(
-        """
-        UPDATE auftraege
-        SET status=?, start_datum=?, fertig_datum=?, abholtermin=?, geaendert_am=?
-        WHERE id=?
-        """,
-        (neuer_status, start_datum, fertig_datum, abholtermin, now_str(), auftrag_id),
-    )
-    if neuer_status >= 3:
-        # Sobald das Fahrzeug in Arbeit geht (oder weiter ist), ist die "abholbereit"-Meldung
-        # erledigt. Flag zuruecksetzen, damit der Hinweis von der Werkstatt-Tafel verschwindet.
+    # Acquire the shared cross-worker gate before any service/order row lock.
+    with portal_originals_operation_lock():
+        db = get_db()
+        if neuer_status >= 3:
+            try:
+                service_process.assert_can_start(db, auftrag_id)
+            except ValueError as exc:
+                db.rollback()
+                db.close()
+                abort(409, description=str(exc))
         db.execute(
-            "UPDATE auftraege SET fahrzeug_abholbereit=0, fahrzeug_abholbereit_am='' WHERE id=?",
-            (auftrag_id,),
+            """
+            UPDATE auftraege
+            SET status=?, start_datum=?, fertig_datum=?, abholtermin=?, geaendert_am=?
+            WHERE id=?
+            """,
+            (neuer_status, start_datum, fertig_datum, abholtermin, now_str(), auftrag_id),
         )
-    else:
-        # Faellt der Auftrag unter "In Arbeit" zurueck (z.B. zurueck auf Eingeplant), ist der
-        # Produktionsschritt einer evtl. frueheren Runde veraltet. Zuruecksetzen, damit Tafel,
-        # Kundenseite und Partner-Liste beim Wiederanlauf nicht den alten Schritt zeigen.
+        if neuer_status >= 3:
+            # Sobald das Fahrzeug in Arbeit geht (oder weiter ist), ist die "abholbereit"-Meldung
+            # erledigt. Flag zuruecksetzen, damit der Hinweis von der Werkstatt-Tafel verschwindet.
+            db.execute(
+                "UPDATE auftraege SET fahrzeug_abholbereit=0, fahrzeug_abholbereit_am='' WHERE id=?",
+                (auftrag_id,),
+            )
+        else:
+            # Faellt der Auftrag unter "In Arbeit" zurueck (z.B. zurueck auf Eingeplant), ist der
+            # Produktionsschritt einer evtl. frueheren Runde veraltet. Zuruecksetzen, damit Tafel,
+            # Kundenseite und Partner-Liste beim Wiederanlauf nicht den alten Schritt zeigen.
+            db.execute(
+                "UPDATE auftraege SET produktion_schritt='' WHERE id=?",
+                (auftrag_id,),
+            )
         db.execute(
-            "UPDATE auftraege SET produktion_schritt='' WHERE id=?",
-            (auftrag_id,),
+            "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
+            (auftrag_id, neuer_status, now_str()),
         )
-    db.execute(
-        "INSERT INTO status_log (auftrag_id, status, zeitstempel) VALUES (?, ?, ?)",
-        (auftrag_id, neuer_status, now_str()),
-    )
-    db.commit()
-    db.close()
+        db.commit()
+        db.close()
     add_benachrichtigung(
         auftrag_id,
         "Status geändert",
