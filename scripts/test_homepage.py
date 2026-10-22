@@ -2,6 +2,8 @@ from pathlib import Path
 from datetime import date, datetime
 from html.parser import HTMLParser
 import sys
+import json
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 
@@ -77,7 +79,10 @@ def main():
         "Bremsenkarte mit Anfragelink und vollstaendigem Bremsenmotiv": '/anfrage?anliegen=bremsenservice#kurzanfrage' in hero_html and 'Bremsen anfragen' in hero_html and 'Bremsentermin online buchen' not in hero_html and '/static/homepage/karte-bremsen-v2-20261021.webp' in hero_html and client.get('/static/homepage/karte-bremsen-v2-20261021.webp').status_code == 200,
         "Newslinks starten mit passendem Anliegen": 'value="oelwechsel" checked' in oil_form and 'name="pflege_kategorie"' in care_form,
         "Leistungsuebersicht bleibt vollstaendig ohne zweiten Buchungsbutton": services_html.count('class="service-item"') == 9 and 'href="/leistungen/reifenservice"' in services_html and 'data-reifen-buchung' not in services_html,
-        "Umzugshinweis und Stylesheet verfuegbar": "1. November 2026" in html and "Alte Neckarelzer Straße 18" in html and css.status_code == 200,
+        "Aktuelle Werkstattadresse ohne zukuenftigen Umzugshinweis": "Alte Neckarelzer Straße 18/1" in html and "Binauer" not in html and "Mosbach-Lohrbach" not in html and "1. November 2026" not in html and "01.11.2026" not in html and css.status_code == 200,
+        "Team und Partner fuehren denselben Standort": all("Alte Neckarelzer Straße 18/1" in page and "1. November 2026" not in page and "Mosbach-Lohrbach" not in page for page in (team_html, partner_html)),
+        "Routenlink mit exakter neuer Zieladresse": parse_qs(urlparse(portal.WERKSTATT_ANFAHRT_URL).query).get("destination") == ["Alte Neckarelzer Straße 18/1, 74821 Mosbach"] and "Route planen" in html and "maps/dir/?api=1" in html,
+        "Strukturierte Adresse stimmt mit dem sichtbaren Standort ueberein": json.loads(html.split('<script type="application/ld+json">',1)[1].split("</script>",1)[0])["address"] == {"@type":"PostalAddress","streetAddress":"Alte Neckarelzer Straße 18/1","postalCode":"74821","addressLocality":"Mosbach","addressCountry":"DE"},
         "Lazy Loading ausserhalb des Titelbilds": html.count('loading="lazy"') >= 4,
         "Cookielose Besucherstatistik eingebunden": "/api/besucher" in html and "localStorage" not in html and "document.cookie" not in html,
         "Vorschau nicht indexierbar": 'name="robots" content="noindex, nofollow"' in html,

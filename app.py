@@ -35989,6 +35989,12 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
     return steps
 
 
+WERKSTATT_ANFAHRT_URL = (
+    "https://www.google.com/maps/dir/?api=1&destination="
+    + quote("Alte Neckarelzer Straße 18/1, 74821 Mosbach")
+)
+
+
 def werkstatt_kundenkontakt(auftrag=None):
     auftrag = auftrag or {}
     phone = "+49 1522 7706694"
@@ -36000,7 +36006,8 @@ def werkstatt_kundenkontakt(auftrag=None):
     whatsapp_text = quote(f"Hallo Gärtner, ich habe eine Frage zu {reference}.")
     return {
         "name": "Gärtner GmbH Karosserie + Lack",
-        "adresse": "Binauer Höhe 4, 74821 Mosbach-Lohrbach",
+        "adresse": "Alte Neckarelzer Straße 18/1, 74821 Mosbach",
+        "anfahrt_url": WERKSTATT_ANFAHRT_URL,
         "telefon": phone,
         "telefon_url": phone_href,
         "whatsapp_url": f"https://wa.me/{whatsapp_number}?text={whatsapp_text}",
@@ -45050,7 +45057,7 @@ WEBSITE_WEITERE_ANFRAGE_ARTEN = {
 }
 
 WEBSITE_BESICHTIGUNGSARTEN = {
-    "werkstatt": "Prüfung bei Gärtner in Mosbach-Lohrbach",
+    "werkstatt": "Prüfung bei Gärtner in Mosbach",
     "vor_ort": "Besichtigung beim Verkäufer oder Fahrzeugstandort gegen Aufpreis",
 }
 
@@ -45914,6 +45921,7 @@ def oeffentliche_homepage():
         render_template(
             "homepage.html",
             google_reviews=get_google_reviews(),
+            werkstatt_anfahrt_url=WERKSTATT_ANFAHRT_URL,
             portal_links=homepage_portal_links(),
             leistungen=HOMEPAGE_LEISTUNGEN,
             jahreszeit=homepage_jahreszeit(),
