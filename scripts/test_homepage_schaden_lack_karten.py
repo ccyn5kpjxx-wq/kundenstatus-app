@@ -70,8 +70,8 @@ def main():
     check('Existing five cards and exactly two additions are present', len(cards) == 7)
     damage = cards['Versicherungsschaden']
     paint = cards['Lackierarbeiten']
-    check('Insurance card keeps the approved short wording', damage['heading'] == 'Versicherungsschaden? Wir kümmern uns.' and damage['paragraphs'] == 0)
-    check('Paint card keeps only its heading', paint['heading'] == 'Lackierarbeiten' and paint['paragraphs'] == 0)
+    check('Insurance card keeps its heading and has one short description', damage['heading'] == 'Versicherungsschaden? Wir kümmern uns.' and damage['paragraphs'] == 1)
+    check('Paint card keeps its heading and has one short description', paint['heading'] == 'Lackierarbeiten' and paint['paragraphs'] == 1)
     check('Each new card has one real action link', len(damage['links']) == len(paint['links']) == 1)
     damage_url, paint_url = damage['links'][0], paint['links'][0]
     check('Insurance action goes directly to public intake', damage_url == '/privat/schaden')
