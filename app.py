@@ -8306,6 +8306,18 @@ def ensure_column(db, table_name, column_name, column_definition):
 
 
 def ensure_index(db, index_name, table_name, columns):
+    if USE_POSTGRES:
+        existing = db.execute(
+            """SELECT 1 FROM pg_indexes
+               WHERE indexname=? AND schemaname=(
+                   SELECT n.nspname FROM pg_class t
+                   JOIN pg_namespace n ON n.oid=t.relnamespace
+                   WHERE t.oid=to_regclass(?)
+               )""",
+            (index_name, table_name),
+        ).fetchone()
+        if existing:
+            return
     column_sql = ", ".join(columns)
     db.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_sql})")
 

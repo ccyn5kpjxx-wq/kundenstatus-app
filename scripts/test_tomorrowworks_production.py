@@ -13,6 +13,7 @@ from werkzeug.wrappers import Response
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 ENTRYPOINT = PROJECT_ROOT / "tomorrowworks_production.py"
 
 

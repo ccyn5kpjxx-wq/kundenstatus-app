@@ -45,7 +45,10 @@ if STORAGE_PRESSURE_MAINTENANCE:
     os.environ["TW_DASHBOARD_MAINTENANCE"] = "true"
 
 
-from app import app as werkstatt_app
+from portal_startup_lock import portal_app_import_lock
+
+with portal_app_import_lock():
+    from app import app as werkstatt_app
 from tomorrowworks_dashboard import create_app
 
 
