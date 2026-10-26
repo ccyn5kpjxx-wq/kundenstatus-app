@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <noscript><style>img[data-preview-src] { display:none; }</style></noscript>
-<link rel="stylesheet" href="{{ url_for('static', filename='inspektionscheckliste.css') }}">
+<link rel="stylesheet" href="{{ static_asset_url('inspektionscheckliste.css') }}">
 <style>
   .process-panel {
     background: linear-gradient(135deg, rgba(247, 241, 232, .96), rgba(255, 253, 249, .96));

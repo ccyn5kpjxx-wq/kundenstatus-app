@@ -388,9 +388,9 @@
     }
   </style>
   {% block extra_css %}{% endblock %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin-sidebar.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('admin-sidebar.css') }}">
   {% set werkstatt_internal = session.get('admin') and (request.path == '/admin' or request.path.startswith('/admin/')) %}
-  {% if werkstatt_internal %}<meta name="theme-color" content="#f3efe6"><link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css', v='farben-2') }}">{% endif %}
+  {% if werkstatt_internal %}<meta name="theme-color" content="#f3efe6"><link rel="stylesheet" href="{{ static_asset_url('werkstatt_theme.css') }}">{% endif %}
 </head>
 <body{% if werkstatt_internal %} class="ws-cockpit"{% endif %}>
 <a class="skip-link" href="#hauptinhalt">Direkt zum Inhalt</a>
@@ -424,7 +424,7 @@
   <div class="container py-2">
     {% if session.get('admin') %}<button type="button" class="sidebar-close" aria-label="Menü einklappen">‹ <span>Menü einklappen</span></button>{% endif %}
     <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}" aria-label="Werkstatt-Cockpit Startseite">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner GmbH Karosserie + Lack">
+      <img src="{{ static_asset_url('logo-nav-192.webp') }}" alt="Gärtner GmbH Karosserie + Lack">
       <span>Werkstatt-Cockpit</span>
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#hauptNavigation" aria-controls="hauptNavigation" aria-expanded="false" aria-label="Navigation umschalten">&#9776;</button>
@@ -459,7 +459,7 @@
   </div>
 </nav>
 {% endblock %}
-<script src="{{ url_for('static', filename='admin-sidebar.js') }}" defer></script>
+<script src="{{ static_asset_url('admin-sidebar.js') }}" defer></script>
 
 <main class="hero-shell" id="hauptinhalt" tabindex="-1">
   <div class="container">

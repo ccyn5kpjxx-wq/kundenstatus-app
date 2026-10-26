@@ -38,7 +38,8 @@ def template_environment():
     )
     env.filters["iso_date"] = lambda value: value or ""
     env.globals.update(
-        url_for=url_for, csrf_field=lambda: '<input name="csrf_token" value="synthetic-csrf" type="hidden">',
+        url_for=url_for, static_asset_url=lambda filename: url_for("static", filename=filename) + "?v=synthetic-core",
+        csrf_field=lambda: '<input name="csrf_token" value="synthetic-csrf" type="hidden">',
         get_flashed_messages=lambda **_: [], analysis_loading_news=lambda: [],
     )
     return env

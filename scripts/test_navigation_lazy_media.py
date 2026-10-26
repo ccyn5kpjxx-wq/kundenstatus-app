@@ -9,6 +9,7 @@ from urllib.parse import urlencode, urlparse
 import unittest
 
 from jinja2 import ChainableUndefined, ChoiceLoader, DictLoader, Environment, FileSystemLoader
+from PIL import Image, ImageChops
 from playwright.sync_api import expect, sync_playwright
 
 
@@ -29,16 +30,30 @@ def url_for(endpoint, **values):
     return "/" + endpoint + ("?" + urlencode(values) if values else "")
 
 
-def render(template, **values):
-    env = Environment(loader=ChoiceLoader([
-        DictLoader({"base.html": "<!doctype html><html><head><meta charset='utf-8'>{% block extra_css %}{% endblock %}</head>"
-                    "<body>{% block content %}{% endblock %}{% block extra_js %}{% endblock %}</body></html>"}),
-        FileSystemLoader(ROOT / "templates"),
-    ]), autoescape=True, undefined=ChainableUndefined)
+def static_asset_url(filename):
+    if filename not in {"admin-sidebar.css", "admin-sidebar.js", "werkstatt_theme.css",
+                        "inspektionscheckliste.css", "logo-nav-192.webp"}:
+        raise AssertionError("Only public core assets use this helper")
+    return "/static/" + filename + "?v=synthetic-core"
+
+
+def render(template, *, full_base=False, **values):
+    loaders = [] if full_base else [DictLoader({
+        "base.html": "<!doctype html><html><head><meta charset='utf-8'>{% block extra_css %}{% endblock %}</head>"
+                     "<body>{% block content %}{% endblock %}{% block extra_js %}{% endblock %}</body></html>"})]
+    loaders.append(FileSystemLoader(ROOT / "templates"))
+    env = Environment(loader=ChoiceLoader(loaders), autoescape=True, undefined=ChainableUndefined)
     env.globals.update(url_for=url_for, csrf_token=lambda: "synthetic-csrf",
+                       static_asset_url=static_asset_url,
                        csrf_field=lambda: '<input type="hidden" name="csrf_token" value="synthetic-csrf">',
                        document_visible=lambda *args: True,
-                       request=SimpleNamespace(args={}), session={}, auftragsarten={})
+                       request=SimpleNamespace(args={}), session={}, auftragsarten={}, config={},
+                       get_flashed_messages=lambda **kwargs: [], analysis_loading_news=lambda: [])
+    for name in ("mahnungen_faellig_count", "aufgaben_offen_heute_count", "admin_leads_count",
+                 "admin_bewerbungen_count", "fahrzeugsuche_auktion_alert_count", "fahrzeugsuche_count",
+                 "fahrzeugverkauf_count", "fahrzeugeinkauf_count", "mietwagen_anfragen_count",
+                 "mietfahrzeuge_unterwegs_count", "admin_versicherung_count", "admin_postfach_count"):
+        env.globals[name] = lambda: 0
     env.filters["iso_date"] = lambda value: value or ""
     return env.get_template(template).render(**values)
 
@@ -98,7 +113,12 @@ class NavigationBrowserTests(unittest.TestCase):
             elif path == "/stats":
                 pending_stats.append(route)
             elif path.startswith("/static/"):
-                route.fulfill(body="", content_type="text/css")
+                asset = ROOT / path.lstrip("/")
+                content_type = {".css": "text/css", ".js": "application/javascript", ".webp": "image/webp"}.get(asset.suffix)
+                if asset.is_file() and content_type:
+                    route.fulfill(body=asset.read_bytes(), content_type=content_type)
+                else:
+                    route.abort()
             else:
                 # No accidental provider requests or form submissions leave the test.
                 route.abort()
@@ -211,6 +231,28 @@ class NavigationBrowserTests(unittest.TestCase):
         pending.pop().fulfill(json=statistics(version=3))
         expect(page.locator("[data-detail-count]")).to_have_text("3 Fahrzeuge")
         self.assertFalse(any(request.method != "GET" for request in requests))
+
+    def test_versioned_public_core_assets_keep_logo_content_and_display_size(self):
+        with Image.open(ROOT / "static/logo.png") as original, Image.open(ROOT / "static/logo-nav-192.webp") as optimized:
+            self.assertEqual(original.size, (1536, 1024))
+            self.assertEqual(optimized.size, (192, 128))
+            resized = original.resize(optimized.size, Image.Resampling.LANCZOS).convert("RGB")
+            self.assertIsNone(ImageChops.difference(resized, optimized.convert("RGB")).getbbox())
+        self.assertLess((ROOT / "static/logo-nav-192.webp").stat().st_size, 12000)
+        for admin, expected_size in ((True, (48, 32)), (False, (57, 38))):
+            with self.subTest(admin=admin):
+                html = render("base.html", full_base=True, session={"admin": admin},
+                              request=SimpleNamespace(path="/admin/auftrag/71", endpoint="auftrag_detail", args={}))
+                page, _, _ = self.open_page(html)
+                logo = page.locator(".navbar-brand img")
+                expect(logo).to_have_attribute("src", static_asset_url("logo-nav-192.webp"))
+                box = logo.bounding_box()
+                self.assertAlmostEqual(box["width"], expected_size[0], delta=0.1)
+                self.assertAlmostEqual(box["height"], expected_size[1], delta=0.1)
+                for name in ("admin-sidebar.css", "admin-sidebar.js") + (("werkstatt_theme.css",) if admin else ()):
+                    self.assertEqual(page.locator(f'[href="{static_asset_url(name)}"], [src="{static_asset_url(name)}"]').count(), 1)
+                self.assertEqual(page.locator('script[src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"]').count(), 1)
+        self.assertIn(static_asset_url("inspektionscheckliste.css"), self.detail)
 
 
 if __name__ == "__main__":
