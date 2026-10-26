@@ -150,6 +150,7 @@ class CustomerInvoiceTests(unittest.TestCase):
         html = self.client.get(self.index).get_data(as_text=True)
         for name in ('Current-original.pdf', 'Archived-original.pdf', 'Archiviert', 'Archivfahrzeug'):
             self.assertIn(name, html)
+        self.assertIn('Bereitgestellt: 26.10.2026', html)
         for name, doc in excluded:
             self.assertNotIn(name, html)
             self.assertEqual(self.client.get(self.file_url(doc)).status_code, 404)

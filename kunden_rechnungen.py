@@ -3,6 +3,7 @@
 Register once with ``register_customer_invoices(portal_module)``. No upload,
 OCR, publication, notification, invoice creation or customer-name matching.
 """
+from datetime import datetime
 from pathlib import PurePath
 
 from flask import Blueprint, abort, make_response, render_template, request, url_for
@@ -59,7 +60,7 @@ def register_customer_invoices(p):
         try:
             rows = db.execute(
                 f"SELECT {_FIELDS} FROM dateien d JOIN auftraege a ON a.id=d.auftrag_id "
-                "WHERE " + " AND ".join(clauses) + " ORDER BY d.hochgeladen_am DESC,d.id DESC",
+                "WHERE " + " AND ".join(clauses) + " ORDER BY d.id DESC",
                 tuple(params),
             ).fetchall()
         finally:
@@ -68,13 +69,20 @@ def register_customer_invoices(p):
 
     def card(document, **route):
         endpoint = "partner_pdf" if "slug" in route else "status_pdf"
+        date_label = str(document.get("hochgeladen_am") or "").strip()
+        try:
+            date_label = datetime.fromisoformat(date_label).strftime("%d.%m.%Y")
+        except ValueError:
+            legacy_date = p.parse_date(date_label.split(" ", 1)[0])
+            if legacy_date:
+                date_label = legacy_date.strftime("%d.%m.%Y")
         return {
             "auftrag_id": document["auftrag_id"],
             "fahrzeug": document["fahrzeug"],
             "kennzeichen": document["kennzeichen"],
             "archiviert": bool(document["archiviert"]),
             "name": document["original_name"],
-            "datum": document["hochgeladen_am"],
+            "datum": date_label,
             "open_url": url_for("kundenrechnungen." + endpoint, document_id=document["id"], **route),
             "download_url": url_for("kundenrechnungen." + endpoint + "_download", document_id=document["id"], **route),
         }
