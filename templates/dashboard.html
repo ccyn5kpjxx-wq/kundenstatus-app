@@ -668,7 +668,16 @@
       selectMonth(button.dataset.statMonth, true);
     });
 
+    const refreshSeconds = Math.max(30, Number(statistikData.aktualisierung_sekunden) || 60);
+    const refreshIntervalMs = refreshSeconds * 1000;
+    // The initial page already contains a fresh snapshot. Hidden tabs must not
+    // repeatedly rebuild the full statistic or queue another request in flight.
+    let lastRefreshAttempt = Date.now();
+    let refreshInFlight = false;
     const refreshStatistik = async () => {
+      if (document.hidden || refreshInFlight || Date.now() - lastRefreshAttempt < refreshIntervalMs) return;
+      refreshInFlight = true;
+      lastRefreshAttempt = Date.now();
       try {
         const response = await fetch(lackierStatistikRoot.dataset.liveUrl, {
           credentials: 'same-origin',
@@ -687,13 +696,13 @@
         if (liveText) {
           liveText.textContent = 'Live · nächster Versuch automatisch';
         }
+      } finally {
+        refreshInFlight = false;
       }
     };
 
     renderStatistik(statistikData);
-    refreshStatistik();
-    const refreshSeconds = Math.max(30, Number(statistikData.aktualisierung_sekunden || 60));
-    window.setInterval(refreshStatistik, refreshSeconds * 1000);
+    window.setInterval(refreshStatistik, refreshIntervalMs);
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         refreshStatistik();

@@ -2,6 +2,7 @@
 {% block title %}{{ auftrag['auftragsart_label'] }} · Auftragsdetails{% endblock %}
 
 {% block extra_css %}
+<noscript><style>img[data-preview-src] { display:none; }</style></noscript>
 <link rel="stylesheet" href="{{ url_for('static', filename='inspektionscheckliste.css') }}">
 <style>
   .process-panel {
@@ -418,7 +419,9 @@
         </div>
         {% if auftrag['kunden_status_url'] %}
         <div class="d-flex gap-3 align-items-start flex-wrap">
-          <img src="{{ url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) }}" alt="Kundenstatus QR-Code" style="width:120px;height:120px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+          {% set qr_preview_url = url_for('kunden_status_qr', token=auftrag['kunden_status_token'], target='local') if auftrag['kunden_status_public_warning'] else url_for('kunden_status_qr', token=auftrag['kunden_status_token']) %}
+          <img data-preview-src="{{ qr_preview_url }}" loading="lazy" decoding="async" alt="Kundenstatus QR-Code" width="120" height="120" style="width:120px;height:120px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
+          <noscript><img src="{{ qr_preview_url }}" loading="lazy" decoding="async" alt="Kundenstatus QR-Code" width="120" height="120" style="width:120px;height:120px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;"></noscript>
           <div class="flex-grow-1 min-width-0">
             <div class="fw-bold">Kundenstatus ist aktiv</div>
             <div class="text-muted small mb-2">Der Kunde sieht den aktuellen Fahrzeugstatus, Termine und Hinweise über diesen Link.</div>
@@ -1174,7 +1177,8 @@
           <div class="page-card p-3">
             {% if datei['is_browser_image'] %}
             <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
-              <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+              <img data-preview-src="{{ url_for('admin_datei', datei_id=datei['id']) }}" loading="lazy" decoding="async" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+              <noscript><img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" loading="lazy" decoding="async" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3"></noscript>
             </a>
             {% endif %}
             <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -1246,7 +1250,8 @@
           <div class="page-card p-3">
             {% if datei['mime_type'] and datei['mime_type'].startswith('image/') %}
             <a href="{{ url_for('admin_datei', datei_id=datei['id']) }}" target="_blank" rel="noopener">
-              <img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+              <img data-preview-src="{{ url_for('admin_datei', datei_id=datei['id']) }}" loading="lazy" decoding="async" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3">
+              <noscript><img src="{{ url_for('admin_datei', datei_id=datei['id']) }}" loading="lazy" decoding="async" alt="{{ datei['original_name'] }}" class="finish-image-preview mb-3"></noscript>
             </a>
             {% endif %}
             <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -1499,10 +1504,43 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  // Wait until the tabs have been arranged before starting any original/QR request.
+  let previewObserver;
+  let previewsStarted=false;
+  function previewIsVisible(image){
+    if(image.closest('[hidden]') || !image.getClientRects().length)return false;
+    for(let parent=image.parentElement;parent;parent=parent.parentElement){
+      if(parent.tagName==='DETAILS' && !parent.open && !parent.querySelector(':scope > summary')?.contains(image))return false;
+    }
+    return true;
+  }
+  function loadPreview(image){
+    if(!image.dataset.previewSrc || !previewIsVisible(image))return;
+    image.src=image.dataset.previewSrc;
+    delete image.dataset.previewSrc;
+    previewObserver?.unobserve(image);
+  }
+  function refreshPreviews(){
+    document.querySelectorAll('img[data-preview-src]').forEach(image=>{
+      if(previewObserver)previewObserver.observe(image);
+      else loadPreview(image);
+    });
+  }
+  function startPreviews(){
+    previewsStarted=true;
+    if('IntersectionObserver' in window){
+      previewObserver=new IntersectionObserver(entries=>{
+        entries.forEach(entry=>{if(entry.isIntersecting)loadPreview(entry.target);});
+      });
+    }
+    refreshPreviews();
+    // Also supports browsers without IntersectionObserver and closed disclosures.
+    document.addEventListener('toggle',refreshPreviews,true);
+  }
   const grid=document.querySelector('.auftrag-detail-grid'), target=document.getElementById('order-sections');
-  if(!grid || !target)return;
+  if(!grid || !target){startPreviews();return;}
   const primary=grid.querySelector('.col-xl-7 > .page-card'), secondary=grid.querySelector('.col-xl-5');
-  if(!primary || !secondary)return;
+  if(!primary || !secondary){startPreviews();return;}
   const definitions=[['uebersicht','Übersicht'],['arbeiten','Arbeiten & Termine'],['dokumente','Dokumente'],['preise','Preise & Rechnung'],['verlauf','Verlauf']];
   const nav=document.createElement('div');nav.className='order-section-tabs';nav.setAttribute('role','tablist');nav.setAttribute('aria-label','Auftragsbereiche');
   const panels={}, buttons={};
@@ -1530,7 +1568,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   const summary=document.getElementById('order-work-summary');if(summary)panels.uebersicht.prepend(summary);
   target.append(nav,...definitions.map(([key])=>panels[key]));grid.hidden=true;
-  function activate(key){for(const [name] of definitions){const selected=name===key;panels[name].hidden=!selected;buttons[name].setAttribute('aria-selected',String(selected));buttons[name].tabIndex=selected?0:-1;}}
+  function activate(key){for(const [name] of definitions){const selected=name===key;panels[name].hidden=!selected;buttons[name].setAttribute('aria-selected',String(selected));buttons[name].tabIndex=selected?0:-1;}if(previewsStarted&&!previewObserver)refreshPreviews();}
   for(const [key] of definitions)buttons[key].addEventListener('click',()=>activate(key));
   nav.addEventListener('keydown',event=>{
     if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -1545,6 +1583,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function followHash(){let id;try{id=decodeURIComponent(location.hash.slice(1));}catch{return;}if(!id)return;const node=document.getElementById(id);if(node){reveal(node);requestAnimationFrame(()=>node.scrollIntoView({block:'start'}));}}
   activate('uebersicht');followHash();window.addEventListener('hashchange',followHash);
+  startPreviews();
   document.addEventListener('click',event=>{const link=event.target.closest('a[href^="#"]');if(link){const node=document.getElementById(link.getAttribute('href').slice(1));reveal(node);}},true);
   document.addEventListener('invalid',event=>reveal(event.target),true);
   // Keeping the actual nodes also preserves selected files and all unsent fields.
