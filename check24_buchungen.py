@@ -5,11 +5,27 @@ from email.parser import BytesParser
 from email.utils import getaddresses, parsedate_to_datetime
 import hashlib
 import json
+import os
 import re
+import threading
+import time
+import uuid
 
 from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
 from check24_mail import BERLIN, MAX_MAIL_BYTES, parse_check24_mail
 from mailbox_client import Mailbox, quote
+
+SYNC_LEASE_SECONDS = 300
+SYNC_BUDGET_SECONDS = 60
+SYNC_BATCH_LIMIT = 50
+
+
+class Check24SyncStopped(RuntimeError):
+    """Safe interruption: stale lease, revoked worker or changed mailbox."""
+
+
+class Check24SyncBusy(RuntimeError):
+    """Another process is already scanning this mailbox."""
 
 
 def ionos_verified(raw, config):
@@ -74,6 +90,12 @@ def ionos_verified(raw, config):
 class Check24Bookings:
     def __init__(self, portal):
         self.p = portal
+        self._worker_lock = threading.Lock()
+        self._worker = None
+        self._worker_pid = None
+        self._worker_stop = threading.Event()
+        self._clock = time.time
+        self._monotonic = time.monotonic
         self.init_schema()
 
     def init_schema(self):
@@ -93,7 +115,15 @@ class Check24Bookings:
                 key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')''')
             db.execute('''CREATE TABLE IF NOT EXISTS check24_receipts (
                 source_key TEXT PRIMARY KEY, raw_hash TEXT NOT NULL)''')
-            db.execute("INSERT INTO check24_sync_state(key,value) VALUES('booking_lock','') ON CONFLICT(key) DO NOTHING")
+            db.execute('''CREATE TABLE IF NOT EXISTS check24_worker_state (
+                id INTEGER PRIMARY KEY, account TEXT NOT NULL DEFAULT '',
+                lease_token TEXT NOT NULL DEFAULT '', lease_until DOUBLE PRECISION NOT NULL DEFAULT 0,
+                next_poll_at DOUBLE PRECISION NOT NULL DEFAULT 0, heartbeat_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+                last_started_at DOUBLE PRECISION NOT NULL DEFAULT 0, last_success_at DOUBLE PRECISION NOT NULL DEFAULT 0,
+                last_error_code TEXT NOT NULL DEFAULT '', last_count INTEGER NOT NULL DEFAULT 0,
+                failures INTEGER NOT NULL DEFAULT 0)''')
+            db.execute('INSERT INTO check24_worker_state(id) VALUES(1) ON CONFLICT(id) DO NOTHING RETURNING id').fetchall()
+            db.execute("INSERT INTO check24_sync_state(key,value) VALUES('booking_lock','') ON CONFLICT(key) DO NOTHING RETURNING key").fetchall()
             db.commit()
         finally:
             db.close()
@@ -155,25 +185,27 @@ class Check24Bookings:
         db.execute('UPDATE auftraege SET status=2,annahme_uhrzeit=? WHERE id=?', (start.strftime('%H:%M'), order_id))
         db.execute('INSERT INTO status_log(auftrag_id,status,zeitstempel) VALUES(?,2,?)', (order_id, self.p.now_str()))
         db.execute('''INSERT INTO check24_bookings(provider_id,order_id,start_at,end_at,event_id)
-            VALUES(?,?,?,?,?)''', (data['provider_id'], order_id, data['start_at'], data['end_at'], event['id']))
+            VALUES(?,?,?,?,?) RETURNING provider_id''', (data['provider_id'], order_id, data['start_at'], data['end_at'], event['id'])).fetchall()
         db.execute("UPDATE check24_events SET state='applied',note=? WHERE id=?", ('Als Auftrag ' + str(order_id) + ' übernommen.', event['id']))
         return order_id
 
-    def ingest(self, raw, source_key='upload', verified=False, auto_apply=False):
+    def ingest(self, raw, source_key='upload', verified=False, auto_apply=False, _sync_claim=None):
         data = parse_check24_mail(raw)
         # Caller provenance is never accepted from a public form or EML header.
         if not verified:
             auto_apply = False
         db = self.p.get_db()
         try:
+            if _sync_claim:
+                self._guard_sync(db, _sync_claim)
             self.lock(db)
             db.execute('''INSERT INTO check24_events(raw_hash,source_key,provider_id,payload,created_at,verified)
                 VALUES(?,?,?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''',
                 (data['raw_sha256'], source_key, data['provider_id'], json.dumps(data, ensure_ascii=False), self.p.now_str(), int(verified)))
             event = db.execute('SELECT * FROM check24_events WHERE raw_hash=?', (data['raw_sha256'],)).fetchone()
             if source_key != 'upload':
-                db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING',
-                           (source_key, data['raw_sha256']))
+                db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key',
+                           (source_key, data['raw_sha256'])).fetchall()
             if event['state'] == 'review' and data.get('valid'):
                 previous = db.execute('''SELECT e.payload FROM check24_bookings b
                     JOIN check24_events e ON e.id=b.event_id WHERE b.provider_id=?''', (data['provider_id'],)).fetchone()
@@ -298,9 +330,137 @@ class Check24Bookings:
         finally:
             db.close()
 
-    def sync(self, auto_apply=False):
+    def worker_enabled(self):
+        value = self.p.app.config.get('CHECK24_WORKER_ENABLED')
+        if value is None:
+            value = os.environ.get('CHECK24_WORKER_ENABLED', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        return value is True
+
+    def worker_interval(self):
+        try:
+            return max(60, min(86400, int(self.p.app.config.get('CHECK24_WORKER_INTERVAL_SECONDS',
+                os.environ.get('CHECK24_WORKER_INTERVAL_SECONDS', '300')))))
+        except (TypeError, ValueError):
+            return 300
+
+    @staticmethod
+    def _account(config):
+        # This fingerprint identifies a configuration, never exposes its secret.
+        fields = {key: config.get(key) for key in ('host', 'port', 'user', 'folder', 'ssl', 'password')}
+        return hashlib.sha256(json.dumps(fields, sort_keys=True).encode()).hexdigest()
+
+    def _claim_sync(self, config, worker):
+        if worker and (not self.worker_enabled() or self._worker_stop.is_set()):
+            return None
+        now = self._clock()
+        claim = {'token': uuid.uuid4().hex, 'account': self._account(config), 'worker': worker}
+        db = self.p.get_db()
+        try:
+            if worker:
+                db.execute('UPDATE check24_worker_state SET heartbeat_at=? WHERE id=1', (now,))
+            changed = db.execute('''UPDATE check24_worker_state SET account=?,lease_token=?,lease_until=?,last_started_at=?
+                WHERE id=1 AND (lease_token='' OR lease_until<=?) AND (next_poll_at<=? OR ?=0)''',
+                (claim['account'], claim['token'], now + SYNC_LEASE_SECONDS, now, now, now, int(worker))).rowcount
+            db.commit()
+            return claim if changed == 1 else None
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _guard_sync(self, db, claim, *, renew=False):
+        if self._account(self.p.get_werkstatt_imap_config()) != claim['account'] or (
+            claim['worker'] and (not self.worker_enabled() or self._worker_stop.is_set())):
+            raise Check24SyncStopped('CHECK24-Abgleich angehalten.')
+        # The row stays locked until the caller commits the message publication.
+        # A pre-fetch check alone cannot fence a worker whose lease expires in I/O.
+        now = self._clock()
+        changed = db.execute('''UPDATE check24_worker_state SET lease_until=CASE WHEN ?=1 THEN ? ELSE lease_until END
+            WHERE id=1 AND account=? AND lease_token=? AND lease_until>?''',
+            (int(renew), now + SYNC_LEASE_SECONDS, claim['account'], claim['token'], now)).rowcount
+        if changed != 1:
+            raise Check24SyncStopped('CHECK24-Abgleich angehalten.')
+
+    def _renew_sync(self, claim):
+        db = self.p.get_db()
+        try:
+            self._guard_sync(db, claim, renew=True)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def _finish_sync(self, claim, processed, error=''):
+        db = self.p.get_db()
+        try:
+            db.execute('UPDATE check24_worker_state SET id=id WHERE id=1')
+            row = db.execute('SELECT * FROM check24_worker_state WHERE id=1').fetchone()
+            # An expired owner must not publish success or clear its successor.
+            if not row or row['lease_token'] != claim['token'] or row['lease_until'] <= self._clock():
+                db.rollback()
+                return
+            if not error:
+                self._guard_sync(db, claim)
+            now = self._clock()
+            failures = int(row['failures']) + 1 if error else 0
+            delay = min(900, 60 * 2 ** min(failures - 1, 4)) if error else self.worker_interval()
+            db.execute('''UPDATE check24_worker_state SET lease_token='',lease_until=0,next_poll_at=?,
+                last_success_at=?,last_error_code=?,last_count=?,failures=? WHERE id=1 AND lease_token=?''',
+                (now + delay, row['last_success_at'] if error else now, error, processed, failures, claim['token']))
+            if not error:
+                db.execute("INSERT INTO check24_sync_state(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key", (self.p.now_str(),)).fetchall()
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def status(self):
+        db = self.p.get_db()
+        try:
+            row = dict(db.execute('SELECT * FROM check24_worker_state WHERE id=1').fetchone())
+        finally:
+            db.close()
+        now = self._clock()
+        enabled = self.worker_enabled()
+        result = {key: row[key] for key in ('last_error_code', 'last_count', 'failures')}
+        result.update(enabled=enabled, configured=bool(self.p.get_werkstatt_imap_config().get('configured')),
+            busy=bool(row['lease_token'] and row['lease_until'] > now),
+            worker_alive=bool(enabled and self._worker_pid == os.getpid() and self._worker
+                and self._worker.is_alive() and not self._worker_stop.is_set()),
+            heartbeat_stale=bool(not row['heartbeat_at'] or now - row['heartbeat_at'] >= 90),
+            interval_seconds=self.worker_interval())
+        for key in ('heartbeat_at', 'last_started_at', 'last_success_at', 'next_poll_at'):
+            result[key] = datetime.fromtimestamp(row[key], timezone.utc).isoformat(timespec='seconds') if row[key] else ''
+        for key, target in (('last_success_at', 'last_success_text'), ('next_poll_at', 'next_poll_text'), ('heartbeat_at', 'heartbeat_text')):
+            result[target] = datetime.fromtimestamp(row[key], BERLIN).strftime('%d.%m.%Y %H:%M') if row[key] else ''
+        return result
+
+    def sync(self, auto_apply=False, *, worker=False):
+        """One shared lease coordinates manual, CLI and optional worker scans."""
+        config = self.p.get_werkstatt_imap_config()
+        claim = self._claim_sync(config, worker)
+        if not claim:
+            if worker:
+                return 0
+            raise Check24SyncBusy('Ein CHECK24-Abgleich läuft bereits.')
+        try:
+            processed = self._scan(config, claim, auto_apply)
+            self._finish_sync(claim, processed)
+            return processed
+        except Exception as exc:
+            self._finish_sync(claim, 0, 'stopped' if isinstance(exc, Check24SyncStopped) else 'sync_failed')
+            raise
+
+    def _scan(self, cfg, claim, auto_apply):
         """Bounded read-only scan, including read mails. Never STORE/MOVE/EXPUNGE."""
-        cfg = self.p.get_werkstatt_imap_config()
+        deadline = self._monotonic() + SYNC_BUDGET_SECONDS
+        cfg = dict(cfg)
+        cfg['timeout'] = min(20, max(1, int(cfg.get('timeout', 20))))
         box = Mailbox(lambda: cfg)
         folder = cfg.get('folder') or 'INBOX'
         processed = 0
@@ -323,12 +483,15 @@ class Check24Bookings:
             finally:
                 db.close()
             for uid in ids:
+                if self._monotonic() >= deadline:
+                    break
                 key = account + '/' + validity + '/' + uid.decode('ascii')
                 if key in known:
                     continue
+                self._renew_sync(claim)
                 try:
                     raw, _ = box.raw(client, uid.decode('ascii'))
-                    self.ingest(raw, key, verified=ionos_verified(raw, cfg), auto_apply=auto_apply)
+                    self.ingest(raw, key, verified=ionos_verified(raw, cfg), auto_apply=auto_apply, _sync_claim=claim)
                 except ValueError:
                     # A malformed/oversize message must be visible, but must not
                     # starve all later bookings on every scheduled run.
@@ -338,22 +501,45 @@ class Check24Bookings:
                     digest = hashlib.sha256(('failed:' + key).encode()).hexdigest()
                     db = self.p.get_db()
                     try:
+                        self._guard_sync(db, claim)
                         db.execute('''INSERT INTO check24_events(raw_hash,source_key,payload,created_at)
                             VALUES(?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''', (digest, key, json.dumps(data), self.p.now_str()))
-                        db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING', (key, digest))
+                        db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key', (key, digest)).fetchall()
                         db.commit()
+                    except Exception:
+                        db.rollback()
+                        raise
                     finally:
                         db.close()
                 processed += 1
-                if processed >= 50:
+                if processed >= SYNC_BATCH_LIMIT:
                     break
-        db = self.p.get_db()
-        try:
-            db.execute("INSERT INTO check24_sync_state(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (self.p.now_str(),))
-            db.commit()
-        finally:
-            db.close()
         return processed
+
+
+def start_check24_worker(service):
+    """Optional web-process thread. Registration alone never starts a scanner."""
+    portal = service.p
+    if portal.app.config.get('TESTING') or getattr(portal, 'PUBLIC_SITE_ONLY', False) or not service.worker_enabled():
+        return False
+    with service._worker_lock:
+        if service._worker_pid == os.getpid() and service._worker and service._worker.is_alive():
+            return False
+        stop = threading.Event()
+        service._worker_stop = stop
+        def run():
+            # Do not perform network I/O synchronously during app initialization.
+            while not stop.wait(15):
+                try:
+                    with portal.app.app_context():
+                        if service.worker_enabled():
+                            service.sync(auto_apply=True, worker=True)
+                except Exception:
+                    portal.app.logger.warning('CHECK24-Abruf ausstehend; Prüfbereich und Verbindung kontrollieren.')
+        service._worker_pid = os.getpid()
+        service._worker = threading.Thread(target=run, name='werkstatt-check24', daemon=True)
+        service._worker.start()
+        return True
 
 
 def register_check24(portal):
@@ -366,6 +552,7 @@ def register_check24(portal):
         page = max(1, request.args.get('seite', 1, type=int))
         events = service.rows(page)
         response = make_response(render_template('werkstatt_check24.html', events=events, page=page,
+            sync_status=service.status(),
             imap_configured=bool(portal.get_werkstatt_imap_config().get('configured')),
             check24_demo=bool(portal.app.config.get('CHECK24_DEMO'))))
         response.headers['Cache-Control'] = 'no-store'
@@ -391,8 +578,10 @@ def register_check24(portal):
         try:
             count = service.sync(auto_apply=True)
             flash(f'{count} neue Nachricht(en) geprüft. Eindeutige Buchungen wurden eingeplant; offene Prüfungen stehen unten.', 'success')
+        except Check24SyncBusy:
+            flash('Ein CHECK24-Abgleich läuft bereits. Bitte den laufenden Durchlauf abwarten.', 'info')
         except Exception:
-            portal.app.logger.exception('CHECK24 mailbox sync failed')
+            portal.app.logger.warning('CHECK24-Abruf fehlgeschlagen; Prüfbereich und Verbindung kontrollieren.')
             flash('Postfachabgleich fehlgeschlagen. Verbindung prüfen; bestehende Termine bleiben erhalten.', 'warning')
         return redirect(url_for('check24.index'))
 

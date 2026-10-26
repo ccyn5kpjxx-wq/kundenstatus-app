@@ -16,7 +16,15 @@
  <div class="c24-actions"><div><strong>Neue Buchungen aus dem Postfach übernehmen</strong><p class="c24-muted">Eindeutige, verifizierte Buchungen werden als Reifenauftrag eingeplant. Änderungen, Stornos und Überschneidungen bleiben zur Prüfung hier sichtbar.</p></div>
  <form method="post" action="{{ url_for('check24.sync') }}"><button class="btn btn-brand" {% if not imap_configured %}disabled{% endif %}>Postfach jetzt abgleichen</button></form></div>
  {% if not imap_configured %}<p class="c24-review">Der verschlüsselte Postfachzugang ist für diese App noch nicht eingerichtet. Bis dahin kann eine Originalmail als EML eingelesen werden.</p>{% endif %}
- <p class="c24-muted">Der automatische Hintergrundabruf muss auf dem Server eingerichtet sein. Ein Abgleich ändert keine Buchung im CHECK24-Portal.</p>
+ {% if sync_status %}
+ <div class="c24-card" aria-label="Abrufstatus">
+  <strong>{% if not sync_status.enabled %}Automatischer Abruf ausgeschaltet{% elif not sync_status.configured %}Postfachverbindung fehlt{% elif sync_status.last_error_code %}Automatischer Abruf: Verbindung prüfen{% elif sync_status.busy %}Postfach wird gerade abgeglichen{% elif sync_status.worker_alive and not sync_status.heartbeat_stale %}Automatischer Abruf aktiv{% else %}Automatischer Abruf wartet auf Rückmeldung{% endif %}</strong>
+  <p class="c24-muted mb-1">Letzter erfolgreicher Abgleich: {{ sync_status.last_success_text or 'Noch kein erfolgreicher Abruf' }}{% if sync_status.last_success_text %} · {{ sync_status.last_count }} neue Nachricht(en) geprüft{% endif %}</p>
+  {% if sync_status.enabled and sync_status.next_poll_text %}<p class="c24-muted mb-1">Nächster geplanter Versuch: {{ sync_status.next_poll_text }}</p>{% endif %}
+  {% if sync_status.last_error_code %}<p class="c24-review mb-1">Der letzte Abruf ist fehlgeschlagen. Bereits übernommene Termine bleiben erhalten. Bitte Postfachzugang und Verbindung prüfen.</p>{% endif %}
+ </div>
+ {% endif %}
+ <p class="c24-muted mt-2">Freie Werkstattzeiten werden nicht an CHECK24 übertragen. Ein Abgleich ändert keine Buchung im CHECK24-Portal.</p>
  <details><summary>Originalmail als EML einlesen</summary><form method="post" enctype="multipart/form-data" action="{{ url_for('check24.import_mail') }}"><label class="form-label" for="check24-mail">CHECK24-Buchungsmail</label><input id="check24-mail" class="form-control" type="file" name="mail" accept=".eml,message/rfc822" required><button class="btn btn-soft mt-2">Daten prüfen</button></form></details>
 </div>
 <div class="c24-grid">

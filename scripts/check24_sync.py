@@ -20,6 +20,7 @@ MAX_BATCH_MESSAGES = 50
 # must not also start its unrelated workers, backups or accounting sync.
 CLI_ENVIRONMENT = {
     "PUBLIC_SITE_ONLY": "1",
+    "CHECK24_WORKER_ENABLED": "0",
     "AUTO_BACKUP_ON_STARTUP": "0",
     "AUTO_BACKUP_ENABLED": "0",
     "AUTO_CHANGE_BACKUP_ENABLED": "0",

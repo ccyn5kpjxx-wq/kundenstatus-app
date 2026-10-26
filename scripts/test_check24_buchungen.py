@@ -1,5 +1,6 @@
 """CHECK24 parser contract with synthetic RFC822 messages; no app or network."""
 from email.message import EmailMessage
+from contextlib import contextmanager
 from pathlib import Path
 import sys
 import unittest
@@ -188,7 +189,12 @@ class Check24IntegrationTest(unittest.TestCase):
         clock = self.clock.start()
         clock.now.return_value = self.fixed
         self.addCleanup(self.clock.stop)
+        self.service._worker_stop.clear()
+        self.service._worker = None
+        self.service._worker_pid = None
         db = self.p.get_db()
+        db.execute('DELETE FROM check24_worker_state')
+        db.execute('INSERT INTO check24_worker_state(id) VALUES(1)')
         for table in ('check24_bookings', 'check24_events', 'check24_receipts', 'reifen_termin_slots'):
             db.execute('DELETE FROM ' + table)
         db.execute("DELETE FROM status_log WHERE auftrag_id IN (SELECT id FROM auftraege WHERE quelle='check24')")
@@ -202,6 +208,164 @@ class Check24IntegrationTest(unittest.TestCase):
             return db.execute("SELECT COUNT(*) FROM auftraege WHERE quelle='check24'").fetchone()[0]
         finally:
             db.close()
+
+    @contextmanager
+    def fake_sync_mailbox(self, *, count=1, on_raw=None):
+        from unittest.mock import patch
+        calls = []
+        cfg = {'configured': True, 'ssl': True, 'host': 'imap.example.invalid',
+               'user': 'werkstatt@example.invalid', 'folder': 'INBOX'}
+        class FakeClient:
+            def uid(self, *args):
+                calls.append(args)
+                return 'OK', [' '.join(str(i) for i in range(1, count+1)).encode()]
+        class FakeMailbox:
+            def __init__(self, config): pass
+            @contextmanager
+            def connect(self): yield FakeClient()
+            def select(self, client, folder, readonly):
+                if readonly is not True: raise AssertionError('Writable mailbox')
+                return '991'
+            def raw(self, client, uid):
+                calls.append(('FETCH', uid))
+                if on_raw: on_raw(cfg, uid)
+                return synthetic_mail(), ''
+        with patch('check24_buchungen.Mailbox', FakeMailbox), patch.object(self.p, 'get_werkstatt_imap_config', return_value=cfg):
+            yield cfg, calls
+
+    def test_sync_claim_is_shared_and_expired_owner_cannot_release_successor(self):
+        from unittest.mock import patch
+        from check24_buchungen import Check24SyncStopped
+        with self.fake_sync_mailbox() as (cfg, calls), patch.object(self.service, '_clock', return_value=1000) as clock:
+            first = self.service._claim_sync(cfg, False)
+            self.assertIsNotNone(first)
+            self.assertIsNone(self.service._claim_sync(cfg, False))
+            clock.return_value = 1301
+            second = self.service._claim_sync(cfg, False)
+            self.assertNotEqual(first['token'], second['token'])
+            self.service._finish_sync(first, 0)
+            db = self.p.get_db()
+            try:
+                self.assertEqual(db.execute('SELECT lease_token FROM check24_worker_state').fetchone()[0], second['token'])
+                with self.assertRaises(Check24SyncStopped):
+                    self.service._guard_sync(db, first)
+                db.rollback()
+            finally:
+                db.close()
+            self.assertEqual(calls, [])
+
+    def test_parallel_manual_scans_open_only_one_mailbox_fetch(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from check24_buchungen import Check24SyncBusy
+        import threading
+        entered, release = threading.Event(), threading.Event()
+        def hold(cfg, uid):
+            entered.set()
+            if not release.wait(5): raise AssertionError('Test release timeout')
+        with self.fake_sync_mailbox(on_raw=hold) as (cfg, calls), ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.service.sync)
+            try:
+                self.assertTrue(entered.wait(5))
+                with self.assertRaises(Check24SyncBusy):
+                    self.service.sync(auto_apply=True)
+            finally:
+                release.set()
+            self.assertEqual(pending.result(timeout=5), 1)
+            self.assertEqual([call for call in calls if call[0]=='FETCH'], [('FETCH','1')])
+
+    def test_expired_lease_after_fetch_fences_both_message_and_error_receipt(self):
+        from check24_buchungen import Check24SyncStopped
+        for malformed in (False, True):
+            with self.subTest(malformed=malformed):
+                def replace_lease(cfg, uid):
+                    db = self.p.get_db()
+                    db.execute("UPDATE check24_worker_state SET lease_token='successor',lease_until=9999999999")
+                    db.commit(); db.close()
+                    if malformed: raise ValueError('synthetic malformed mail')
+                db = self.p.get_db()
+                db.execute("UPDATE check24_worker_state SET lease_token='',lease_until=0")
+                db.commit(); db.close()
+                with self.fake_sync_mailbox(on_raw=replace_lease), self.assertRaises(Check24SyncStopped):
+                    self.service.sync(auto_apply=True)
+                db = self.p.get_db()
+                try:
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_events').fetchone()[0], 0)
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_receipts').fetchone()[0], 0)
+                    self.assertEqual(db.execute('SELECT lease_token FROM check24_worker_state').fetchone()[0], 'successor')
+                finally:
+                    db.close()
+
+    def test_sync_batch_and_wall_budget_bound_new_fetches(self):
+        from unittest.mock import patch
+        with self.fake_sync_mailbox(count=55) as (cfg, calls):
+            self.assertEqual(self.service.sync(), 50)
+            self.assertEqual(len([c for c in calls if c[0]=='FETCH']), 50)
+            self.assertEqual(self.service.sync(), 5)
+        db = self.p.get_db()
+        db.execute('DELETE FROM check24_receipts'); db.commit(); db.close()
+        with self.fake_sync_mailbox(count=3) as (cfg, calls), patch.object(self.service, '_monotonic', side_effect=[0,0,61]):
+            self.assertEqual(self.service.sync(), 1)
+            self.assertEqual([c for c in calls if c[0]=='FETCH'], [('FETCH','1')])
+
+    def test_config_change_or_worker_stop_after_fetch_prevents_publication(self):
+        from unittest.mock import patch
+        from check24_buchungen import Check24SyncStopped
+        def config_changed(cfg, uid): cfg['user'] = 'different@example.invalid'
+        with self.fake_sync_mailbox(on_raw=config_changed), self.assertRaises(Check24SyncStopped):
+            self.service.sync(auto_apply=True)
+        db = self.p.get_db()
+        self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_receipts').fetchone()[0], 0)
+        db.execute('UPDATE check24_worker_state SET next_poll_at=0'); db.commit(); db.close()
+        with patch.dict(self.p.app.config, CHECK24_WORKER_ENABLED=True), self.fake_sync_mailbox(on_raw=lambda cfg, uid:self.service._worker_stop.set()):
+            with self.assertRaises(Check24SyncStopped):
+                self.service.sync(auto_apply=True, worker=True)
+        self.assertEqual(self.count_orders(), 0)
+        self.assertEqual(self.service.status()['last_error_code'], 'stopped')
+
+    def test_worker_backoff_and_safe_status_without_success_claim(self):
+        from unittest.mock import patch
+        def failure(cfg, uid): raise OSError('SECRET private@example.invalid')
+        with patch.dict(self.p.app.config, CHECK24_WORKER_ENABLED=True), self.fake_sync_mailbox(on_raw=failure) as (cfg,calls), patch.object(self.service, '_clock', return_value=1000) as clock:
+            with self.assertRaises(OSError): self.service.sync(worker=True)
+            status = self.service.status()
+            self.assertEqual(status['last_error_code'], 'sync_failed')
+            self.assertEqual(status['last_success_at'], '')
+            self.assertEqual(status['failures'], 1)
+            self.assertNotIn('SECRET', str(status))
+            self.assertNotIn('lease_token', status)
+            self.assertFalse(status['worker_alive'])
+            self.assertEqual(self.service.sync(worker=True), 0)
+            clock.return_value = 1061
+            with self.assertRaises(OSError): self.service.sync(worker=True)
+            self.assertEqual(self.service.status()['failures'], 2)
+            db = self.p.get_db()
+            self.assertEqual(db.execute('SELECT next_poll_at FROM check24_worker_state').fetchone()[0], 1181)
+            db.close()
+
+    def test_worker_default_off_testing_public_and_duplicate_start_guards(self):
+        from unittest.mock import patch
+        from check24_buchungen import start_check24_worker
+        threads = []
+        class FakeThread:
+            def __init__(self, **kwargs): self.kwargs=kwargs; self.started=False; threads.append(self)
+            def start(self): self.started=True
+            def is_alive(self): return self.started
+        with patch.dict(self.p.app.config, CHECK24_WORKER_ENABLED=False, TESTING=False), patch.object(self.p, 'PUBLIC_SITE_ONLY', False), patch('check24_buchungen.threading.Thread', FakeThread):
+            self.assertFalse(start_check24_worker(self.service))
+            self.p.app.config['CHECK24_WORKER_ENABLED']=True
+            self.p.app.config['TESTING']=True
+            self.assertFalse(start_check24_worker(self.service))
+            self.p.app.config['TESTING']=False
+            self.p.PUBLIC_SITE_ONLY=True
+            self.assertFalse(start_check24_worker(self.service))
+            self.p.PUBLIC_SITE_ONLY=False
+            self.assertTrue(start_check24_worker(self.service))
+            self.assertFalse(start_check24_worker(self.service))
+            self.assertEqual(len(threads), 1)
+            self.assertTrue(threads[0].kwargs['daemon'])
+            self.assertTrue(self.service.status()['worker_alive'])
+            self.service._worker_stop.set()
+            self.assertFalse(self.service.status()['worker_alive'])
 
     def test_upload_never_auto_applies_and_manual_is_idempotent(self):
         event = self.service.ingest(synthetic_mail(auth='kundenserver.de; dkim=pass'), auto_apply=True)
@@ -218,6 +382,9 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertFalse(order.get('lexware_invoice_id'))
         days = self.p.kalender_daten([order])
         self.assertTrue(any(any(e['auftrag']['id'] == first for e in day['events']) for day in days))
+        labels = str([e.get('termine') for day in days for e in day['events'] if e['auftrag']['id'] == first])
+        self.assertIn('Reifenservice', labels)
+        self.assertIn('08:00–08:30', labels)
         client = self.p.app.test_client()
         with client.session_transaction() as session:
             session['admin'] = True
@@ -417,6 +584,131 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertEqual(self.service.rows()[0]['id'], event)
         self.assertEqual(len(self.service.rows(1)), 50)
         self.assertEqual(len(self.service.rows(2)), 11)
+
+    def test_real_postgres_adapter_handles_natural_keys_through_full_import(self):
+        """Exercise production SQL conversion, not a copied RETURNING heuristic.
+
+        SQLite is only the disposable relational backend for the driver's SQL
+        subset; this catches missing-column RETURNING and result-consumption
+        errors without a PostgreSQL service or any production connections.
+        """
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from check24_buchungen import Check24Bookings
+
+        original_get_db = self.p.get_db
+        statements = []
+
+        class CursorBridge:
+            def __init__(self, connection):
+                self.cursor = connection.cursor()
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.cursor.close()
+            def execute(self, sql, params):
+                statements.append(sql)
+                sql = sql.replace('%s', '?').replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT')
+                self.cursor.execute(sql, params)
+                self.rowcount = self.cursor.rowcount
+                self.description = [SimpleNamespace(name=item[0]) for item in self.cursor.description] if self.cursor.description else None
+            def fetchall(self):
+                return [tuple(row) for row in self.cursor.fetchall()]
+
+        def adapter_connection():
+            raw = original_get_db()
+            return self.p.PostgresConnection(SimpleNamespace(
+                cursor=lambda: CursorBridge(raw), commit=raw.commit,
+                rollback=raw.rollback, close=raw.close))
+
+        class FakeClient:
+            def uid(self, *args):
+                return 'OK', [b'1 2']
+
+        class FakeMailbox:
+            def __init__(self, config):
+                pass
+            @contextmanager
+            def connect(self):
+                yield FakeClient()
+            def select(self, client, folder, readonly):
+                return '8'
+            def raw(self, client, uid):
+                if uid == '1':
+                    raise ValueError('synthetic invalid mail')
+                return synthetic_mail(), ''
+
+        cfg = {'configured': True, 'ssl': True, 'host': 'imap.example.invalid',
+               'user': 'werkstatt@example.invalid', 'folder': 'INBOX'}
+        with patch.object(self.p, 'get_db', side_effect=adapter_connection), \
+             patch.object(self.p, 'get_werkstatt_imap_config', return_value=cfg), \
+             patch('check24_buchungen.Mailbox', FakeMailbox):
+            service = Check24Bookings(self.p)  # Includes natural-key boot lock.
+            service.init_schema()  # ON CONFLICT must also work with no returned row.
+            event = service.ingest(synthetic_mail(), 'adapter/8/1', verified=True, auto_apply=True)
+            self.assertEqual(service.ingest(synthetic_mail(), 'adapter/8/1'), event)
+            self.assertEqual(self.count_orders(), 1)
+            self.assertEqual(service.rows()[0]['state'], 'applied')
+            self.assertEqual(service.sync(), 2)  # Error receipt and success receipt.
+            self.assertEqual(service.sync(), 0)  # last_sync upsert, no duplicate jobs.
+            db = self.p.get_db()
+            try:
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_bookings').fetchone()[0], 1)
+                self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_receipts').fetchone()[0], 3)
+                self.assertTrue(db.execute("SELECT value FROM check24_sync_state WHERE key='last_sync'").fetchone()[0])
+                self.assertEqual(service.review_count(), 1)
+            finally:
+                db.close()
+        self.assertTrue(any('RETURNING provider_id' in sql for sql in statements))
+
+
+class Check24CLITest(unittest.TestCase):
+    def cli(self, args, env, loader, sleeper=lambda seconds: None):
+        from io import StringIO
+        from contextlib import redirect_stderr, redirect_stdout
+        from scripts.check24_sync import main
+        output = StringIO()
+        with redirect_stdout(output), redirect_stderr(output):
+            try:
+                code = main(args, environment=env, service_loader=loader, sleeper=sleeper)
+            except SystemExit as exc:
+                code = exc.code
+        return code, output.getvalue()
+
+    def test_default_and_missing_enable_never_load_application(self):
+        from unittest.mock import Mock
+        loader = Mock(side_effect=AssertionError('No app import allowed'))
+        for args, env, expected in (([], {}, 0), (['--loop'], {'CHECK24_SYNC_ENABLED':'1'}, 0),
+                                    (['--run'], {}, 2), (['--run'], {'CHECK24_SYNC_ENABLED':'true'}, 2)):
+            self.assertEqual(self.cli(args, env, loader)[0], expected)
+        loader.assert_not_called()
+
+    def test_enabled_once_and_cli_process_worker_suppression(self):
+        from unittest.mock import Mock
+        from scripts.check24_sync import CLI_ENVIRONMENT
+        service = Mock()
+        service.sync.return_value = 2
+        code, output = self.cli(['--run','--once'], {'CHECK24_SYNC_ENABLED':'1'}, lambda: service)
+        self.assertEqual(code, 0)
+        service.sync.assert_called_once_with(auto_apply=True)
+        self.assertIn('2 neue Nachricht', output)
+        self.assertEqual(CLI_ENVIRONMENT['CHECK24_WORKER_ENABLED'], '0')
+        self.assertEqual(CLI_ENVIRONMENT['PUBLIC_SITE_ONLY'], '1')
+
+    def test_loop_validation_failure_and_error_output_remain_safe(self):
+        from unittest.mock import Mock
+        loader = Mock()
+        self.assertEqual(self.cli(['--run','--loop','--interval','59'], {'CHECK24_SYNC_ENABLED':'1'}, loader)[0], 2)
+        loader.assert_not_called()
+        service = Mock()
+        service.sync.side_effect = [0, RuntimeError('SECRET someone@example.invalid')]
+        pauses = []
+        code, output = self.cli(['--run','--loop','--interval','60'], {'CHECK24_SYNC_ENABLED':'1'}, lambda: service, pauses.append)
+        self.assertEqual(code, 1)
+        self.assertEqual(pauses, [60])
+        self.assertNotIn('SECRET', output)
+        self.assertNotIn('someone@', output)
 
 
 if __name__ == "__main__":

@@ -38262,8 +38262,14 @@ def kalender_daten(auftraege):
                     }
                     eintraege[auftrag["id"]] = eintrag
                 if feld not in eintrag["felder"]:
+                    event_label = label
+                    if feld == 'annahme_datum' and auftrag.get('quelle') == 'check24':
+                        intake = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
+                        start, end = intake.get('check24_start', ''), intake.get('check24_ende', '')
+                        if start and end:
+                            event_label = f"Reifenservice · {start[11:16]}–{end[11:16]} Uhr"
                     eintrag["termine"].append(
-                        {"feld": feld, "label": label, "farbe": farbe}
+                        {"feld": feld, "label": event_label, "farbe": farbe}
                     )
                     eintrag["felder"].add(feld)
 
@@ -59689,7 +59695,7 @@ service_app = register_service_app(sys.modules[__name__], kundenflotten)
 
 from kunden_rechnungen import register_customer_invoices
 register_customer_invoices(sys.modules[__name__])
-from check24_buchungen import register_check24
+from check24_buchungen import register_check24, start_check24_worker
 check24_bookings = register_check24(sys.modules[__name__])
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
@@ -59707,6 +59713,7 @@ if not PUBLIC_SITE_ONLY:
     start_order_worker(workshop_orders)
     start_purchase_monitor_worker(sys.modules[__name__])
     start_material_worker(sys.modules[__name__])
+    start_check24_worker(check24_bookings)
 
 start_hourly_backups()
 start_lexware_auto_sync()
