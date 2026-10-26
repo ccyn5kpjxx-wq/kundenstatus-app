@@ -12315,6 +12315,33 @@ def service_status_path(*, lead_id=None, order_id=None):
     return path
 
 
+def preload_service_status_paths(auftrag_ids):
+    """Resolve list links in batches, within the same GET-only request cache."""
+    if not globals().get('service_process') or not has_request_context() or request.method != 'GET':
+        return
+    cache = getattr(g, 'service_status_paths', None)
+    if cache is None:
+        cache = g.service_status_paths = {}
+    ids = sorted({int(value) for value in auftrag_ids if value
+                  and ('order', int(value)) not in cache})
+    if not ids:
+        return
+    db = get_db()
+    try:
+        for offset in range(0, len(ids), 500):
+            batch = ids[offset:offset + 500]
+            placeholders = ','.join('?' for _ in batch)
+            rows = db.execute(
+                f'SELECT auftrag_id, fahrzeug_id FROM serviceprozesse WHERE auftrag_id IN ({placeholders})',
+                batch,
+            ).fetchall()
+            paths = {value: '' for value in batch}
+            paths.update({row['auftrag_id']: '/service/fahrzeug/' + row['fahrzeug_id'] for row in rows})
+            cache.update({('order', value): path for value, path in paths.items()})
+    finally:
+        db.close()
+
+
 def kunden_status_url(auftrag, force_request_host=False):
     aktiv = (auftrag or {}).get("kunden_status_aktiv")
     if aktiv is not None and not strict_bool(aktiv):
@@ -21575,17 +21602,25 @@ def _create_lexware_invoice_draft(auftrag, rechnung, net_amount, *, managed_serv
     }
 
 
-def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=False,
-                   *, include_unset_archived=False):
+def _list_auftrag_rows(autohaus_id=None, include_archived=False, include_angebote=False,
+                      *, include_unset_archived=False, navigation_only=False):
     db = get_db()
+    columns = "a.*"
+    if navigation_only:
+        columns = ", ".join("a." + name for name in (
+            "id", "fahrzeug", "kennzeichen", "auftragsnummer", "fin_nummer", "kunde_name",
+            "autohaus_id", "versicherung_id", "quelle", "archiviert", "angebotsphase", "status",
+            "leistungsart", "schaden_aufnahme_json", "transport_art", "annahme_uhrzeit", "abhol_uhrzeit",
+            "annahme_datum", "start_datum", "fertig_datum", "abholtermin", "fahrzeug_abholbereit",
+        ))
     archived_filter = "" if include_archived else "AND a.archiviert = 0"
     if not include_archived and include_unset_archived:
         archived_filter = "AND (a.archiviert = 0 OR a.archiviert IS NULL)"
     angebots_filter = "" if include_angebote else "AND a.angebotsphase = 0"
     if autohaus_id is None:
         rows = db.execute(
-            """
-            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug,
+            f"""
+            SELECT {columns}, h.name AS autohaus_name, h.slug AS autohaus_slug,
                    v.name AS versicherung_name, v.slug AS versicherung_slug
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -21601,8 +21636,8 @@ def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=Fa
         ).fetchall()
     else:
         rows = db.execute(
-            """
-            SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug,
+            f"""
+            SELECT {columns}, h.name AS autohaus_name, h.slug AS autohaus_slug,
                    v.name AS versicherung_name, v.slug AS versicherung_slug
             FROM auftraege a
             LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
@@ -21618,10 +21653,53 @@ def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=Fa
             (autohaus_id,),
         ).fetchall()
     db.close()
+    return rows
+
+
+def list_auftraege(autohaus_id=None, include_archived=False, include_angebote=False,
+                   *, include_unset_archived=False):
+    rows = _list_auftrag_rows(autohaus_id, include_archived, include_angebote,
+                             include_unset_archived=include_unset_archived)
+    preload_service_status_paths([row['id'] for row in rows])
 
     auftraege = [row_to_auftrag(row) for row in rows]
     mark_auftraege_reklamationsstatus(auftraege)
     auftraege.sort(key=auftrag_planung_sort_key)
+    return auftraege
+
+
+def list_auftrag_navigation_rows(*, include_angebote=False, planning=False):
+    """Read only the fields needed by search and statistics, without sharing or pricing."""
+    rows = _list_auftrag_rows(include_archived=True, include_angebote=include_angebote,
+                             navigation_only=True)
+    auftraege = []
+    for row in rows:
+        auftrag = dict(row)
+        auftrag['archiviert'] = bool(auftrag.get('archiviert'))
+        auftrag['angebotsphase'] = bool(auftrag.get('angebotsphase'))
+        auftrag['quelle'] = clean_text(auftrag.get('quelle')) or 'intern'
+        quelle_key = auftrag_quelle_key(auftrag)
+        auftrag['quelle_meta'] = {**AUFTRAG_QUELLE_META[quelle_key], 'key': quelle_key}
+        auftrag['schaden_aufnahme'] = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
+        auftrag.update(auftragsart_anzeige(auftrag))
+        try:
+            auftrag['status'] = int(auftrag.get('status') or 1)
+        except (TypeError, ValueError):
+            auftrag['status'] = 1
+        auftrag['status_meta'] = STATUSLISTE.get(auftrag['status'], STATUSLISTE[1])
+        for feld, _, _ in EVENT_FELDER:
+            auftrag[feld + '_obj'] = parse_date(auftrag.get(feld))
+            auftrag[feld] = format_date(auftrag.get(feld))
+        if planning:
+            transport = clean_text(auftrag.get('transport_art')) or 'standard'
+            auftrag['transport_meta'] = TRANSPORT_ARTEN.get(transport, TRANSPORT_ARTEN['standard'])
+            auftrag['transport_art'] = transport if transport in TRANSPORT_ARTEN else 'standard'
+            auftrag['annahme_label'] = auftrag['transport_meta']['annahme_label']
+            auftrag['abholung_label'] = auftrag['transport_meta']['abholung_label']
+            auftrag['planung'] = build_auftrag_planung(auftrag)
+        auftraege.append(auftrag)
+    if planning:
+        auftraege.sort(key=auftrag_planung_sort_key)
     return auftraege
 
 
@@ -22080,7 +22158,8 @@ def is_today_finished_auftrag(auftrag, today_finished_ids, today):
 def list_dateien(auftrag_id):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM dateien WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        "SELECT d.*, EXISTS(SELECT 1 FROM datei_backups b WHERE b.datei_id=d.id) AS _backup_available "
+        "FROM dateien d WHERE auftrag_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (auftrag_id,),
     ).fetchall()
     db.close()
@@ -22095,8 +22174,8 @@ def list_dateien_for_auftraege(auftrag_ids):
     db = get_db()
     rows = db.execute(
         f"""
-        SELECT *
-        FROM dateien
+        SELECT d.*, EXISTS(SELECT 1 FROM datei_backups b WHERE b.datei_id=d.id) AS _backup_available
+        FROM dateien d
         WHERE auftrag_id IN ({placeholders})
         ORDER BY hochgeladen_am DESC, id DESC
         """,
@@ -22122,7 +22201,10 @@ def dateien_mit_kategorie(dateien, kategorie):
 
 def get_datei(datei_id):
     db = get_db()
-    row = db.execute("SELECT * FROM dateien WHERE id=?", (datei_id,)).fetchone()
+    row = db.execute(
+        "SELECT d.*, EXISTS(SELECT 1 FROM datei_backups b WHERE b.datei_id=d.id) AS _backup_available "
+        "FROM dateien d WHERE id=?", (datei_id,)
+    ).fetchone()
     db.close()
     return hydrate_datei(dict(row)) if row else None
 
@@ -22201,6 +22283,9 @@ def hydrate_datei(datei):
     if not datei:
         return None
 
+    # Keep the database predicate before display normalization of empty categories.
+    datei['_document_review_candidate'] = is_document_review_candidate(datei)
+    backup_available = datei.pop('_backup_available', None)
     suffix = pathlib.Path(datei["original_name"]).suffix.lower()
     datei["is_pdf"] = suffix == ".pdf"
     datei["is_image"] = suffix in IMAGE_EXTENSIONS
@@ -22217,7 +22302,7 @@ def hydrate_datei(datei):
     )
     datei["has_extract"] = bool(datei["has_analysis"] or clean_text(datei.get("notiz")))
     datei["text_preview"] = clean_text(datei.get("extrahierter_text"))[:2000]
-    datei["original_available"] = upload_file_exists(datei)
+    datei["original_available"] = upload_file_exists(datei, backup_available=backup_available)
     return datei
 
 
@@ -22381,10 +22466,12 @@ def ensure_upload_file_available(datei):
     return None
 
 
-def upload_file_exists(datei):
+def upload_file_exists(datei, *, backup_available=None):
     path = upload_file_path(datei)
     if path and path.exists() and path.is_file():
         return True
+    if backup_available is not None:
+        return bool(backup_available)
     return datei_backup_exists((datei or {}).get("id"))
 
 
@@ -22604,27 +22691,45 @@ def values_match_for_review(key, left, right):
     return left_value == right_value
 
 
-def list_document_review_items(auftrag_id, auftrag=None, audience=None):
+def is_document_review_candidate(datei):
+    return (
+        datei.get('kategorie') == 'standard'
+        and (datei.get('dokument_zweck') if datei.get('dokument_zweck') is not None else 'pruefen') == 'pruefen'
+        and datei.get('reklamation_id') is None
+        and any(datei.get(key) is not None and datei.get(key) != ''
+                for key in ('extrahierter_text', 'analyse_json'))
+    )
+
+
+def list_document_review_items(auftrag_id, auftrag=None, audience=None, *, dateien=None):
     if not auftrag:
         auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         return []
 
-    db = get_db()
-    rows = db.execute(
-        """
-        SELECT *
-        FROM dateien
-        WHERE auftrag_id=?
-          AND kategorie='standard'
-          AND COALESCE(dokument_zweck,'pruefen')='pruefen'
-          AND reklamation_id IS NULL
-          AND (extrahierter_text != '' OR analyse_json != '')
-        ORDER BY id DESC
-        """,
-        (auftrag_id,),
-    ).fetchall()
-    db.close()
+    if dateien is None:
+        db = get_db()
+        rows = db.execute(
+            """
+            SELECT *
+            FROM dateien
+            WHERE auftrag_id=?
+              AND kategorie='standard'
+              AND COALESCE(dokument_zweck,'pruefen')='pruefen'
+              AND reklamation_id IS NULL
+              AND (extrahierter_text != '' OR analyse_json != '')
+            ORDER BY id DESC
+            """,
+            (auftrag_id,),
+        ).fetchall()
+        db.close()
+    else:
+        rows = sorted(
+            (datei for datei in dateien if int(datei.get('auftrag_id') or 0) == int(auftrag_id)
+             and (datei['_document_review_candidate'] if '_document_review_candidate' in datei
+                  else is_document_review_candidate(datei))),
+            key=lambda datei: int(datei['id']), reverse=True,
+        )
 
     reviews = []
     for row in rows:
@@ -23814,7 +23919,7 @@ def list_admin_auftrag_suche(query, limit=8):
     query_text = query.lower()
     query_key = normalize_auftrag_search_key(query)
     treffer = []
-    for index, auftrag in enumerate(list_auftraege(include_archived=True, include_angebote=True)):
+    for index, auftrag in enumerate(list_auftrag_navigation_rows(include_angebote=True, planning=True)):
         suchfelder = [
             auftrag.get("fahrzeug"),
             auftrag.get("auftragsart_label"),
@@ -24231,7 +24336,18 @@ def list_admin_postfach_items(limit=80):
 
 def admin_postfach_count():
     try:
-        return len(list_admin_postfach_items(limit=200))
+        if not has_request_context():
+            return len(list_admin_postfach_items(limit=200))
+        cached = getattr(g, 'admin_postfach_items_cache', {})
+        if 200 in cached:
+            return len(cached[200])
+        from portal_navigation_counts import count_admin_postfach_items
+        hidden = postfach_hidden_keys('admin', 0)
+        db = get_db()
+        try:
+            return count_admin_postfach_items(db, hidden, limit=200)
+        finally:
+            db.close()
     except Exception:
         return 0
 
@@ -31811,7 +31927,7 @@ def get_verzoegerung(verzoegerung_id):
     return dict(row) if row else None
 
 
-def list_reklamationen(auftrag_id):
+def list_reklamationen(auftrag_id, *, dateien=None):
     db = get_db()
     rows = db.execute(
         """
@@ -31824,7 +31940,8 @@ def list_reklamationen(auftrag_id):
     db.close()
     reklamationen = [dict(row) for row in rows]
     for reklamation in reklamationen:
-        reklamation["dateien"] = list_dateien_by_reklamation(reklamation["id"])
+        reklamation["dateien"] = (list_dateien_by_reklamation(reklamation["id"]) if dateien is None
+                                  else [datei for datei in dateien if datei.get('reklamation_id') == reklamation['id']])
     return reklamationen
 
 
@@ -31909,7 +32026,8 @@ def get_reklamation(reklamation_id):
 def list_dateien_by_reklamation(reklamation_id):
     db = get_db()
     rows = db.execute(
-        "SELECT * FROM dateien WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
+        "SELECT d.*, EXISTS(SELECT 1 FROM datei_backups b WHERE b.datei_id=d.id) AS _backup_available "
+        "FROM dateien d WHERE reklamation_id=? ORDER BY hochgeladen_am DESC, id DESC",
         (reklamation_id,),
     ).fetchall()
     db.close()
@@ -39438,7 +39556,7 @@ def dashboard():
 @app.route("/admin/lackier-statistik")
 @admin_required
 def admin_lackier_statistik():
-    alle_auftraege = list_auftraege(include_archived=True)
+    alle_auftraege = list_auftrag_navigation_rows()
     return jsonify(build_lackier_statistik(alle_auftraege))
 
 
@@ -50493,9 +50611,9 @@ def auftrag_detail(auftrag_id):
         bonusrechnungen=bonusrechnungen,
         rechnungsdateien=rechnungsdateien,
         fertigbilder=fertigbilder,
-        dokument_pruefung=list_document_review_items(auftrag_id, auftrag),
+        dokument_pruefung=list_document_review_items(auftrag_id, auftrag, dateien=dateien),
         versicherung_pruefung=build_versicherung_pruefung_checkliste(auftrag, prozess=versicherung_prozess) if auftrag.get("versicherung_id") else None,
-        reklamationen=list_reklamationen(auftrag_id),
+        reklamationen=list_reklamationen(auftrag_id, dateien=dateien),
         verzoegerungen=list_verzoegerungen(auftrag_id),
         benachrichtigungen=list_benachrichtigungen(auftrag_id, include_internal=True),
         chat_nachrichten=chat_nachrichten,

@@ -141,8 +141,10 @@ class CockpitQueryBudgetTests(unittest.TestCase):
         budget_reads = [sql for sql in service_reads
                         if (match := re.search(r'WHERE auftrag_id\s*=\s*(\d+)', sql))
                         and int(match[1]) in budget_ids]
-        self.assertEqual(len(budget_reads), 20)
-        self.assertLessEqual(len(selects), 80)
+        self.assertEqual(len(budget_reads), 0)
+        batch_reads = [sql for sql in selects if sql.startswith('SELECT auftrag_id, fahrzeug_id FROM serviceprozesse')]
+        self.assertEqual(len(batch_reads), 1)
+        self.assertLessEqual(len(selects), 50)
         print(f'Cockpit: {len(selects)} SELECTs for 20 active and 302 archived tokenized orders')
         html = response.get_data(as_text=True)
         self.assertTrue('BUDGET-020' not in html, 'Archived vehicle must not appear in the cockpit')
