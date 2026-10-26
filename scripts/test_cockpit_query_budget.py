@@ -168,7 +168,10 @@ class CockpitQueryBudgetTests(unittest.TestCase):
         self.assertTrue(any(item['kennzeichen'] == 'BUDGET-020' for item in search.json['items']))
         dashboard = client.get('/admin')
         self.assertEqual(dashboard.status_code, 200)
-        self.assertTrue('BUDGET-020' in dashboard.get_data(as_text=True), 'Archive remains in the dashboard')
+        self.assertNotIn('BUDGET-020', dashboard.get_data(as_text=True))
+        archive = client.get('/admin?archiv=1')
+        self.assertEqual(archive.status_code, 200)
+        self.assertIn('BUDGET-020', archive.get_data(as_text=True), 'Archive remains explicitly accessible')
 
     @staticmethod
     def remove_orders():

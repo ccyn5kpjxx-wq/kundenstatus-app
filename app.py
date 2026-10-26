@@ -39536,16 +39536,22 @@ def admin_klickstatistik():
 @app.route("/admin")
 @admin_required
 def dashboard():
-    alle_auftraege = [a for a in list_auftraege(include_archived=True) if not auftrag_ist_reifen(a)]
+    archiv_geladen = request.args.get('archiv') == '1'
+    alle_auftraege = [a for a in list_auftraege(include_archived=archiv_geladen,
+                                              include_unset_archived=True) if not auftrag_ist_reifen(a)]
     auftraege = [a for a in alle_auftraege if not a["archiviert"]]
     archivierte_auftraege = [a for a in alle_auftraege if a["archiviert"]]
+    statistik_auftraege = (alle_auftraege if archiv_geladen else
+                          [a for a in list_auftrag_navigation_rows() if not auftrag_ist_reifen(a)])
     angebotsanfragen = list_angebotsanfragen()
     cockpit_data = dashboard_daten(auftraege)
-    lackier_statistik = build_lackier_statistik(alle_auftraege)
+    lackier_statistik = build_lackier_statistik(statistik_auftraege)
     return render_template(
         "dashboard.html",
         auftraege=auftraege,
         archivierte_auftraege=archivierte_auftraege,
+        archiv_geladen=archiv_geladen,
+        archiv_anzahl=sum(1 for a in statistik_auftraege if a['archiviert']),
         angebotsanfragen=angebotsanfragen,
         cockpit=cockpit_data,
         lackier_statistik=lackier_statistik,

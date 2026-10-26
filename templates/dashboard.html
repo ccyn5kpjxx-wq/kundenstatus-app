@@ -395,7 +395,17 @@
     <script type="application/json" id="lackier-statistik-data">{{ lackier_statistik|tojson }}</script>
   </section>
   {% endif %}
-  {% if archivierte_auftraege %}
+  <div id="archiv" class="d-flex align-items-center justify-content-between gap-3 flex-wrap mb-3">
+    <h3 class="h5 mb-0">Archivierte Aufträge ({{ archiv_anzahl }})</h3>
+    {% if not archiv_geladen and archiv_anzahl %}
+    <a href="{{ url_for('dashboard', archiv=1, _anchor='archiv') }}" class="btn btn-soft">Archiv öffnen</a>
+    {% elif archiv_geladen %}
+    <a href="{{ url_for('dashboard') }}" class="btn btn-soft btn-sm">Zur aktuellen Übersicht</a>
+    {% endif %}
+  </div>
+  {% if not archiv_geladen and archiv_anzahl %}
+    <p class="text-muted">Im Archiv kannst du abgeschlossene Aufträge öffnen und wieder aktivieren.</p>
+  {% elif archivierte_auftraege %}
   <form method="POST" action="{{ url_for('admin_sammelaktion') }}" data-bulk-form>
   <div class="bulk-bar">
     <div class="d-flex align-items-center gap-3 flex-wrap">
