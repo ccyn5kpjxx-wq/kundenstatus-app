@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}CHECK24 · Montagebuchungen{% endblock %}
+{% block extra_css %}
+<style>
+.c24-head,.c24-actions {display:flex;gap:1rem;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.c24-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:1rem;margin-top:1.5rem}
+.c24-card {border:1px solid var(--line,#ddd);border-radius:16px;padding:1.25rem;background:var(--panel,#fff);overflow-wrap:anywhere}
+.c24-card h2 {font-size:1.25rem}.c24-state {font-weight:700;color:#0b6760}.c24-review {color:#a35200}.c24-time {font-size:1.2rem;font-weight:750}
+.c24-muted {color:#68737b;font-size:.9rem}.c24-card li {margin-bottom:.3rem}.c24-card form {margin-top:1rem}
+</style>
+{% endblock %}
+{% block content %}
+{% if check24_demo %}<div class="alert alert-info">Lokale Vorschau mit Beispieldaten · keine echte Buchung und kein Live-Abgleich</div>{% endif %}
+<div class="c24-head"><div><h1>CHECK24-Montagebuchungen</h1><p>Termine und Reifenlieferungen für eure Werkstatt.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Werkstatt-Tafel →</a></div>
+<div class="c24-card">
+ <div class="c24-actions"><div><strong>Neue Buchungen aus dem Postfach übernehmen</strong><p class="c24-muted">Eindeutige, verifizierte Buchungen werden als Reifenauftrag eingeplant. Änderungen, Stornos und Überschneidungen bleiben zur Prüfung hier sichtbar.</p></div>
+ <form method="post" action="{{ url_for('check24.sync') }}"><button class="btn btn-brand" {% if not imap_configured %}disabled{% endif %}>Postfach jetzt abgleichen</button></form></div>
+ {% if not imap_configured %}<p class="c24-review">Der verschlüsselte Postfachzugang ist für diese App noch nicht eingerichtet. Bis dahin kann eine Originalmail als EML eingelesen werden.</p>{% endif %}
+ <p class="c24-muted">Der automatische Hintergrundabruf muss auf dem Server eingerichtet sein. Ein Abgleich ändert keine Buchung im CHECK24-Portal.</p>
+ <details><summary>Originalmail als EML einlesen</summary><form method="post" enctype="multipart/form-data" action="{{ url_for('check24.import_mail') }}"><label class="form-label" for="check24-mail">CHECK24-Buchungsmail</label><input id="check24-mail" class="form-control" type="file" name="mail" accept=".eml,message/rfc822" required><button class="btn btn-soft mt-2">Daten prüfen</button></form></details>
+</div>
+<div class="c24-grid">
+{% for event in events %}{% set d=event.data %}
+<article class="c24-card" data-check24-event="{{ event.id }}">
+ <p class="c24-state {% if event.state=='review' %}c24-review{% endif %}">{% if event.state=='applied' %}In Werkstatt eingeplant{% elif event.state=='duplicate' %}Bereits vorhanden{% elif event.state=='resolved' %}Geprüft{% else %}Prüfung erforderlich{% endif %} · {{ d.provider_id or 'Bestellnummer unklar' }}</p>
+ <h2>{{ d.customer_name or d.subject }}</h2>
+ {% if d.start_at %}<p class="c24-time">{{ d.start_at[8:10] }}.{{ d.start_at[5:7] }}.{{ d.start_at[:4] }} · {{ d.start_at[11:16] }}–{{ d.end_at[11:16] }} Uhr</p>{% endif %}
+ {% if event.current_start and event.current_start != d.start_at %}<p class="c24-state">Aktueller Werkstatttermin: {{ event.current_start[8:10] }}.{{ event.current_start[5:7] }}.{{ event.current_start[:4] }} · {{ event.current_start[11:16] }}–{{ event.current_end[11:16] }} Uhr</p><p class="c24-muted">Die Zeit oben stammt aus der ursprünglichen Nachricht.</p>{% endif %}
+ <p>{{ d.service }}</p><ul>{% for tire in d.tires %}<li>{{ tire }}</li>{% endfor %}</ul>
+ {% if d.customer_phone %}<p>Telefon: {{ d.customer_phone }}</p>{% endif %}
+ {% if d.delivery_date %}<p>Voraussichtliche Lieferung: {{ d.delivery_date[8:10] }}.{{ d.delivery_date[5:7] }}.{{ d.delivery_date[:4] }}</p>{% endif %}
+ {% if d.total_gross %}<p>Gebuchter Gesamtpreis: <strong>{{ d.total_gross|replace('.', ',') }} € brutto</strong></p>{% endif %}
+ {% if event.note %}<p class="c24-review">{{ event.note }}</p>{% endif %}
+ {% if event.order_id %}<a class="btn btn-soft" href="{{ url_for('auftrag_detail', auftrag_id=event.order_id) }}">Auftrag {{ event.order_id }} öffnen →</a>{% endif %}
+ {% if event.order_id %}<details class="mt-3"><summary>Bestätigte Terminänderung übernehmen</summary><form method="post" action="{{ url_for('check24.reschedule',event_id=event.id) }}"><p>Den neuen Termin zuerst mit CHECK24 abstimmen. Hier werden Auftrag und Zeitreservierung gemeinsam geändert.</p><label>Datum <input class="form-control" type="date" name="day" required></label><label>Beginn <input class="form-control" type="time" name="begin" required></label><label>Ende <input class="form-control" type="time" name="finish" required></label><label class="form-label">Prüfvermerk <input class="form-control" name="note" required maxlength="1000"></label><label><input type="checkbox" name="reviewed" value="1" required> Neuen Termin mit CHECK24 abgeglichen</label><br><button class="btn btn-soft mt-2">Neue Zeit übernehmen</button></form></details>{% endif %}
+ {% if event.order_id %}<details class="mt-3"><summary>Bestätigten Storno übernehmen</summary><form method="post" action="{{ url_for('check24.cancel',event_id=event.id) }}"><p>Nur verwenden, wenn CHECK24 die Buchung tatsächlich storniert hat. Der Werkstattauftrag wird archiviert und die Zeit freigegeben.</p><label><input type="checkbox" name="reviewed" value="1" required> Storno im CHECK24-Portal geprüft</label><label class="form-label mt-2" for="cancel-note-{{ event.id }}">Prüfvermerk</label><input class="form-control" id="cancel-note-{{ event.id }}" name="note" required maxlength="1000"><button class="btn btn-outline-danger mt-2">Storno in Werkstatt übernehmen</button></form></details>{% endif %}
+ {% if event.state=='review' %}
+ <ul class="c24-review">{% for error in d.errors %}<li>{{ error }}</li>{% endfor %}</ul>
+ {% if not event.verified %}<p class="c24-muted">Originalmail und Termin vor der Übernahme im CHECK24-Portal abgleichen.</p>{% endif %}
+ {% if d.valid and not event.order_id %}<form method="post" action="{{ url_for('check24.apply',event_id=event.id) }}"><label><input type="checkbox" name="reviewed" value="1" required> Daten mit CHECK24 abgeglichen</label><br><button class="btn btn-brand mt-2">Als Reifenauftrag einplanen</button></form>{% endif %}
+ <details class="mt-3"><summary>Prüfung dokumentieren</summary><form method="post" action="{{ url_for('check24.resolve',event_id=event.id) }}"><label for="note-{{ event.id }}">Ergebnis der Prüfung</label><textarea class="form-control" id="note-{{ event.id }}" name="note" required maxlength="1000"></textarea><p class="c24-muted">Dieser Vermerk ändert den Werkstattauftrag und seine reservierte Zeit nicht.</p><button class="btn btn-soft">Prüfung erledigt</button></form></details>
+ {% endif %}
+</article>
+{% else %}<div class="c24-card"><h2>Noch keine CHECK24-Nachrichten eingelesen</h2><p>Nach dem Postfachabgleich erscheinen hier die Buchungen mit Kunde, Uhrzeit, Reifen und zugehörigem Werkstattauftrag.</p></div>{% endfor %}
+</div>
+<nav class="c24-actions mt-3" aria-label="Nachrichtenseiten">{% if page>1 %}<a class="btn btn-soft" href="{{ url_for('check24.index',seite=page-1) }}">← Vorherige Seite</a>{% endif %}<span>Seite {{ page }} · offene Prüfungen zuerst</span>{% if events|length==50 %}<a class="btn btn-soft" href="{{ url_for('check24.index',seite=page+1) }}">Weitere Nachrichten →</a>{% endif %}</nav>
+{% endblock %}

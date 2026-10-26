@@ -548,6 +548,7 @@
     <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten" style="background:#a23f2d; border:1px solid #df7764; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">👥 Unser Team</button>
     <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
     {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
+    {% if session.admin %}<a class="ws-back" href="{{ url_for('check24.index') }}">CHECK24{% if check24_review_count %} · {{ check24_review_count }} prüfen{% endif %}</a>{% endif %}
   </div>
 
   {% include '_werkstatt_team_showcase.html' %}
@@ -609,6 +610,7 @@
           {% endif %}
         </div>
         <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
+        {% if auftrag.get('check24_termin') %}<div data-check24-termin style="margin:.5rem 0;padding:.55rem .65rem;border-radius:9px;background:#e4f3f1;color:#145d66;font-weight:800;">{{ auftrag['check24_termin'] }}</div><div>{{ auftrag['kunde_name'] }}</div>{% endif %}
         {% if auftrag['leistungsart'] == 'inspektion' %}
         {% set pruefliste = auftrag.get('inspektionscheckliste', {}) %}
         <div data-inspektionscheckliste-einstieg style="margin-top:.65rem; padding:.65rem .7rem; border:1px solid #8ab3a7; border-radius:10px; background:#eaf4ee; color:#145346; font-size:.9rem; line-height:1.5;">

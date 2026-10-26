@@ -45394,6 +45394,8 @@ def freie_reifen_slots(datum):
             """SELECT s.uhrzeit FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
                WHERE s.datum=? AND l.status!='verloren'""", (datum,)
         ).fetchall()}
+        if globals().get('check24_bookings'):
+            belegt.update(zeit for zeit in zeiten if check24_bookings.native_slot_blocked(db, datum, zeit))
     finally:
         db.close()
     return [zeit for zeit in zeiten if zeit not in belegt]
@@ -45402,6 +45404,10 @@ def freie_reifen_slots(datum):
 def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
     if uhrzeit not in reifen_slot_zeiten(datum):
         raise ReifenSlotBelegt("Bitte eine freie volle Stunde innerhalb unserer Öffnungszeiten auswählen.")
+    if globals().get('check24_bookings'):
+        check24_bookings.lock(db)
+        if check24_bookings.native_slot_blocked(db, datum, uhrzeit):
+            raise ReifenSlotBelegt("Diese Zeit ist bereits durch eine Montagebuchung belegt. Bitte wählen Sie einen anderen Termin.")
     db.execute("DELETE FROM reifen_termin_slots WHERE lead_id IN (SELECT id FROM leads WHERE status='verloren')")
     db.execute("DELETE FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),))
     result = db.execute(
@@ -50497,10 +50503,13 @@ def auftrag_detail(auftrag_id):
         neue_art = leistungsart_formular(form, fallback="") if "leistungsart" in form else None
         aktion = form.get("aktion", "speichern")
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
-        if hat_reifenbuchung(auftrag) and (
+        if (hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24') and (
             format_date(form.get("annahme_datum")) != format_date(auftrag.get("annahme_datum"))
             or format_time_value(form.get("annahme_uhrzeit")) != format_time_value(auftrag.get("annahme_uhrzeit"))
         ):
+            if auftrag.get('quelle') == 'check24':
+                flash('CHECK24-Termine bitte im CHECK24-Bereich ändern. Dort wird das gesamte Zeitintervall geprüft.', 'warning')
+                return redirect(url_for('check24.index'))
             flash("Bitte den Reifentermin im Reifenportal ändern. Dort wird die freie Stunde geprüft.","warning")
             return redirect(url_for("admin_reifentermine"))
         bonus_netto_betrag = positive_money_amount(form.get("bonus_netto_betrag")) or 0.0
@@ -50518,12 +50527,12 @@ def auftrag_detail(auftrag_id):
                 abort(404)
             frisch = dict(zeile)
             hat_reifenrechnung = clean_text(frisch.get("reifen_rechnung_json")) not in ("", "{}")
-            if (hat_reifenbuchung(frisch) or hat_reifenrechnung) and neue_art != "reifenservice":
+            if (hat_reifenbuchung(frisch) or frisch.get('quelle') == 'check24' or hat_reifenrechnung) and neue_art != "reifenservice":
                 db.rollback()
                 db.close()
                 abort(400, description="Die Auftragsart einer Reifenbuchung oder gespeicherten Reifenabrechnung bleibt Reifenservice.")
             db.execute("UPDATE auftraege SET leistungsart=? WHERE id=?", (neue_art, auftrag_id))
-        if hat_reifenbuchung(auftrag):
+        if hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24':
             db.execute("UPDATE auftraege SET status=status WHERE id=?",(auftrag_id,))
             termin = db.execute("SELECT annahme_datum,annahme_uhrzeit FROM auftraege WHERE id=?",(auftrag_id,)).fetchone()
             if not termin or termin["annahme_datum"] != auftrag.get("annahme_datum") or termin["annahme_uhrzeit"] != auftrag.get("annahme_uhrzeit"):
@@ -52529,6 +52538,9 @@ def admin_kundenwuensche_bestaetigen(auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag:
         abort(404)
+    if auftrag.get('quelle') == 'check24':
+        flash('CHECK24-Termine bitte im CHECK24-Bereich ändern.', 'info')
+        return redirect(url_for('check24.index'))
     if auftrag_ist_reifen(auftrag):
         flash("Reifentermine bitte im Reifenportal ändern.","info")
         return redirect(url_for("admin_reifentermine"))
@@ -52962,6 +52974,9 @@ def admin_auslese_uebernehmen(auftrag_id):
     if not order:
         abort(404)
     key = request.form.get('feld')
+    if order.get('quelle') == 'check24' and key == 'annahme_datum':
+        flash('CHECK24-Termine bitte im CHECK24-Bereich ändern.', 'warning')
+        return redirect(url_for('check24.index'))
     if hat_reifenbuchung(order) and key == 'annahme_datum':
         flash('Reifentermine bitte im Reifenportal ändern. Dort wird die freie Stunde geprüft.','warning')
         return redirect(url_for('admin_reifentermine'))
@@ -55393,6 +55408,12 @@ def werkstatt_tafel():
         for auftrag in list_auftraege()
         if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
+    for auftrag in auftraege:
+        if auftrag.get('quelle') == 'check24':
+            intake = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
+            start, end = intake.get('check24_start', ''), intake.get('check24_ende', '')
+            if start and end:
+                auftrag['check24_termin'] = f"{start[8:10]}.{start[5:7]}. · {start[11:16]}–{end[11:16]} Uhr"
     inspektionscheckliste.load_many(sys.modules[__name__], auftraege, admin=bool(session.get("admin")))
     reifentermine = list_reifentermine()
     spalten = (
@@ -55437,6 +55458,7 @@ def werkstatt_tafel():
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
         server_now_iso=jetzt.isoformat(timespec="seconds"),
         countdown_ziel_iso=abflug.isoformat(timespec="seconds") if abflug > jetzt else "",
+        check24_review_count=check24_bookings.review_count() if session.get('admin') else 0,
     )
 
 
@@ -59667,6 +59689,8 @@ service_app = register_service_app(sys.modules[__name__], kundenflotten)
 
 from kunden_rechnungen import register_customer_invoices
 register_customer_invoices(sys.modules[__name__])
+from check24_buchungen import register_check24
+check24_bookings = register_check24(sys.modules[__name__])
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
 # and the shared workshop login remain independent.
