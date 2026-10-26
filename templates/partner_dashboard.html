@@ -879,9 +879,9 @@
             <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
             <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
             <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Versicherungsfall melden</a>
-            {% if kunden_rechnungen_enabled %}<a href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rechnungen</a>{% endif %}
             <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
             <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
+            {% if kunden_rechnungen_enabled %}<a href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rechnungen</a>{% endif %}
             <div class="whatsapp-quick-status" role="status" aria-label="WhatsApp Verbindung aktiv">
               <span class="whatsapp-mark" aria-hidden="true">WA</span>
               <div>
