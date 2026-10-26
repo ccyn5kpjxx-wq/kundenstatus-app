@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>Rechnungen · {{ autohaus.portal_label }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='kunden-rechnungen.css') }}">
+</head>
+<body class="invoice-page">
+  <main class="invoice-shell">
+    <header class="invoice-header">
+      <a class="invoice-back" href="{{ url_for('partner_dashboard', slug=autohaus.slug) }}">← Zur Übersicht</a>
+      <img src="{{ url_for('static', filename='logo-transparent.png') }}" width="166" height="64" alt="Gärtner GmbH Karosserie + Lack">
+    </header>
+    <section class="invoice-intro" aria-labelledby="rechnungen-titel">
+      <p class="invoice-eyebrow">{{ autohaus.portal_label }}</p>
+      <h1 id="rechnungen-titel">Ihre Rechnungen <span>{{ rechnungen_gesamt }}</span></h1>
+      <p>Alle für Sie bereitgestellten Rechnungs-PDFs, nach Auftrag zugeordnet. Auch abgeschlossene und archivierte Aufträge bleiben hier erreichbar.</p>
+    </section>
+    {% include '_kunden_rechnungen.html' %}
+    {% if rechnungen_seiten > 1 %}
+    <nav class="invoice-pagination" aria-label="Rechnungsseiten">
+      {% if rechnungen_seite > 1 %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite-1) }}">← Zurück</a>{% endif %}
+      <span>Seite {{ rechnungen_seite }} von {{ rechnungen_seiten }}</span>
+      {% if rechnungen_seite < rechnungen_seiten %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite+1) }}">Weiter →</a>{% endif %}
+    </nav>
+    {% endif %}
+  </main>
+</body>
+</html>

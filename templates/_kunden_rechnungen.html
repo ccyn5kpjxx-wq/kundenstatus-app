@@ -1,0 +1,25 @@
+{% if kunden_rechnungen %}
+<ul class="invoice-list" aria-label="Ihre Rechnungsdokumente">
+  {% for rechnung in kunden_rechnungen %}
+  <li class="invoice-card">
+    <span class="invoice-file-icon" aria-hidden="true">PDF</span>
+    <div class="invoice-details">
+      <div class="invoice-order">Auftrag {{ rechnung.auftrag_id }}{% if rechnung.archiviert %}<span class="invoice-archive">Archiviert</span>{% endif %}</div>
+      <h3>{{ rechnung.fahrzeug or 'Werkstattauftrag' }}{% if rechnung.kennzeichen %} · {{ rechnung.kennzeichen }}{% endif %}</h3>
+      <p class="invoice-name">{{ rechnung.name }}</p>
+      {% if rechnung.datum %}<p class="invoice-date">Bereitgestellt: {{ rechnung.datum }}</p>{% endif %}
+    </div>
+    <div class="invoice-actions">
+      <a class="invoice-button invoice-open" href="{{ rechnung.open_url }}" target="_blank" rel="noopener" aria-label="{{ rechnung.name }} öffnen (neuer Tab)">PDF öffnen <span aria-hidden="true">↗</span></a>
+      <a class="invoice-button" href="{{ rechnung.download_url }}" aria-label="{{ rechnung.name }} herunterladen">Herunterladen <span aria-hidden="true">↓</span></a>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="invoice-empty">
+  <span class="invoice-file-icon" aria-hidden="true">PDF</span>
+  <h3>Noch keine Rechnung bereitgestellt</h3>
+  <p>Sobald Ihre Rechnung hier bereitsteht, können Sie die PDF öffnen und speichern.</p>
+</div>
+{% endif %}

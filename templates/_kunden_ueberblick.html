@@ -46,6 +46,7 @@
 <nav class="portal-tabs" aria-label="Bereiche im Kundenportal" data-portal-nav>
   <a href="#uebersicht" data-section="uebersicht">Übersicht</a>
   <a href="#termine" data-section="termine">Termine<span class="portal-tab-extra"> &amp; Auftrag</span></a>
+  {% if kunden_rechnungen_enabled %}<a href="#rechnungen" data-section="rechnungen">Rechnungen <span>{{ kunden_rechnungen|default([])|length }}</span></a>{% endif %}
   <a href="#unterlagen" data-section="unterlagen">Unterlagen <span>{{ kunden_dokumente|length }}</span></a>
   {% if kunden_bilder %}<a href="#bilder" data-section="bilder">Bilder <span>{{ kunden_bilder|length }}</span></a>{% endif %}
   <a href="#nachrichten" data-section="nachrichten">Nachrichten <span>{{ kunden_verlauf|length }}</span></a>

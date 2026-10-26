@@ -66,6 +66,7 @@
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='kundenportal.css') }}">
+  {% if kunden_rechnungen_enabled %}<link rel="stylesheet" href="{{ url_for('static', filename='kunden-rechnungen.css') }}">{% endif %}
   <style>
     /* Customer presentation only; the workshop and partner views keep their own layout. */
     :root { --portal-ink:#202524; --portal-muted:#646d69; --portal-line:#e2e6e2; --portal-red:#bb301e; }
@@ -422,6 +423,16 @@
         <a class="portal-text-link mt-2" href="#unterlagen">Alle Unterlagen <span aria-hidden="true">↗</span></a>
       </section>
     </div>
+
+    {% if kunden_rechnungen_enabled %}
+    <section class="panel mb-4" id="rechnungen" data-portal-section="rechnungen" aria-labelledby="rechnungen-title">
+      <div class="section-head"><div>
+        <h2 class="h4 mb-1" id="rechnungen-title">Ihre Rechnungen</h2>
+        <p class="text-muted">Alle für Sie bereitgestellten Rechnungs-PDFs zu diesem Auftrag. Direkt öffnen oder auf Ihrem Gerät speichern.</p>
+      </div></div>
+      {% include '_kunden_rechnungen.html' %}
+    </section>
+    {% endif %}
 
     <div class="panel mb-4" id="unterlagen" data-portal-section="unterlagen">
       <div class="section-head">
