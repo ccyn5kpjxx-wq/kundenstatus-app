@@ -59664,6 +59664,9 @@ def service_assignment_context(db, company_id, vehicle_id):
 service_reminders = serviceerinnerungen.ReminderService(sys.modules[__name__], kundenflotten, assignment_context=service_assignment_context)
 from werkstatt_serviceapp import register_service_app
 service_app = register_service_app(sys.modules[__name__], kundenflotten)
+
+from kunden_rechnungen import register_customer_invoices
+register_customer_invoices(sys.modules[__name__])
 from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_employee_orders_for_import
 # Personal order controls have a narrow grant; general assistant permissions
 # and the shared workshop login remain independent.

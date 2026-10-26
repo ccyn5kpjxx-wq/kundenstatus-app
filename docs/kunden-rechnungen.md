@@ -8,15 +8,16 @@ funktionieren als normale serverseitige Links, auch ohne JavaScript.
 
 ## Integration
 
-In `app.py` nach der Registrierung der Service-App ergänzen:
+`app.py` registriert den Bereich direkt nach der Service-App:
 
 ```python
 from kunden_rechnungen import register_customer_invoices
 register_customer_invoices(sys.modules[__name__])
 ```
 
-Diese Registrierung wird in den Tests und in der lokalen Vorschau explizit
-ausgeführt. Die Templates zeigen den Button nur bei registriertem Modul.
+Die Tests und die lokale Vorschau verwenden dieselbe App-Registrierung. Der
+Integrationstest bricht ab, falls sie fehlt. Die Templates zeigen den Button nur
+bei registriertem Modul.
 
 ## Auswahl und Freigabe
 

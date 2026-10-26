@@ -16,9 +16,7 @@ os.environ.update({
 import smoke_test as isolated
 
 p = isolated.portal
-from kunden_rechnungen import register_customer_invoices
-
-register_customer_invoices(p)
+assert "kundenrechnungen" in p.app.blueprints, "Die App muss den Rechnungsbereich selbst registrieren."
 
 
 def sql(statement, args=()):
