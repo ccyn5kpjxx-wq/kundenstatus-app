@@ -50,6 +50,9 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 from backup_storage import BackupStorage
+from portal_static_assets import asset_version, is_versioned_ui_asset
+from portal_request_timing import start_request_timing, timed_database_call, server_timing_header
+from portal_navigation_snapshot import NAVIGATION_SQL_COUNT_KEYS, load_navigation_sql_counts
 import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
@@ -2793,6 +2796,16 @@ def get_csrf_token():
     return token
 
 
+def static_asset_url(filename):
+    version = asset_version(app.static_folder, filename)
+    if version:
+        return url_for('static', filename=filename, v=version)
+    return url_for('static', filename=filename)
+
+
+app.jinja_env.globals['static_asset_url'] = static_asset_url
+
+
 def csrf_field():
     return (
         f'<input type="hidden" name="{CSRF_FIELD_NAME}" '
@@ -2866,7 +2879,7 @@ def inject_csrf_helpers():
     def once(function):
         def count():
             if function not in counts:
-                counts[function] = function()
+                counts[function] = navigation_render_count(function)
             return counts[function]
         return count
 
@@ -2894,6 +2907,41 @@ def inject_csrf_helpers():
         "gt_motive_configured": bool(GT_MOTIVE_API_KEY or GT_MOTIVE_CLIENT_ID),
         "dat_api_status": dat_api_status_meta,
     }
+
+
+def navigation_render_count(function):
+    """Batch fresh scalar badges for this admin GET; keep other call paths."""
+    key = function.__name__
+    if (not has_request_context() or request.method != 'GET'
+            or not session.get('admin') or key not in NAVIGATION_SQL_COUNT_KEYS):
+        return function()
+    snapshot = getattr(g, 'navigation_sql_counts', None)
+    if snapshot is None:
+        # Preserve the lead badge's existing rental-inquiry synchronization.
+        # Do it before the snapshot so every count observes the resulting state.
+        try:
+            sync_mietwagen_anfragen_to_leads()
+            db = get_db()
+            try:
+                if USE_POSTGRES:
+                    db.execute('SAVEPOINT navigation_counts')
+                try:
+                    snapshot = load_navigation_sql_counts(db, datetime.now().strftime(DATE_FMT))
+                except Exception:
+                    if USE_POSTGRES:
+                        db.execute('ROLLBACK TO SAVEPOINT navigation_counts')
+                    raise
+                finally:
+                    if USE_POSTGRES:
+                        db.execute('RELEASE SAVEPOINT navigation_counts')
+            finally:
+                db.close()
+        except Exception:
+            # Optional/legacy schema failures must not break unrelated badges
+            # or repeatedly retry the entire batch during the same render.
+            snapshot = False
+        g.navigation_sql_counts = snapshot
+    return snapshot[key] if snapshot is not False else function()
 
 
 def session_is_authenticated():
@@ -3080,6 +3128,8 @@ def public_site_is_indexable_request():
 
 @app.before_request
 def configure_website_upload_limit():
+    if request.method == 'GET':
+        start_request_timing()
     # Must run before CSRF validation first parses the multipart form.
     if request.endpoint in {"website_anfrage", "privat_schadenaufnahme"} and request.method == "POST":
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
@@ -3302,6 +3352,17 @@ def add_security_headers(response):
             "Cache-Control",
             "no-store" if session.get("admin") else "private, no-cache",
         )
+    if response.status_code in {200, 304} and is_versioned_ui_asset(
+        app.static_folder, request.endpoint, request.method, request.view_args, request.args
+    ):
+        # These files contain public UI code/images only. Private caching also
+        # prevents shared caches from retaining any session-refresh headers.
+        response.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    if (request.method == 'GET' and session.get('admin')
+            and response.mimetype == 'text/html'):
+        timing = server_timing_header()
+        if timing:
+            response.headers['Server-Timing'] = timing
     return response
 
 
@@ -7634,7 +7695,7 @@ def find_matching_autohaus_id(text):
     return None
 
 
-def parse_document_fields(text, filename=""):
+def parse_document_fields(text, filename="", *, include_autohaus_match=True):
     cleaned = clean_text(text)
     if not cleaned:
         return {}
@@ -7941,7 +8002,7 @@ def parse_document_fields(text, filename=""):
         details.append(hint)
 
     return {
-        "autohaus_id": find_matching_autohaus_id(cleaned),
+        "autohaus_id": find_matching_autohaus_id(cleaned) if include_autohaus_match else None,
         "fahrzeug": fahrzeug,
         "farbcode": farbnummer,
         "fin_nummer": vin or fahrgestellnummer,
@@ -8035,6 +8096,11 @@ def slugify(text):
     return value or f"autohaus-{uuid.uuid4().hex[:6]}"
 
 
+@timed_database_call('connect')
+def connect_postgres_request():
+    return psycopg.connect(DATABASE_URL, connect_timeout=5)
+
+
 def get_db():
     if USE_POSTGRES:
         if psycopg is None:
@@ -8044,7 +8110,7 @@ def get_db():
         if has_request_context():
             db = getattr(g, "db_connection", None)
             if db is None:
-                db = PostgresConnection(psycopg.connect(DATABASE_URL, connect_timeout=5), close_on_close=False)
+                db = PostgresConnection(connect_postgres_request(), close_on_close=False)
                 g.db_connection = db
             return db
         return PostgresConnection(psycopg.connect(DATABASE_URL, connect_timeout=5))
@@ -8121,6 +8187,7 @@ class PostgresConnection:
         self.lastrowid = None
         self.close_on_close = close_on_close
 
+    @timed_database_call('db')
     def execute(self, sql, params=()):
         sql = sql.strip()
         if sql.upper() == "SELECT LAST_INSERT_ROWID()":
@@ -22744,6 +22811,7 @@ def list_document_review_items(auftrag_id, auftrag=None, audience=None, *, datei
         local_felder = parse_document_fields(
             review_text,
             datei.get("original_name"),
+            include_autohaus_match=False,
         )
         felder = merge_document_fields(ai_felder, local_felder)
         items = []
