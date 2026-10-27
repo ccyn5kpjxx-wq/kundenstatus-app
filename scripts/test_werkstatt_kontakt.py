@@ -77,7 +77,7 @@ class WorkshopContactTests(unittest.TestCase):
         self.assertNotIn('tel:+4915227706694', text)
 
     def test_member_contact_and_whatsapp_are_preserved(self):
-        for route in ('/homepage', '/team', '/geschaeftspartner'):
+        for route in ('/team', '/geschaeftspartner'):
             with self.subTest(route=route):
                 text = self.client.get(route).get_data(as_text=True)
                 self.assertIn('tel:+4917660477486', text)

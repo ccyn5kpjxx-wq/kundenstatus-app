@@ -132,7 +132,7 @@
     </div></section>
     <section class="trust wrap section-pad" id="vertrauen" aria-labelledby="trust-title">
       <div class="trust-photo"><img {{ image_attrs('images/margita-hoefer-aufrecht-20261020.jpg', sizes='(max-width:560px) 90px, (max-width:980px) 140px, 165px') }} alt="Margita Höfer, Büro und Partnerbetreuung" width="1122" height="1402" loading="lazy" decoding="async"></div>
-      <div class="trust-copy"><h2 id="trust-title">Persönlich für Sie da.</h2><p>Ein fester Kontakt. Klare Absprachen.</p><a class="text-link" href="{{ url_for('oeffentliches_team') }}">Unser Team kennenlernen →</a><div class="trust-bottom"><span>Margita Höfer · Büro &amp; Partnerbetreuung</span><a href="tel:+4917660477486">0176 60477486</a><a class="trust-email" href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div></div>
+      <div class="trust-copy"><h2 id="trust-title">Persönlich für Sie da.</h2><p>Ein fester Kontakt. Klare Absprachen.</p><a class="text-link" href="{{ url_for('oeffentliches_team') }}">Unser Team kennenlernen →</a><div class="trust-bottom"><span>Margita Höfer · Büro &amp; Partnerbetreuung</span><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><a class="trust-email" href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div></div>
       <aside class="trust-proof"><ul><li>Meisterbetrieb für Karosserie &amp; Lack</li><li>Klare Angebote</li><li>Hol- &amp; Bringservice nach Vereinbarung</li></ul><a class="text-link" href="{{ google_reviews.maps_url }}" target="_blank" rel="noopener noreferrer">Google-Bewertungen ansehen ↗</a></aside>
     </section>
     <section class="new-location section-pad" id="neue-location" aria-labelledby="location-title">
