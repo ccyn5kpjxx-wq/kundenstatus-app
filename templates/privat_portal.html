@@ -114,7 +114,7 @@
     <div class="wrap nav">
       <a href="{{ url_for('privat_portal') }}" aria-label="Gärtner Privatkunden-Portal"><img class="logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a>
       <nav class="nav-actions" aria-label="Kontakt">
-        <a href="tel:+4915227706694">0152 277 066 94</a>
+        <a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
         <a href="https://wa.me/4915227706694" target="_blank" rel="noopener">WhatsApp</a>
       </nav>
     </div>
@@ -195,7 +195,7 @@
 
   <footer>
     <div class="wrap footer-grid">
-      <div><strong>Gärtner GmbH Karosserie + Lack</strong><br>Alte Neckarelzer Straße 18/1 · 74821 Mosbach<br>KAROSSERIE · LACK · FAHRZEUGGLAS · AUTOMECHANIK · SCHADENSERVICE</div>
+      <div><strong>Gärtner GmbH Karosserie + Lack</strong><br>{{ werkstatt_oeffentlich.adresse }}<br>KAROSSERIE · LACK · FAHRZEUGGLAS · AUTOMECHANIK · SCHADENSERVICE</div>
       <div><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a><br><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div>
     </div>
   </footer>

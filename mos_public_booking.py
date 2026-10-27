@@ -25,6 +25,7 @@ from mos_return import (init_schema as init_return_schema, deposit_release_eligi
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 from mos_contract_delivery import _single_address
 import mos_site_handoff
+from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS, public_workshop_contact
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -314,7 +315,8 @@ def register(portal):
     def mode_context():
         state=app.extensions.get('mos_public_booking',{})
         cfg=state.get('cfg') or app.config.get('MOS_PUBLIC_BOOKING',{})
-        return {'live':cfg.get('mode')=='live','booking_config':cfg}
+        return {'live':cfg.get('mode')=='live','booking_config':cfg,
+                'werkstatt_oeffentlich':public_workshop_contact()}
 
     @bp.after_request
     def headers(response):
@@ -458,7 +460,7 @@ def register(portal):
             text+=f"\nGezahlter Mietpreis: {q['amount_cents']/100:.2f} EUR"
         else:
             text+=f"\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
-        text+='\nAbholung persönlich: Gärtner, Binauer Höhe 4, 74821 Mosbach-Lohrbach.'
+        text+='\nAktuelle Abholadresse (persönliche Schlüsselübergabe): Gärtner, '+WORKSHOP_ADDRESS+'.'
         text+='\nVermieter und Vertragspartner: '+q.get('lessor_name',LESSOR_NAME)+', '+q.get('lessor_address',LESSOR_ADDRESS)
         if q.get('lessor_email') or q.get('lessor_phone'):
             text+='\nKontakt Vermieter: '+', '.join(filter(None,(q.get('lessor_email'),q.get('lessor_phone'))))

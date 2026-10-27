@@ -23,6 +23,7 @@ patch('socket.socket.connect',deny).start();patch('socket.socket.connect_ex',den
 from run_mos_public_test import build_test_app
 from mos_public_contract import signed_payload, signature_png, signature_record_hash
 from mos_booking.production import cancellation_fee
+from werkstatt_kontakt import BUSINESS_ADDRESS, PHONE, PHONE_URL
 TEMP=tempfile.TemporaryDirectory(prefix='mos-public-tests-')
 # Simulate an operator launching the test from a live-configured shell.
 with patch.dict(os.environ, {
@@ -61,6 +62,53 @@ class PublicTests(unittest.TestCase):
         client=client or self.client
         with client.session_transaction() as s:csrf=s.get('csrf_token')
         return client.post(path,data={**(data or {}),'csrf_token':csrf})
+
+    def test_current_pickup_contacts_on_entry_and_quote(self):
+        entry = self.client.get('/mietwagen-test/')
+        _, quoted = self.quote()
+        for response in (entry, quoted):
+            self.assertEqual(response.status_code, 200)
+            page = response.get_data(as_text=True)
+            self.assertIn('Aktuelle Abholadresse', page)
+            self.assertIn(BUSINESS_ADDRESS, page)
+            self.assertIn(PHONE, page)
+            self.assertIn(PHONE_URL, page)
+            self.assertNotIn('Mosbach-Lohrbach', page)
+
+    def test_current_directions_preserve_stored_quote_hash_and_original_pdf(self):
+        hold = self.paid_hold()
+        status_url = '/mietwagen-test/status/' + hold
+        self.assertEqual(self.client.get(status_url).status_code, 200)
+        original_pdf = self.client.get(status_url + '/vertrag.pdf').data
+
+        def stored():
+            db = portal.get_db()
+            try:
+                booking = dict(db.execute('SELECT payload,fingerprint FROM miet_checkout_holds WHERE id=?', (hold,)).fetchone())
+                contract = dict(db.execute('SELECT * FROM miet_checkout_contracts WHERE hold_id=?', (hold,)).fetchone())
+                return booking, contract
+            finally:
+                db.close()
+
+        before = stored()
+        payload = json.loads(before[0]['payload'])
+        self.assertNotIn('pickup_address', payload['quote'])
+        original_lessor = payload['quote']['lessor_address']
+        self.assertIn('Binauer Höhe', original_lessor)
+        page = self.client.get(status_url).get_data(as_text=True)
+        self.assertIn('Aktuelle Abholadresse', page)
+        self.assertIn(BUSINESS_ADDRESS, page)
+        receipt = self.client.get(status_url + '/bestaetigung.txt').get_data(as_text=True)
+        self.assertIn('Aktuelle Abholadresse', receipt)
+        self.assertIn(BUSINESS_ADDRESS, receipt)
+        self.assertIn(original_lessor, receipt)
+        from mietwagen_checkout import _checkout_disclosure
+        description, _ = _checkout_disclosure(payload['quote'], test_mode=True)
+        self.assertIn('Aktuelle Abholadresse', description)
+        self.assertIn(BUSINESS_ADDRESS, description)
+        self.assertEqual(payload, json.loads(before[0]['payload']))
+        self.assertEqual(self.client.get(status_url + '/vertrag.pdf').data, original_pdf)
+        self.assertEqual(stored(), before)
 
     def quote(self,slug='kona',start_index=0,end_index=3):
         r=self.post('/mietwagen-test/quote',{'vehicle':slug,'start':self.cfg['slots'][start_index],

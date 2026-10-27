@@ -386,7 +386,7 @@
         <a class="top-back" href="{{ back_url }}">← {{ back_label }}</a>
         {% if public_mode %}<a class="top-status" href="{{ overview_url }}">Reparaturstatus öffnen</a>{% elif not partner_mode %}<a class="top-status" href="{{ overview_url }}">Alle Versicherungsfälle</a>{% endif %}
         {% else %}
-        <a class="top-phone" href="tel:+4915227706694">☎ 0152 277 066 94</a>
+        <a class="top-phone" href="{{ werkstatt_oeffentlich.telefon_url }}">☎ {{ werkstatt_oeffentlich.telefon }}</a>
         <button class="top-status" type="button" data-show-status>Status ansehen</button>
         {% endif %}
       </div>
@@ -404,7 +404,7 @@
           <li><span class="trust-check">✓</span><div><b>Fehlende Daten nachreichen</b><small>Angaben zum Unfallgegner dürfen zunächst unbekannt bleiben.</small></div></li>
           <li><span class="trust-check">✓</span><div><b>Persönlich geprüft</b><small>Keine automatische Reparaturfreigabe oder Abtretung.</small></div></li>
         </ul>
-        <div class="side-help"><div class="side-help-icon">☎</div><div><small>Unsicher oder nicht fahrbereit?</small><a href="tel:+4915227706694">Direkt Werkstatt anrufen</a></div></div>
+        <div class="side-help"><div class="side-help-icon">☎</div><div><small>Unsicher oder nicht fahrbereit?</small><a href="{{ werkstatt_oeffentlich.telefon_url }}">Direkt Werkstatt anrufen</a></div></div>
       </section>
       <section class="side-card">
         <div class="eyebrow">Wenn vorhanden</div>
@@ -635,7 +635,7 @@
           {% endif %}
           <div class="result-actions">
             {% if public_mode and created_auftrag %}
-            <a class="btn btn-primary" href="tel:+4915227706694">Werkstatt anrufen</a>
+            <a class="btn btn-primary" href="{{ werkstatt_oeffentlich.telefon_url }}">Werkstatt anrufen</a>
             <a class="btn btn-secondary" href="{{ mobility_url }}">Mietwagen anfragen</a>
             <a class="btn btn-secondary" href="{{ new_case_url }}">Neue Schadenmeldung</a>
             <a class="btn btn-secondary" href="{{ back_url }}">Zum Privatkunden-Portal</a>
@@ -649,7 +649,7 @@
             {% else %}
             <button class="btn btn-primary" type="button" data-show-status>Kundenstatus öffnen</button>
             <button class="btn btn-secondary" type="button" id="restart-button">Neue Meldung ansehen</button>
-            <a class="btn btn-secondary" href="tel:+4915227706694">Werkstatt anrufen</a>
+            <a class="btn btn-secondary" href="{{ werkstatt_oeffentlich.telefon_url }}">Werkstatt anrufen</a>
             {% endif %}
           </div>
         </div>
@@ -690,7 +690,7 @@
             <article class="status-card">
               <h2>Nachrichten</h2><p>Werkstatt und Kunde bleiben an einem Ort im Gespräch.</p>
               <div class="message-box"><strong>Gärtner Schadenservice</strong>Wir prüfen Ihre Meldung. Falls uns noch etwas fehlt, melden wir uns persönlich.</div>
-              <div class="status-actions"><button class="btn btn-secondary" type="button" id="status-message">Nachricht schreiben</button><a class="btn btn-link" href="tel:+4915227706694">Anrufen</a></div>
+              <div class="status-actions"><button class="btn btn-secondary" type="button" id="status-message">Nachricht schreiben</button><a class="btn btn-link" href="{{ werkstatt_oeffentlich.telefon_url }}">Anrufen</a></div>
             </article>
           </div>
         </div>
@@ -700,7 +700,7 @@
     </section>
   </main>
 
-  <footer class="page-footer"><div>Gärtner GmbH Karosserie + Lack · Alte Neckarelzer Straße 18/1 · 74821 Mosbach</div><div><a href="{{ url_for('impressum_seite') }}" target="_blank" rel="noopener">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutz</a></div></footer>
+  <footer class="page-footer"><div>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }}</div><div><a href="{{ url_for('impressum_seite') }}" target="_blank" rel="noopener">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutz</a></div></footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>

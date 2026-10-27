@@ -80,7 +80,7 @@
       <p class="mb-2">Ihre Anfragenummer: <strong>MW-{{ anfrage_ref }}</strong></p>
       {% endif %}
       <p class="text-muted">Vielen Dank — wir melden uns schnellstmöglich telefonisch, auf Wunsch per WhatsApp oder per E-Mail. Erst unsere gesonderte Rückmeldung bestätigt, ob das gewünschte Fahrzeug verfügbar ist.</p>
-      <p class="text-muted">Gärtner GmbH Karosserie + Lack &middot; Binauer Höhe 4, 74821 Mosbach &middot; +49 1522 7706694</p>
+      <p class="text-muted">Gärtner GmbH Karosserie + Lack &middot; {{ werkstatt_oeffentlich.adresse }} &middot; {{ werkstatt_oeffentlich.telefon }}</p>
     </div>
     {% else %}
     <div class="mw-intro">

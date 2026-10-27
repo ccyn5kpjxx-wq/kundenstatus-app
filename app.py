@@ -22,6 +22,12 @@ from email.parser import BytesParser
 from email.utils import formataddr, getaddresses, parsedate_to_datetime, formatdate, make_msgid
 from functools import wraps
 from werkstatt_mail_identity import add_workshop_mail_footer, append_workshop_footer
+from werkstatt_kontakt import (
+    BUSINESS_ADDRESS as WORKSHOP_ADDRESS,
+    DIRECTIONS_URL as WORKSHOP_DIRECTIONS_URL,
+    PHONE as WORKSHOP_PHONE,
+    public_workshop_contact,
+)
 from html import escape, unescape
 import hmac
 import hashlib
@@ -3452,7 +3458,7 @@ FEHLERSEITE_PORTAL_TEMPLATE = """
     <h1>{{ titel }}</h1>
     <p>{{ text }}</p>
     <div class="knoepfe">
-      <a class="knopf brand" href="tel:+4915227706694">Anrufen</a>
+      <a class="knopf brand" href="{{ werkstatt_oeffentlich.telefon_url }}">Anrufen</a>
       <a class="knopf" href="https://wa.me/4915227706694">WhatsApp</a>
       {% if zurueck_url %}<a class="knopf" href="{{ zurueck_url }}">Zurück</a>{% endif %}
     </div>
@@ -12529,15 +12535,12 @@ def customer_status_share_message(auftrag, status_update=False):
 def customer_fertig_whatsapp_message(auftrag):
     name = clean_text((auftrag or {}).get("kunde_name")) or "zusammen"
     fahrzeug = clean_text((auftrag or {}).get("fahrzeug")) or "Ihr Fahrzeug"
-    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or (
-        "https://www.google.com/maps/search/?api=1&query="
-        "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
-    )
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or GOOGLE_MAPS_FALLBACK_URL
     return (
         f"Hallo {name}, {fahrzeug} ist fertig und kann abgeholt werden. "
         "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
         f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
-        "Viele Grüße, Gärtner GmbH Karosserie + Lack, Tel. +49 1522 7706694."
+        f"Viele Grüße, Gärtner GmbH Karosserie + Lack, Tel. {WORKSHOP_PHONE}."
     )
 
 
@@ -12737,6 +12740,11 @@ def leistungsart_formular(form, fallback="lackierung"):
 @app.context_processor
 def auftragsarten_context():
     return {"auftragsarten": AUFTRAGSARTEN}
+
+
+@app.context_processor
+def werkstatt_kontakt_context():
+    return {"werkstatt_oeffentlich": public_workshop_contact()}
 
 
 def hydrate_lead(row):
@@ -23468,15 +23476,12 @@ def notify_customer_whatsapp_fertig(auftrag):
         return False, "Keine gültige Mobilnummer beim Kunden hinterlegt."
     auftrag_id = int(auftrag.get("id") or 0)
     fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Ihr Fahrzeug"
-    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or (
-        "https://www.google.com/maps/search/?api=1&query="
-        "G%C3%A4rtner+Karosserie+%26+Lack+GmbH+Binauer+H%C3%B6he+4+74821+Mosbach"
-    )
+    bewertung_url = clean_text(get_app_setting("GOOGLE_BEWERTUNG_URL", "")) or GOOGLE_MAPS_FALLBACK_URL
     nachricht = (
         f"Guten Tag, {fahrzeug} ist fertig und kann abgeholt werden. "
         "Ein kleines Feedback würde uns sehr helfen. Wenn Sie zufrieden sind, "
         f"freuen wir uns über Ihre Google-Bewertung: {bewertung_url} "
-        "Ihr Team von Gärtner GmbH Karosserie + Lack, Binauer Höhe 4, 74821 Mosbach, Tel. +49 1522 7706694."
+        f"Ihr Team von Gärtner GmbH Karosserie + Lack, {WORKSHOP_ADDRESS}, Tel. {WORKSHOP_PHONE}."
     )
     ok, errors = send_whatsapp_notice_with_fallback(
         auftrag_id,
@@ -28944,7 +28949,7 @@ def baue_endkunden_fertig_mail(auftrag):
         "",
         "Mit besten Grüßen",
         "Ihr Team von Gärtner GmbH Karosserie + Lack",
-        "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
+        f"{WORKSHOP_ADDRESS} · Telefon {WORKSHOP_PHONE}",
     ]
     return "\n".join(zeilen)
 
@@ -28971,7 +28976,7 @@ def baue_endkunden_danke_mail(auftrag):
         "",
         "Mit besten Grüßen",
         "Ihr Team von Gärtner GmbH Karosserie + Lack",
-        "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
+        f"{WORKSHOP_ADDRESS} · Telefon {WORKSHOP_PHONE}",
     ]
     return "\n".join(zeilen)
 
@@ -29033,7 +29038,7 @@ def baue_endkunden_terminbestaetigung_mail(auftrag):
             "",
             "Mit freundlichen Grüßen",
             "Ihr Team von Gärtner GmbH Karosserie + Lack",
-            "Alte Neckarelzer Straße 18/1, 74821 Mosbach · Telefon +49 1522 7706694",
+            f"{WORKSHOP_ADDRESS} · Telefon {WORKSHOP_PHONE}",
         ]
     )
     return "\n".join(zeilen)
@@ -36284,27 +36289,18 @@ def kunden_status_timeline(auftrag, log=None, prozess=None, teile=None):
     return steps
 
 
-WERKSTATT_ANFAHRT_URL = (
-    "https://www.google.com/maps/dir/?api=1&destination="
-    + quote("Alte Neckarelzer Straße 18/1, 74821 Mosbach")
-)
+WERKSTATT_ANFAHRT_URL = WORKSHOP_DIRECTIONS_URL
 
 
 def werkstatt_kundenkontakt(auftrag=None):
     auftrag = auftrag or {}
-    phone = "+49 1522 7706694"
-    phone_href = "tel:" + re.sub(r"\s+", "", phone)
     whatsapp_number = whatsapp_number_key(WHATSAPP_WORKSHOP_NUMBERS) or "4915227706694"
     fahrzeug = clean_text(auftrag.get("fahrzeug")) or "meinem Fahrzeug"
     kennzeichen = clean_text(auftrag.get("kennzeichen"))
     reference = " ".join(part for part in (fahrzeug, kennzeichen) if part)
     whatsapp_text = quote(f"Hallo Gärtner, ich habe eine Frage zu {reference}.")
     return {
-        "name": "Gärtner GmbH Karosserie + Lack",
-        "adresse": "Alte Neckarelzer Straße 18/1, 74821 Mosbach",
-        "anfahrt_url": WERKSTATT_ANFAHRT_URL,
-        "telefon": phone,
-        "telefon_url": phone_href,
+        **public_workshop_contact(),
         "whatsapp_url": f"https://wa.me/{whatsapp_number}?text={whatsapp_text}",
         "oeffnungszeiten": get_oeffnungszeiten_text(),
     }
@@ -39178,7 +39174,7 @@ def login():
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("admin", "admin")
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. {WORKSHOP_PHONE} oder info@auto-lackierzentrum.de.", "danger")
             return render_template("login.html"), 429
         submitted_password = request.form.get("password") or request.form.get("passwort")
         if admin_password_matches(submitted_password):
@@ -40141,7 +40137,7 @@ def admin_rundmail_senden():
                         message["Reply-To"] = config["smtp_user"]
                         message.set_content(
                             paket["text"]
-                            + "\n\n--\nGärtner GmbH Karosserie + Lack\nAlte Neckarelzer Straße 18/1, 74821 Mosbach\nTelefon +49 1522 7706694"
+                            + f"\n\n--\nGärtner GmbH Karosserie + Lack\n{WORKSHOP_ADDRESS}\nTelefon {WORKSHOP_PHONE}"
                         )
                         add_standard_mail_headers(message)
                         smtp.send_message(message)
@@ -46349,7 +46345,7 @@ def oeffentliche_karriere():
             return redirect(target)
         if PUBLIC_SITE_ONLY:
             return (
-                "Die Karriereseite ist vorübergehend nicht erreichbar. Bitte rufen Sie uns unter 0152 277 066 94 an.",
+                f"Die Karriereseite ist vorübergehend nicht erreichbar. Bitte rufen Sie uns unter {WORKSHOP_PHONE} an.",
                 503,
                 {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"},
             )
@@ -55383,7 +55379,7 @@ def werkstatt_login():
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("werkstatt", "tafel")
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. {WORKSHOP_PHONE} oder info@auto-lackierzentrum.de.", "danger")
             return render_template("werkstatt_login.html", code_konfiguriert=bool(get_werkstatt_tafel_code())), 429
         submitted = request.form.get("password") or request.form.get("zugangscode")
         if werkstatt_tafel_code_matches(submitted):
@@ -55817,7 +55813,7 @@ def partner_login():
         limit_identifier = portal_key or "zentral"
         limited, wait_seconds = login_rate_limit_status("partner", limit_identifier)
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. {WORKSHOP_PHONE} oder info@auto-lackierzentrum.de.", "danger")
             return render_template("partner_index.html", autohaeuser=autohaeuser), 429
         if autohaus and partner_access_code_matches(zugangscode, autohaus):
             clear_login_attempts("partner", limit_identifier)
@@ -55841,7 +55837,7 @@ def partner_login_key(portal_key):
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("partner", portal_key)
         if limited:
-            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. +49 1522 7706694 oder info@auto-lackierzentrum.de.", "danger")
+            flash(f"Zu viele Fehlversuche. Bitte in {login_wait_label(wait_seconds)} erneut versuchen. Zugang verloren? Tel. {WORKSHOP_PHONE} oder info@auto-lackierzentrum.de.", "danger")
             return render_template("partner_login.html", autohaus=autohaus), 429
         submitted_code = request.form.get("password") or request.form.get("zugangscode")
         if partner_access_code_matches(submitted_code, autohaus):

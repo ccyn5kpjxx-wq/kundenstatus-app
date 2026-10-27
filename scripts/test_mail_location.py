@@ -14,6 +14,7 @@ import smoke_test as isolated
 from flask import Flask
 from mailbox_client import register_mailbox
 from werkstatt_mail_identity import BUSINESS_ADDRESS, STREET, add_workshop_mail_footer
+from werkstatt_kontakt import PHONE
 import mos_contract_delivery
 import mos_order_receipt
 import mos_termination
@@ -67,7 +68,9 @@ class MailLocationTests(unittest.TestCase):
                             p.baue_endkunden_terminbestaetigung_mail):
                 with self.subTest(builder=builder.__name__):
                     self.assert_current(builder(order))
+                    self.assertIn(PHONE, builder(order))
             self.assert_current(p.render_template('_mail_signature.html'))
+            self.assertIn(PHONE, p.render_template('_mail_signature.html'))
 
     def test_common_system_mail_footer_and_foreign_tenant_opt_out(self):
         for enabled in (True, False):
@@ -135,6 +138,8 @@ class MailLocationTests(unittest.TestCase):
         msg = self.mailbox_message()
         self.assert_current(msg.get_body(('plain',)).get_content())
         self.assert_current(msg.get_body(('html',)).get_content())
+        self.assertIn(PHONE, msg.get_body(('plain',)).get_content())
+        self.assertIn(PHONE, msg.get_body(('html',)).get_content())
         images = [part for part in msg.walk() if part.get_content_maintype() == 'image']
         self.assertEqual({str(part['Content-ID']) for part in images},
                          {'<signature-logo>', '<signature-portrait>'})

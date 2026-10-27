@@ -2,15 +2,13 @@
 
 import html
 import re
+from werkstatt_kontakt import BUSINESS_ADDRESS, CITY, PHONE, STREET
 
 
-STREET = "Alte Neckarelzer Straße 18/1"
-CITY = "74821 Mosbach"
-BUSINESS_ADDRESS = f"{STREET}, {CITY}"
 FOOTER_TEXT = (
     "Gärtner GmbH Karosserie + Lack\n"
     + BUSINESS_ADDRESS
-    + "\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de"
+    + f"\nTelefon: {PHONE}\nE-Mail: info@auto-lackierzentrum.de"
 )
 
 

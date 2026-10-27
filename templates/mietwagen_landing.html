@@ -73,7 +73,7 @@
 <nav>
   <div class="wrap">
     <div class="logo">Gärtner GmbH <span>Karosserie + Lack</span> · MIETWAGEN</div>
-    <a class="telbtn" href="tel:+4915227706694">0152 277 066 94</a>
+    <a class="telbtn" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
   </div>
 </nav>
 
@@ -81,7 +81,7 @@
   <div class="wrap"><div class="inner">
     <div class="eyebrow">Autovermietung in Mosbach</div>
     <h1>Einsteigen.<br>Losfahren.<br>Fertig.</h1>
-    <p class="sub">Mietwagen &amp; Ersatzwagen direkt vom Meisterbetrieb in Mosbach-Lohrbach. Faire Tagespreise, Vertrag digital unterschrieben — in 5 Minuten sitzen Sie am Steuer.</p>
+    <p class="sub">Mietwagen &amp; Ersatzwagen direkt vom Meisterbetrieb in {{ werkstatt_oeffentlich.ort }}. Faire Tagespreise, Vertrag digital unterschrieben — in 5 Minuten sitzen Sie am Steuer.</p>
     <a class="cta haupt" href="{{ url_for('mietwagen_anfrage') }}">Jetzt online anfragen</a>
     <a class="cta wa" href="https://wa.me/4915227706694?text=Hallo%2C%20ich%20interessiere%20mich%20f%C3%BCr%20einen%20Mietwagen.">Per WhatsApp</a>
     <a class="cta ghost" href="#fahrzeuge">Fahrzeuge ansehen</a>
@@ -121,7 +121,7 @@
       </div>
       {% endfor %}
       {% if not fahrzeuge %}
-      <p>Unsere Flotte wird gerade eingepflegt — rufen Sie uns an: <a href="tel:+4915227706694">0152 277 066 94</a></p>
+      <p>Unsere Flotte wird gerade eingepflegt — rufen Sie uns an: <a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a></p>
       {% endif %}
     </div>
   </div>
@@ -144,10 +144,10 @@
   <div class="wrap">
     <h2>Kontakt &amp; Abholung</h2>
     <div class="grid">
-      <div><b>WhatsApp / Telefon</b><a href="tel:+4915227706694">0152 277 066 94</a><br><a href="https://wa.me/4915227706694">WhatsApp öffnen →</a></div>
+      <div><b>WhatsApp / Telefon</b><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><br><a href="https://wa.me/4915227706694">WhatsApp öffnen →</a></div>
       <div><b>Online-Anfrage</b><a href="{{ url_for('mietwagen_anfrage') }}">Anfrageformular öffnen →</a><br><span style="opacity:.75">Wunschtermin angeben — wir bereiten alles vor.</span></div>
       <div><b>E-Mail</b><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div>
-      <div><b>Adresse</b>Gärtner GmbH Karosserie + Lack<br>Binauer Höhe 4 · 74821 Mosbach</div>
+      <div><b>Adresse</b>Gärtner GmbH Karosserie + Lack<br>{{ werkstatt_oeffentlich.adresse }}</div>
     </div>
   </div>
 </section>

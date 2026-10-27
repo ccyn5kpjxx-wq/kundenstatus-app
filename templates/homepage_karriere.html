@@ -153,7 +153,7 @@
 
     <section class="application" id="bewerbung" aria-labelledby="bewerbung-titel">
       <div class="wrap application-grid">
-        <div class="application-copy"><div class="eyebrow">Unverbindlich kennenlernen</div><h2 id="bewerbung-titel">Kurz Kontakt aufnehmen.</h2><p>Für den ersten Kontakt brauchen Sie keinen Lebenslauf hochzuladen. Name und Telefonnummer genügen.</p><ul><li>Passenden Bereich auswählen</li><li>Erreichbare Telefonnummer hinterlassen</li><li>Persönlich miteinander sprechen</li></ul><a class="phone-link" href="tel:+4915227706694">Oder direkt anrufen: 0152 277 066 94</a></div>
+        <div class="application-copy"><div class="eyebrow">Unverbindlich kennenlernen</div><h2 id="bewerbung-titel">Kurz Kontakt aufnehmen.</h2><p>Für den ersten Kontakt brauchen Sie keinen Lebenslauf hochzuladen. Name und Telefonnummer genügen.</p><ul><li>Passenden Bereich auswählen</li><li>Erreichbare Telefonnummer hinterlassen</li><li>Persönlich miteinander sprechen</li></ul><a class="phone-link" href="{{ werkstatt_oeffentlich.telefon_url }}">Oder direkt anrufen: {{ werkstatt_oeffentlich.telefon }}</a></div>
         <div class="form-card">
           {% if gesendet %}
           <div class="success" role="status"><div class="success-mark" aria-hidden="true">✓</div><h3>Vielen Dank.</h3><p>Ihre Rückrufanfrage ist angekommen. Wir melden uns persönlich unter der angegebenen Telefonnummer.</p><a href="{{ url_for('oeffentliche_karriere') }}#stellen">Zurück zu den Stellen</a></div>
@@ -184,7 +184,7 @@
     </section>
   </main>
 
-  <footer><div class="wrap footer-row"><div>Gärtner GmbH Karosserie + Lack · Alte Neckarelzer Straße 18/1 · 74821 Mosbach</div><div class="footer-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></footer>
+  <footer><div class="wrap footer-row"><div>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }}</div><div class="footer-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></footer>
   {% include "_besucher_tracking.html" %}
 </body>
 </html>

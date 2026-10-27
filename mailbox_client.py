@@ -4,6 +4,7 @@ import email
 from email import policy
 from email.message import EmailMessage
 from werkstatt_mail_identity import add_workshop_mail_footer
+from werkstatt_kontakt import BUSINESS_ADDRESS, PHONE, public_workshop_contact
 from email.utils import getaddresses, formatdate, make_msgid, formataddr
 from html.parser import HTMLParser
 import io
@@ -249,10 +250,10 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
         if reply_id and re.fullmatch(r'<[^<>\s]+>',reply_id):
             references=list(dict.fromkeys(re.findall(r'<[^<>\s]+>',reference_text)+[reply_id]))[-30:]
             msg['In-Reply-To']=reply_id;msg['References']=' '.join(references)
-        signature_text='Christopher Gärtner\nGründer & Geschäftsführer\nGärtner GmbH Karosserie + Lack\nAlte Neckarelzer Straße 18/1 · 74821 Mosbach\nTelefon: +49 152 27706694\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
+        signature_text=f'Christopher Gärtner\nGründer & Geschäftsführer\nGärtner GmbH Karosserie + Lack\n{BUSINESS_ADDRESS}\nTelefon: {PHONE}\nE-Mail: info@auto-lackierzentrum.de\nInternet: www.auto-lackierzentrum.de'
         quote_text='\n\n--- Ursprüngliche Nachricht ---\n'+quoted if quoted else ''
         msg.set_content(body+'\n\n'+signature_text+quote_text)
-        signature=render_template('_mail_signature.html')
+        signature=render_template('_mail_signature.html', werkstatt_oeffentlich=public_workshop_contact())
         images=[('/static/logo-transparent.png','signature-logo','image','png'),('/static/homepage/portrait.webp','signature-portrait','image','webp')]
         for url,cid,_,_ in images:signature=signature.replace(url,'cid:'+cid)
         quoted_html='<hr><blockquote style="white-space:pre-wrap">'+html.escape(quoted)+'</blockquote>' if quoted else ''

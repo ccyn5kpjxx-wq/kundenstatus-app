@@ -21,7 +21,7 @@
     {% endif %}
     {% if session.get('admin') %}<a class="{{ 'active' if request.endpoint in ['serviceapp.admin_index','serviceapp.admin_case'] else '' }}" href="{{ url_for('serviceapp.admin_index') }}">{{ icon('tool') }}<span>Werkstatt</span></a>{% endif %}
   </nav>
-  <div class="sa-sidebar-bottom"><div class="sa-contact-box"><span class="sa-contact-symbol">{{ icon('phone') }}</span><strong>Wir sind für Sie da.</strong><p>Ein kurzer Anruf.<br>Eine klare Antwort.</p><a href="tel:+4915227706694">0152 277 066 94 {{ icon('arrow') }}</a></div><span class="sa-sidebar-foot">Gärtner · Mosbach</span></div>
+  <div class="sa-sidebar-bottom"><div class="sa-contact-box"><span class="sa-contact-symbol">{{ icon('phone') }}</span><strong>Wir sind für Sie da.</strong><p>Ein kurzer Anruf.<br>Eine klare Antwort.</p><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }} {{ icon('arrow') }}</a></div><span class="sa-sidebar-foot">Gärtner · Mosbach</span></div>
 </aside>
 <div class="sa-workspace">
 <header class="sa-header">
@@ -36,12 +36,12 @@
 </header>
 {% if service_demo %}<div class="sa-demo"><span class="sa-demo-dot"></span>Lokale Vorschau · Beispieldaten · kein Versand oder Zahlung <a href="/demo">Beispielrolle wechseln {{ icon('arrow') }}</a></div>{% endif %}
 <main id="inhalt" class="sa-main">{% for category,message in get_flashed_messages(with_categories=true) %}<p class="sa-notice {{ category }}" role="status">{{ icon('check') }}{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main>
-<footer class="sa-footer"><span>Gärtner GmbH Karosserie + Lack</span><div><a href="tel:+4915227706694">Kontakt</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></footer>
+<footer class="sa-footer"><span>Gärtner GmbH Karosserie + Lack</span><div><a href="{{ werkstatt_oeffentlich.telefon_url }}">Kontakt</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></footer>
 </div>
 <nav class="sa-bottom-nav" aria-label="Mobile Navigation">
 <a class="{{ 'active' if request.endpoint == 'serviceapp.index' else '' }}" href="{{ url_for('serviceapp.index') }}">{{ icon('home') }}<span>Übersicht</span></a>
 {% if service_actor %}<a href="{{ url_for('serviceapp.index') }}#fahrzeuge">{{ icon('car') }}<span>Fahrzeuge</span></a><a href="{{ url_for('serviceapp.vehicle',vehicle_id=current_vehicle) ~ '#termine' if current_vehicle else url_for('serviceapp.index') ~ '#hinweise' }}">{{ icon('calendar') }}<span>Hinweise</span></a>
 {% else %}<a href="{{ url_for('website_anfrage',anliegen='reifenservice') }}#kurzanfrage">{{ icon('tire') }}<span>Reifentermin</span></a><a href="/service/anmelden">{{ icon('shield') }}<span>Mein Zugang</span></a>{% endif %}
-<a href="tel:+4915227706694">{{ icon('phone') }}<span>Kontakt</span></a>
+<a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ icon('phone') }}<span>Kontakt</span></a>
 </nav>
 </body></html>

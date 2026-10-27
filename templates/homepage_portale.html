@@ -48,7 +48,7 @@
       </a>
       {% endif %}
     </section>
-    <aside class="portal-help"><p><strong>Sie brauchen Unterstützung beim Zugang?</strong><br>Wir helfen Ihnen persönlich weiter.</p><a class="text-link" href="tel:+4915227706694">0152 277 066 94 <span aria-hidden="true">↗</span></a></aside>
+    <aside class="portal-help"><p><strong>Sie brauchen Unterstützung beim Zugang?</strong><br>Wir helfen Ihnen persönlich weiter.</p><a class="text-link" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }} <span aria-hidden="true">↗</span></a></aside>
   </main>
   <footer class="site-footer"><div class="wrap portal-footer"><span>Gärtner GmbH Karosserie + Lack</span><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></nav></div></footer>
   {% include '_besucher_tracking.html' %}

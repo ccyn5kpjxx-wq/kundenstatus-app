@@ -32,7 +32,7 @@
   <style>.member .copy{min-width:0}.member-email{display:block;max-width:100%;margin-top:18px;overflow-wrap:anywhere;font-size:16px}</style>
 </head>
 <body>
-  <header class="header"><nav class="wrap nav" aria-label="Team-Navigation"><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Startseite</a><a class="cta" href="tel:+4915227706694">Kontakt aufnehmen</a></nav></header>
+  <header class="header"><nav class="wrap nav" aria-label="Team-Navigation"><a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Startseite</a><a class="cta" href="{{ werkstatt_oeffentlich.telefon_url }}">Kontakt aufnehmen</a></nav></header>
   <main>
     <section class="hero"><div class="wrap"><div class="eyebrow">Menschen hinter der Qualität</div><h1>Unser Team.</h1><p>Persönliche Ansprechpartner, sorgfältiges Handwerk und Spezialisten für Karosserie, Lack und mobile Dellenreparatur.</p></div></section>
     <section class="wrap grid" aria-label="Unser Team">
@@ -50,7 +50,7 @@
       <div class="wrap">
         <div class="section-title">
           <div><div class="eyebrow">Gärtner in Mosbach</div><h2 id="workshop-title">Entdecke unsere neue Werkstatt.</h2></div>
-          <p>Ein Blick in unsere Werkstatt.<br>Unser Standort: Alte Neckarelzer Straße 18/1, 74821 Mosbach.</p>
+          <p>Ein Blick in unsere Werkstatt.<br>Unser Standort: {{ werkstatt_oeffentlich.adresse }}.</p>
         </div>
         <figure>
           <a class="workshop-gallery-link" href="{{ image_url('homepage/werkstatt-collage-mosbach.png') }}" target="_blank" rel="noopener" aria-label="Werkstattcollage vergrößert öffnen (neuer Tab)">

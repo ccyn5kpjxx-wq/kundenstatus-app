@@ -57,7 +57,7 @@ def main():
         "Homepage nicht veraltet cachen": "no-store" in response.headers.get("Cache-Control", ""),
         "Eine Hauptueberschrift mit Fahrzeug und Fuhrpark": html.count("<h1") == 1 and all(x in html for x in ("Ihr Fahrzeug.", "Ihr Fuhrpark.", "Wir kümmern uns.")),
         "Versicherungsabwicklung im Titel und Einstieg": "Auch im Versicherungsfall." in html and "Abstimmung mit Ihrer Versicherung" in html,
-        "Fotoanfrage und Anruf direkt erreichbar": "Anfrage mit Foto" in html and 'href="tel:+4915227706694"' in html,
+        "Fotoanfrage und Anruf direkt erreichbar": "Anfrage mit Foto" in html and f'href="{portal.public_workshop_contact()["telefon_url"]}"' in html,
         "Alle drei Kundengruppen erreichbar": all(x in html for x in ("Privatkunden", "Autohäuser &amp;", "Werkstätten", "Firmenflotten", "/geschaeftspartner")),
         "Beide Partner-Kacheln starten am Seitenanfang": html.count('class="audience" href="/geschaeftspartner"') == 2,
         "Interne Partner-Sprunglinks bleiben erhalten": all(x in partner_html for x in ('href="#autohaeuser"', 'href="#flotten"', 'id="autohaeuser"', 'id="flotten"')),

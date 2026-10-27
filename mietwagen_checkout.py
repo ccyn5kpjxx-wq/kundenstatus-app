@@ -11,6 +11,7 @@ import secrets
 import time
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS
 
 
 def init_schema(db):
@@ -47,7 +48,7 @@ def _checkout_disclosure(quote, *, test_mode):
         f"Abholung {local_slot(quote['start_slot'])}; Rückgabe {local_slot(quote['end_slot'])}; "
         f"{quote['included_km']} km inklusive; Mehrkilometer "
         f"{quote['extra_km_cents']/100:.2f} EUR/km. "
-        'Persönliche Übergabe bei Gärtner, Binauer Höhe 4, Mosbach-Lohrbach.'
+        f'Aktuelle Abholadresse für die persönliche Übergabe: Gärtner, {WORKSHOP_ADDRESS}.'
     )
     deposit = ('500 EUR Kaution bereits separat auf der Kreditkarte reserviert, ohne Abbuchung. '
                if _card_authorization_quote(quote) else

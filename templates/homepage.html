@@ -14,7 +14,7 @@
   <meta property="og:description" content="Schaden digital melden, Mietwagen anfragen und Reparaturstatus sicher verfolgen.">
   {{ image_preload(jahreszeit.hero_bild) }}
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"AutoBodyShop","name":"Gärtner GmbH Karosserie + Lack","url":"https://auto-lackierzentrum.de/","telephone":"+49 152 27706694","email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":"Alte Neckarelzer Straße 18/1","postalCode":"74821","addressLocality":"Mosbach","addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
+  {"@context":"https://schema.org","@type":"AutoBodyShop","name":"Gärtner GmbH Karosserie + Lack","url":"https://auto-lackierzentrum.de/","telephone":{{ werkstatt_oeffentlich.telefon_e164|tojson }},"email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":{{ werkstatt_oeffentlich.strasse|tojson }},"postalCode":{{ werkstatt_oeffentlich.plz|tojson }},"addressLocality":{{ werkstatt_oeffentlich.ort|tojson }},"addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
   <style>.trust-copy{min-width:0}.trust-email{flex-basis:100%;min-width:0;overflow-wrap:anywhere;font-size:12px}.footer-grid>div{min-width:0}.footer-contact{margin:14px 0 0}.footer-contact span{display:block}.footer-contact a{overflow-wrap:anywhere}</style>
@@ -29,10 +29,10 @@
       <a class="button nav-portal" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
-  <div class="move-strip"><div class="wrap"><span>Unser Standort · <strong>Alte Neckarelzer Straße 18/1, Mosbach</strong></span><a href="#neue-location">Neue Location entdecken <span aria-hidden="true">→</span></a></div></div>
+  <div class="move-strip"><div class="wrap"><span>Unser Standort · <strong>{{ werkstatt_oeffentlich.strasse }}, {{ werkstatt_oeffentlich.ort }}</strong></span><a href="#neue-location">Neue Location entdecken <span aria-hidden="true">→</span></a></div></div>
   <main id="inhalt">
     <section class="intro hero-wide" aria-labelledby="hero-title">
-      <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="tel:+4915227706694">Direkt anrufen →</a></div></div>
+      <div class="intro-copy"><span class="eyebrow">Ihr Meisterbetrieb in Mosbach</span><h1 id="hero-title">Ihr Fahrzeug.<br>Ihr Fuhrpark.<br><em>Wir kümmern uns.</em><span class="insurance-line">Auch im Versicherungsfall.</span></h1><p>Von der Reparatur bis zur Abstimmung mit Ihrer Versicherung.</p><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto <span aria-hidden="true">↗</span></a><a class="text-link" href="{{ werkstatt_oeffentlich.telefon_url }}">Direkt anrufen →</a></div></div>
       <div class="intro-photo"><img {{ image_attrs(jahreszeit.hero_bild, sizes='100vw') }} alt="{{ jahreszeit.hero_alt }}" width="1672" height="941" fetchpriority="high" decoding="async"></div>
       <aside class="current-deck" id="aktuell" aria-labelledby="current-title" aria-roledescription="Kartenstapel" data-current-deck>
         <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>{{ jahreszeit.label }}</span></div>
@@ -141,7 +141,7 @@
           <span class="eyebrow">Neue Location</span>
           <h2 id="location-title">Hier begrüßen wir Sie persönlich.</h2>
           <p>Unsere Werkstatt in Mosbach.</p>
-          <address><strong>Alte Neckarelzer Straße 18/1</strong><br>74821 Mosbach</address>
+          <address><strong>{{ werkstatt_oeffentlich.strasse }}</strong><br>{{ werkstatt_oeffentlich.plz_ort }}</address>
           <a class="text-link" href="{{ werkstatt_anfahrt_url }}" target="_blank" rel="noopener noreferrer">Route planen ↗</a><br><a class="text-link" href="#kontakt">Kontakt →</a>
         </div>
         <div class="location-views">
@@ -154,9 +154,9 @@
         </div>
       </div>
     </section>
-    <section class="contact-band" id="kontakt"><div class="wrap contact-inner"><div><h2>Wie können wir helfen?</h2><p class="opening-hours"><strong>Öffnungszeiten</strong><br>{{ homepage_oeffnungszeiten }}</p></div><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto ↗</a><a class="button light" href="tel:+4915227706694">0152 277 066 94</a></div></div></section>
+    <section class="contact-band" id="kontakt"><div class="wrap contact-inner"><div><h2>Wie können wir helfen?</h2><p class="opening-hours"><strong>Öffnungszeiten</strong><br>{{ homepage_oeffnungszeiten }}</p></div><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto ↗</a><a class="button light" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a></div></div></section>
   </main>
-  <footer class="site-footer"><div class="wrap footer-grid"><div><strong>Gärtner GmbH Karosserie + Lack</strong><p>Alte Neckarelzer Straße 18/1 · 74821 Mosbach</p><p class="footer-contact"><span>Büro &amp; Partnerbetreuung · Margita Höfer</span><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></p><p class="footer-contact"><span>Geschäftsführung · Christopher Gärtner</span><a href="mailto:geschaeftsfuehrung@auto-lackierzentrum.de">geschaeftsfuehrung@auto-lackierzentrum.de</a></p></div><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Fuhrpark &amp; Partnerschaft</a><a href="{{ url_for('oeffentliches_team') }}#unsere-geschichte">Unsere Geschichte</a><a href="{{ portal_links.karriere }}">Stellen &amp; Karriere</a></nav><nav aria-label="Zugänge und Rechtliches"><a href="{{ url_for('oeffentliche_portale') }}">Kunden- &amp; Partnerzugänge</a>{% if config.SERVICE_APP_ENABLED %}<a href="{{ portal_links.service }}">Service-App · Fahrzeuge &amp; Termine</a>{% endif %}<a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}</nav></div></footer>
+  <footer class="site-footer"><div class="wrap footer-grid"><div><strong>Gärtner GmbH Karosserie + Lack</strong><p>{{ werkstatt_oeffentlich.adresse }}</p><p class="footer-contact"><span>Büro &amp; Partnerbetreuung · Margita Höfer</span><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></p><p class="footer-contact"><span>Geschäftsführung · Christopher Gärtner</span><a href="mailto:geschaeftsfuehrung@auto-lackierzentrum.de">geschaeftsfuehrung@auto-lackierzentrum.de</a></p></div><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Fuhrpark &amp; Partnerschaft</a><a href="{{ url_for('oeffentliches_team') }}#unsere-geschichte">Unsere Geschichte</a><a href="{{ portal_links.karriere }}">Stellen &amp; Karriere</a></nav><nav aria-label="Zugänge und Rechtliches"><a href="{{ url_for('oeffentliche_portale') }}">Kunden- &amp; Partnerzugänge</a>{% if config.SERVICE_APP_ENABLED %}<a href="{{ portal_links.service }}">Service-App · Fahrzeuge &amp; Termine</a>{% endif %}<a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}</nav></div></footer>
   <script>
   (() => {
     const button = document.querySelector('.menu-toggle');

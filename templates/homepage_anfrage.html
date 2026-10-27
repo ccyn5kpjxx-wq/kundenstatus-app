@@ -259,7 +259,7 @@
           <div class="success-mark" aria-hidden="true">✓</div>
           <h2>{% if bremsen_gesendet %}Ihre Bremsenanfrage ist angekommen.{% elif reifen_gesendet %}Ihre Reifenbuchung ist eingegangen.{% else %}Ihre Anfrage ist angekommen.{% endif %}</h2>
           <p>{% if bremsen_gesendet %}Vielen Dank. Wir prüfen anhand Ihrer FIN die passenden Teile und melden uns persönlich, um Arbeiten, Preise und Termin abzustimmen. Das Absenden reserviert keinen Termin.{% elif reifen_gesendet %}Ihr Termin ist reserviert: <strong>{{ gebuchter_reifentermin }}</strong>. Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten. Wir reservieren einen Stundenblock mit Planungspuffer. Bei Rückfragen zu den Arbeiten oder zur Einlagerung melden wir uns persönlich. Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.{% else %}Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.{% endif %}</p>
-          <div class="success-actions"><a class="primary" href="tel:+4915227706694">0152 277 066 94</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
+          <div class="success-actions"><a class="primary" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
         </div>
       {% elif kurzanfrage and formdata.get('anliegen') in kurzanfrage_optionen %}
         <aside class="info">
