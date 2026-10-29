@@ -81,7 +81,7 @@ def main():
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
     check(
         "Tafel nutzt das Teamfoto als dezenten, lesbaren Hintergrund",
-        "/static/homepage/team-daniel-hannes-abdul-v2.png" in html
+        "/static/homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp" in html
         and "linear-gradient(180deg, rgba(247, 242, 234, 0.7)" in html
         and "background: rgba(255, 253, 249, 0.95)" in html
         and "backdrop-filter: blur(10px)" in html,
