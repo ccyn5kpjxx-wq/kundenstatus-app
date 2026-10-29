@@ -14,7 +14,8 @@ Die vorgeschaltete HEAD-Pruefung berechnete die gesamte Tafel. Der nur fuer
 GET aktive Sammelcache griff dabei nicht: Eine isolierte Reproduktion mit
 den echten Helfern ergab bei 100 Auftraegen 500 Servicepfad-Abfragen fuer
 HEAD, gegenueber einer Sammelabfrage fuer GET. Danach erfolgte nochmals GET.
-Die gemessene Serverauslastung zeigt keinen Kapazitaetsengpass.
+Im eingesehenen Messfenster zeigt die Serverauslastung keinen Hinweis auf
+einen Kapazitaetsengpass.
 
 ## Reparatur
 
@@ -54,3 +55,33 @@ Importe beenden lassen, Worker und Cron pausieren, Webbuild und betroffene
 Anfragen pruefen, danach Hintergrunddienste einzeln wiederherstellen.
 Auto-Deploy, Zeitplan, Instanzgroesse und persistente Disk bleiben bestehen.
 Die erfolgreiche Bereitstellung und Nachmessung werden getrennt erfasst.
+
+## Liveergebnis
+
+Runtime `08fd077f4304573600eb69934c3c24676576ec4d` ist bereitgestellt,
+Webdeploy `dep-dbhl4i8ae00c73e2bbag`. Render meldete live am 29. Oktober um
+14:05:35 UTC. Im angekuendigten Serverwechsel wurde um 14:05:39 noch eine
+HEAD-502 protokolliert; die anschliessenden erfassten Tafelanfragen liefern
+200. Eine erste kalte HEAD-Antwort benoetigte 226 ms, die vier folgenden
+24, 18, 18 und 20 ms. Die Tafel-GETs nach dem Kaltstart lagen bei 106–188 ms.
+
+Worker wurde danach einzeln fortgesetzt (Deploy `dep-dbhl84uc6qcc73fnfqeg`,
+live 14:12:37 UTC); der Prozess und wiederkehrende Appzyklen sind im Log
+sichtbar. Erst anschliessend wurde Cron fortgesetzt (Deploy
+`dep-dbhl9b8473hc73aa0q3g`, live 14:14:52 UTC). Beide Dienste sind wieder
+`not_suspended`, mit Auto-Deploy Off und unveraendertem Cronplan `*/10 * * * *`.
+Es wurde kein Cronlauf oder Testversand manuell ausgeloest.
+
+Unter wieder aktivem Worker zeigen weitere echte Anfragen HEAD 41, 19 und
+125 ms sowie GET 168, 327 und 299 ms. Die letzte Anfrage erfolgt nach beiden
+Wiederanlaeufen. Beide Domains liefern nach dem Wiederherstellen Health 200,
+`ok=true` und Build `08fd077f4304`. Gruppenbild und Logo sind mit genau
+87724 und 8898 Bytes live abrufbar.
+
+Das sind begrenzte reale Messfenster mit bestaetigtem Zugriff, keine Garantie
+einer maximalen Ladezeit fuer jedes Geraet. Der nachfolgende Berichtscommit
+aendert ausschliesslich Dokumentation und erfordert keinen weiteren Deploy.
+Ergaenzende lokale Nachweise: `health-assets-live.json`,
+`live-request-after.json`, `live-request-after-resume.json`,
+`final-service-health.json` und `maintenance-actions.jsonl` im oben genannten
+privaten Nachweisordner.
