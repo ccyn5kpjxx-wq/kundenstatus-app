@@ -7,11 +7,11 @@
            aria-labelledby="team-showcase-titel"
            hidden>
     <audio data-team-musik
-           preload="auto"
-           src="{{ url_for('static', filename='audio/werkstatt-team-cinematic-v1.mp3') }}"></audio>
+           preload="none"
+           data-team-src="{{ url_for('static', filename='audio/werkstatt-team-cinematic-v1.mp3') }}"></audio>
     <header class="team-showcase-kopf">
       <div class="team-showcase-marke">
-        <img src="{{ url_for('static', filename='logo.png') }}" alt="">
+        <img data-team-src="{{ url_for('static', filename='logo-nav-192.webp') }}" decoding="async" alt="">
         <div>
           <strong id="team-showcase-titel">Menschen hinter der Qualität</strong>
           <span>Gärtner GmbH Karosserie + Lack</span>
@@ -26,7 +26,7 @@
     <div class="team-showcase-buehne" aria-live="polite">
       <article class="team-slide is-gruppe" data-team-slide data-team-dauer="1800" aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp') }}" decoding="async"
                alt="Daniel, Hannes und Abdul gemeinsam in der Werkstatt">
         </div>
         <div class="team-slide-copy">
@@ -39,7 +39,7 @@
 
       <article class="team-slide is-christopher" data-team-slide aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/portrait.webp') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/portrait.webp') }}" decoding="async"
                alt="Christopher Gärtner, Geschäftsführer von Gärtner GmbH Karosserie + Lack">
         </div>
         <div class="team-slide-copy">
@@ -52,7 +52,7 @@
 
       <article class="team-slide" data-team-slide aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/abdul-lackiervorbereitung-v1.webp') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/abdul-lackiervorbereitung-v1.webp') }}" decoding="async"
                alt="Abdul aus der Lackiervorbereitung">
         </div>
         <div class="team-slide-copy">
@@ -65,7 +65,7 @@
 
       <article class="team-slide is-hannes" data-team-slide aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp') }}" decoding="async"
                alt="Hannes, Auszubildender zum Fahrzeuglackierer">
         </div>
         <div class="team-slide-copy">
@@ -78,7 +78,7 @@
 
       <article class="team-slide" data-team-slide aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/daniel-karosserie-mechanik-v2.webp') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/daniel-karosserie-mechanik-v2.webp') }}" decoding="async"
                alt="Daniel aus Karosserie und Mechanik">
         </div>
         <div class="team-slide-copy">
@@ -91,7 +91,7 @@
 
       <article class="team-slide" data-team-slide aria-hidden="true">
         <div class="team-slide-bild">
-          <img src="{{ url_for('static', filename='homepage/mobiler-dellendruecker-v1.webp') }}"
+          <img data-team-src="{{ url_for('static', filename='homepage/mobiler-dellendruecker-v1.webp') }}" decoding="async"
                alt="Daniel Marx, mobiler Dellendrücker">
         </div>
         <div class="team-slide-copy">

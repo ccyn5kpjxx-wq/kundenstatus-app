@@ -39,7 +39,7 @@
         radial-gradient(circle at top left, rgba(162, 63, 45, 0.1), transparent 31%),
         radial-gradient(circle at top right, rgba(20, 93, 102, 0.1), transparent 34%),
         linear-gradient(180deg, rgba(247, 242, 234, 0.7) 0%, rgba(243, 239, 230, 0.84) 100%),
-        url("{{ url_for('static', filename='homepage/team-daniel-hannes-abdul-v2.png') }}") center 38% / cover no-repeat fixed;
+        url("{{ url_for('static', filename='homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp') }}") center 38% / cover no-repeat fixed;
       background-color: var(--bg);
       color: var(--ink);
       font-family: "DM Sans", sans-serif;
@@ -523,7 +523,7 @@
 <body class="ws-legacy ws-legacy-tafel">
   <div class="topbar">
     <div class="titel">
-      <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo">
+      <img src="{{ static_asset_url('logo-nav-192.webp') }}" width="192" height="128" style="width:auto" alt="Logo">
       <h1>Werkstatt-Tafel</h1>
     </div>
     <div class="wetter" data-wetter hidden>
@@ -848,12 +848,24 @@
       let dragAktiv = false;
       let reloadAb = Date.now() + 60000;
       let reloadLaeuft = false;
+      let reloadProbe = null;
       const reloadVerschieben = () => { reloadAb = Date.now() + 60000; };
       ['click', 'touchstart', 'scroll'].forEach((ev) => {
         document.addEventListener(ev, reloadVerschieben, { passive: true, capture: true });
       });
       const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]')
         || !!document.querySelector('[data-team-showcase]:not([hidden])');
+      const reloadErlaubt = () => document.visibilityState === 'visible'
+        && !dragAktiv && !panelOffen() && Date.now() >= reloadAb;
+      const probeAbbrechen = () => {
+        if (!reloadProbe) return;
+        reloadProbe.ausgeblendet = true;
+        reloadProbe.controller.abort();
+      };
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') probeAbbrechen();
+      });
+      window.addEventListener('pagehide', probeAbbrechen);
       const verbindungsHinweisZeigen = () => {
         if (document.querySelector('[data-verbindungs-hinweis]')) return;
         const leiste = document.createElement('div');
@@ -866,22 +878,36 @@
         document.body.appendChild(leiste);
       };
       const tafelNeuLaden = async () => {
-        if (reloadLaeuft) return;
+        if (reloadLaeuft || !reloadErlaubt()) return;
         reloadLaeuft = true;
+        const probe = { controller: new AbortController(), ausgeblendet: false };
+        reloadProbe = probe;
+        const timeout = setTimeout(() => probe.controller.abort(), 8000);
         try {
           // Erst pruefen, ob der Server antwortet — sonst bleibt der Hallen-Bildschirm
           // nach einem 502/Deploy auf einer Fehlerseite haengen.
-          const resp = await fetch(window.location.href, { method: 'HEAD' });
+          const resp = await fetch(window.location.href, {
+            method: 'HEAD', cache: 'no-store', signal: probe.controller.signal
+          });
           if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          // Während der Probe kann jemand die Tafel wieder bedienen oder ausblenden.
+          if (probe.controller.signal.aborted || !reloadErlaubt()) return;
+          document.querySelector('[data-verbindungs-hinweis]')?.remove();
+          reloadAb = Date.now() + 60000;
           window.location.reload();
         } catch (fehler) {
+          if (!probe.ausgeblendet) {
+            reloadAb = Date.now() + 30000; // in 30 s erneut versuchen
+            if (document.visibilityState === 'visible') verbindungsHinweisZeigen();
+          }
+        } finally {
+          clearTimeout(timeout);
+          if (reloadProbe === probe) reloadProbe = null;
           reloadLaeuft = false;
-          reloadAb = Date.now() + 30000; // in 30 s erneut versuchen
-          verbindungsHinweisZeigen();
         }
       };
       setInterval(() => {
-        if (!dragAktiv && !panelOffen() && Date.now() >= reloadAb) tafelNeuLaden();
+        if (reloadErlaubt()) tafelNeuLaden();
       }, 5000);
 
       // Status-Meldungen kurz zeigen, dann ausblenden

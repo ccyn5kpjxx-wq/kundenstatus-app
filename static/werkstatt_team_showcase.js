@@ -30,6 +30,14 @@
 
       teamTonAktiv = teamSpeicherLesen(teamTonKey) !== 'aus';
 
+      const teamBilderLaden = (bereich) => {
+        if (!bereich) return;
+        bereich.querySelectorAll('img[data-team-src]').forEach((bild) => {
+          bild.src = bild.dataset.teamSrc;
+          bild.removeAttribute('data-team-src');
+        });
+      };
+
       const teamTonAnzeigeAktualisieren = () => {
         if (!teamTonKnopf) return;
         const melodieLaeuft = teamMusik && !teamMusik.paused;
@@ -52,6 +60,10 @@
       const teamMelodieSpielen = async () => {
         if (!teamTonAktiv || !teamMusik) return false;
         try {
+          if (teamMusik.dataset.teamSrc) {
+            teamMusik.src = teamMusik.dataset.teamSrc;
+            teamMusik.removeAttribute('data-team-src');
+          }
           teamMusik.pause();
           teamMusik.currentTime = 0;
           teamMusik.volume = .72;
@@ -77,6 +89,7 @@
 
       const teamSlideZeigen = (index) => {
         teamAktuellerSlide = index;
+        teamBilderLaden(teamSlides[index]);
         const aktuelleDauer = teamSlideDauerHolen(index);
         teamSlides.forEach((slide, slideIndex) => {
           const aktiv = slideIndex === index;
@@ -144,6 +157,7 @@
         window.clearTimeout(teamTimer);
         teamVorherigerFokus = document.activeElement;
         teamSpeicherSchreiben(teamSpeicherKey, Date.now());
+        teamBilderLaden(teamShowcase.querySelector('.team-showcase-marke'));
         teamSlideZeigen(0);
         teamShowcase.hidden = false;
         document.body.classList.add('team-showcase-offen');
