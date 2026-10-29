@@ -55405,6 +55405,11 @@ def werkstatt_tafel():
     guard = werkstatt_tafel_guard()
     if guard:
         return guard
+    if request.method == "HEAD":
+        # Reload probes need current access checks, not the full board model.
+        response = app.response_class()
+        response.automatically_set_content_length = False
+        return response
     auftraege = [
         auftrag
         for auftrag in list_auftraege()
