@@ -610,7 +610,13 @@
           {% endif %}
         </div>
         <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
-        {% if auftrag.get('check24_termin') %}<div data-check24-termin style="margin:.5rem 0;padding:.55rem .65rem;border-radius:9px;background:#e4f3f1;color:#145d66;font-weight:800;">{{ auftrag['check24_termin'] }}</div><div>{{ auftrag['kunde_name'] }}</div>{% endif %}
+        {% if auftrag.get('check24_termin') %}
+        <div data-check24-termin style="margin:.5rem 0;padding:.55rem .65rem;border-radius:9px;background:#e4f3f1;color:#145d66;font-weight:800;">
+          {% if auftrag.get('annahme_uhrzeit') %}<div>Anlieferung: {{ auftrag['annahme_datum'] }} · {{ auftrag['annahme_uhrzeit'] }} Uhr</div>{% endif %}
+          <div>Montage: {{ auftrag['check24_termin'] }}</div>
+        </div>
+        <div>{{ auftrag['kunde_name'] }}</div>
+        {% endif %}
         {% if auftrag['leistungsart'] == 'inspektion' %}
         {% set pruefliste = auftrag.get('inspektionscheckliste', {}) %}
         <div data-inspektionscheckliste-einstieg style="margin-top:.65rem; padding:.65rem .7rem; border:1px solid #8ab3a7; border-radius:10px; background:#eaf4ee; color:#145346; font-size:.9rem; line-height:1.5;">
@@ -642,7 +648,7 @@
             <span class="chip">🛡️ {{ auftrag['schadenart_label'] or 'Versicherung' }} · {{ auftrag['schaden_station_label'] }}</span>
           {% endif %}
           {% if auftrag['status'] <= 2 and auftrag['annahme_datum'] %}
-            <span class="chip">{{ auftrag['annahme_label'] }}: <strong>{{ auftrag['annahme_datum'] }}</strong></span>
+            <span class="chip">{{ auftrag['annahme_label'] }}: <strong>{{ auftrag['annahme_datum'] }}{% if auftrag.get('annahme_uhrzeit') %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</strong></span>
           {% endif %}
           {% if auftrag['status'] == 3 %}
             {% if auftrag['fertig_datum'] %}
