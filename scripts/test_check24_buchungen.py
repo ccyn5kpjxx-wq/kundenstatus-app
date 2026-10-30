@@ -49,6 +49,29 @@ def synthetic_mail(body=BODY, *, sender="montagepartner@check24.de", date="Mon, 
 
 
 class Check24MailParserTest(unittest.TestCase):
+    def test_service_booking_without_tire_delivery_is_supported(self):
+        body = BODY.replace('Montagetermin', 'Servicetermin').replace(
+            'Voraussichtliche Zustellung: Do. 29. Oktober\n', '').replace(
+            '2x Beispielreifen 185/60 R15 88 V, Ganzjahresreifen\n', '').replace(
+            'für 2 Reifen', 'für 4 Reifen').replace('45,00 €', '90,00 €')
+        for html in (False, True):
+            with self.subTest(html=html):
+                content = ''.join('<p>' + line + '</p>' for line in body.splitlines()) if html else body
+                result = parse_check24_mail(synthetic_mail(content, html=html))
+                self.assertTrue(result['valid'], result['errors'])
+                self.assertEqual(result['kind'], 'new')
+                self.assertEqual(result['total_gross'], '90.00')
+                self.assertEqual(result['service'], 'Reifenmontage für 4 Reifen')
+                self.assertEqual(result['tires'], [])
+                self.assertEqual(result['delivery_date'], '')
+
+    def test_service_changes_cancellations_and_unknown_services_stay_in_review(self):
+        body = BODY.replace('Montagetermin', 'Servicetermin')
+        for suffix in ('Termin storniert.', 'Termin verschoben.', 'Terminänderung.', 'Termin abgesagt.'):
+            self.assertFalse(parse_check24_mail(synthetic_mail(body + '\n' + suffix))['valid'])
+        self.assertFalse(parse_check24_mail(synthetic_mail(body.replace('Reifenmontage für 2 Reifen', 'Bremsenprüfung')))['valid'])
+        self.assertFalse(parse_check24_mail(synthetic_mail(body, subject='Fwd: Neue CHECK24 Terminbuchung (Bestellnummer: TEST9001)'))['valid'])
+
     def test_observed_new_template_is_structural_review_only(self):
         result = parse_check24_mail(synthetic_mail())
         self.assertTrue(result["valid"], result["errors"])
@@ -210,7 +233,7 @@ class Check24IntegrationTest(unittest.TestCase):
             db.close()
 
     @contextmanager
-    def fake_sync_mailbox(self, *, count=1, on_raw=None):
+    def fake_sync_mailbox(self, *, count=1, on_raw=None, raw_bytes=None):
         from unittest.mock import patch
         calls = []
         cfg = {'configured': True, 'ssl': True, 'host': 'imap.example.invalid',
@@ -229,7 +252,7 @@ class Check24IntegrationTest(unittest.TestCase):
             def raw(self, client, uid):
                 calls.append(('FETCH', uid))
                 if on_raw: on_raw(cfg, uid)
-                return synthetic_mail(), ''
+                return raw_bytes if raw_bytes is not None else synthetic_mail(), ''
         with patch('check24_buchungen.Mailbox', FakeMailbox), patch.object(self.p, 'get_werkstatt_imap_config', return_value=cfg):
             yield cfg, calls
 
@@ -306,6 +329,74 @@ class Check24IntegrationTest(unittest.TestCase):
         with self.fake_sync_mailbox(count=3) as (cfg, calls), patch.object(self.service, '_monotonic', side_effect=[0,0,61]):
             self.assertEqual(self.service.sync(), 1)
             self.assertEqual([c for c in calls if c[0]=='FETCH'], [('FETCH','1')])
+
+    def test_old_unknown_mail_is_reparsed_once_from_mailbox_without_duplicate(self):
+        import json
+        from unittest.mock import patch
+        from check24_mail import PARSER_VERSION
+        service_mail = synthetic_mail(BODY.replace('Montagetermin', 'Servicetermin'))
+        with self.fake_sync_mailbox(raw_bytes=service_mail) as (cfg, calls), patch('check24_buchungen.ionos_verified', return_value=True):
+            self.service.sync(auto_apply=False)
+            db = self.p.get_db()
+            row = db.execute('SELECT id,payload FROM check24_events').fetchone()
+            old = json.loads(row['payload'])
+            old.update(kind='unknown', valid=False, errors=['Alte Vorlage'], parser_version=1)
+            db.execute('UPDATE check24_events SET payload=?,note=? WHERE id=?',
+                       (json.dumps(old), 'Diese Nachricht muss manuell geklärt werden.', row['id']))
+            db.commit(); db.close()
+            self.assertEqual(self.service.sync(auto_apply=True), 1)
+            self.assertEqual(self.count_orders(), 1)
+            self.assertEqual(self.service.rows()[0]['id'], row['id'])
+            self.assertEqual(self.service.rows()[0]['data']['parser_version'], PARSER_VERSION)
+            self.assertEqual(self.service.rows()[0]['state'], 'applied')
+            self.assertEqual(self.service.sync(auto_apply=True), 0)
+            self.assertEqual(self.count_orders(), 1)
+            self.assertEqual(len([c for c in calls if c[0]=='FETCH']), 2)
+
+    def test_reifenportal_surfaces_pending_check24_review(self):
+        self.service.ingest(synthetic_mail(BODY + '\nTermin storniert.'), auto_apply=True)
+        client = self.p.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        response = client.get('/admin/reifenportal')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-check24-review-alert', response.text)
+        self.assertIn('CHECK24: 1 Nachricht(en)', response.text)
+        self.assertIn('CHECK24-Buchungen prüfen', response.text)
+        self.assertEqual(self.count_orders(), 0)
+
+    def test_old_unknown_reparse_does_not_upgrade_unverified_mail(self):
+        import json
+        from unittest.mock import patch
+        with self.fake_sync_mailbox() as (cfg, calls):
+            self.service.sync(auto_apply=False)
+            db = self.p.get_db()
+            row = db.execute('SELECT id,payload FROM check24_events').fetchone()
+            old = json.loads(row['payload'])
+            old.update(kind='unknown', valid=False, errors=['Alte Vorlage'])
+            old.pop('parser_version')
+            db.execute('UPDATE check24_events SET payload=?,verified=1 WHERE id=?', (json.dumps(old), row['id']))
+            db.commit(); db.close()
+            with patch('check24_buchungen.ionos_verified', return_value=False):
+                self.assertEqual(self.service.sync(auto_apply=True), 1)
+            self.assertEqual(self.count_orders(), 0)
+            self.assertFalse(self.service.rows()[0]['verified'])
+            self.assertTrue(self.service.rows()[0]['data']['valid'])
+            self.assertEqual(self.service.sync(auto_apply=True), 0)
+
+    def test_resolved_old_unknown_is_not_reopened(self):
+        import json
+        with self.fake_sync_mailbox() as (cfg, calls):
+            self.service.sync(auto_apply=False)
+            db = self.p.get_db()
+            row = db.execute('SELECT id,payload FROM check24_events').fetchone()
+            old = json.loads(row['payload'])
+            old.update(kind='unknown', valid=False, errors=['Alte Vorlage'], parser_version=1)
+            db.execute("UPDATE check24_events SET payload=?,state='resolved',note='Geprüft' WHERE id=?", (json.dumps(old), row['id']))
+            db.commit(); db.close()
+            self.assertEqual(self.service.sync(auto_apply=True), 0)
+            self.assertEqual(self.count_orders(), 0)
+            self.assertEqual(self.service.rows()[0]['note'], 'Geprüft')
 
     def test_config_change_or_worker_stop_after_fetch_prevents_publication(self):
         from unittest.mock import patch

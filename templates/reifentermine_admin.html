@@ -22,6 +22,13 @@
 </form></details>
 {% endmacro %}
 <div class="page-header"><div><h1>Reifenportal</h1><p>Reifenbuchungen, Einlagerung und Reifenaufträge.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Gemeinsame Werkstatt-Tafel →</a></div>
+{% if check24_review_count %}
+<div class="alert alert-warning" role="alert" data-check24-review-alert>
+  <strong>CHECK24: {{ check24_review_count }} Nachricht(en) müssen geprüft werden.</strong>
+  <p class="mb-2">Buchungen oder Änderungen warten auf Klärung und sind möglicherweise noch nicht in der Werkstatt eingeplant.</p>
+  <a class="btn btn-soft" href="{{ url_for('check24.index') }}">CHECK24-Buchungen prüfen →</a>
+</div>
+{% endif %}
 <h2 class="h4">Neue Reifenbuchungen</h2>
 <p class="text-muted">{{ reifentermine|length }} neue Buchung(en). Reservierte Uhrzeit prüfen und mit einem Klick als Reifenauftrag übernehmen.</p>
 <div class="reifen-grid">

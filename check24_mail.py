@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 
 MAX_MAIL_BYTES = 5 * 1024 * 1024
+PARSER_VERSION = 2
 BERLIN = ZoneInfo("Europe/Berlin")
 MONTHS = {name: index for index, name in enumerate((
     "januar", "februar", "märz", "april", "mai", "juni", "juli", "august",
@@ -163,6 +164,7 @@ def parse_check24_mail(raw_bytes):
     warnings = ["Absender und Authentifizierungsheader sind nicht verifiziert. Originalmail vor Übernahme prüfen."]
     result = {
         "provider": "check24", "provider_id": "", "kind": "unknown",
+        "parser_version": PARSER_VERSION,
         "subject": _clean(message.get("Subject")), "sender": "",
         "message_id": _clean(message.get("Message-ID")),
         "raw_sha256": hashlib.sha256(raw_bytes).hexdigest(),
@@ -201,7 +203,7 @@ def parse_check24_mail(raw_bytes):
     subject_id = re.search(r"\(Bestellnummer:\s*([A-Z0-9]{4,20})\)$", result["subject"], re.I)
     if subject_id:
         result["provider_id"] = subject_id[1].upper()
-    body_new = re.search(r"unser Kunde hat einen Montagetermin bei Ihnen gebucht\.", text, re.I)
+    body_new = re.search(r"unser Kunde hat einen (?:Montage|Service)termin bei Ihnen gebucht\.", text, re.I)
     # Only new bookings are supported.  Do not let an old quoted new-booking
     # paragraph turn a cancellation or reschedule into a second appointment.
     changed = re.search(

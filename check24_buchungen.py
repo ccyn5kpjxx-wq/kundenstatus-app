@@ -12,7 +12,7 @@ import time
 import uuid
 
 from flask import Blueprint, abort, flash, make_response, redirect, render_template, request, url_for
-from check24_mail import BERLIN, MAX_MAIL_BYTES, parse_check24_mail
+from check24_mail import BERLIN, MAX_MAIL_BYTES, PARSER_VERSION, parse_check24_mail
 from mailbox_client import Mailbox, quote
 
 SYNC_LEASE_SECONDS = 300
@@ -203,6 +203,16 @@ class Check24Bookings:
                 VALUES(?,?,?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''',
                 (data['raw_sha256'], source_key, data['provider_id'], json.dumps(data, ensure_ascii=False), self.p.now_str(), int(verified)))
             event = db.execute('SELECT * FROM check24_events WHERE raw_hash=?', (data['raw_sha256'],)).fetchone()
+            previous_data = json.loads(event['payload'])
+            if (_sync_claim and event['state'] == 'review' and previous_data.get('kind') == 'unknown'
+                    and not previous_data.get('valid')
+                    and previous_data.get('parser_version', 0) < PARSER_VERSION):
+                # Re-read the identical original through the configured mailbox;
+                # never upgrade uploaded headers or rewrite an applied/resolved event.
+                db.execute('''UPDATE check24_events SET payload=?,provider_id=?,verified=?,note=''
+                    WHERE id=?''', (json.dumps(data, ensure_ascii=False), data['provider_id'],
+                                    int(verified), event['id']))
+                event = db.execute('SELECT * FROM check24_events WHERE id=?', (event['id'],)).fetchone()
             if source_key != 'upload':
                 db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key',
                            (source_key, data['raw_sha256'])).fetchall()
@@ -480,6 +490,12 @@ class Check24Bookings:
             db = self.p.get_db()
             try:
                 known = {r['source_key'] for r in db.execute('SELECT source_key FROM check24_receipts').fetchall()}
+                for receipt in db.execute('''SELECT r.source_key,e.payload FROM check24_receipts r
+                    JOIN check24_events e ON e.raw_hash=r.raw_hash WHERE e.state='review' ''').fetchall():
+                    old_data = json.loads(receipt['payload'])
+                    if (old_data.get('kind') == 'unknown' and not old_data.get('valid')
+                            and old_data.get('parser_version', 0) < PARSER_VERSION):
+                        known.discard(receipt['source_key'])
             finally:
                 db.close()
             for uid in ids:
@@ -496,6 +512,7 @@ class Check24Bookings:
                     # A malformed/oversize message must be visible, but must not
                     # starve all later bookings on every scheduled run.
                     data = {'subject': 'CHECK24-Nachricht nicht lesbar', 'provider_id': '',
+                            'parser_version': PARSER_VERSION,
                             'customer_name': '', 'start_at': '', 'end_at': '', 'service': '',
                             'tires': [], 'valid': False, 'errors': ['Originalnachricht im Postfach prüfen. Automatische Übernahme nicht möglich.']}
                     digest = hashlib.sha256(('failed:' + key).encode()).hexdigest()

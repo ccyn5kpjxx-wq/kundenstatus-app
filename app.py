@@ -45486,7 +45486,8 @@ def list_reifentermine():
 @admin_required
 def admin_reifentermine():
     reifenauftraege = [a for a in list_auftraege() if auftrag_ist_reifen(a)]
-    response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine(), reifenauftraege=reifenauftraege))
+    response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine(), reifenauftraege=reifenauftraege,
+                                            check24_review_count=check24_bookings.review_count()))
     response.headers["Cache-Control"] = "no-store"
     return response
 

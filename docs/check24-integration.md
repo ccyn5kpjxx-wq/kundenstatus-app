@@ -18,6 +18,10 @@ Der Import speichert Herkunftskennungen und Inhaltsprüfsummen, damit wiederholt
 
 ## Postfachabgleich
 
+Die bestätigten Neumail-Varianten „Montagetermin“ und „Servicetermin“ werden erkannt, auch bei mitgebrachten Reifen ohne Lieferangaben. Leistung, Termin, Bestellnummer und Herkunft werden weiterhin geprüft. Ein Hinweis auf Änderung oder Storno führt weiterhin zur manuellen Prüfung.
+
+Nach einer Parserkorrektur werden zuvor unbekannte, noch ungeklärte Nachrichten beim nächsten regulären Abgleich einmal erneut aus dem Originalpostfach gelesen. Die Parser-Version steht im gespeicherten Ergebnis. Nur identische Originalbytes dürfen den bisherigen Prüfdatensatz aktualisieren; Herkunft und Terminprüfungen laufen erneut. Bereits übernommene oder abgeschlossene Prüfungen werden nicht wieder geöffnet. Fehlende Originalmails und weiterhin unklare Buchungen bleiben im Prüfbereich. Das Reifenportal zeigt hierfür oben einen Warnhinweis mit direktem Link; ein erfolgreicher Postfachabruf bedeutet nicht, dass alle Buchungen übernommen wurden.
+
 Es gilt die bereits hinterlegte Werkstatt-IMAP-Konfiguration. Der Ordner wird nur lesend geöffnet; Nachrichten werden weder als gelesen markiert noch verschoben oder gelöscht. Der Suchzeitraum umfasst die letzten 45 Tage, einschließlich bereits gelesener Nachrichten. Ein Durchlauf verarbeitet höchstens 50 noch nicht erfasste Nachrichten. Weitere Nachrichten folgen in späteren Durchläufen. UIDVALIDITY und Nachrichten-UID gehören zur Herkunftskennung.
 
 Ein Durchlauf beginnt nach 60 Sekunden Laufzeit keine weitere Nachricht mehr. Ein bereits laufender IMAP-Aufruf darf noch zurückkehren; sein Socket-Timeout ist auf höchstens 20 Sekunden begrenzt. Das Zeitbudget ist deshalb kein harter Abbruch einer bereits begonnenen Netzwerkoperation. Die 300-Sekunden-Lease wird vor jeder Nachricht erneuert und in der Schreibtransaktion erneut geprüft. Ein verspäteter Prozess kann nach Ablauf oder Übernahme seiner Lease nichts mehr veröffentlichen. Netzwerkaufrufe halten keine Datenbanktransaktion offen.
