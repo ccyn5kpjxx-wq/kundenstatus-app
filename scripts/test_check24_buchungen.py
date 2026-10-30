@@ -664,6 +664,117 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertTrue(result.location.endswith('/admin/check24'))
         self.assertEqual(self.p.get_auftrag(order_id)['annahme_uhrzeit'], '10:00')
 
+    def test_early_dropoff_keeps_reserved_slot_and_contact_card(self):
+        event = self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)
+        order_id = self.service.rows()[0]['order_id']
+        self.service.reschedule(event, '2026-10-30', '11:00', '12:00', 'Abgeglichen')
+        self.service.arrival(order_id, '2026-10-30', '08:00', 'Leihfahrzeug <script>unerlaubt</script>', '4')
+        order = self.p.get_auftrag(order_id)
+        self.assertEqual(order['annahme_uhrzeit'], '08:00')
+        self.assertIn('Leihfahrzeug', order['notiz_intern'])
+        db = self.p.get_db()
+        self.assertFalse(self.service.native_slot_blocked(db, '2026-10-30', '08:00'))
+        self.assertTrue(self.service.native_slot_blocked(db, '2026-10-30', '11:00'))
+        db.close()
+        client = self.p.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        response = client.get('/admin/reifenportal')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('08:00 Uhr', response.text)
+        self.assertIn('11:00–12:00 Uhr', response.text)
+        self.assertIn('tel:+49', response.text)
+        self.assertIn('mailto:kundenalias@example.invalid', response.text)
+        self.assertIn('Leihfahrzeug &lt;script&gt;unerlaubt&lt;/script&gt;', response.text)
+        self.assertNotIn('<script>unerlaubt</script>', response.text)
+        self.assertIn('data-order-state="offen"', response.text)
+        self.assertIn('4 Altreifen entsorgen', response.text)
+        self.assertIn('61,00 €', response.text)
+        self.assertEqual(order['schaden_aufnahme']['check24_entsorgung_menge'], 4)
+
+    def test_check24_invoice_prefill_is_readonly_and_saved_base_cannot_be_overridden(self):
+        from datetime import date
+        from unittest.mock import patch
+        self.service.ingest(synthetic_mail(BODY.replace('für 2 Reifen','für 4 Reifen').replace('45,00 €','90,00 €')), verified=True, auto_apply=True)
+        order_id=self.service.rows()[0]['order_id']
+        self.service.arrival(order_id, '2026-10-30', '07:00', 'Leihfahrzeug', '4')
+        order=self.p.get_auftrag(order_id)
+        original=order['reifen_rechnung_json']
+        client=self.p.app.test_client()
+        with client.session_transaction() as session: session['admin']=True
+        url=f'/admin/auftrag/{order_id}/reifen-rechnung'
+        response=client.get(url)
+        self.assertEqual(response.status_code,200)
+        self.assertIn('106,00 €',response.text)
+        self.assertIn('Vorschlag aus CHECK24',response.text)
+        self.assertNotIn('id="leistung-montage_13_16"',response.text)
+        self.assertNotIn('id="reifen-lexware-form"',response.text)
+        self.assertEqual(self.p.get_auftrag(order_id)['reifen_rechnung_json'],original)
+        self.assertEqual(client.get(url+'/excel').status_code,409)
+        with client.session_transaction() as session: csrf=session[self.p.CSRF_FIELD_NAME]
+        data={self.p.CSRF_FIELD_NAME:csrf, 'revision':self.p.reifen_rechnungsentwurf(order)['revision'],
+              'leistung':['entsorgung'],'menge_entsorgung':'4','brutto':'0.01',
+              'rechnung_name':'Erika Beispiel','rechnung_strasse':'Teststraße 1','rechnung_plz':'12345',
+              'rechnung_ort':'Teststadt','leistungsdatum':date.today().isoformat()}
+        with patch.object(self.p,'schedule_change_backup'):
+            self.assertEqual(client.post(url,data=data|{'leistung':['montage_13_16'],'menge_montage_13_16':'4'}).status_code,400)
+            self.assertEqual(client.post(url,data=data|{'lose_raeder':'1'}).status_code,400)
+            self.assertEqual(client.post(url,data=data).status_code,302)
+        saved=self.p.get_auftrag(order_id)
+        calc=self.p.reifen_rechnungsentwurf(saved)['kalkulation']
+        self.assertEqual(calc['gesamt']['brutto_cent'],10600)
+        self.assertEqual(client.get(url+'/excel').status_code,200)
+        self.assertEqual(client.get(url+'/druck').status_code,200)
+        self.assertIsNone(self.p.reifen_rechnungsentwurf(saved)['check24_vorschlag'])
+        # Export to Lexware uses gross units, without rounding the net unit first.
+        with patch.object(self.p,'ensure_lexware_contact',return_value=('test-contact',False,False)), patch.object(self.p,'lexware_request',return_value={'id':'test-invoice'}) as provider:
+            self.p.create_lexware_invoice_draft(saved, self.p.build_lexware_rechnung_context(saved), 89.08)
+            payload=provider.call_args.args[2]
+            self.assertEqual([p['unitPrice']['grossAmount'] for p in payload['lineItems']],[90,4])
+            self.assertEqual([p['quantity'] for p in payload['lineItems']],[1,4])
+
+    def test_invalid_disposal_and_finished_order_are_not_changed(self):
+        self.service.ingest(synthetic_mail(),verified=True,auto_apply=True)
+        order_id=self.service.rows()[0]['order_id']
+        for count in ('5','-1','1.5',4):
+            with self.assertRaises(ValueError): self.service.arrival(order_id,'2026-10-30','07:00','Test',count)
+        db=self.p.get_db()
+        db.execute("UPDATE auftraege SET lexware_invoice_id='already-invoiced' WHERE id=?",(order_id,));db.commit();db.close()
+        with self.assertRaises(ValueError): self.service.arrival(order_id,'2026-10-30','07:00','Test','4')
+        self.assertNotIn('check24_entsorgung_menge',self.p.get_auftrag(order_id)['schaden_aufnahme'])
+
+    def test_dropoff_cannot_move_booking_day_or_follow_montage(self):
+        event = self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)
+        order_id = self.service.rows()[0]['order_id']
+        self.service.reschedule(event, '2026-10-30', '11:00', '12:00', 'Abgeglichen')
+        for day, at in [('2026-10-31','08:00'),('2026-10-30','12:00'),('2026-10-30','06:00'),('bad','08:00')]:
+            with self.subTest(day=day, at=at), self.assertRaises(ValueError):
+                self.service.arrival(order_id, day, at, 'Test')
+        self.assertEqual(self.p.get_auftrag(order_id)['annahme_uhrzeit'], '11:00')
+        self.service.cancel(event, 'Storniert')
+        with self.assertRaises(ValueError):
+            self.service.arrival(order_id, '2026-10-30', '08:00', 'Test')
+
+    def test_dropoff_route_requires_admin_csrf_and_open_order(self):
+        self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)
+        order_id = self.service.rows()[0]['order_id']
+        path = f'/admin/check24/auftrag/{order_id}/anlieferung'
+        client = self.p.app.test_client()
+        self.assertIn(client.post(path).status_code, (302,400,403))
+        with client.session_transaction() as session:
+            session['admin'] = True
+        client.get('/admin/reifenportal')
+        self.assertEqual(client.post(path, data={'day':'2026-10-30','at':'07:00'}).status_code, 400)
+        with client.session_transaction() as session:
+            csrf = session[self.p.CSRF_FIELD_NAME]
+        result = client.post(path, data={self.p.CSRF_FIELD_NAME:csrf,'day':'2026-10-30','at':'07:00','note':'Leihfahrzeug'})
+        self.assertEqual(result.status_code, 302)
+        self.assertEqual(self.p.get_auftrag(order_id)['annahme_uhrzeit'], '07:00')
+        db = self.p.get_db()
+        db.execute('UPDATE auftraege SET status=3 WHERE id=?', (order_id,)); db.commit(); db.close()
+        with self.assertRaises(ValueError):
+            self.service.arrival(order_id, '2026-10-30', '07:30', 'Test')
+
     def test_old_reviews_remain_visible_and_history_is_paginated(self):
         event = self.service.ingest(synthetic_mail())
         db = self.p.get_db()

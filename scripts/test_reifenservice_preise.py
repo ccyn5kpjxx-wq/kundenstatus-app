@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from reifenservice import (PREISKATALOG_VERSION, berechne_reifenservice,
+                          berechne_check24_reifenservice, _gepruefter_snapshot,
                           export_reifenservice_xlsx, reifen_preiskatalog)
 
 
@@ -24,6 +25,30 @@ def calc(*rows, **options):
 
 
 class ReifenservicePreiseTest(unittest.TestCase):
+    def test_check24_price_plus_disposal_is_exact_and_exportable(self):
+        result = berechne_check24_reifenservice('TEST9001', 'Reifenmontage für 4 Reifen', '90.00',
+                    [{'preis_id':'entsorgung', 'menge':4}])
+        self.assertEqual(result['gesamt'], {'brutto_cent':10600,'netto_cent':8908,'mwst_cent':1692})
+        self.assertEqual([p['menge'] for p in result['positionen']], [1,4])
+        self.assertEqual(_gepruefter_snapshot(result), result)
+        self.assertTrue(export_reifenservice_xlsx(result).startswith(b'PK'))
+        self.assertEqual(berechne_check24_reifenservice('TEST9002','Reifenmontage für 2 Reifen','45.00')['gesamt']['brutto_cent'],4500)
+
+    def test_check24_rejects_double_mounting_and_tampered_snapshot(self):
+        from copy import deepcopy
+        for selection in ([{'preis_id':'montage_13_16','menge':4}], [{'preis_id':[],'menge':1}],
+                          [{'preis_id':'entsorgung','menge':4}]*2, [{'preis_id':'entsorgung','menge':5}]):
+            with self.subTest(selection=selection), self.assertRaises(ValueError):
+                berechne_check24_reifenservice('TEST9001','Reifenmontage','90.00',selection)
+        for gross in ('90,00','0.00','-90.00',90.0):
+            with self.subTest(gross=gross), self.assertRaises(ValueError):
+                berechne_check24_reifenservice('TEST9001','Reifenmontage',gross)
+        result = berechne_check24_reifenservice('TEST9001','Reifenmontage','90.00')
+        for mutate in (lambda p:p['positionen'][0].update(menge=2),lambda p:p['gesamt'].update(brutto_cent=1),
+                       lambda p:p['check24_buchung'].update(brutto='45.00')):
+            modified=deepcopy(result); mutate(modified)
+            with self.assertRaises(ValueError): _gepruefter_snapshot(modified)
+
     def test_catalogue_only_contains_published_prices(self):
         template = (Path(__file__).resolve().parents[1] / "templates/_homepage_reifenpreise.html").read_text(encoding="utf-8")
         published_cents = {int(value) for value in re.findall(r"price\((\d+)\)", template)}

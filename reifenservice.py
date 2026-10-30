@@ -162,6 +162,31 @@ def berechne_reifenservice(auswahl, *, lose_raeder=False):
     }
 
 
+def berechne_check24_reifenservice(bestellnummer, leistung, brutto, auswahl=()):
+    """Use the stored provider gross total once; only independent extras may be added."""
+    if not isinstance(bestellnummer, str) or not re.fullmatch(r'[A-Z0-9]{4,20}', bestellnummer):
+        raise ValueError('Die CHECK24-Bestellnummer fehlt oder ist ungültig.')
+    if not isinstance(leistung, str) or not leistung.strip() or len(leistung) > 300:
+        raise ValueError('Die gebuchte CHECK24-Leistung fehlt.')
+    if not isinstance(brutto, str) or not re.fullmatch(r'[0-9]{1,6}\.[0-9]{2}', brutto):
+        raise ValueError('Der gespeicherte CHECK24-Bruttopreis ist ungültig.')
+    cents = int(Decimal(brutto) * 100)
+    if not 0 < cents <= 1000000:
+        raise ValueError('Den CHECK24-Bruttopreis bitte prüfen.')
+    if not isinstance(auswahl, (list, tuple)) or any(not isinstance(p, Mapping) or p.get('preis_id') not in ('entsorgung','einlagerung','raederwaesche') for p in auswahl):
+        raise ValueError('Die Montage ist im CHECK24-Preis bereits enthalten. Nur zusätzliche Entsorgung, Einlagerung oder Räderwäsche auswählen.')
+    basis = {'bestellnummer':bestellnummer, 'leistung':leistung, 'brutto':brutto}
+    base = _Preis('check24_buchung', leistung, cents, 'Pauschale', 'check24', 'Gebuchter CHECK24-Gesamtpreis · ' + bestellnummer)
+    positionen = [_position(base, 1)]
+    if auswahl:
+        positionen += berechne_reifenservice(auswahl)['positionen']
+    return {'schema_version':2, 'katalog_version':PREISKATALOG_VERSION,
+            'quelle':'CHECK24-Buchung', 'status':'entwurf', 'steuerbasis':'brutto',
+            'mwst_satz':'19.00', 'lose_raeder':False, 'check24_buchung':basis,
+            'positionen':positionen,
+            'gesamt':{key:sum(p[key] for p in positionen) for key in ('brutto_cent','netto_cent','mwst_cent')}}
+
+
 def _gepruefter_snapshot(kalkulation):
     if not isinstance(kalkulation, Mapping):
         raise ValueError("Eine gespeicherte Reifen-Kalkulation fehlt.")
@@ -170,7 +195,13 @@ def _gepruefter_snapshot(kalkulation):
         raise ValueError("Die gespeicherten Leistungspositionen sind ungültig.")
     auswahl = [{"preis_id": p.get("preis_id"), "menge": p.get("menge")}
                for p in positionen if p.get("preis_id") != "lose_raeder"]
-    aktuell = berechne_reifenservice(auswahl, lose_raeder=kalkulation.get("lose_raeder", False))
+    if kalkulation.get('quelle') == 'CHECK24-Buchung':
+        basis = kalkulation.get('check24_buchung')
+        if not isinstance(basis, Mapping) or set(basis) != {'bestellnummer','leistung','brutto'}:
+            raise ValueError('Die gespeicherte CHECK24-Preisquelle fehlt.')
+        aktuell = berechne_check24_reifenservice(**basis, auswahl=[p for p in auswahl if p['preis_id'] != 'check24_buchung'])
+    else:
+        aktuell = berechne_reifenservice(auswahl, lose_raeder=kalkulation.get("lose_raeder", False))
     if aktuell != dict(kalkulation):
         raise ValueError("Die Kalkulation stimmt nicht mit den gespeicherten Preispositionen überein. Bitte neu prüfen.")
     return aktuell

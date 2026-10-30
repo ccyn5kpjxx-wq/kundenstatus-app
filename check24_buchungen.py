@@ -288,7 +288,7 @@ class Check24Bookings:
                 raise ValueError('Kein zugehöriger CHECK24-Auftrag gefunden.')
             db.execute('UPDATE auftraege SET status=status WHERE id=?', (booking['order_id'],))
             order = db.execute('SELECT * FROM auftraege WHERE id=?', (booking['order_id'],)).fetchone()
-            if not order or int(order['status'] or 0) >= 3 or order['lexware_invoice_id'] or order['rechnung_nummer']:
+            if not order or int(order['status'] or 0) >= 3 or order['archiviert'] or self.p.reifen_rechnung_gesperrt(dict(order)):
                 raise ValueError('Auftrag bereits in Arbeit oder abgerechnet. Storno zuerst im Büro klären.')
             if booking['active']:
                 db.execute('UPDATE check24_bookings SET active=0 WHERE provider_id=?', (booking['provider_id'],))
@@ -333,6 +333,41 @@ class Check24Bookings:
                 beschreibung=?,analyse_text=?,geaendert_am=? WHERE id=?''',
                 (start.strftime('%d.%m.%Y'), start.strftime('%H:%M'), json.dumps(intake, ensure_ascii=False), description, analysis, self.p.now_str(), booking['order_id']))
             db.execute("UPDATE check24_events SET state='resolved',note=? WHERE id=?", ('Termin nach CHECK24-Abgleich geändert: ' + start.strftime('%d.%m.%Y %H:%M') + '–' + end.strftime('%H:%M') + '. ' + note, event_id))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def arrival(self, order_id, day, at, note, disposal=None):
+        """Record an earlier drop-off without moving the booked workshop slot."""
+        from check24_mail import _local_datetime
+        from datetime import date
+        try:
+            arrival = _local_datetime(date.fromisoformat(day), at)
+        except (ValueError, TypeError):
+            raise ValueError('Bitte ein gültiges Anlieferungsdatum und eine Uhrzeit angeben.')
+        if disposal is not None and (not isinstance(disposal, str) or disposal not in ('0','1','2','3','4')):
+            raise ValueError('Bitte null bis vier Altreifen zur Entsorgung angeben.')
+        db = self.p.get_db()
+        try:
+            self.lock(db)
+            booking = db.execute('SELECT * FROM check24_bookings WHERE order_id=? AND active=1', (order_id,)).fetchone()
+            if not booking:
+                raise ValueError('Keine aktive CHECK24-Buchung gefunden.')
+            start = datetime.fromisoformat(booking['start_at'])
+            if arrival.date() != start.date() or arrival.hour < 7 or arrival > start or arrival <= datetime.now(BERLIN):
+                raise ValueError('Die Anlieferung muss am Montagetermin zwischen 07:00 Uhr und Montagebeginn liegen. Den Montagetermin selbst bitte im CHECK24-Bereich ändern.')
+            db.execute('UPDATE auftraege SET status=status WHERE id=?', (order_id,))
+            order = db.execute('SELECT * FROM auftraege WHERE id=?', (order_id,)).fetchone()
+            if not order or int(order['status'] or 0) >= 3 or order['lexware_invoice_id'] or order['rechnung_nummer']:
+                raise ValueError('Auftrag bereits in Arbeit oder abgerechnet. Anlieferung zuerst im Büro klären.')
+            intake = json.loads(order['schaden_aufnahme_json'] or '{}')
+            if disposal is not None:
+                intake['check24_entsorgung_menge'] = int(disposal)
+            db.execute('UPDATE auftraege SET annahme_datum=?,annahme_uhrzeit=?,notiz_intern=?,schaden_aufnahme_json=?,geaendert_am=? WHERE id=?',
+                       (arrival.strftime('%d.%m.%Y'), arrival.strftime('%H:%M'), note, json.dumps(intake,ensure_ascii=False), self.p.now_str(), order_id))
             db.commit()
         except Exception:
             db.rollback()
@@ -644,6 +679,20 @@ def register_check24(portal):
         except ValueError as exc:
             flash(str(exc), 'warning')
         return redirect(url_for('check24.index'))
+
+    @bp.post('/admin/check24/auftrag/<int:order_id>/anlieferung')
+    @portal.admin_required
+    def arrival(order_id):
+        note = request.form.get('note', '').strip()
+        if len(note) > 4000:
+            abort(400)
+        try:
+            service.arrival(order_id, request.form.get('day', ''), request.form.get('at', ''), note, request.form.get('disposal'))
+            portal.schedule_change_backup('check24-anlieferung')
+            flash('Anlieferung und Hinweise gespeichert. Die reservierte Montagezeit bleibt bestehen.', 'success')
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+        return redirect(url_for('admin_reifentermine'))
 
     @bp.post('/admin/check24/<int:event_id>/verschieben')
     @portal.admin_required

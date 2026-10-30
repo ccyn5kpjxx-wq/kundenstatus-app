@@ -39,7 +39,7 @@
 {% endblock %}
 
 {% block content %}
-{% set kalkulation = entwurf.kalkulation %}
+{% set kalkulation = entwurf.kalkulation or entwurf.check24_vorschlag %}
 {% set kunde = entwurf.kunde %}
 <div class="page-header">
   <div>
@@ -70,7 +70,10 @@
       <section class="page-card reifen-rechnung-card" aria-labelledby="reifen-auswahl">
         <h2 id="reifen-auswahl">2. Was wurde gemacht?</h2>
         <p class="small text-muted mb-2">Ausgeführte Leistungen auswählen. Alle Preise inklusive 19 % MwSt. Ein Satz = vier Räder.</p>
-        {% for preis in katalog %}
+        {% if entwurf.check24_basis %}
+        <div class="reifen-rechnung-hinweis mb-3"><strong>CHECK24-Leistung bereits übernommen</strong><br>{{ entwurf.check24_basis.leistung }} · {{ entwurf.check24_basis.brutto|replace('.', ',') }} € inkl. MwSt.<br><small>Zusätzliche Leistungen nur auswählen, wenn sie tatsächlich ausgeführt wurden.</small></div>
+        {% endif %}
+        {% for preis in katalog if not entwurf.check24_basis or preis.id in ('entsorgung', 'einlagerung', 'raederwaesche') %}
         <div class="reifen-leistung" data-preis-id="{{ preis.id }}">
           <div>
             <label class="reifen-leistung-label" for="leistung-{{ preis.id }}"><input class="form-check-input" type="checkbox" name="leistung" value="{{ preis.id }}" id="leistung-{{ preis.id }}" {% if preis.id in entwurf.auswahl %}checked{% endif %}><span>{{ preis.bezeichnung }}</span></label>
@@ -86,7 +89,7 @@
           </div>
         </div>
         {% endfor %}
-        <label class="form-check mt-3"><input type="checkbox" class="form-check-input" name="lose_raeder" value="1" {% if entwurf.lose_raeder %}checked{% endif %}><span>Reifenmontage an angelieferten losen Rädern</span><span class="d-block small text-muted">Der hinterlegte Nachlass von 5,00 € je montiertem Rad wird berücksichtigt.</span></label>
+        {% if not entwurf.check24_basis %}<label class="form-check mt-3"><input type="checkbox" class="form-check-input" name="lose_raeder" value="1" {% if entwurf.lose_raeder %}checked{% endif %}><span>Reifenmontage an angelieferten losen Rädern</span><span class="d-block small text-muted">Der hinterlegte Nachlass von 5,00 € je montiertem Rad wird berücksichtigt.</span></label>{% endif %}
         <button class="btn btn-brand mt-4" type="submit">Berechnen &amp; speichern</button>
         <p class="small text-muted mt-2 mb-0" id="reifen-ungespeichert" hidden role="status">Änderungen bitte zuerst berechnen und speichern.</p>
       </section>
@@ -97,7 +100,7 @@
     <section class="page-card reifen-rechnung-card" aria-labelledby="reifen-gespeichert">
       <h2 id="reifen-gespeichert">3. Prüfen und Rechnung erstellen</h2>
       {% if kalkulation %}
-      <p class="small text-muted">Gespeicherter Stand · Leistungsdatum {{ entwurf.leistungsdatum }}</p>
+      <p class="small text-muted">{% if entwurf.kalkulation %}Gespeicherter Stand · Leistungsdatum {{ entwurf.leistungsdatum }}{% else %}Vorschlag aus CHECK24 · Leistungen und Empfänger prüfen und speichern{% endif %}</p>
       <p class="text-break mb-3"><strong>{{ kunde.name }}</strong><br>{{ kunde.strasse }}<br>{{ kunde.plz }} {{ kunde.ort }}</p>
       <table class="reifen-rechnung-tabelle">
         <thead><tr><th scope="col">Leistung</th><th scope="col" class="betrag">Brutto</th></tr></thead>
@@ -108,7 +111,7 @@
         <div><dt class="fw-normal">19 % MwSt.</dt><dd>{{ kalkulation.gesamt.mwst_cent|geld_cent }}</dd></div>
         <div class="reifen-rechnung-gesamt"><dt>Gesamt</dt><dd>{{ kalkulation.gesamt.brutto_cent|geld_cent }}</dd></div>
       </dl>
-      <div class="reifen-rechnung-toolbar mb-3"><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_excel', auftrag_id=auftrag.id) }}">Excel-Kalkulation</a><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_druck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Entwurf drucken</a></div>
+      {% if entwurf.kalkulation %}<div class="reifen-rechnung-toolbar mb-3"><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_excel', auftrag_id=auftrag.id) }}">Excel-Kalkulation</a><a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung_druck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Entwurf drucken</a></div>{% endif %}
       {% else %}
       <p class="text-muted">Links die erledigten Leistungen auswählen und speichern. Die Summe erscheint hier automatisch.</p>
       {% endif %}
@@ -130,7 +133,7 @@
       <div class="alert alert-warning small mb-0">Für diesen Auftrag ist bereits ein Rechnungsbeleg hinterlegt. Bitte den vorhandenen Beleg verwenden.</div>
       {% elif not api_ready %}
       <div class="reifen-rechnung-hinweis">Die Verbindung zu Lexware ist noch nicht eingerichtet. Die gespeicherte Kalkulation bleibt verfügbar.</div>
-      {% elif not kalkulation %}
+      {% elif not entwurf.kalkulation %}
       <div class="reifen-rechnung-hinweis">Zuerst Leistungen und Rechnungsempfänger speichern.</div>
       {% else %}
       {% if auftrag.status|int < 4 %}<div class="alert alert-info small">Die Rechnung kann erstellt werden, sobald der Reifenauftrag als „Fertig“ markiert ist.</div>{% endif %}

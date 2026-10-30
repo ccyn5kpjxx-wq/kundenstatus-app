@@ -80,3 +80,29 @@ Beim Appimport deaktiviert das CLI ausschließlich in seinem eigenen Prozess die
 Im Webdienst `CHECK24_WORKER_ENABLED=0` setzen und den Webprozess kontrolliert neu starten. Ein eventuell separat laufendes CLI oder dessen Zeitplan muss zusätzlich beendet und `CHECK24_SYNC_ENABLED` entfernt bzw. auf `0` gesetzt werden. Bei einem bereits laufenden Prozess reicht eine Änderung der äußeren Umgebungsvariable nicht. Bereits importierte Aufträge und Prüfdatensätze bleiben erhalten. Sie werden bei einer Rücknahme niemals automatisch gelöscht. Falsche Zuordnungen oder Termine werden nach Prüfung im normalen Werkstattablauf korrigiert.
 
 Das Abschalten des CLI verhindert keine bewusst im angemeldeten Adminbereich gestarteten manuellen Abgleiche. Mailimport und Prüfbereich sind weiterhin getrennt von der providerseitigen CHECK24-Terminverwaltung.
+# Reifenportal: Übersicht und frühere Anlieferung
+
+Im internen Reifenportal zeigen Auftragskarten Anlieferung, Kunde, Telefonnummer,
+E-Mail, Leistungen, Status und den gebuchten CHECK24-Bruttopreis. Eine Suche und
+ein Statusfilter begrenzen die Anzeige, ohne Daten zu ändern. Ohne JavaScript
+bleiben alle Karten und Auftragslinks verfügbar. Die Werkstatttafel wird nicht
+umgestaltet.
+
+Bei einer aktiven, noch nicht begonnenen CHECK24-Buchung kann die Werkstatt über
+„Anlieferung & Hinweise“ eine frühere Fahrzeugabgabe am selben Tag festhalten.
+Die Abgabe liegt zwischen 07:00 Uhr und dem reservierten Montagebeginn. Der
+Montagezeitraum bleibt in `check24_bookings` und in den Buchungsdaten erhalten;
+die Anlieferung in `auftraege` und ein interner Hinweis werden gemeinsam gespeichert.
+Das erlaubt beispielsweise eine frühe Fahrzeugabgabe mit Leihfahrzeug, ohne
+eine zusätzliche Montagestunde zu reservieren. Der Hinweis ist keine Zuordnung
+oder Reservierung eines konkreten Mietfahrzeugs. Datumswechsel und spätere
+Montagezeiten werden weiterhin ausschließlich im CHECK24-Prüfbereich geändert.
+
+Der Rechnungsentwurf übernimmt den gespeicherten CHECK24-Bruttopreis als eine
+Pauschalposition. Zusätzliche Entsorgung, Einlagerung und Räderwäsche stammen aus
+dem bestehenden Preiskatalog; die Montage kann nicht doppelt gewählt werden.
+Bis zu vier geplante Altreifen können bereits bei der Anlieferungsnotiz erfasst
+werden. Ein Seitenaufruf speichert keine Rechnung: Vor der Übertragung müssen
+tatsächliche Leistungen, Empfänger und Leistungsdatum geprüft und gespeichert
+werden. Bestehende Rechnungssperren und die Freigabe erst nach Fertigstellung
+bleiben bestehen. Bereits gespeicherte Kalkulationen werden nicht überschrieben.

@@ -60,7 +60,7 @@ from portal_static_assets import asset_version, is_versioned_ui_asset
 from portal_request_timing import start_request_timing, timed_database_call, server_timing_header
 from portal_navigation_snapshot import NAVIGATION_SQL_COUNT_KEYS, load_navigation_sql_counts
 import mietwagen_checkout
-from reifenservice import reifen_preiskatalog, berechne_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
+from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
@@ -45487,7 +45487,8 @@ def list_reifentermine():
 def admin_reifentermine():
     reifenauftraege = [a for a in list_auftraege() if auftrag_ist_reifen(a)]
     response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine(), reifenauftraege=reifenauftraege,
-                                            check24_review_count=check24_bookings.review_count()))
+                                            check24_review_count=check24_bookings.review_count(),
+                                            reifen_entsorgung_cent=next(p['brutto_cent'] for p in reifen_preiskatalog() if p['id']=='entsorgung')))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -53072,6 +53073,15 @@ def geld_cent(value):
     return f"{int(value or 0)/100:,.2f}".replace(",","X").replace(".",",").replace("X",".") + " €"
 
 
+def check24_rechnungsbasis(auftrag):
+    if auftrag.get('quelle') != 'check24':
+        return None
+    intake = auftrag.get('schaden_aufnahme') or json.loads(auftrag.get('schaden_aufnahme_json') or '{}')
+    return {'bestellnummer':intake.get('check24_bestellnummer'),
+            'leistung':next((line for line in (auftrag.get('beschreibung') or '').splitlines() if line.startswith('Reifenmontage')), 'Reifenservice gemäß CHECK24-Buchung'),
+            'brutto':intake.get('check24_preis_brutto')}
+
+
 def reifen_rechnungsentwurf(auftrag):
     raw = auftrag.get("reifen_rechnung_json") or "{}"
     try:
@@ -53083,6 +53093,13 @@ def reifen_rechnungsentwurf(auftrag):
     kalkulation = data.get("kalkulation")
     if kalkulation:
         kalkulation = _gepruefter_snapshot(kalkulation)
+    basis = check24_rechnungsbasis(auftrag)
+    vorschlag = None
+    if basis and not kalkulation:
+        intake = auftrag.get('schaden_aufnahme') or json.loads(auftrag.get('schaden_aufnahme_json') or '{}')
+        entsorgung = intake.get('check24_entsorgung_menge', 0)
+        extras = [{'preis_id':'entsorgung','menge':str(entsorgung)}] if entsorgung else []
+        vorschlag = berechne_check24_reifenservice(**basis, auswahl=extras)
     kunde = data.get("kunde") or {
         "name":clean_text(auftrag.get("kunde_name")), "strasse":"","plz":"","ort":"",
         "telefon":clean_text(auftrag.get("kontakt_telefon")), "email":clean_text(auftrag.get("kunde_email")),
@@ -53092,7 +53109,8 @@ def reifen_rechnungsentwurf(auftrag):
     return {
         "kalkulation":kalkulation, "kunde":kunde,
         "leistungsdatum":data.get("leistungsdatum") or (parse_date(auftrag.get("fertig_datum")) or date.today()).isoformat(),
-        "auswahl":{p["preis_id"]:p["menge"] for p in (kalkulation or {}).get("positionen",[]) if p["preis_id"] != "lose_raeder"},
+        "check24_basis":basis, "check24_vorschlag":vorschlag,
+        "auswahl":{p["preis_id"]:p["menge"] for p in (kalkulation or vorschlag or {}).get("positionen",[]) if p["preis_id"] not in ("lose_raeder", "check24_buchung")},
         "lose_raeder":bool((kalkulation or {}).get("lose_raeder")),
         "revision":hashlib.sha256(raw.encode("utf-8")).hexdigest(),
     }
@@ -53125,9 +53143,13 @@ def reifen_rechnung(auftrag_id):
             if request.form.get("revision") != entwurf["revision"]:
                 raise ValueError("Die Leistungen wurden zwischenzeitlich geändert. Bitte die Seite neu laden.")
             ids = request.form.getlist("leistung")
-            kalkulation = berechne_reifenservice([
-                {"preis_id":key,"menge":request.form.get("menge_"+key,"1")} for key in ids
-            ],lose_raeder=request.form.get("lose_raeder") == "1")
+            auswahl = [{"preis_id":key,"menge":request.form.get("menge_"+key,"1")} for key in ids]
+            if entwurf.get('check24_basis'):
+                if request.form.get('lose_raeder'):
+                    raise ValueError('Der gebuchte CHECK24-Gesamtpreis enthält bereits die vereinbarte Montage.')
+                kalkulation = berechne_check24_reifenservice(**entwurf['check24_basis'], auswahl=auswahl)
+            else:
+                kalkulation = berechne_reifenservice(auswahl,lose_raeder=request.form.get("lose_raeder") == "1")
             datum = clean_text(request.form.get("leistungsdatum"))
             if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}",datum) or not parse_date(datum) or parse_date(datum)>date.today():
                 raise ValueError("Bitte ein gültiges Leistungsdatum bis heute eintragen.")
