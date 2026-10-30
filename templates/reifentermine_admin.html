@@ -3,26 +3,29 @@
 {% block extra_css %}
 <style>
   .reifen-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr)); gap:1rem; }
-  .reifen-card { min-width:0; padding:1.3rem; border:1px solid var(--line); border-radius:18px; background:var(--panel); overflow-wrap:anywhere; display:flex; flex-direction:column; }
-  .reifen-card h2 { margin:.7rem 0; font-size:1.25rem; }
-  .reifen-card p { margin:.5rem 0; }
+  .reifen-grid { align-items:start; }
+  .reifen-card { min-width:0; padding:1rem; border:1px solid var(--line); border-radius:14px; background:var(--panel); overflow-wrap:anywhere; display:flex; flex-direction:column; }
+  .reifen-card h2 { margin:.4rem 0; font-size:1.15rem; }
+  .reifen-card p { margin:.35rem 0; }
   .reifen-card ul { padding-left:1.25rem; margin:.8rem 0; }
   .reifen-card .reifen-date { color:var(--brand); font-weight:800; }
-  .reifen-card .reifen-contact { display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:1rem 0; }
-  .reifen-card-head { background:#135d84; color:#fff; padding:1rem 1.3rem; margin:-1.3rem -1.3rem 1rem; border-radius:17px 17px 0 0; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:.6rem; }
+  .reifen-card .reifen-contact { display:flex; flex-wrap:wrap; gap:.25rem .8rem; margin:.4rem 0; font-size:.9rem; }
+  .reifen-card-head { background:#135d84; color:#fff; padding:.7rem 1rem; margin:-1rem -1rem .65rem; border-radius:13px 13px 0 0; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:.4rem; }
   .reifen-card-head small { display:block; opacity:.9; }
-  .reifen-card-head strong { display:block; font-size:1.2rem; }
+  .reifen-card-head strong { display:block; font-size:1.05rem; }
   .reifen-status { background:#fff; color:#135d84; padding:.2rem .65rem; border-radius:20px; font-size:.8rem; font-weight:750; white-space:nowrap; }
   .reifen-card[data-order-state="fertig"] .reifen-card-head { background:#47635b; }
   .reifen-card h2 a { color:inherit; text-decoration:none; }
   .reifen-card h2 a:hover { text-decoration:underline; }
   .reifen-order-ref { font-size:.85rem; color:#5a6670; }
-  .reifen-service { border-top:1px solid var(--line); padding-top:.8rem; margin-top:.6rem; }
+  .reifen-service { border-top:1px solid var(--line); padding-top:.5rem; margin:.4rem 0; font-size:.9rem; }
+  .reifen-card summary { cursor:pointer; font-size:.9rem; }
+  .reifen-card details[open] { padding-bottom:.5rem; }
   .reifen-service h3 { font-size:1rem; margin:0; }
   .reifen-price { display:flex; justify-content:space-between; gap:.5rem; border-top:1px solid var(--line); padding-top:.8rem; margin-top:auto; }
   .reifen-price strong { font-size:1.25rem; white-space:nowrap; flex-shrink:0; }
   .reifen-note { padding:.75rem; border-left:3px solid #bf790e; background:#fff8e7; color:#5c431c; white-space:pre-line; }
-  .reifen-card-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:1rem; }
+  .reifen-card-actions { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.6rem; }
   .reifen-filter { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; margin:1rem 0; }
   .reifen-filter label { flex:1; min-width:min(100%,220px); }
   .reifen-filter input,.reifen-filter select { width:100%; }
@@ -48,8 +51,8 @@
   <a class="btn btn-soft" href="{{ url_for('check24.index') }}">CHECK24-Buchungen prüfen →</a>
 </div>
 {% endif %}
-<h2 class="h4">Neue Reifenbuchungen</h2>
 {% if reifentermine %}
+<h2 class="h4">Neue Reifenbuchungen</h2>
 <p class="text-muted">{{ reifentermine|length }} neue Buchung(en). Reservierte Uhrzeit prüfen und mit einem Klick als Reifenauftrag übernehmen.</p>
 <div class="reifen-grid">
   {% for termin in reifentermine %}
@@ -71,11 +74,11 @@
   <div class="reifen-card"><h2>Keine offenen Reifen-Terminwünsche</h2><p>Neue Kundenanfragen erscheinen hier automatisch.</p></div>
   {% endfor %}
 </div>
-{% else %}<p class="text-muted">Keine offenen Reifen-Terminwünsche. Neue Kundenanfragen erscheinen hier automatisch.</p>{% endif %}
+{% endif %}
 <h2 class="h4 mt-4">Reifenaufträge</h2>
 <div class="reifen-filter" data-reifen-filter hidden>
   <label for="reifen-suche">Kunde, Kennzeichen oder Auftragsnummer<input id="reifen-suche" class="form-control" type="search" placeholder="Auftrag suchen …"></label>
-  <label for="reifen-status-filter">Status<select id="reifen-status-filter" class="form-select"><option value="offen">Offene Aufträge</option><option value="fertig">Fertig / zurückgegeben</option><option value="alle" selected>Alle Aufträge</option></select></label>
+  <label for="reifen-status-filter">Status<select id="reifen-status-filter" class="form-select"><option value="offen" selected>Offene Aufträge</option><option value="fertig">Fertig / zurückgegeben</option><option value="alle">Alle Aufträge</option></select></label>
   <p class="mb-2" id="reifen-ergebnis" role="status"></p>
 </div>
 <div class="reifen-grid" id="reifen-auftragskarten">
@@ -87,23 +90,24 @@
     <header class="reifen-card-head"><div><small>Anlieferung{% if auftrag.annahme_datum_obj %} · {{ ['Mo.','Di.','Mi.','Do.','Fr.','Sa.','So.'][auftrag.annahme_datum_obj.weekday()] }}{% endif %}</small><strong>{{ auftrag.annahme_datum or 'Termin offen' }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}</strong></div><span class="reifen-status">{{ auftrag.status_meta.label }}</span></header>
     <span class="reifen-order-ref">Auftrag {{ auftrag.id }}{% if c24 %} · CHECK24 {{ c24 }}{% endif %}</span>
     <h2><a href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">{{ auftrag.kunde_name or 'Kunde noch offen' }}</a></h2>
-    <p>{{ auftrag.fahrzeug }}{% if auftrag.kennzeichen %} · <strong>{{ auftrag.kennzeichen }}</strong>{% endif %}</p>
+    {% if auftrag.kennzeichen or not c24 %}<p>{{ auftrag.fahrzeug }}{% if auftrag.kennzeichen %} · <strong>{{ auftrag.kennzeichen }}</strong>{% endif %}</p>{% endif %}
     <div class="reifen-contact">
       {% if auftrag.kontakt_telefon %}<a href="tel:{{ auftrag.kontakt_telefon }}">Anrufen: {{ auftrag.kontakt_telefon }}</a>{% endif %}
-      {% if auftrag.kunde_email %}<a href="mailto:{{ auftrag.kunde_email }}">E-Mail: {{ auftrag.kunde_email }}</a>{% endif %}
+      {% if auftrag.kunde_email %}<a href="mailto:{{ auftrag.kunde_email }}" title="{{ auftrag.kunde_email }}">E-Mail</a>{% endif %}
       {% if not auftrag.kontakt_telefon and not auftrag.kunde_email %}<strong class="text-warning">Kontakt fehlt – im Auftrag ergänzen</strong>{% endif %}
     </div>
     {% if c24 and intake.get('check24_start') and intake.get('check24_ende') %}<p class="reifen-montage"><strong>Montagezeit:</strong> {{ intake.check24_start[8:10] }}.{{ intake.check24_start[5:7] }}. · {{ intake.check24_start[11:16] }}–{{ intake.check24_ende[11:16] }} Uhr</p>{% endif %}
-    <section class="reifen-service"><h3>Leistungen</h3>
+    <details class="reifen-service" data-reifen-details><summary>Leistungen{% if auftrag.notiz_intern %} &amp; Hinweise{% endif %} anzeigen</summary>
       {% if c24 %}<ul>{% for line in (auftrag.beschreibung or '').splitlines() %}{% if line and not line.startswith(('CHECK24 ·','Termin:','Gebuchter Gesamtpreis:')) %}<li>{{ line }}</li>{% endif %}{% endfor %}</ul>
       {% else %}<p style="white-space:pre-line">{{ auftrag.werkstatt_angebot_text or auftrag.beschreibung or 'Leistungen im Auftrag ergänzen.' }}</p>{% endif %}
-    </section>
-    {% if c24 and entsorgung %}<p><strong>Zusätzlich:</strong> {{ entsorgung }} Altreifen entsorgen · {{ (entsorgung * reifen_entsorgung_cent)|geld_cent }}</p>{% endif %}
     {% if auftrag.notiz_intern %}<p class="reifen-note"><strong>Werkstatthinweis</strong><br>{{ auftrag.notiz_intern }}</p>{% endif %}
+    {% if auftrag.kunde_email %}<p><strong>E-Mail:</strong> <a href="mailto:{{ auftrag.kunde_email }}">{{ auftrag.kunde_email }}</a></p>{% endif %}
+    </details>
+    {% if c24 and entsorgung %}<p class="small">{{ entsorgung }} Altreifen entsorgen · {{ (entsorgung * reifen_entsorgung_cent)|geld_cent }}</p>{% endif %}
     {% if c24 and intake.get('check24_preis_brutto') %}<div class="reifen-price"><span>{% if entsorgung %}Geplanter Gesamtpreis{% else %}Gebuchter Gesamtpreis{% endif %}<br><small>inkl. MwSt.{% if entsorgung %} · CHECK24 {{ intake.check24_preis_brutto|replace('.', ',') }} € + Entsorgung{% endif %}</small></span><strong>{{ ((intake.check24_preis_brutto|float * 100)|round|int + entsorgung * reifen_entsorgung_cent)|geld_cent }}</strong></div>{% endif %}
-    <div class="reifen-card-actions"><a class="btn btn-brand" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">Reifenauftrag öffnen →</a>
-    {% if auftrag.status < 4 %}<form method="POST" action="{{ url_for('status_update',auftrag_id=auftrag.id,neuer_status=4) }}"><input type="hidden" name="next" value="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}"><button class="btn btn-soft">Fertig · Rechnung erstellen →</button></form>{% else %}<a class="btn btn-soft" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Rechnung erstellen →</a>{% endif %}</div>
-    {% if c24 and auftrag.status < 3 %}<details class="mt-3"><summary>Anlieferung & Hinweise</summary>
+    <div class="reifen-card-actions"><a class="btn btn-brand btn-sm" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">Auftrag öffnen →</a>
+    {% if auftrag.status < 4 %}<form method="POST" action="{{ url_for('status_update',auftrag_id=auftrag.id,neuer_status=4) }}"><input type="hidden" name="next" value="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}"><button class="btn btn-soft btn-sm">Fertig · Rechnung →</button></form>{% else %}<a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Rechnung →</a>{% endif %}</div>
+    {% if c24 and auftrag.status < 3 %}<details class="mt-2"><summary>Anlieferung bearbeiten</summary>
       <form method="post" action="{{ url_for('check24.arrival', order_id=auftrag.id) }}" class="mt-2">
         <p>Eine frühere Fahrzeugabgabe verschiebt die reservierte Montagezeit nicht.</p>
         <label class="form-label">Tag der Anlieferung<input class="form-control" type="date" name="day" value="{{ auftrag.annahme_datum_obj.isoformat() if auftrag.annahme_datum_obj else '' }}" required></label>

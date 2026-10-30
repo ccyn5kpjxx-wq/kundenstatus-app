@@ -84,7 +84,10 @@ Das Abschalten des CLI verhindert keine bewusst im angemeldeten Adminbereich ges
 
 Im internen Reifenportal zeigen Auftragskarten Anlieferung, Kunde, Telefonnummer,
 E-Mail, Leistungen, Status und den gebuchten CHECK24-Bruttopreis. Eine Suche und
-ein Statusfilter begrenzen die Anzeige, ohne Daten zu ändern. Ohne JavaScript
+ein Statusfilter begrenzen die Anzeige, ohne Daten zu ändern. Standardmäßig
+zeigt die Übersicht offene Aufträge; erledigte bleiben im Statusfilter erreichbar.
+Längere Leistungen, interne Hinweise und vollständige E-Mail-Adressen sind
+ausklappbar, damit mehr Karten gleichzeitig sichtbar sind. Ohne JavaScript
 bleiben alle Karten und Auftragslinks verfügbar. Die Werkstatttafel wird nicht
 umgestaltet.
 
