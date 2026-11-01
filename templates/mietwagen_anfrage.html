@@ -147,6 +147,7 @@
             <div class="foto">{% if f.bild_url %}<img src="{{ f.bild_url }}" alt="{{ f.bezeichnung }}" loading="lazy">{% elif f.titelbild_id %}<img src="{{ url_for('mietwagen_public_bild', bild_id=f.titelbild_id) }}" alt="{{ f.bezeichnung }}" loading="lazy">{% else %}Foto folgt{% endif %}</div>
             <div class="info">
               <div class="name">{{ f.bezeichnung }}</div>
+              {% if f.bild_hinweis %}<div class="form-text">{{ f.bild_hinweis }}</div>{% endif %}
               <div class="preis">{% if f.tagessatz %}ab {{ f.tagessatz }} €/Tag{% else %}{{ f.fahrzeugklasse }}{% endif %}</div>
               {% if f.bald %}<div class="belegt" style="color:#8a5b00;">In Kürze verfügbar — vormerken</div>{% elif f.belegt %}<div class="belegt">belegt: {{ f.belegt|join(' · ') }}</div>{% endif %}
             </div>

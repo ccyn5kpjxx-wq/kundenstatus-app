@@ -229,9 +229,9 @@ def main():
         check("Mietwagen zeigt den auswählbaren Fuhrpark", mietwagen.status_code == 200 and all(
             marker in mietwagen_html for marker in (
                 'name="mietwagen_fahrzeug"', "Hyundai i10", "Hyundai KONA N Line X",
-                "Fiat Doblò", "Fiat Doblò Maxi", "39 € / Tag", "59 € / Tag",
+                "Fiat Doblò", "Fiat Doblò XL", "39 € / Tag", "59 € / Tag",
                 "i10_symbolfoto.jpg", "kona_symbolfoto.jpg", "doblo_symbolfoto.jpg",
-                "doblo_maxi_symbolfoto.jpg", "Noch unsicher oder anderer Fahrzeugwunsch",
+                "doblo-xl-hersteller.png", "Noch unsicher oder anderer Fahrzeugwunsch",
                 'name="mietbeginn"', 'name="mietende"', 'name="nachricht"', 'name="bilder"',
             )
         )),
