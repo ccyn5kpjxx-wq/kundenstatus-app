@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jobs & Karriere · Gärtner GmbH Karosserie + Lack</title>
-  <meta name="description" content="Jobs bei Gärtner GmbH Karosserie + Lack in Mosbach. Name und Telefonnummer genügen für den ersten persönlichen Rückruf.">
+  <title>Jobs & Karriere · {{ werkstatt_oeffentlich.name }}</title>
+  <meta name="description" content="Jobs bei {{ werkstatt_oeffentlich.name }} in Mosbach. Name und Telefonnummer genügen für den ersten persönlichen Rückruf.">
   {% if not site_indexable %}<meta name="robots" content="noindex, nofollow">{% endif %}
   {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -126,7 +126,7 @@
   <a class="skip-link" href="#inhalt">Direkt zum Inhalt</a>
   <header>
     <nav class="wrap nav" aria-label="Hauptnavigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='230px', dimensions=true) }} alt="Gärtner GmbH Karosserie + Lack" decoding="async"><span>Gärtner</span></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='230px', dimensions=true) }} alt="{{ werkstatt_oeffentlich.name }}" decoding="async"><span>Gärtner</span></a>
       <div class="nav-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('oeffentliches_team') }}">Team</a><a href="#stellen">Stellen</a><a class="nav-cta" href="#bewerbung">Rückruf anfordern</a></div>
     </nav>
   </header>
@@ -184,7 +184,7 @@
     </section>
   </main>
 
-  <footer><div class="wrap footer-row"><div>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }}</div><div class="footer-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></footer>
+  <footer><div class="wrap footer-row"><div>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.adresse }}</div><div class="footer-links"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></div></footer>
   {% include "_besucher_tracking.html" %}
 </body>
 </html>

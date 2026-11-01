@@ -4,17 +4,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gärtner GmbH Karosserie + Lack | Meisterbetrieb in Mosbach</title>
+  <title>{{ werkstatt_oeffentlich.name }} | Meisterbetrieb in Mosbach</title>
   <meta name="description" content="Karosserie, Lack, Service und Fuhrparkbetreuung aus einer Hand in Mosbach. Für Privatkunden, Autohäuser, Werkstätten und Firmenflotten.">
   <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
   {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <meta property="og:type" content="website">
   <meta property="og:locale" content="de_DE">
-  <meta property="og:title" content="Gärtner GmbH Karosserie + Lack | Meisterbetrieb in Mosbach">
+  <meta property="og:title" content="{{ werkstatt_oeffentlich.name }} | Meisterbetrieb in Mosbach">
   <meta property="og:description" content="Schaden digital melden, Mietwagen anfragen und Reparaturstatus sicher verfolgen.">
   {{ image_preload(jahreszeit.hero_bild) }}
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"AutoBodyShop","name":"Gärtner GmbH Karosserie + Lack","url":"https://auto-lackierzentrum.de/","telephone":{{ werkstatt_oeffentlich.telefon_e164|tojson }},"email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":{{ werkstatt_oeffentlich.strasse|tojson }},"postalCode":{{ werkstatt_oeffentlich.plz|tojson }},"addressLocality":{{ werkstatt_oeffentlich.ort|tojson }},"addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
+  {"@context":"https://schema.org","@type":"AutoBodyShop","name":{{ werkstatt_oeffentlich.name|tojson }},"url":"https://auto-lackierzentrum.de/","telephone":{{ werkstatt_oeffentlich.telefon_e164|tojson }},"email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":{{ werkstatt_oeffentlich.strasse|tojson }},"postalCode":{{ werkstatt_oeffentlich.plz|tojson }},"addressLocality":{{ werkstatt_oeffentlich.ort|tojson }},"addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
   <style>.trust-copy{min-width:0}.trust-email{flex-basis:100%;min-width:0;overflow-wrap:anywhere;font-size:12px}.footer-grid>div{min-width:0}.footer-contact{margin:14px 0 0}.footer-contact span{display:block}.footer-contact a{overflow-wrap:anywhere}</style>
@@ -23,7 +23,7 @@
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header">
     <nav class="wrap site-nav" aria-label="Hauptnavigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="Gärtner Karosserie + Lack" width="210" height="60" decoding="async"></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="{{ werkstatt_oeffentlich.name }}" width="210" height="60" decoding="async"></a>
       <button class="menu-toggle" aria-expanded="false" aria-controls="hauptmenue">Menü <span aria-hidden="true">☰</span></button>
       <div class="nav-links" id="hauptmenue"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Geschäftspartner</a><a href="{{ url_for('oeffentliches_team') }}">Über uns</a><a href="#kontakt">Kontakt</a><a class="mobile-portal-link" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge</a></div>
       <a class="button nav-portal" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge <span aria-hidden="true">↗</span></a>
@@ -156,7 +156,7 @@
     </section>
     <section class="contact-band" id="kontakt"><div class="wrap contact-inner"><div><h2>Wie können wir helfen?</h2><p class="opening-hours"><strong>Öffnungszeiten</strong><br>{{ homepage_oeffnungszeiten }}</p></div><div class="actions"><a class="button red" href="{{ portal_links.auswahl }}">Anfrage mit Foto ↗</a><a class="button light" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a></div></div></section>
   </main>
-  <footer class="site-footer"><div class="wrap footer-grid"><div><strong>Gärtner GmbH Karosserie + Lack</strong><p>{{ werkstatt_oeffentlich.adresse }}</p><p class="footer-contact"><span>Büro &amp; Partnerbetreuung · Margita Höfer</span><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></p><p class="footer-contact"><span>Geschäftsführung · Christopher Gärtner</span><a href="mailto:geschaeftsfuehrung@auto-lackierzentrum.de">geschaeftsfuehrung@auto-lackierzentrum.de</a></p></div><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Fuhrpark &amp; Partnerschaft</a><a href="{{ url_for('oeffentliches_team') }}#unsere-geschichte">Unsere Geschichte</a><a href="{{ portal_links.karriere }}">Stellen &amp; Karriere</a></nav><nav aria-label="Zugänge und Rechtliches"><a href="{{ url_for('oeffentliche_portale') }}">Kunden- &amp; Partnerzugänge</a>{% if config.SERVICE_APP_ENABLED %}<a href="{{ portal_links.service }}">Service-App · Fahrzeuge &amp; Termine</a>{% endif %}<a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}</nav></div></footer>
+  <footer class="site-footer"><div class="wrap footer-grid"><div><strong>{{ werkstatt_oeffentlich.name }}</strong><p>{{ werkstatt_oeffentlich.adresse }}</p><p class="footer-contact"><span>Büro &amp; Partnerbetreuung · Margita Höfer</span><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></p><p class="footer-contact"><span>Geschäftsführung · Christopher Gärtner</span><a href="mailto:geschaeftsfuehrung@auto-lackierzentrum.de">geschaeftsfuehrung@auto-lackierzentrum.de</a></p></div><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Fuhrpark &amp; Partnerschaft</a><a href="{{ url_for('oeffentliches_team') }}#unsere-geschichte">Unsere Geschichte</a><a href="{{ portal_links.karriere }}">Stellen &amp; Karriere</a></nav><nav aria-label="Zugänge und Rechtliches"><a href="{{ url_for('oeffentliche_portale') }}">Kunden- &amp; Partnerzugänge</a>{% if config.SERVICE_APP_ENABLED %}<a href="{{ portal_links.service }}">Service-App · Fahrzeuge &amp; Termine</a>{% endif %}<a href="{{ portal_links.mietwagen }}">Mietwagen</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}</nav></div></footer>
   <script>
   (() => {
     const button = document.querySelector('.menu-toggle');

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{% if formdata.get('anliegen') == 'bremsenservice' or bremsen_gesendet %}Bremsenservice anfragen{% elif formdata.get('anliegen') == 'reifenservice' or reifen_gesendet %}Reifen-Termin buchen{% elif kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | Gärtner GmbH Karosserie + Lack</title>
+  <title>{% if formdata.get('anliegen') == 'bremsenservice' or bremsen_gesendet %}Bremsenservice anfragen{% elif formdata.get('anliegen') == 'reifenservice' or reifen_gesendet %}Reifen-Termin buchen{% elif kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | {{ werkstatt_oeffentlich.name }}</title>
   <meta name="description" content="Unverbindliche Privatkunden-Anfrage für Lack, Glasschaden, Reparatur, Bremsenservice, Reifenservice, Einlagerung, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
   {% if formdata.get('anliegen') == 'reifenservice' and not gesendet %}<link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifenpreise.css') }}">{% endif %}
   <style>
@@ -135,7 +135,7 @@
 <body>
   <header class="top">
     <nav class="wrap nav" aria-label="Navigation">
-      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='104px', dimensions=true) }} alt="Gärtner GmbH Karosserie + Lack" decoding="async"><span>Gärtner GmbH Karosserie + Lack</span></a>
+      <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='104px', dimensions=true) }} alt="{{ werkstatt_oeffentlich.name }}" decoding="async"><span>{{ werkstatt_oeffentlich.name }}</span></a>
       <a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Zur Homepage</a>
     </nav>
   </header>

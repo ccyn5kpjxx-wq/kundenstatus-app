@@ -23,6 +23,7 @@ from flask import Blueprint, abort, current_app, make_response, render_template,
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from mos_contract_delivery import _single_address, _smtp_send
+from werkstatt_kontakt import public_workshop_contact
 
 
 MAX_BODY = 8192
@@ -289,6 +290,10 @@ def register(portal, *, enabled=False, test_mode=False):
         finally:
             db.close()
     bp = Blueprint('mos_termination', __name__, url_prefix='/mieten')
+
+    @bp.context_processor
+    def workshop_contact_context():
+        return {'werkstatt_oeffentlich': public_workshop_contact()}
 
     @bp.before_request
     def guard():
