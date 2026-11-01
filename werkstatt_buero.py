@@ -2,6 +2,7 @@
 from flask import Blueprint, abort, g, redirect, render_template, request, session, url_for
 
 from werkstatt_buero_zugang import CATEGORY_LABELS, OFFICE_ALLOWED_ENDPOINTS
+from werkstatt_buero_posteingang import InboxBlocked, confirmed_ceo_mailbox_user
 
 
 NAVIGATION = (
@@ -142,7 +143,11 @@ def register_office_cockpit(p):
             configured_user = str(p.get_werkstatt_imap_config().get('user', '')).strip().casefold()
             ceo_user = str(p.get_app_setting('OFFICE_CEO_MAIL_ADDRESS', '') or
                            p.app.config.get('OFFICE_CEO_MAIL_ADDRESS', '')).strip().casefold()
-            if not ceo_user or not configured_user or configured_user == ceo_user:
+            try:
+                ceo_mailbox_user = confirmed_ceo_mailbox_user(p, ceo_user).casefold()
+            except InboxBlocked:
+                ceo_mailbox_user = ''
+            if not ceo_user or not ceo_mailbox_user or not configured_user or configured_user in (ceo_user, ceo_mailbox_user):
                 abort(403, description='Das Geschäftsführer-Postfach ist dem Chefbereich vorbehalten. Für das Büro ist ein eigenes geschäftliches Postfach erforderlich.')
         if request.endpoint == 'assistent.page':
             return redirect('/werkstatt/buero')

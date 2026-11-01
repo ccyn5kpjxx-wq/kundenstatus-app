@@ -20,7 +20,8 @@ from werkzeug.datastructures import FileStorage
 from mailbox_client import Mailbox
 from werkstatt_buero_analyse import analyse_document
 from werkstatt_buero_posteingang import (InboxBlocked, OfficeInbox, ReadonlyIMAP, PortalInventory,
-                                       LexwarePurchaseIndex, MAX_ATTACHMENT, document_identity)
+                                       LexwarePurchaseIndex, MAX_ATTACHMENT, document_identity,
+                                       confirmed_ceo_mailbox_user)
 from werkstatt_mitarbeiter_portal import _document
 
 
@@ -254,7 +255,10 @@ class OfficeInboxBindings:
     def readiness(self):
         problems=[]
         address=self.address()
-        try:self.pipeline._account(address)
+        mailbox_user=""
+        try:
+            mailbox_user=confirmed_ceo_mailbox_user(self.p,address)
+            self.pipeline._account(address)
         except (InboxBlocked,PermissionError) as exc:problems.append(str(exc))
         config=self.p.get_werkstatt_imap_config()
         if not config.get("configured") or not config.get("ssl") or not config.get("password") or not config.get("host"):
@@ -264,7 +268,9 @@ class OfficeInboxBindings:
         if getattr(self.p,"LEXWARE_API_BASE_URL","").rstrip("/")!="https://api.lexware.io" or not getattr(self.p,"LEXWARE_API_KEY",""):
             problems.append("Der vorhandene offizielle Lexware-GET-Zugang ist nicht vollständig eingerichtet.")
         if not getattr(self.p,"office_documents",None):problems.append("Der geschützte Portal-Belegworkflow ist nicht eingerichtet.")
-        return {"address":address,"ready":not problems,"problems":problems}
+        return {"address":address,"mailbox_user":mailbox_user,
+                "shared_mailbox":bool(mailbox_user and mailbox_user.casefold()!=str(address).strip().casefold()),
+                "ready":not problems,"problems":problems}
 
     def _read_official(self,path,*,max_bytes,accept,budget=None):
         if budget:budget.check()

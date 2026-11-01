@@ -98,8 +98,11 @@ Absenderadresse oder der Originalauswertung.
 ## Mailabgleich und Betriebsstand
 
 Die Chefseite `/admin/buero/posteingang-abgleich` prüft ihre Quellen vor einem
-ausdrücklich gestarteten Lauf. Das bestätigte Geschäftsführer-Konto muss mit
-dem vorhandenen verschlüsselten IMAP-Zugang übereinstimmen. Ein unvollständiger
+ausdrücklich gestarteten Lauf. Die bestätigte Geschäftsführer-Adresse muss mit
+dem vorhandenen verschlüsselten IMAP-Zugang oder dessen ausdrücklich gesetzter
+`OFFICE_CEO_MAILBOX_USER`-Zuordnung übereinstimmen. Ohne diese Zuordnung bleibt
+die strenge Adressgleichheit bestehen. Ein bestätigtes gemeinsames Chefpostfach
+bleibt für den allgemeinen Büro-Mailboxzugang gesperrt. Ein unvollständiger
 Altbestand oder ein anderer Scan ohne verifizierte Rechnungsidentität sperrt
 die automatische Neuanlage. Details stehen in [buero-posteingang.md](buero-posteingang.md).
 

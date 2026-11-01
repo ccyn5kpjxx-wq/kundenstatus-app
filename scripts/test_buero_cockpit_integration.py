@@ -259,7 +259,7 @@ class OfficeCockpitIntegration(unittest.TestCase):
     def setUp(self):
         self.enterContext(isolated_operations())
         self.enterContext(patch.dict(p.app.config, TESTING=True,
-                                    OFFICE_CEO_MAIL_ADDRESS='chef@example.invalid'))
+                                    OFFICE_CEO_MAIL_ADDRESS='chef@example.invalid', OFFICE_CEO_MAILBOX_USER=''))
         self.enterContext(patch.object(p, 'get_werkstatt_imap_config',
                                       return_value={'user': 'info@example.invalid'}))
         # Register before fixture writes: even a caught forbidden operation in
@@ -583,6 +583,14 @@ class OfficeCockpitIntegration(unittest.TestCase):
                     self.assertEqual(self.get('/admin/mail').status_code, 403)
                     self.assertEqual(self.get('/admin/mail/messages').status_code, 403)
             with patch.dict(p.app.config, OFFICE_CEO_MAIL_ADDRESS=''):
+                self.assertEqual(self.get('/admin/mail').status_code, 403)
+            for mapping in ('info@example.invalid', ' INFO@EXAMPLE.INVALID ', 'invalid mapping'):
+                with self.subTest(mapping=mapping), patch.dict(p.app.config, OFFICE_CEO_MAILBOX_USER=mapping):
+                    self.assertEqual(self.get('/admin/mail').status_code, 403)
+                    self.assertEqual(self.get('/admin/mail/messages').status_code, 403)
+                    self.assertEqual(self.get('/admin/mail/message/1').status_code, 403)
+                    self.assertEqual(self.get('/admin/mail/message/1/attachment/0').status_code, 403)
+            with patch.dict(p.app.config, OFFICE_CEO_MAIL_ADDRESS='invalid ceo', OFFICE_CEO_MAILBOX_USER='shared@example.invalid'):
                 self.assertEqual(self.get('/admin/mail').status_code, 403)
             connect.assert_not_called()
 

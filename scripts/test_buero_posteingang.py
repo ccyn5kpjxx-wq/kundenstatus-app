@@ -54,7 +54,8 @@ class OfficeInboxTests(TestCase):
         self.setting = "ceo@example.invalid"
         self.config = {"user": self.setting}
         self.p = SimpleNamespace(get_db=db, portal_originals_operation_lock=lambda:RLock(),
-            get_app_setting=lambda k,d:self.setting, get_werkstatt_imap_config=lambda:self.config)
+            get_app_setting=lambda k,d:self.setting if k == "OFFICE_CEO_MAIL_ADDRESS" else getattr(self, "mailbox_setting", d),
+            get_werkstatt_imap_config=lambda:self.config)
         self.authorize = Mock(return_value=True)
         self.service = register_office_inbox(self.p, authorize=self.authorize)
         self.service.init_schema()
@@ -77,6 +78,39 @@ class OfficeInboxTests(TestCase):
         self.authorize.return_value=False
         with self.assertRaises(PermissionError): self.run_mail()
         self.mailbox.messages.assert_not_called()
+    def test_explicit_shared_mailbox_mapping_preserves_chef_alias_and_readonly_scope(self):
+        self.mailbox_setting=" INFO@EXAMPLE.INVALID "
+        self.config={"user":"info@example.invalid"}
+        result=self.run_mail()
+        self.assertTrue(result["account_verified"])
+        self.assertEqual((result["lexware_writes"],result["bank_actions"],result["mail_flags_changed"]),(0,0,False))
+        with self.assertRaises(InboxBlocked):self.service._account("info@example.invalid")
+        self.config={"user":"other@example.invalid"}
+        with self.assertRaises(InboxBlocked):self.run_mail()
+    def test_mailbox_mapping_settings_override_config_and_invalid_values_fail_closed(self):
+        self.p.app=SimpleNamespace(config={"OFFICE_CEO_MAILBOX_USER":"config@example.invalid"})
+        self.mailbox_setting="confirmed@example.invalid";self.config={"user":self.mailbox_setting}
+        self.assertTrue(self.run_mail()["account_verified"])
+        for value in (" ","first@example.invalid,second@example.invalid","bad\n@example.invalid",True):
+            self.mailbox_setting=value
+            with self.subTest(value=value),self.assertRaises(InboxBlocked):self.run_mail()
+        self.mailbox_setting="";self.config={"user":"config@example.invalid"}
+        self.assertTrue(self.run_mail()["account_verified"])
+        self.p.app.config["OFFICE_CEO_MAILBOX_USER"]=""
+        with self.assertRaises(InboxBlocked):self.run_mail()
+    def test_shared_inbox_receipts_are_distinct_but_portal_original_is_reused(self):
+        self.run_mail()
+        with closing(self.p.get_db()) as db:
+            before=db.execute("SELECT account_hash,source_key FROM buero_posteingang_receipts").fetchone()
+        expected=hashlib.sha256(b"ceo@example.invalid").hexdigest()
+        self.assertEqual(before["account_hash"],expected)
+        self.mailbox_setting="info@example.invalid";self.config={"user":self.mailbox_setting}
+        self.run_mail();self.run_mail()
+        with closing(self.p.get_db()) as db:
+            rows=db.execute("SELECT account_hash,source_key FROM buero_posteingang_receipts").fetchall()
+        self.assertEqual((len(rows),len(self.portal.creates)),(2,1))
+        self.assertEqual(len({row["account_hash"] for row in rows}),2)
+        self.assertEqual(len({row["source_key"] for row in rows}),2)
     def test_server_config_fallback_still_requires_matching_imap_user(self):
         self.setting=""
         self.p.app=SimpleNamespace(config={"OFFICE_CEO_MAIL_ADDRESS":"ceo@example.invalid"})

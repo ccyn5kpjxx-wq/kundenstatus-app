@@ -34,6 +34,22 @@ class InboxBlocked(RuntimeError):
     pass
 
 
+def confirmed_ceo_mailbox_user(portal, ceo_address):
+    """Resolve only an explicitly configured mailbox, otherwise the CEO address."""
+    if not isinstance(ceo_address, str) or not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", ceo_address.strip()):
+        raise InboxBlocked("Eine ausdrücklich bestätigte Chef-Mailadresse fehlt. Keine Mailbox wurde gelesen.")
+    app = getattr(portal, "app", None)
+    config = app.config if app is not None else {}
+    value = portal.get_app_setting("OFFICE_CEO_MAILBOX_USER", "")
+    if value in (None, ""):
+        value = config.get("OFFICE_CEO_MAILBOX_USER", "")
+    if value in (None, ""):
+        value = ceo_address
+    if not isinstance(value, str) or not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", value.strip()):
+        raise InboxBlocked("Die ausdrücklich bestätigte Chef-Postfachzuordnung ist ungültig. Keine Mailbox wurde gelesen.")
+    return value.strip()
+
+
 def document_identity(meta):
     """Only independently evidenced identity, never amount/subject alone."""
     if not isinstance(meta, dict) or meta.get("identity_verified") is not True:
@@ -280,9 +296,10 @@ class OfficeInbox:
         configured = app.config.get("OFFICE_CEO_MAIL_ADDRESS", "") if app is not None else ""
         setting = self.p.get_app_setting("OFFICE_CEO_MAIL_ADDRESS", "") or configured
         config = self.p.get_werkstatt_imap_config()
+        mailbox_user = confirmed_ceo_mailbox_user(self.p, address)
         if (not setting or str(setting).strip().casefold() != address.casefold()
-                or not isinstance(config, dict) or str(config.get("user", "")).strip().casefold() != address.casefold()):
-            raise InboxBlocked("Chef-Mailadresse und konfiguriertes IMAP-Konto sind nicht eindeutig gleich. Keine Mailbox wurde gelesen.")
+                or not isinstance(config, dict) or str(config.get("user", "")).strip().casefold() != mailbox_user.casefold()):
+            raise InboxBlocked("Chef-Mailadresse und bestätigte Postfachzuordnung passen nicht zum konfigurierten IMAP-Konto. Keine Mailbox wurde gelesen.")
         return config
 
     def _record(self, source_key, account_hash, message, digest, result):
@@ -304,7 +321,7 @@ class OfficeInbox:
 
     def run(self, account_address, *, mailbox=None, portal=None, lexware=None, metadata=None,
             lookback_days=14, max_messages=80, max_attachments=40, now=None):
-        self._account(account_address)
+        account = self._account(account_address)
         if not (1 <= lookback_days <= 90 and 1 <= max_messages <= 200 and 1 <= max_attachments <= 100):
             raise ValueError("Sichere Lauflimits einhalten.")
         mailbox = mailbox or getattr(self.p, "office_inbox_mail_transport", None)
@@ -313,7 +330,13 @@ class OfficeInbox:
         if mailbox is None or portal is None or lexware is None:
             raise InboxBlocked("Mail-, Portal- und Lexware-Abgleich müssen ausdrücklich mit vollständigen Quellen eingerichtet sein.")
         today = (now or datetime.now(ZoneInfo("Europe/Berlin"))).date()
-        account_hash = hashlib.sha256(account_address.casefold().encode()).hexdigest()
+        account_identity = account_address.casefold()
+        mailbox_user = str(account["user"]).strip().casefold()
+        if mailbox_user != account_identity:
+            # Keep existing strict-account receipts stable, but distinguish an
+            # explicitly shared physical inbox from another mailbox's UIDs.
+            account_identity += "\0" + mailbox_user
+        account_hash = hashlib.sha256(account_identity.encode()).hexdigest()
         results, total_bytes, attachment_count = [], 0, 0
         for message_count, message in enumerate(mailbox.messages(today-timedelta(days=lookback_days), today+timedelta(days=1), max_messages), 1):
             if message_count > max_messages or not all(re.fullmatch(r"[0-9]{1,30}", str(message.get(k, ""))) for k in ("uid", "uidvalidity")):

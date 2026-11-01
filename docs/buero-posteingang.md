@@ -6,9 +6,10 @@ automatische Kontoauswahl und keine Bank- oder Lexware-Schreibaktion.
 Ein Lauf benötigt einen ausdrücklichen Chefauftrag: im Request die Chefsession,
 außerhalb davon einen bei der Registrierung injizierten Autorisierungscallback.
 Die gespeicherte Einstellung `OFFICE_CEO_MAIL_ADDRESS` (alternativ der vom
-Betreiber gesetzte gleichnamige `app.config`-Wert), die angegebene Adresse und der
-konfigurierte IMAP-Benutzer müssen übereinstimmen. Ein allgemeines Werkstattkonto
-wird niemals als Chefkonto angenommen.
+Betreiber gesetzte gleichnamige `app.config`-Wert) und die angegebene Chefadresse
+müssen übereinstimmen. Standardmäßig muss auch der konfigurierte IMAP-Benutzer
+dieser Adresse entsprechen. Ein allgemeines Werkstattkonto wird niemals
+ungefragt als Chefkonto angenommen.
 
 ## Konkrete Bedienung und Konfiguration
 
@@ -24,8 +25,34 @@ Eine normale Büro- oder Mitarbeiteranmeldung reicht für diese Seite nicht.
 Die ausdrücklich bestätigte Quelle ist
 `geschaeftsfuehrung@auto-lackierzentrum.de`. Die gespeicherte Einstellung
 `OFFICE_CEO_MAIL_ADDRESS` hat Vorrang vor dem gleichnamigen `app.config`-Wert.
-Vor einem Lauf müssen der tatsächlich konfigurierte IMAP-Benutzer und diese
-Adresse übereinstimmen. Bestehende IMAP-Konfiguration muss vollständig sein,
+Ohne weitere Zuordnung muss der tatsächlich konfigurierte IMAP-Benutzer dieser
+Adresse entsprechen. Bei einem ausdrücklich bestätigten gemeinsamen Postfach
+kann `OFFICE_CEO_MAILBOX_USER` den erwarteten IMAP-Benutzer benennen. Für beide
+Einstellungen gilt: gespeicherter Wert vor gleichnamigem `app.config`-Wert;
+wenn beide Postfachwerte fehlen oder leer sind, gilt die strenge Chefadresse. Ungültige ausdrückliche Zuordnungen sperren den Lauf. Es gibt keinen
+Fallback auf den zufällig vorhandenen IMAP-Benutzer und keine Übernahme aus
+Formularfeldern. Die Chefadresse bleibt auch beim Alias unverändert.
+
+Nach Bestätigung, dass Chefpost tatsächlich im gemeinsamen info-Posteingang
+ankommt, ist die nicht geheime Konfiguration beispielsweise:
+
+```text
+OFFICE_CEO_MAIL_ADDRESS=geschaeftsfuehrung@auto-lackierzentrum.de
+OFFICE_CEO_MAILBOX_USER=info@auto-lackierzentrum.de
+```
+
+Dies ändert keine IMAP-Zugangsdaten. Der vorhandene IMAP-Benutzer muss exakt der
+bestätigten Postfachzuordnung entsprechen. Die Chefseite zeigt beide Adressen.
+Ein gemeinsamer Lauf liest bewusst die **gesamte gemeinsame INBOX**, ohne
+To-/Aliasfilter; Bcc/Weiterleitungen werden nicht über Headerannahmen getrennt.
+Auch ein allgemeiner Büro-Mailboxgrant darf dieses zugeordnete Chefpostfach
+nicht öffnen. Die ursprüngliche Chefadresse bleibt ebenfalls gesperrt.
+Zuordnungen auf einen anderen physischen Postfachbenutzer erhalten getrennte
+Abgleichsnachweise; bestehende strenge Zuordnungen behalten ihre bisherigen
+Receiptreferenzen. Original-Dubletten werden weiterhin global wiederverwendet.
+
+Die Bereitschaftsanzeige prüft nur Konfiguration, keinen Verbindungserfolg.
+Bestehende IMAP-Konfiguration muss vollständig sein,
 TLS verwenden und INBOX auswählen. Die Bindung beschafft weder neue Zugänge
 noch Passwörter und nimmt kein allgemeines Werkstattkonto ersatzweise an.
 Bei anderer oder fehlender Konfiguration bleibt der Lauf gesperrt.

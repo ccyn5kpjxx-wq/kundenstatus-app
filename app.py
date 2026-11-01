@@ -59774,6 +59774,7 @@ app.config['OFFICE_AI_ANALYSIS_ENABLED'] = env_flag('OFFICE_AI_ANALYSIS_ENABLED'
 office_document_ai = register_office_document_ai(sys.modules[__name__])
 app.config['OFFICE_LEXWARE_UPLOAD_ENABLED'] = env_flag('OFFICE_LEXWARE_UPLOAD_ENABLED', True)
 app.config['OFFICE_CEO_MAIL_ADDRESS'] = os.environ.get('OFFICE_CEO_MAIL_ADDRESS', 'geschaeftsfuehrung@auto-lackierzentrum.de')
+app.config['OFFICE_CEO_MAILBOX_USER'] = os.environ.get('OFFICE_CEO_MAILBOX_USER', '')
 office_inbox = register_office_inbox(sys.modules[__name__])
 office_inbox_init_schema = office_inbox.init_schema
 office_inbox.init_schema()

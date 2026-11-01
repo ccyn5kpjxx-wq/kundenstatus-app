@@ -161,11 +161,38 @@ class InboxBindingsTests(TestCase):
         self.p.config["user"]="different@example.invalid"
         response=self.admin.post(ROUTE,data=self.fields())
         self.assertEqual(response.status_code,400)
-        self.assertIn("nicht eindeutig gleich",response.get_data(as_text=True))
+        self.assertIn("bestätigte Postfachzuordnung",response.get_data(as_text=True))
         self.assertNotIn("different@example.invalid",response.get_data(as_text=True))
         self.p.office_inbox_connection_factory.assert_not_called()
         self.p.app.config["OFFICE_CEO_MAIL_ADDRESS"]=""
         with self.assertRaises(InboxBlocked):self.run_chef()
+    def test_explicit_shared_inbox_is_visible_in_inert_readiness_and_runs_readonly(self):
+        self.p.app.config["OFFICE_CEO_MAILBOX_USER"]="info@example.invalid"
+        self.p.config["user"]="info@example.invalid"
+        response=self.admin.get(ROUTE);html=response.get_data(as_text=True)
+        self.assertEqual(response.status_code,200)
+        self.assertIn(CEO,html);self.assertIn("info@example.invalid",html)
+        self.assertIn("gesamte gemeinsame INBOX",html)
+        self.p.office_inbox_connection_factory.assert_not_called()
+        with self.p.app.test_request_context():
+            from flask import session
+            session["admin"]=True
+            ready=self.service.readiness()
+        self.assertTrue(ready["ready"]);self.assertTrue(ready["shared_mailbox"])
+        response=self.admin.post(ROUTE,data=self.fields())
+        self.assertEqual(response.status_code,200,response.get_data(as_text=True))
+        self.assertTrue(all(options.get("readonly") is True for _,options in self.connection.selects))
+        self.assertTrue(all(command[0] in ("search","fetch") for command in self.connection.commands))
+        self.assertEqual((self.rows()[0]["payable"],self.rows()[0]["business_confirmed"]),(0,0))
+    def test_shared_inbox_requires_explicit_mapping_and_cannot_be_selected_in_request(self):
+        self.p.config["user"]="info@example.invalid"
+        response=self.admin.post(ROUTE,data=self.fields(OFFICE_CEO_MAILBOX_USER="info@example.invalid"))
+        self.assertEqual(response.status_code,400)
+        self.p.office_inbox_connection_factory.assert_not_called()
+        self.p.app.config["OFFICE_CEO_MAILBOX_USER"]="other@example.invalid"
+        self.assertEqual(self.admin.post(ROUTE,data=self.fields()).status_code,400)
+        self.p.settings["OFFICE_CEO_MAILBOX_USER"]="info@example.invalid"
+        self.assertEqual(self.admin.post(ROUTE,data=self.fields()).status_code,200)
     def test_inactive_sources_or_unencrypted_or_other_folder_block(self):
         for key,value in (("configured",False),("ssl",False),("folder","Archive"),("password","")):
             original=self.p.config[key];self.p.config[key]=value
