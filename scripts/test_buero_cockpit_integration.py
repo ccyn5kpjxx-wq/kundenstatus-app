@@ -764,5 +764,60 @@ class OfficeCockpitIntegration(unittest.TestCase):
         self.assertEqual(self.get(vacation).status_code, 403)
 
 
+    def test_15_chef_reviews_scan_draft_directly_without_requesting_own_approval(self):
+        base = '/werkstatt/buero/belege'
+        upload = self.rendered_form(self.get(base), form_action=base + '/erfassen')
+        text = '\n'.join([
+            'Rechnung', 'Lieferant: Musterlieferant Chefprüfung GmbH',
+            'Rechnungsnummer: CHEF-DIREKT-2026-001', 'Rechnungsdatum: 01.11.2026',
+            'Fällig am: 15.11.2026', 'Gesamtbetrag brutto: 119,00 EUR',
+            'Nur synthetische Daten, keine echte Zahlungsaufforderung.',
+        ])
+        stream = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=250)
+        writer.add_metadata({'/Title': 'SYNTHETIC direct chief review'})
+        writer.write(stream)
+        with patch.dict(p.app.config, OFFICE_AI_ANALYSIS_ENABLED=False), patch.object(
+                p, 'extract_document_text_local', return_value=text):
+            response = self.submit_rendered(upload, base,
+                original=(BytesIO(stream.getvalue()), 'synthetic-direct-chief.pdf'))
+        self.assertEqual(response.status_code, 303)
+        key = response.headers['Location'].rstrip('/').rsplit('/', 1)[-1]
+        chief_path = '/admin/buero/belege/' + key
+        chief = self.get(chief_path, self.admin)
+        html = chief.get_data(as_text=True)
+        self.assertIn('Deine Freigabe', html)
+        self.assertNotIn('Zur Cheffreigabe einreichen', html)
+        self.assertNotIn('action="' + chief_path + '/einreichen"', html)
+        self.assertIn('Rechnung zur Zahlung freigeben', html)
+        form = self.rendered_form(chief, form_action=chief_path + '/freigeben')
+        self.assertEqual((form['data']['typ'], form['data']['kategorie']), ('rechnung', 'rechnung'))
+        # The office keeps its own submission form and cannot approve as chief.
+        self.rendered_form(self.get(base + '/' + key), form_action=base + '/' + key + '/einreichen')
+        self.assertEqual(self.submit_rendered(form, chief_path,
+            bereich='geschaeftlich', confirmed='ja', csrf_token='synthetic-office-csrf').status_code, 403)
+        with closing(p.get_db()) as db:
+            before = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual(before['status'], 'entwurf')
+        invalid = self.submit_rendered(form, chief_path, client=self.admin,
+            typ='rechnung', kategorie='rechnung', bereich='', confirmed='ja')
+        self.assertEqual(invalid.status_code, 400)
+        with closing(p.get_db()) as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone()), before)
+        with patch.object(p.office_lexware, 'send_approved', return_value={'state': 'linked'}) as transfer:
+            result = self.submit_rendered(form, chief_path, client=self.admin,
+                bereich='geschaeftlich', confirmed='ja', chef_notiz='Synthetischer Beleg geprüft.')
+            self.assertEqual(result.status_code, 303)
+            replay = self.submit_rendered(form, chief_path, client=self.admin,
+                bereich='geschaeftlich', confirmed='ja')
+            self.assertEqual(replay.status_code, 409)
+        with closing(p.get_db()) as db:
+            approved = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual((approved['status'], approved['typ'], approved['kategorie'], approved['payable']),
+                         ('freigegeben', 'rechnung', 'rechnung', 1))
+        transfer.assert_called_once_with(key, approved['revision'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -61,6 +61,9 @@ Im Chef-Cockpit führt **Rechnungen zur Freigabe** nach
    Freigabe auf Chef und erfassende Person begrenzt.
 3. Chef bestätigt die geschäftliche oder private Zuordnung ausdrücklich.
    Bescheide und Zahlungsaufträge benötigen eine eigene Zahlungsbestätigung.
+   In seiner eigenen Ansicht kann er auch einen erfassten Scan direkt prüfen
+   und freigeben. Belegart, Ordner und Originalprüfung werden dabei zusammen
+   mit der Entscheidung gespeichert; eine Einreichung an sich selbst entfällt.
 4. Das Büro erhält die freigegebene Zahlungsaufgabe. Betriebliche Rechnungen
    und passende Bescheide können mit ihrem Original an Lexware übergeben werden.
    Lexware bleibt für Erfassung, Kontierung und persönliche Bankfreigabe zuständig.

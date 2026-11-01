@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import base64
 import hashlib
 import io
+import json
 from pathlib import Path
 import sqlite3
 import sys
@@ -149,6 +150,146 @@ class OfficeDocumentTests(unittest.TestCase):
             if admin: session["admin"] = True
             else: session["office_mid"] = mid
             return self.p.documents.record_extracted_fields(key, str(version or self.row(key)["revision"]), fields, **kwargs)
+
+    def test_chef_directly_approves_classified_draft_in_one_revision_without_self_submission(self):
+        key = self.create(raw=pdf_bytes("direct-chef-draft"), typ="post", kategorie="")
+        before = self.row(key)
+        approved = []
+        self.p.office_document_approved = approved.append
+        response = self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="rechnung")
+        self.assertEqual(response.status_code, 303)
+        after = self.row(key)
+        self.assertEqual((after["typ"], after["kategorie"], after["status"], after["payable"], after["business_confirmed"]),
+                         ("rechnung", "rechnung", "freigegeben", 1, 1))
+        self.assertEqual(after["revision"], before["revision"] + 1)
+        self.assertEqual(after["submitted_at"], "")
+        for field in ("original_base64", "sha256", "created_by", "betrag_cent"):
+            self.assertEqual(after[field], before[field])
+        audit = self.rows(TABLES[1])
+        self.assertEqual(len(audit), 2)
+        entry = next(row for row in audit if row["aktion"] == "freigegeben")
+        details = json.loads(entry["details_json"])
+        self.assertEqual(details["vorher_status"], "entwurf")
+        self.assertTrue(details["direkte_chefpruefung"])
+        self.assertTrue(details["klassifizierung_geaendert"])
+        self.assertFalse(any(row["aktion"] == "eingereicht" for row in audit))
+        self.assertEqual(approved, [key])
+        self.assertEqual(self.counts()["zahlung_offen"], 1)
+        self.assertEqual(self.counts(admin=True)["offen_anzahl"], 0)
+
+    def test_direct_approval_requires_explicit_classification_and_failed_attempt_changes_nothing(self):
+        key = self.create(raw=pdf_bytes("explicit-classification"), typ="post")
+        before, audits = self.row(key), self.rows(TABLES[1])
+        for fields in ({}, {"typ": "rechnung"}, {"kategorie": "rechnung"},
+                       {"typ": "rechnung", "kategorie": ""},
+                       {"typ": "unknown", "kategorie": "rechnung"},
+                       {"typ": "rechnung", "kategorie": "unknown"}):
+            with self.subTest(fields=fields):
+                self.assertEqual(self.action(key, "freigeben", admin=True, **fields).status_code, 400)
+                self.assertEqual(self.row(key), before)
+                self.assertEqual(self.rows(TABLES[1]), audits)
+
+    def test_direct_invoice_checks_all_required_source_fields_before_changing_type(self):
+        for missing in ("lieferant", "belegnummer", "belegdatum", "betrag_brutto"):
+            with self.subTest(missing=missing):
+                key = self.create(raw=pdf_bytes("direct-missing-" + missing), typ="post", **{missing: ""})
+                before, audits = self.row(key), self.rows(TABLES[1])
+                self.assertEqual(self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="rechnung").status_code, 400)
+                self.assertEqual(self.row(key), before)
+                self.assertEqual(self.rows(TABLES[1]), audits)
+
+    def test_returned_document_can_be_directly_reviewed_without_second_submission(self):
+        key = self.create(raw=pdf_bytes("returned-direct"))
+        self.submit(key)
+        self.assertEqual(self.action(key, "zurueckweisen", admin=True, chef_notiz="Synthetic correction requested").status_code, 303)
+        before = self.row(key)
+        self.assertEqual(before["status"], "zurueckgewiesen")
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="privat", bereich="privat").status_code, 303)
+        row = self.row(key)
+        self.assertEqual((row["status"], row["bereich"], row["business_confirmed"], row["payable"]), ("freigegeben", "privat", 0, 1))
+        self.assertEqual(row["revision"], before["revision"] + 1)
+        self.assertEqual(len([entry for entry in self.rows(TABLES[1]) if entry["aktion"] == "eingereicht"]), 1)
+
+    def test_direct_bescheid_and_payment_order_keep_their_distinct_payment_confirmations(self):
+        reviewed = self.create(raw=pdf_bytes("direct-bescheid-review"), typ="post")
+        self.assertEqual(self.action(reviewed, "freigeben", admin=True, typ="bescheid", kategorie="gebuehren").status_code, 303)
+        self.assertEqual(self.row(reviewed)["payable"], 0)
+        payable = self.create(raw=pdf_bytes("direct-bescheid-pay"), typ="post")
+        self.assertEqual(self.action(payable, "freigeben", admin=True, typ="bescheid", kategorie="gebuehren", zahlungspflichtig="ja").status_code, 303)
+        self.assertEqual(self.row(payable)["payable"], 1)
+        order = self.create(raw=pdf_bytes("direct-order"), **self.order_fields())
+        before, audits = self.row(order), self.rows(TABLES[1])
+        self.assertEqual(self.action(order, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete").status_code, 400)
+        self.assertEqual(self.row(order), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        self.assertEqual(self.action(order, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja").status_code, 303)
+        self.assertEqual((self.row(order)["payable"], self.row(order)["quelle_geprueft"]), (1, 1))
+
+    def test_direct_classification_changes_validate_mode_and_dedup_before_commit(self):
+        raw = pdf_bytes("classification-dedup")
+        original = self.create(raw=raw, typ="post")
+        order = self.create(raw=raw, **self.order_fields(zahlungsmodus="einzelzahlung", lieferant="Synthetic Supplier",
+                            belegdatum="2026-01-03", belegnummer="SYN-ORDER"))
+        before, audits = self.row(order), self.rows(TABLES[1])
+        self.assertNotEqual(original, order)
+        self.assertEqual(self.action(order, "freigeben", admin=True, typ="rechnung", kategorie="rechnung").status_code, 400)
+        self.assertEqual(self.row(order), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        monthly = self.create(raw=pdf_bytes("classification-monthly-mode"), **self.order_fields())
+        before, audits = self.row(monthly), self.rows(TABLES[1])
+        self.assertEqual(self.action(monthly, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="kaution", zahlungspflichtig="ja").status_code, 400)
+        self.assertEqual(self.row(monthly), before); self.assertEqual(self.rows(TABLES[1]), audits)
+
+    def test_submitted_classification_change_cannot_bypass_invoice_requirements(self):
+        key = self.create(raw=pdf_bytes("submitted-reclassification"), typ="post", lieferant="", belegnummer="", belegdatum="", betrag_brutto="")
+        self.submit(key)
+        before, audits = self.row(key), self.rows(TABLES[1])
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="rechnung").status_code, 400)
+        self.assertEqual(self.row(key), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="post", kategorie="sonstige").status_code, 303)
+        self.assertEqual((self.row(key)["status"], self.row(key)["payable"]), ("freigegeben", 0))
+
+    def test_direct_approval_has_fresh_revision_and_admin_boundary(self):
+        key = self.create(raw=pdf_bytes("direct-stale-and-rights"))
+        before, audits = self.row(key), self.rows(TABLES[1])
+        self.assertEqual(self.action(key, "freigeben", admin=True, client=self.office, typ="rechnung", kategorie="rechnung").status_code, 403)
+        self.assertEqual(self.action(key, "freigeben", admin=True, client=self.anon, typ="rechnung", kategorie="rechnung").status_code, 403)
+        self.assertEqual(self.row(key), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="rechnung").status_code, 303)
+        after, audits = self.row(key), self.rows(TABLES[1])
+        self.assertEqual(self.action(key, "freigeben", admin=True, version=str(before["revision"]), typ="rechnung", kategorie="rechnung").status_code, 409)
+        self.assertEqual(self.row(key), after); self.assertEqual(self.rows(TABLES[1]), audits)
+
+    def test_direct_approval_rejects_corrupt_original_and_rolls_back_failed_audit(self):
+        key = self.create(raw=pdf_bytes("direct-original-check"))
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_belege SET original_base64='broken' WHERE id=?", (key,)); db.commit()
+        before, audits = self.row(key), self.rows(TABLES[1])
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="rechnung", kategorie="rechnung").status_code, 400)
+        self.assertEqual(self.row(key), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        valid = self.create(raw=pdf_bytes("direct-audit-rollback"), typ="post")
+        before, audits, backups = self.row(valid), self.rows(TABLES[1]), list(self.p.backups)
+        with self.p.app.test_request_context():
+            session["admin"] = True
+            with patch.object(self.p.documents, "_audit", side_effect=RuntimeError("synthetic audit failure")):
+                with self.assertRaises(RuntimeError):
+                    self.p.documents.decide(valid, str(before["revision"]), approve=True, kind="rechnung", category="rechnung",
+                                            bereich="geschaeftlich", business_confirmed=True)
+        self.assertEqual(self.row(valid), before); self.assertEqual(self.rows(TABLES[1]), audits)
+        self.assertEqual(self.p.backups, backups)
+
+    def test_chef_counts_unsubmitted_draft_as_open_but_returned_document_remains_office_work(self):
+        key = self.create(raw=pdf_bytes("direct-open-count"), kategorie="rechnung")
+        self.assertEqual((self.counts(admin=True)["neue_anzahl"], self.counts(admin=True)["offen_anzahl"]), (1, 1))
+        self.assertEqual(self.counts(admin=True)["kategorien"]["rechnung"]["offen_anzahl"], 1)
+        with self.p.app.test_request_context():
+            session["admin"] = True
+            result = self.p.documents.list(admin=True)
+            self.assertTrue(result["rows"][0]["is_new"])
+        self.admin.get("/admin/buero/belege/" + key)
+        self.assertEqual((self.counts(admin=True)["neue_anzahl"], self.counts(admin=True)["offen_anzahl"]), (0, 1))
+        self.submit(key)
+        self.assertEqual(self.action(key, "zurueckweisen", admin=True, chef_notiz="Synthetic office correction").status_code, 303)
+        self.assertEqual(self.counts(admin=True)["offen_anzahl"], 0)
+        self.assertEqual(self.counts()["offen_anzahl"], 1)
 
     def test_file_first_upload_analysis_and_short_confirmed_review(self):
         initial = self.office.get("/werkstatt/buero/belege").get_data(as_text=True)

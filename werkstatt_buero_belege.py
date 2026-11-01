@@ -251,6 +251,31 @@ def _payment_order_ready(row):
         raise ValueError("Einzelzahlung anhand der vorliegenden Quelle in der Notiz begründen.")
 
 
+def _submission_ready(row):
+    """Validate the complete proposed classification without persisting it."""
+    payload = {name: row[name] for name in FIELDS if name != "betrag_brutto"}
+    payload["betrag_brutto"] = "" if row["betrag_cent"] is None else f"{row['betrag_cent'] // 100}.{row['betrag_cent'] % 100:02d}"
+    _fields(payload)  # Also checks classification-dependent rental modes.
+    if not row["lieferant"] and row["typ"] in ("rechnung", "bescheid"):
+        raise ValueError("Lieferant / Absender vor der Prüfung ergänzen.")
+    if row["typ"] in ("rechnung", "bescheid") and not row["belegdatum"]:
+        raise ValueError("Belegdatum vor der Prüfung ergänzen.")
+    if row["typ"] == "rechnung" and (not row["belegnummer"] or row["betrag_cent"] is None):
+        raise ValueError("Rechnungsnummer und Bruttobetrag vor der Prüfung ergänzen.")
+    if row["typ"] == "zahlungsauftrag":
+        _payment_order_ready(row)
+
+
+def _review_original(db, row):
+    blob = db.execute("SELECT original_base64 FROM buero_belege WHERE id=?", (row["id"],)).fetchone()
+    try:
+        raw = base64.b64decode(blob["original_base64"], validate=True)
+    except (TypeError, ValueError):
+        raise ValueError("Das gespeicherte Original ist nicht unverändert prüfbar. Vor der Freigabe klären.") from None
+    if len(raw) != row["size_bytes"] or not 0 < len(raw) <= MAX_ORIGINAL_BYTES or hashlib.sha256(raw).hexdigest() != row["sha256"]:
+        raise ValueError("Das gespeicherte Original ist nicht unverändert prüfbar. Vor der Freigabe klären.")
+
+
 def _version(value):
     if not isinstance(value, str) or not re.fullmatch(r"[1-9]\d{0,9}", value) or int(value) > 2147483647:
         raise RevisionConflict("Dieses Formular ist nicht mehr aktuell. Beleg neu öffnen.")
@@ -332,7 +357,7 @@ class OfficeDocuments:
     def _view(row, *, admin=False):
         value = dict(row)
         category = "privat" if value["bereich"] == "privat" else value["kategorie"] or value["kategorie_vorschlag"] or "sonstige"
-        recipient = value["status"] == "eingereicht" if admin else value["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung")
+        recipient = value["status"] in ("entwurf", "eingereicht") if admin else value["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung")
         value.update(typ_label=KINDS[value["typ"]], status_label=STATES[value["status"]],
                      display_name=value["zahlungsempfaenger"] if value["typ"] == "zahlungsauftrag" and value["zahlungsempfaenger"] else value["lieferant"],
                      kategorie_effektiv=category, kategorie_label=CATEGORIES.get(category, "Sonstige Post"),
@@ -439,11 +464,11 @@ class OfficeDocuments:
         for row in rows:
             category = "privat" if row["bereich"] == "privat" else row["kategorie"] or row["kategorie_vorschlag"] or "sonstige"
             bucket = categories.get(category, categories["sonstige"])
-            new = row["revision"] > row["seen_revision"] and (row["status"] == "eingereicht" if admin else row["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung"))
+            new = row["revision"] > row["seen_revision"] and (row["status"] in ("entwurf", "eingereicht") if admin else row["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung"))
             payment = bool(row["payable"] and (row["business_confirmed"] or row["bereich"] == "privat")
                            and row["status"] in ("freigegeben", "zahlung_in_bearbeitung") and row["typ"] in ("rechnung", "bescheid", "zahlungsauftrag")
                            and (row["typ"] != "zahlungsauftrag" or row["quelle_geprueft"]))
-            opened = row["status"] == "eingereicht" if admin else row["status"] in ("entwurf", "zurueckgewiesen") or payment
+            opened = row["status"] in ("entwurf", "eingereicht") if admin else row["status"] in ("entwurf", "zurueckgewiesen") or payment
             bucket["gesamt"] += 1
             for name, value in (("neue_anzahl", new), ("offen_anzahl", opened), ("zahlung_offen", payment)):
                 bucket[name] += int(value)
@@ -703,14 +728,7 @@ class OfficeDocuments:
                 if category and category not in CATEGORIES:
                     raise ValueError("Belegordner vor der Einreichung prüfen.")
                 row["kategorie"] = category
-            if not row["lieferant"] and row["typ"] in ("rechnung", "bescheid"):
-                raise ValueError("Lieferant / Absender vor der Einreichung ergänzen.")
-            if row["typ"] in ("rechnung", "bescheid") and not row["belegdatum"]:
-                raise ValueError("Belegdatum vor der Einreichung ergänzen.")
-            if row["typ"] == "rechnung" and (not row["belegnummer"] or row["betrag_cent"] is None):
-                raise ValueError("Rechnungsnummer und Bruttobetrag vor der Einreichung ergänzen.")
-            if row["typ"] == "zahlungsauftrag":
-                _payment_order_ready(row)
+            _submission_ready(row)
             now = _now()
             dedup_key = _dedup_key(row["sha256"], row)
             if db.execute("SELECT id FROM buero_belege WHERE dedup_key=? AND id<>?", (dedup_key, key)).fetchone():
@@ -722,13 +740,31 @@ class OfficeDocuments:
             self._audit(db, who, key, "eingereicht", row["status"])
         self._backup()
 
-    def decide(self, key, version, *, approve, note="", payment_release=False, business_confirmed=False, bereich="unklar", source_confirmed=False):
+    def decide(self, key, version, *, approve, note="", payment_release=False, business_confirmed=False, bereich="unklar", source_confirmed=False,
+               kind=None, category=None):
         note = _text(note, 1000, "Chefnotiz", multiline=True)
         if not approve and not note:
             raise ValueError("Für die Rückgabe bitte den Korrekturgrund angeben.")
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            who = self.identity(admin=True)
-            row = self._current(db, key, version, {"eingereicht"})
+            who = self.identity(admin=True, db=db, lock=True)
+            row = self._current(db, key, version, {"eingereicht", "entwurf", "zurueckgewiesen"} if approve else {"eingereicht"})
+            direct = approve and row["status"] in ("entwurf", "zurueckgewiesen")
+            if direct and (not isinstance(kind, str) or kind not in KINDS or not isinstance(category, str) or category not in CATEGORIES):
+                raise ValueError("Belegart und Ordner vor der direkten Chef-Freigabe ausdrücklich prüfen.")
+            old_kind, old_category = row["typ"], row["kategorie"]
+            if kind is not None:
+                if not approve or not isinstance(kind, str) or kind not in KINDS:
+                    raise ValueError("Gültige Belegart für die Chef-Freigabe auswählen.")
+                row["typ"] = kind
+            if category is not None:
+                if not approve or not isinstance(category, str) or category and category not in CATEGORIES:
+                    raise ValueError("Gültigen Belegordner für die Chef-Freigabe auswählen.")
+                row["kategorie"] = category
+            classification_changed = (row["typ"], row["kategorie"]) != (old_kind, old_category)
+            if approve:
+                if direct or classification_changed:
+                    _submission_ready(row)
+                _review_original(db, row)
             if approve and bereich not in ("geschaeftlich", "privat"):
                 raise ValueError("Den Beleg vor der Freigabe ausdrücklich als geschäftlich oder privat zuordnen.")
             if payment_release and (not approve or row["typ"] not in ("bescheid", "zahlungsauftrag")):
@@ -745,15 +781,20 @@ class OfficeDocuments:
             if payable and row["typ"] in ("rechnung", "bescheid") and (not row["lieferant"] or not row["belegdatum"] or (row["typ"] == "rechnung" and not row["belegnummer"])):
                 raise ValueError("Lieferant, Belegdatum und gegebenenfalls Rechnungsnummer vor der Zahlungsfreigabe ergänzen.")
             chosen_area = bereich if approve else row["bereich"]
-            category = row["kategorie"] if chosen_area == "privat" else ("sonstige" if row["kategorie"] == "privat" else row["kategorie"])
+            chosen_category = row["kategorie"] if chosen_area == "privat" else ("sonstige" if row["kategorie"] == "privat" else row["kategorie"])
+            row["kategorie"] = chosen_category
+            dedup_key = _dedup_key(row["sha256"], row)
+            if approve and db.execute("SELECT id FROM buero_belege WHERE dedup_key=? AND id<>?", (dedup_key, key)).fetchone():
+                raise ValueError("Dieser Beleg oder Zahlungsauftrag besteht bereits. Bestehenden Eintrag prüfen.")
             state, now = ("freigegeben" if approve else "zurueckgewiesen"), _now()
-            changed = db.execute("""UPDATE buero_belege SET status=?,payable=?,business_confirmed=?,quelle_geprueft=?,bereich=?,kategorie=?,decided_at=?,decided_by=?,decision_note=?,
-                revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status='eingereicht'""",
-                (state, int(payable), int(payable and business_confirmed and chosen_area == "geschaeftlich"), int(payable and row["typ"] == "zahlungsauftrag" and source_confirmed), chosen_area, category,
-                 now, who["actor"], note, now, key, row["revision"]))
+            changed = db.execute("""UPDATE buero_belege SET typ=?,kategorie=?,dedup_key=?,status=?,payable=?,business_confirmed=?,quelle_geprueft=?,bereich=?,decided_at=?,decided_by=?,decision_note=?,
+                revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status=?""",
+                (row["typ"], chosen_category, dedup_key, state, int(payable), int(payable and business_confirmed and chosen_area == "geschaeftlich"),
+                 int(payable and row["typ"] == "zahlungsauftrag" and source_confirmed), chosen_area, now, who["actor"], note, now, key, row["revision"], row["status"]))
             if changed.rowcount != 1:
                 raise RevisionConflict("Beleg wurde gleichzeitig entschieden. Bitte neu laden.")
-            self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"])
+            self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"],
+                        extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed})
         self._backup()
 
     def payment(self, key, version, *, paid=False, paid_date="", reference=""):
@@ -873,7 +914,10 @@ def register_office_documents(p):
             result = action()
             if isinstance(result, tuple):
                 key, duplicate = result
-                flash("Dieses Original ist bereits vorhanden. Der bestehende Beleg wurde geöffnet; seine Angaben bleiben unverändert." if duplicate else "Beleg geschützt gespeichert. Jetzt Angaben prüfen und zur Cheffreigabe einreichen.", "info" if duplicate else "success")
+                saved = ("Beleg geschützt gespeichert. Jetzt Original und Angaben prüfen und hier freigeben." if admin_route() else
+                         "Beleg geschützt gespeichert. Jetzt Angaben prüfen und zur Cheffreigabe einreichen.")
+                flash("Dieses Original ist bereits vorhanden. Der bestehende Beleg wurde geöffnet; seine Angaben bleiben unverändert." if duplicate else saved,
+                      "info" if duplicate else "success")
             else:
                 flash("Belegstand gespeichert.", "success")
             base = "/admin/buero/belege" if admin_route() else "/werkstatt/buero/belege"
@@ -979,14 +1023,15 @@ def register_office_documents(p):
 
     @bp.post("/admin/buero/belege/<key>/freigeben")
     def approve(key):
-        csrf_and_fields({"revision", "chef_notiz", "zahlungspflichtig", "confirmed", "bereich"})
+        csrf_and_fields({"revision", "chef_notiz", "zahlungspflichtig", "confirmed", "bereich", "typ", "kategorie"})
         if request.form.get("confirmed") != "ja" or request.form.get("zahlungspflichtig", "") not in ("", "ja"):
             abort(400)
         def approve_and_transfer():
             service.decide(key, request.form.get("revision"), approve=True,
                            note=request.form.get("chef_notiz", ""), payment_release=request.form.get("zahlungspflichtig") == "ja",
                            business_confirmed=request.form.get("confirmed") == "ja", bereich=request.form.get("bereich", "unklar"),
-                           source_confirmed=request.form.get("zahlungspflichtig") == "ja" and request.form.get("confirmed") == "ja")
+                           source_confirmed=request.form.get("zahlungspflichtig") == "ja" and request.form.get("confirmed") == "ja",
+                           kind=request.form.get("typ"), category=request.form.get("kategorie"))
             approved = service.detail(key, admin=True)
             if (approved["bereich"] == "geschaeftlich" and approved["business_confirmed"] and approved["payable"]
                     and approved["typ"] in ("rechnung", "bescheid")):
