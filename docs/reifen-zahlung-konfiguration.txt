@@ -1,0 +1,93 @@
+REIFEN – STRIPE HOSTED CHECKOUT
+Stand: 01.11.2026. Nur Transport vorbereitet, keine Sessions erzeugt.
+
+EIGENE KONFIGURATION
+REIFEN_STRIPE_MODE = test oder live (explizit; kein Standard-Livemodus)
+REIFEN_STRIPE_SECRET_KEY = passender sk_test_/rk_test_ oder sk_live_/rk_live_
+REIFEN_STRIPE_WEBHOOK_SECRET = eigener whsec_-Schlüssel des Reifen-Endpunkts
+REIFEN_STRIPE_PUBLIC_ORIGIN = feste HTTPS-Origin ohne Pfad/Query/Fragment
+REIFEN_STRIPE_ALLOWED_REDIRECT_HOSTS = explizite Python-Liste erlaubter Hostnamen
+REIFEN_STRIPE_SUCCESS_PATH = /reifen/zahlung/erfolg/{order_id} (Standard)
+REIFEN_STRIPE_CANCEL_PATH = /reifen/zahlung/abgebrochen/{order_id} (Standard)
+
+Keine Schlüssel in Git, Browsercode oder Doku hinterlegen. Die Klasse übernimmt
+weder globale STRIPE_*-Werte noch MOS-/Mietwagen-Schlüssel. Test- und Live-Keys
+werden auf Präfix und Session-/Ereignismodell geprüft. Der Endpointsecret selbst
+hat kein Test-/Live-Präfix; er muss aus der jeweils passenden Stripe-Umgebung
+stammen. Es wird kein Stripe-Konto und kein Webhook-Endpunkt automatisch angelegt.
+
+SCHNITTSTELLE
+StripeReifenGateway(config, client=None, clock=None)
+- create(order) -> normalisierter Checkoutstatus und geprüfte Stripe-URL.
+- retrieve(session_id, expected_order=order) -> aktueller Sessionstatus;
+  mit expected_order werden Betrag, Währung, Bestell-ID und Quotehash abgeglichen.
+- verify_webhook(raw_bytes, Stripe-Signature) -> signierter Ereigniszeiger:
+  event_id, type, livemode, ignored, session_id. Dieser Zeiger ist keine Zahlung.
+
+order muss serverseitig gespeichert und geprüft sein:
+id: nicht sprechende Bestell-ID; quote_hash: SHA256 als 64 Hexzeichen;
+amount_total: positiver EUR-Bruttogesamtbetrag als Integercent (max. 100.000 EUR);
+currency: eur; payment_created_at und payment_expires_at: eingefrorene Unix-Zeitpunkte;
+payment_attempt: dauerhaft gespeicherte Versuchs-ID, Standard 1.
+Keine kundenseitigen Preise/Redirects weiterreichen. Die Session enthält genau
+eine Gesamtposition, damit Montage/Fracht/MwSt nicht ein zweites Mal entstehen.
+Metadaten in Session und PaymentIntent: integration=reifen_checkout_v1,
+order_id, quote_hash. Es werden keine Kundenadressen/Telefonnummern in diese
+Metadaten oder Idempotenzschlüssel übernommen. Hosted Checkout erfasst die
+Zahlungsdaten bei Stripe. Der Transport verwendet card; verfügbare Wallets
+hängen von Stripe-Konto, Browser und Gerät ab. Keine Wallet-Verfügbarkeit zusagen.
+
+FRISTEN, WIEDERHOLUNG UND LIEFERRESERVIERUNG
+Stripe erlaubt expires_at zwischen 30 Minuten und 24 Stunden nach Sessionerstellung.
+Core muss die gewünschte Frist (z. B. 60 Minuten) vor dem ersten IO dauerhaft
+einfrieren, einschließlich des Beginns dieses Versuchs. Derselbe Versuch benutzt
+dieselben Daten und denselben aus
+Modus/Bestell-ID/Quotehash/Versuchs-ID gebildeten Idempotenzschlüssel. Andere
+Bestelldaten erfordern einen ausdrücklich neuen, sauber abgeglichenen Versuch.
+Auch unter 30 Minuten verbleibender Zeit darf derselbe Versuch mit unveränderten
+Parametern abgeglichen werden; Stripe kann die bereits gespeicherte Session
+zurückgeben. War dort keine Session angelegt, kann die alte Ablaufzeit abgewiesen
+werden: dann prüfen, nicht blind eine neue Frist/Session erzeugen.
+Keine neue Ablaufzeit bei einem Timeout erraten. Stripe hält Idempotenzdaten
+mindestens 24 Stunden vor; danach nie blind dieselbe Bestellung erneut erzeugen.
+Bereits gespeicherte Session-ID zunächst abrufen und unklare Ausgänge prüfen.
+Der echte Lieferantenadapter muss Bestand und Lieferreservierung mindestens
+über den Zahlungszeitraum belastbar abdecken. Eine 15-Minuten-Reservierung deckt
+keine 30-Minuten-Checkoutsession. Nach Ablauf/unklarem Ausgang nicht automatisch
+Montagehold, Warenreservierung oder Zahlung als erledigt/frei behandeln.
+
+WEBHOOK UND BEZAHLTSTATUS
+Core nimmt unveränderte Requestbytes an, prüft die Signatur mit dem eigenen
+Reifen-Endpunktsecret und übergibt genau diese Bytes an verify_webhook.
+SDK-Prüfung plus enger Zeitbereich von 300 Sekunden, auch für Zukunftstimestamps.
+Snapshot-Checkoutevents: completed, async_payment_succeeded,
+async_payment_failed, expired. Andere signierte Events/andere Integration
+werden als ignored zurückgegeben. Keine Connected-Account-/Org-Events akzeptiert.
+Core speichert Event-ID/Session-ID dauerhaft und verarbeitet Zahlung/Auftrag
+atomar genau einmal. Nach gültigem Ereignis Session serverseitig per retrieve
+mit expected_order lesen. Nur status=succeeded (Stripe complete+paid und
+PaymentIntent vorhanden), passender Betrag/Währung/Referenz/Quote/Modus kann
+die bezahlte Bestellung auslösen. Ein Success-Redirect ist kein Zahlungsbeleg.
+processing/offen/unklar bleiben getrennt. Keine API-/Providerfehlertexte oder
+Rohpayloads an Kunden ausgeben; Bestell-/Vertragsmail und Widerruf/Storno/
+Erstattung liegen außerhalb dieses Transportmoduls und bleiben Coreaufgaben.
+
+BETRIEB UND PRÜFUNG
+Offizielles stripe-python15.6.1 ist im Projekt bereits gepinnt. Nutzung über
+StripeClient.v1.checkout.sessions, Hosted-Page-Modus. Eigener RequestsClient
+mit 5 Sekunden Connect- und 15 Sekunden Lesetimeout, automatische Retries 0.
+Keine Wiederverwendung der Mietwagen-Kautions-/Buchungslogik. Kein globaler
+Stripe-Key und keine Überschreibung unbekannter API-Zielserver.
+Die neue Unit-Suite blockiert Netzwerksockets, verwendet Mock-Sessions und
+vom offiziellen SDK überprüfte, lokal signierte synthetische Webhooks.
+Echte Sandbox-Sessions und Zahlungs-/Webhook-End-to-End-Tests bleiben für den
+später ausdrücklich konfigurierten Testzugang. Allein die Schlüsselkonfiguration
+ist keine Livefreigabe für den Shop.
+
+OFFIZIELLE QUELLEN (01.11.2026 geprüft)
+https://docs.stripe.com/api/checkout/sessions/create?lang=python
+https://docs.stripe.com/api/checkout/sessions/retrieve?lang=python
+https://docs.stripe.com/api/idempotent_requests?lang=python
+https://docs.stripe.com/webhooks
+https://docs.stripe.com/checkout/fulfillment.md?ui=full-page
+https://github.com/stripe/stripe-python

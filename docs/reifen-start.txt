@@ -1,0 +1,78 @@
+REIFENVERKAUF – INTEGRATION UND INBETRIEBNAHME
+
+Standardzustand ist aus. Echte Stripe-/Twilio-Adapter sind implementiert;
+vorhandener Code bedeutet keine bestätigten Konten oder Anbieterfreigabe.
+Die frühere reine Demo bleibt separat und kann keine echten Zahlungen anlegen.
+
+Einrichtung auf dem ZENTRALEN PORTAL mit dauerhafter Datenbank:
+1. Eigene REIFEN_*-Konfiguration anhand reifen-anbindung.env.example hinterlegen.
+   Geheimnisse nicht in Chat, Git oder öffentliche Dateien schreiben.
+   Bestehende Mietwagen-/Schadenmail-Schlüssel werden nicht übernommen.
+2. Stripe: Händlerkonto für die tatsächliche Verkäufergesellschaft prüfen,
+   zuerst Sandbox/Testzugang. Reifen-Webhook /webhooks/reifen/stripe auf dem
+   zentralen Portal registrieren, eigenes Endpointsecret. HTTPS-Rückleitung
+   und erlaubte Hosts ausdrücklich setzen. Test-/Livekeys nicht vermischen.
+3. Twilio Verify: Konto, Verify-Service und Kostenlimit einrichten. Standard-
+   Kostenfreigabe und Tageslimit sind aus/0. Im Testmodus nur ausdrücklich
+   freigegebene Telefonnummern und E-Mail-Empfänger verwenden.
+4. Eigene SMTP-Konfiguration und Absender info@auto-lackierzentrum.de prüfen.
+   Wiederkehrender Abgleich/Versand über REIFEN_KAUF_WORKER_ENABLED aktivieren.
+   Der Liveabschluss bleibt ohne laufenden Abgleich-/Versandworker gesperrt.
+   Unklare SMTP-Ausgänge werden nicht blind wiederholt; Status im Büro prüfen.
+5. Bestelltexte als vollständige finale JSON-Fassung freigeben: Status und
+   freigegeben, Version ohne entwurf:/demo:, keine offenen Entscheidungen,
+   korrekt neu berechneter SHA-256. Der Livecheckout akzeptiert keine bloß
+   nichtleeren Texte oder nachträglich ersetzte Vertragsbedingungen.
+   Exaktes Textsnapshot und Einzelerklärungen werden pro Bestellung gespeichert.
+6. Nach TYREsystem-Freigabe den dokumentierten echten Lieferantenadapter
+   verbindlich einrichten. Kein Endpunkt wird geraten. Er muss für jeden
+   Artikel Paketversandfähigkeit, Preis, Bestand und Bereitstellung bestätigen.
+
+Lieferantenprotokoll REIFEN_KAUF_SUPPLIER:
+Adapter.livemode muss exakt zur Zahlungsumgebung passen; Sandboxzahlung darf
+keinen realen Lieferantenauftrag auslösen. Testbetrieb auf eigener Staging-
+Datenbank führen; auch Werkstattaufträge tragen ausdrücklich den Testmarker.
+inspect({query,artikel_id}) -> artikel_id,paketversandfaehig=True,lieferdatum(ISO).
+reserve(order) -> artikel_id,anzahl,quote_hash,reservierung_id,paketversandfaehig,
+  gueltig_bis(mitZeitzone),lieferdatum. Bestellung/Quote/Reservierung sind fest
+  gebunden. Onlinehold muss eingefrorenes Stripe-Ende plus5Minuten abdecken.
+  Stripe verlangt anfänglich mindestens30Minuten; ein15Minuten-Bestandspreis
+  ist deshalb noch keine ausreichende Warenreservierung.
+commit(order) -> bestaetigt=True,bestellnummer,reference,artikel_id,anzahl,
+  lieferdatum,reservierung_id. Dieser Schritt muss auf der Bestellreferenz
+  dauerhaft idempotent sein. Lieferdatum/Reservierung dürfen sich nicht still
+  ändern. Verbindliche Änderungen führen vor Zahlung zur erneuten Übersicht.
+Alle echten IO-Schritte brauchen begrenzte Timeouts und generische Fehler.
+
+Normale Bestellung:
+Frischer Treffer -> Kontakt/Telefon/Termin -> Codeprüfung -> feste Übersicht
+mit Bedingungen -> zahlungspflichtiger Abschluss -> Waren-/Slothold ->
+bei Onlinezahlart sichere Zahlung und geprüfter Sessionstatus -> einmaliger
+Lieferantenauftrag -> ausdrückliche Bestellannahme auf der Bestätigungsseite
+oder per E-Mail mit Zugang -> dauerhaft gespeicherte Vertragsmail.
+Vor-Ort-Zahlung bleibt offen; ein bereits akzeptierter Montagekauf erzeugt
+genau einen ausdrücklich als Reifenservice geplanten Werkstattauftrag.
+Unbezahlte Checkout-Holds erzeugen noch keinen Reparaturauftrag.
+
+Ein Erfolgsredirect ist kein Zahlungsbeleg. Signierte Webhooks plus erneute
+Sessionabfrage und der unabhängige Worker verarbeiten auch Zahlungen ohne
+Kundenrückkehr. Betrag, Währung, Modus, Order, Quote und PaymentIntent müssen
+passen. Kein automatischer zweiter Checkout nach unklarem Erstausgang.
+Unklare Zahlung/Lieferantenantwort hält den Vorgang zur Prüfung. Der aktuelle
+Ausnahmeprozess ist manuelle Klärung im Büro/Anbieterportal; keine unbelegte
+automatische Erstattung oder Waren-/Slotfreigabe durch bloßen Zeitablauf.
+
+Öffentliche Widerrufsfunktion /reifen/vertrag-widerrufen:
+Ohne Login/Telefoncode, zweistufig, unveränderter Eingang mit Zeitangabe und
+eigener Empfangsbestätigung. Bleibt unabhängig von deaktivierten Neukäufen.
+Homepage-Instanzen mit PUBLIC_SITE_ONLY leiten den Einstieg zum festen
+PORTAL_BASE_URL weiter und nehmen keine Erklärungen in flüchtige DBs an.
+Im Büro: /admin/reifenbestellungen, /admin/reifen-anbindung und
+/admin/reifen-widerrufe. Kein Eingang allein löst automatische Erstattungen aus.
+
+Vor Veröffentlichung echte Sandbox-/SMS-/Mailtests mit freigegebenen
+Testkontakten, danach verifizierte Produktionskonfiguration. Bestehende
+Neukäufe mit ENABLED=0 pausieren; benötigte Live-Schlüssel für Abgleich und
+Vertrags-/Widerrufsbestätigungen nicht dadurch unbrauchbar machen.
+Veröffentlichung mit aktuellem Bürostand, Sicherung und Wartungsfenster
+koordinieren; dieser Arbeitsstand löst selbst keinen Neustart oder Deploy aus.

@@ -67,6 +67,14 @@ from reifen_suche import suche_reifenangebote, ReifenSucheEingabefehler
 from reifen_bestellung import (erstelle_auswahl_token, register_reifen_bestellung,
     init_schema as init_reifen_bestellung_schema, BACKUP_TABLES as REIFEN_BESTELLUNG_TABLES,
     SCHEMA_FEATURE as REIFEN_BESTELLUNG_FEATURE)
+from reifen_kauf import (register_reifen_kauf, init_schema as init_reifen_kauf_schema,
+    BACKUP_TABLES as REIFEN_KAUF_TABLES)
+from reifen_sms import init_schema as init_reifen_sms_schema
+from reifen_vertrag import (register_reifen_vertrag, init_schema as init_reifen_vertrag_schema,
+    BACKUP_TABLES as REIFEN_VERTRAG_TABLES)
+from reifen_anbindung import configure_integrations as configure_reifen_integrations, start_worker as start_reifen_worker
+REIFEN_ANBINDUNG_TABLES = (*REIFEN_KAUF_TABLES, *REIFEN_VERTRAG_TABLES, "reifen_sms_challenges")
+REIFEN_ANBINDUNG_FEATURE = "reifen_anbindung_v1"
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
@@ -3145,11 +3153,23 @@ def configure_website_upload_limit():
     # Must run before CSRF validation first parses the multipart form.
     if request.endpoint in {"website_anfrage", "privat_schadenaufnahme"} and request.method == "POST":
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
+    if (request.endpoint or "").startswith(("reifen_kauf.", "reifen_vertrag.")) and request.method == "POST":
+        request.max_content_length = 262144 if request.endpoint == "reifen_kauf.webhook" else 16384
 
 
 @app.before_request
 def restrict_public_site_service():
     if not is_public_site_request():
+        return None
+    if (request.endpoint or "").startswith(("reifen_kauf.", "reifen_vertrag.")):
+        if PUBLIC_SITE_ONLY:
+            # A stateless homepage must never accept legal declarations or
+            # orders into its disposable database. Start on the central portal.
+            if request.method == "GET" and PORTAL_BASE_URL:
+                base = urlsplit(PORTAL_BASE_URL)
+                if base.scheme == "https" and base.netloc and base.netloc != request.host:
+                    return redirect(PORTAL_BASE_URL + request.full_path.rstrip("?"), code=302)
+            abort(503, description="Bitte öffnen Sie den zentralen Werkstattzugang.")
         return None
     allowed_endpoints = {
         "static",
@@ -3192,7 +3212,7 @@ def protect_csrf():
         return None
     if progress_csrf_exempt(sys.modules[__name__]):
         return None
-    if request.endpoint == 'mos_public.webhook':
+    if request.endpoint in {'mos_public.webhook', 'reifen_kauf.webhook'}:
         return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
     if request.path.startswith("/webhooks/whatsapp"):
         return None
@@ -11371,6 +11391,9 @@ def init_db():
     )
     mietwagen_checkout.init_schema(db)
     init_reifen_bestellung_schema(db)
+    init_reifen_kauf_schema(db)
+    init_reifen_sms_schema(db)
+    init_reifen_vertrag_schema(db)
     mos_handover.init_schema(db)
     mos_order_receipt.init_schema(db)
     ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
@@ -45535,7 +45558,8 @@ def reifenangebote_suche():
         if status == 200 and payload.get("status") == "ok":
             for product in payload["produkte"]:
                 token = erstelle_auswahl_token(app.secret_key, request.args, product["artikel_id"])
-                product["bestell_url"] = url_for("reifen_bestellung.start", token=token)
+                endpoint = "reifen_kauf.start" if app.config.get("REIFEN_KAUF_MODE") in {"test", "live"} else "reifen_bestellung.start"
+                product["bestell_url"] = url_for(endpoint, token=token)
         response = jsonify(payload)
         response.status_code = status
     response.headers["Cache-Control"] = "no-store"
@@ -45614,10 +45638,44 @@ def admin_reifenbestellungen():
     db = get_db()
     try:
         rows = db.execute("SELECT * FROM reifen_bestellungen ORDER BY erstellt_am DESC LIMIT 100").fetchall()
+        real_rows = db.execute("SELECT * FROM reifen_kaeufe ORDER BY erstellt_am DESC LIMIT 100").fetchall()
+        withdrawal_count = db.execute("SELECT COUNT(*) AS n FROM reifen_widerruf WHERE confirmed_at!=''").fetchone()["n"]
+        mail_counts = {r["state"]:r["n"] for r in db.execute("SELECT state,COUNT(*) AS n FROM reifen_vertrag_outbox GROUP BY state").fetchall()}
     finally:
         db.close()
     orders = [reifen_bestellungen.order(dict(row)) for row in rows]
-    response = make_response(render_template("reifen_bestellungen_admin.html", bestellungen=orders))
+    response = make_response(render_template("reifen_bestellungen_admin.html", bestellungen=orders,
+        kaeufe=[reifen_kaeufe.order(dict(row)) for row in real_rows], widerruf_count=withdrawal_count, mail_counts=mail_counts))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.get("/admin/reifen-anbindung")
+@admin_required
+def admin_reifen_anbindung():
+    from reifen_rechtstexte import reifen_rechtstexte
+    state = reifen_kaeufe.readiness()
+    response = make_response(render_template("reifen_anbindung_admin.html", verbindung=state,
+        texte=reifen_rechtstexte(), konfigfehler=app.config.get("REIFEN_ANBINDUNG_ERRORS", [])))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.get("/admin/reifen-widerrufe")
+@admin_required
+def admin_reifen_widerrufe():
+    db = get_db()
+    try:
+        rows = db.execute("""SELECT w.id,w.payload_json,w.confirmed_at,o.state AS mail_state
+            FROM reifen_widerruf w LEFT JOIN reifen_vertrag_outbox o
+            ON o.dedupe_key=('widerrufseingang:' || w.id)
+            WHERE w.confirmed_at!='' ORDER BY w.confirmed_at DESC LIMIT 200""").fetchall()
+    finally:
+        db.close()
+    entries = [{"id":r["id"], "data":json.loads(r["payload_json"]),
+        "received":datetime.fromisoformat(r["confirmed_at"]).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y %H:%M:%S Uhr"),
+        "mail_state":r["mail_state"]} for r in rows]
+    response = make_response(render_template("reifen_widerrufe_admin.html", erklaerungen=entries))
     response.headers["Cache-Control"] = "private, no-store"
     return response
 
@@ -49376,6 +49434,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
     required_tables.difference_update(REIFEN_BESTELLUNG_TABLES)
     if REIFEN_BESTELLUNG_FEATURE in schema_features:
         required_tables.update(REIFEN_BESTELLUNG_TABLES)
+    required_tables.difference_update(REIFEN_ANBINDUNG_TABLES)
+    if REIFEN_ANBINDUNG_FEATURE in schema_features:
+        required_tables.update(REIFEN_ANBINDUNG_TABLES)
     for feature, office_tables in (
         (OFFICE_ACCESS_FEATURE, OFFICE_ACCESS_TABLES),
         (OFFICE_SECTION_FEATURE, OFFICE_SECTION_TABLES),
@@ -60035,6 +60096,11 @@ office_document_uploaded = office_lexware.analyse_scan
 reifen_bestellungen = register_reifen_bestellung(sys.modules[__name__])
 BACKUP_TABLES += REIFEN_BESTELLUNG_TABLES
 BACKUP_SCHEMA_FEATURES += (REIFEN_BESTELLUNG_FEATURE,)
+reifen_kaeufe = register_reifen_kauf(sys.modules[__name__])
+reifen_vertraege = register_reifen_vertrag(sys.modules[__name__])
+BACKUP_TABLES += REIFEN_ANBINDUNG_TABLES
+BACKUP_SCHEMA_FEATURES += (REIFEN_ANBINDUNG_FEATURE,)
+configure_reifen_integrations(sys.modules[__name__])
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)
@@ -60061,6 +60127,7 @@ if not PUBLIC_SITE_ONLY:
     start_purchase_monitor_worker(sys.modules[__name__])
     start_material_worker(sys.modules[__name__])
     start_check24_worker(check24_bookings)
+    start_reifen_worker(sys.modules[__name__])
 
 start_hourly_backups()
 start_lexware_auto_sync()

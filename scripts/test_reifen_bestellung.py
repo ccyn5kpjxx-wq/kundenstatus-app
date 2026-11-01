@@ -529,7 +529,8 @@ class ReifenBestellungTest(unittest.TestCase):
             with self.subTest(config=config, environ=environ), patch.dict(portal.app.config, config):
                 response = self.client.get(order["url"] + "/erfolg", environ_overrides=environ)
                 self.assertEqual(response.status_code, 200)
-                self.assertIn("DEMO · Kein echter Kauf, keine Zahlung und keine echte SMS.", response.get_data(as_text=True))
+                self.assertIn('class="demo"', response.get_data(as_text=True))
+                self.assertIn("Keine echte Reifenbestellung oder Kundenzahlung.", response.get_data(as_text=True))
         self.assertEqual(self.read(order)["status"], "demo_bestellt_zahlung_offen")
 
     def test_stale_phone_snapshot_cannot_reset_a_started_or_final_order(self):
