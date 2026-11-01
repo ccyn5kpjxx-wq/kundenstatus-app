@@ -345,9 +345,9 @@
                 <label class="rental-card">
                   <input type="radio" name="mietwagen_fahrzeug" value="{{ key }}" {% if formdata.get('mietwagen_fahrzeug') == key %}checked{% endif %} required>
                   <span class="rental-photo">
-                    <img src="{{ url_for('static', filename=auto['bild']) }}" alt="Symbolfoto {{ auto['name'] }}" loading="lazy">
+                    <img src="{{ url_for('static', filename=auto['bild']) }}" alt="{{ auto.get('bild_hinweis', 'Symbolfoto') }} {{ auto['name'] }}" loading="lazy">
                     <span class="rental-status {% if auto['status_typ'] == 'bald' %}is-bald{% endif %}">{{ auto['status'] }}</span>
-                    <span class="rental-photo-note">Symbolfoto</span>
+                    <span class="rental-photo-note">{{ auto.get('bild_hinweis', 'Symbolfoto') }}</span>
                   </span>
                   <span class="rental-body">
                     <span class="rental-title"><strong>{{ auto['name'] }}</strong><span class="rental-price">{{ auto['preis'] }}</span></span>

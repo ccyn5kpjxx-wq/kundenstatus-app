@@ -45350,13 +45350,14 @@ WEBSITE_MIETWAGEN_FLOTTE = {
         "preis_hinweis": "Ab 3 Tagen 45 € / Tag",
     },
     "fiat-doblo-maxi": {
-        "name": "Fiat Doblò Maxi",
-        "typ": "Langversion · maximal flexibel",
-        "beschreibung": "Extra Laderaum für größere Transporte, Handwerk oder Umzug.",
-        "merkmale": ("Extra Laderaum", "Bis zu 5 Sitze", "Transport"),
-        "bild": "mietwagen_vorschau/bilder/doblo_maxi_symbolfoto.jpg",
-        "status": "In Kürze",
-        "status_typ": "bald",
+        "name": "Fiat Doblò XL",
+        "typ": "XL Kastenwagen · 1.5 Diesel · 75 kW",
+        "beschreibung": "Extra Laderaum und erhöhte Nutzlast für Transporte, Handwerk oder Umzug. Fragen Sie Ihren Wunschzeitraum an.",
+        "merkmale": ("XL Kastenwagen", "Diesel · 75 kW", "Erhöhte Nutzlast"),
+        "bild": "mietwagen/doblo-xl-hersteller.png",
+        "bild_hinweis": "Herstellerabbildung · Symbolfoto",
+        "status": "Jetzt verfügbar",
+        "status_typ": "verfuegbar",
         "preis": "59 € / Tag",
         "preis_hinweis": "Ab 3 Tagen 49 € / Tag",
     },
@@ -58234,22 +58235,28 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
 
 def mietwagen_public_fahrzeuge():
     """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
+    def ist_doblo_xl(bezeichnung):
+        name = clean_text(bezeichnung).lower().replace("ò", "o")
+        return bool(re.search(r"\bfiat doblo\b.*\b(?:xl|maxi)\b", name))
+
     def bild_von_vermietungsseite(bezeichnung):
         name = clean_text(bezeichnung).lower().replace("ò", "o")
         if "hyundai i10" in name:
             return "/static/mietwagen/i10-white.webp"
         if "hyundai kona" in name:
             return "/static/mietwagen/kona-white.webp"
-        if "fiat doblo maxi" in name:
-            return "/static/mietwagen/doblo-maxi-white.webp"
+        if ist_doblo_xl(bezeichnung):
+            return "/static/" + WEBSITE_MIETWAGEN_FLOTTE["fiat-doblo-maxi"]["bild"]
         if "fiat doblo" in name:
             return "/static/mietwagen/doblo-maxi-white.webp"
         return ""
 
-    def ist_demnaechst_verfuegbar(bezeichnung, gespeicherter_status):
+    def ist_demnaechst_verfuegbar(bezeichnung, gespeicherter_status, basis_status=None):
         name = clean_text(bezeichnung).lower().replace("ò", "o")
         if "hyundai i10" in name or "hyundai kona" in name:
             return False
+        if ist_doblo_xl(bezeichnung):
+            return clean_text(basis_status or gespeicherter_status) == "bald"
         if "fiat doblo" in name:
             return True
         return clean_text(gespeicherter_status) == "bald"
@@ -58280,6 +58287,10 @@ def mietwagen_public_fahrzeuge():
             tagessatz = clean_text(str(f.get("tagessatz") or ""))
         bezeichnung = clean_text(f.get("bezeichnung")) or clean_text(f.get("fahrzeugklasse")) or "Mietwagen"
         bild_url = bild_von_vermietungsseite(bezeichnung)
+        bild_hinweis = ""
+        if ist_doblo_xl(bezeichnung):
+            bezeichnung = re.sub(r"\bMaxi\b", "XL", bezeichnung, flags=re.IGNORECASE)
+            bild_hinweis = WEBSITE_MIETWAGEN_FLOTTE["fiat-doblo-maxi"]["bild_hinweis"]
         fahrzeuge.append(
             {
                 "id": f["id"],
@@ -58288,8 +58299,9 @@ def mietwagen_public_fahrzeuge():
                 "tagessatz": tagessatz,
                 "titelbild_id": titelbild_id,
                 "bild_url": bild_url,
+                "bild_hinweis": bild_hinweis,
                 "belegt": belegt,
-                "bald": ist_demnaechst_verfuegbar(bezeichnung, f.get("status")),
+                "bald": ist_demnaechst_verfuegbar(bezeichnung, f.get("status"), f.get("basis_status")),
             }
         )
     return fahrzeuge
