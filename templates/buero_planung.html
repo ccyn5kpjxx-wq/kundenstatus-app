@@ -1,83 +1,70 @@
+{% from 'buero_icons.html' import icon %}
 <!doctype html>
 <html lang="de">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="referrer" content="no-referrer">
-  <title>{% if kalender %}Kalender{% else %}Tagesplanung{% endif %} · Büro · Gärtner</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">
+  <title>{{ 'Kalender' if kalender else 'Fahrten' }} · Büro · Gärtner</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='buero_planung.css') }}">
 </head>
-<body>
+<body class="planning-page">
 {% include 'buero_nav.html' %}
+{% set access = namespace(calendar=kalender or buero_preview|default(false), planning=not kalender or buero_preview|default(false)) %}
+{% for item in buero_nav_items|default([]) %}{% if item.path == '/werkstatt/buero/kalender' %}{% set access.calendar = true %}{% elif item.path == '/werkstatt/buero/planung' %}{% set access.planning = true %}{% endif %}{% endfor %}
 <main class="office-planning">
-  <header class="planning-heading"><div><p class="eyebrow">BÜRO · FAHRZEUGE UND TERMINE</p><h1>{% if kalender %}Kalender{% else %}Tagesplanung{% endif %}</h1></div><a href="/werkstatt/buero/{% if kalender %}planung{% else %}kalender{% endif %}?datum={{ datum }}">{% if kalender %}Zur Tagesplanung{% else %}7 Tage ansehen{% endif %} →</a></header>
+  <header class="planning-heading"><div><p class="eyebrow">{{ 'DEINE TERMINE' if kalender else 'HEUTE UNTERWEGS' }}</p><h1>{{ 'Kalender' if kalender else 'Holen & Bringen' }}</h1></div><div class="planning-heading-actions">{% if kalender and access.planning %}<a class="planning-link" href="/werkstatt/buero/planung?datum={{ datum }}">{{ icon('car') }}Fahrten</a>{% elif not kalender and access.calendar %}<a class="planning-link" href="/werkstatt/buero/kalender?datum={{ datum }}">{{ icon('calendar') }}Kalender</a>{% endif %}{% if access.calendar %}<a class="planning-add" href="#neuer-termin">{{ icon('plus') }}Termin</a>{% endif %}</div></header>
   {% for category,message in get_flashed_messages(with_categories=true) %}<p class="planning-message" role="status">{{ message }}</p>{% endfor %}
-  <form method="get" class="planning-date"><label for="planning-day">{% if kalender %}Ab Datum{% else %}Datum{% endif %}<input type="date" id="planning-day" name="datum" value="{{ datum }}" required></label><button type="submit">Anzeigen</button></form>
-  <p class="planning-context">Termine aus den Werkstattaufträgen. Eine geplante Fahrt ist keine Abhol- oder Rückgabefreigabe. Änderungen an Fahrzeugterminen stimmt die Werkstattleitung im Auftrag ab.</p>
+  <div class="planning-toolbar"><form method="get" class="planning-date"><label for="planning-day">{{ 'Ab Datum' if kalender else 'Datum' }}<input type="date" id="planning-day" name="datum" value="{{ datum }}" required></label><button type="submit">Anzeigen</button></form>{% if not kalender %}<p class="planning-day-label"><strong>{{ anzahl_fahrten }}</strong> Fahrten · {{ datum_text }}</p>{% endif %}</div>
+
+  {% macro vehicle(item, group) %}
+  <article class="vehicle-event">
+    <div class="event-time{% if not item.uhrzeit %} event-time-open{% endif %}"><strong>{{ item.uhrzeit or 'Zeit offen' }}</strong>{% if group.key == 'ueberfaellig' %}<small>{{ item.datum_text }}</small>{% endif %}</div>
+    <div class="event-body"><h3>{{ item.kennzeichen or 'Kennzeichen offen' }}</h3><p class="event-car">{{ item.fahrzeug or 'Fahrzeug offen' }}</p>
+      {% if item.kunde %}<p class="event-customer">{{ item.kunde }}</p>{% elif item.partner %}<p class="event-customer">{{ item.partner }} <span>· Partner</span></p>{% endif %}
+      {% if group.key in ('abholung_durch_werkstatt_heute','rueckbringung_heute') %}<p class="event-address{% if not item.adresse %} event-address-open{% endif %}">{{ icon('pin') }}{{ item.adresse or 'Adresse abstimmen' }}</p>{% endif %}
+      {% for hint in item.warnungen|default(item.hinweise) %}<p class="event-warning">{{ icon('warning') }}{{ hint }}</p>{% endfor %}
+      <details class="event-details"><summary>Details {{ icon('chevron') }}</summary><div><p>Auftrag {{ item.auftrag_id }}</p>{% if item.kunde and item.partner %}<p>Partner: {{ item.partner }}</p>{% endif %}{% if item.fertig_datum_text %}<p>{{ item.fertig_status }} · {{ item.fertig_datum_text }}{% if item.fertig_uhrzeit %} · {{ item.fertig_uhrzeit }}{% endif %}</p>{% endif %}{% for hint in item.hinweise %}<p>{{ hint }}</p>{% endfor %}</div></details>
+    </div>
+  </article>
+  {% endmacro %}
 
   {% macro office_notes(notes) %}
-    {% for note in notes %}
-      <article class="office-note"><h3>{{ note.uhrzeit or 'Uhrzeit offen' }} · {{ note.titel }}</h3>{% if note.notiz %}<p class="note-text">{{ note.notiz }}</p>{% endif %}
-        <details><summary>Bürotermin bearbeiten</summary>
-          <form method="post" action="/werkstatt/buero/kalender/termine/{{ note.id }}" class="note-form">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="version" value="{{ note.version }}">
-            <label>Datum<input type="date" name="datum" value="{{ note.datum }}" required></label>
-            <label>Uhrzeit (optional)<input type="time" name="uhrzeit" value="{{ note.uhrzeit }}"></label>
-            <label>Titel<input name="titel" value="{{ note.titel }}" maxlength="160" required></label>
-            <label>Hinweis<textarea name="notiz" rows="3" maxlength="2000">{{ note.notiz }}</textarea></label>
-            <button type="submit">Änderung speichern</button>
-          </form>
-        </details>
-      </article>
-    {% else %}<p class="planning-empty">Keine Bürotermine eingetragen.</p>{% endfor %}
+    {% for note in notes %}<article class="office-note"><time>{{ note.uhrzeit or 'Zeit offen' }}</time><div><h3>{{ note.titel }}</h3>
+      <details class="note-edit"><summary>{{ icon('edit') }}{{ 'Notiz / Bearbeiten' if note.notiz else 'Bearbeiten' }}</summary>{% if note.notiz %}<p class="note-text">{{ note.notiz }}</p>{% endif %}
+        <form method="post" action="/werkstatt/buero/kalender/termine/{{ note.id }}" class="note-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="version" value="{{ note.version }}">
+          <div class="note-form-dates"><label>Datum<input type="date" name="datum" value="{{ note.datum }}" required></label><label>Uhrzeit<input type="time" name="uhrzeit" value="{{ note.uhrzeit }}"></label></div>
+          <label>Titel<input name="titel" value="{{ note.titel }}" maxlength="160" required></label><label>Notiz<textarea name="notiz" rows="3" maxlength="2000">{{ note.notiz }}</textarea></label><button type="submit">Speichern</button>
+        </form>
+      </details></div></article>{% else %}<p class="planning-empty">Keine Bürotermine.</p>{% endfor %}
   {% endmacro %}
 
-  {% macro daily_groups(day) %}
+  {% macro daily_groups(day, show_empty=false) %}
     <div class="planning-groups">
-    {% for group in day.gruppen %}
-      {% if group['items'] or loop.index <= 4 %}
-      <section class="planning-group{% if loop.index <= 2 %} planning-driving{% endif %}"><h2>{{ group.titel }} <span>{{ group['items']|length }}</span></h2>
-        {% for item in group['items'] %}
-          <article class="vehicle-event">
-            <div class="event-top"><strong>{{ item.uhrzeit or 'Uhrzeit offen' }}</strong><span>Auftrag {{ item.auftrag_id }}</span></div>
-            <h3>{{ item.kennzeichen or 'Kennzeichen fehlt' }}</h3><p>{{ item.fahrzeug or 'Fahrzeugangabe fehlt' }}{% if item.partner %} · {{ item.partner }}{% endif %}</p>
-            {% if group.key == 'ueberfaellig' %}<p>Geplant für {{ item.datum_text }}</p>{% endif %}
-            {% if item.adresse %}<p class="event-address">Abholadresse: {{ item.adresse }}</p>{% endif %}
-            {% for hint in item.hinweise %}<p class="event-hint">{{ hint }}</p>{% endfor %}
-          </article>
-        {% else %}<p class="planning-empty">Keine Fahrzeuge für diesen Tag eingeplant.</p>{% endfor %}
-      </section>
-      {% endif %}
-    {% endfor %}
+    {% for group in day.gruppen if group.key in ('abholung_durch_werkstatt_heute','rueckbringung_heute') %}{% if group['items'] or show_empty %}
+      <section class="planning-group planning-driving{% if group.key == 'rueckbringung_heute' %} planning-return{% endif %}" aria-label="{{ group.titel }}"><header class="planning-group-heading"><h2>{{ icon('car') }}{{ 'Holen' if group.key == 'abholung_durch_werkstatt_heute' else 'Bringen' }} <span>{{ group['items']|length }}</span></h2></header>
+        {% for item in group['items'] %}{{ vehicle(item, group) }}{% else %}<p class="planning-empty">Keine Fahrten.</p>{% endfor %}
+      </section>{% endif %}{% endfor %}
     </div>
+    {% for group in day.gruppen if group.key not in ('abholung_durch_werkstatt_heute','rueckbringung_heute') and group['items'] %}
+    <details class="planning-secondary{% if group.key in ('ueberfaellig','transport_ungeklaert') %} planning-secondary-warning{% endif %}"{% if group.key in ('ueberfaellig','transport_ungeklaert') %} open{% endif %}><summary>{{ icon('warning' if group.key in ('ueberfaellig','transport_ungeklaert') else 'car') }}<span>{{ {'anlieferung_heute':'Kunde bringt','kundenabholung_heute':'Kunde holt','heute_faellig':'Fertigstellung geplant','ueberfaellig':'Fertigtermin überschritten','transport_ungeklaert':'Transport klären'}.get(group.key,group.titel) }}</span><b>{{ group['items']|length }}</b>{{ icon('chevron','planning-chevron') }}</summary>{% for item in group['items'] %}{{ vehicle(item,group) }}{% endfor %}</details>
+    {% endfor %}
   {% endmacro %}
+
+  {% macro warnings(hints) %}{% if hints %}<section class="planning-clarify"><h2>{{ icon('warning') }}Noch abstimmen <span>{{ hints|length }}</span></h2><ul>{% for hint in hints %}<li><strong>{{ hint.kennzeichen or ('Auftrag ' ~ (hint.auftrag_id or 'offen')) }}</strong> · {{ hint.hinweis }}</li>{% endfor %}</ul></section>{% endif %}{% endmacro %}
 
   {% if kalender %}
-    {% for day in tage %}
-      <section class="calendar-day"><h2 class="calendar-date">{{ day.datum_text }}</h2>
-        {{ daily_groups(day) }}
-        <section class="planning-group"><h2>Bürotermine</h2>{{ office_notes(day.termine) }}</section>
-      </section>
-    {% endfor %}
-    {% set hints = tage[0].offene_hinweise %}
+    {% for day in tage %}<section class="calendar-day"><header class="calendar-day-heading"><h2>{{ day.datum_text }}</h2><span>{{ day.anzahl_fahrten }} Fahrten · {{ day.termine|length }} Bürotermine</span></header>
+      {% if day.anzahl_termine %}{{ daily_groups(day) }}{% if day.termine %}<section class="planning-group planning-notes"><header class="planning-group-heading"><h2>{{ icon('calendar') }}Bürotermine</h2></header>{{ office_notes(day.termine) }}</section>{% endif %}{% else %}<p class="calendar-empty">Keine Termine.</p>{% endif %}
+      {% if loop.first %}{{ warnings(day.offene_hinweise) }}{% endif %}
+    </section>{% endfor %}
   {% else %}
-    <p class="planning-day-label">{{ datum_text }} · {{ anzahl_fahrten }} geplante Fahrten</p>
-    {{ daily_groups({'gruppen': gruppen}) }}
-    <section class="planning-group"><h2>Bürotermine</h2>{{ office_notes(termine) }}</section>
-    {% set hints = offene_hinweise %}
+    {{ daily_groups({'gruppen':gruppen},true) }}
+    {{ warnings(offene_hinweise) }}
+    {% if access.calendar %}<section class="planning-group planning-notes"><header class="planning-group-heading"><h2>{{ icon('calendar') }}Bürotermine <span>{{ termine|length }}</span></h2></header>{{ office_notes(termine) }}</section>{% endif %}
   {% endif %}
-  {% if hints %}<section class="planning-group planning-clarify"><h2>Noch abstimmen</h2><ul>{% for hint in hints %}<li>Auftrag {{ hint.auftrag_id or 'offen' }}{% if hint.kennzeichen %} · {{ hint.kennzeichen }}{% endif %}: {{ hint.hinweis }}</li>{% endfor %}</ul></section>{% endif %}
 
-  <section class="planning-group new-note" id="neuer-termin"><p class="eyebrow">IM WERKSTATTKALENDER SICHTBAR</p><h2>Bürotermin eintragen</h2><p>Für Rückrufe und Absprachen. Fahrzeugtermine bleiben im jeweiligen Auftrag.</p>
-    <form method="post" action="/werkstatt/buero/kalender/termine" class="note-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Datum<input type="date" name="datum" value="{{ datum }}" required></label>
-      <label>Uhrzeit (optional)<input type="time" name="uhrzeit"></label>
-      <label>Titel<input name="titel" maxlength="160" placeholder="Zum Beispiel Rückruf zum Fahrzeugtermin" required></label>
-      <label>Hinweis<textarea name="notiz" rows="3" maxlength="2000"></textarea></label>
-      <button type="submit">Termin speichern</button>
-    </form>
-  </section>
-</main>
-</body>
-</html>
+  {% if access.calendar %}<details class="planning-group new-note" id="neuer-termin"><summary>{{ icon('plus') }}Bürotermin eintragen {{ icon('chevron','planning-chevron') }}</summary><form method="post" action="/werkstatt/buero/kalender/termine" class="note-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="note-form-dates"><label>Datum<input type="date" name="datum" value="{{ datum }}" required></label><label>Uhrzeit<input type="time" name="uhrzeit"></label></div><label>Titel<input name="titel" maxlength="160" placeholder="Rückruf oder Absprache" required></label><label>Notiz<textarea name="notiz" rows="3" maxlength="2000"></textarea></label><button type="submit">Termin speichern</button>
+  </form></details>{% endif %}
+  <details class="planning-context"><summary>Planungshinweise {{ icon('chevron') }}</summary><p>Eine geplante Fahrt ist keine Abhol- oder Rückgabefreigabe. Fahrzeugtermine ändert die Werkstattleitung im Auftrag. Bürotermine erscheinen im Werkstattkalender.</p></details>
+</main></body></html>

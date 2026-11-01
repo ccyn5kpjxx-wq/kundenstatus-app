@@ -44,7 +44,7 @@ ISOLATED_ENV = {**runtime,
     'MAILBOX_SEND_ENABLED': '0', 'MAILBOX_MOVE_ENABLED': '0', 'MAILBOX_FLAGS_ENABLED': '0',
     'MAILBOX_WRITE_ENABLED': '0', 'WHATSAPP_ENABLED': '0', 'ENABLE_LOCAL_OCR': '0',
     'KI_ASSISTENT_ONLINE_ENABLED': '0', 'LOCAL_SPEECH_ENABLED': '0', 'CODEX_BRIDGE_ENABLED': '0',
-    'OFFICE_LEXWARE_UPLOAD_ENABLED': '0', 'ASSISTANT_NATIVE_COCKPIT': '1',
+    'OFFICE_LEXWARE_UPLOAD_ENABLED': '0', 'OFFICE_AI_ANALYSIS_ENABLED': '0', 'ASSISTANT_NATIVE_COCKPIT': '1',
     'OPENAI_API_KEY': '', 'LEXWARE_API_KEY': '', 'GOOGLE_APPLICATION_CREDENTIALS': '',
     'GOOGLE_DOC_AI_SERVICE_ACCOUNT_FILE': '', 'GOOGLE_DOC_AI_PROJECT_ID': '',
     'WHATSAPP_ACCESS_TOKEN': '', 'WHATSAPP_WORKSHOP_NUMBERS': '', 'MAIL_IMAP_PASS': '',
@@ -78,7 +78,8 @@ def audit(event, args):
     # another discovered module is importing or executing its own fixtures.
     if not GUARD_ACTIVE:
         return
-    if event in {'socket.connect', 'socket.bind', 'socket.getaddrinfo', 'subprocess.Popen', 'os.system'}:
+    if event in {'socket.connect', 'socket.bind', 'socket.getaddrinfo', 'socket.gethostbyname',
+                 'socket.gethostbyaddr', 'socket.getnameinfo', 'socket.sendto', 'subprocess.Popen', 'os.system'}:
         forbidden(event)
     if event == 'sqlite3.connect' and args[0] != ':memory:' and not inside(args[0]):
         forbidden('database outside test scratch')
@@ -131,6 +132,9 @@ def isolated_operations():
         # Suppress urllib3's optional Windows IPv6 bind probe during import;
         # even loopback sockets remain forbidden inside our regression.
         stack.enter_context(patch('socket.has_ipv6', False))
+        # SMTP availability derives a HELO name during import. Supply a local
+        # fixture instead of permitting its otherwise implicit reverse DNS.
+        stack.enter_context(patch('socket.getfqdn', return_value='localhost'))
         stack.enter_context(patch.object(threading.Thread, 'start', deny_worker))
         stack.enter_context(patch.object(Path, 'exists', no_env_files))
         GUARD_ACTIVE = True
@@ -289,10 +293,11 @@ class OfficeCockpitIntegration(unittest.TestCase):
     def assert_no_external_operations(self):
         self.assertEqual(BLOCKED_OPERATIONS, [], 'A forbidden operation was attempted, even if the app caught its exception')
 
-    def rendered_form(self, response, **matches):
+    def rendered_form(self, response, *, form_action=None, **matches):
         self.assertEqual(response.status_code, 200)
         forms = [form for form in RenderedForms(response.get_data(as_text=True)).forms
-                 if form['method'] == 'post' and all(form['data'].get(key) == str(value) for key, value in matches.items())]
+                 if form['method'] == 'post' and (form_action is None or form['action'] == form_action)
+                 and all(form['data'].get(key) == str(value) for key, value in matches.items())]
         self.assertEqual(len(forms), 1, 'Expected one actual rendered POST form for ' + repr(matches))
         form = forms[0]
         tokens = form['data'].getlist('csrf_token')
@@ -327,7 +332,7 @@ class OfficeCockpitIntegration(unittest.TestCase):
 
     def test_01_full_app_registration_and_every_office_get_renders_without_full_navigation(self):
         for blueprint in ('office_access', 'office_cockpit', 'office_planning', 'office_sections',
-                          'buero_belege', 'office_lexware', 'office_payroll'):
+                          'buero_belege', 'office_lexware', 'office_payroll', 'office_prices'):
             self.assertIn(blueprint, p.app.blueprints)
         for table in ('buero_zugaenge', 'buero_zugang_audit', 'buero_arbeitszeit_pruefungen',
                       'buero_belege', 'buero_belege_audit', 'buero_belege_seen',
@@ -339,14 +344,18 @@ class OfficeCockpitIntegration(unittest.TestCase):
                      '/werkstatt/buero/mahnungen', '/werkstatt/buero/news', '/werkstatt/buero/bewerbungen',
                      '/werkstatt/buero/lieferanten', '/werkstatt/buero/postfach', '/werkstatt/buero/zugaenge',
                      '/werkstatt/buero/autohausportale', '/werkstatt/buero/belege',
-                     '/werkstatt/buero/loehne', '/admin/mail'):
+                     '/werkstatt/buero/loehne', '/werkstatt/buero/preise', '/admin/mail'):
             with self.subTest(path=path):
                 self.assert_limited_page(self.get(path))
         html = self.get('/werkstatt/buero/planung').get_data(as_text=True)
         self.assertIn('SYNTH-910001', html)
         self.assertIn('SYNTH-910002', html)
-        self.assertIn('Bei Kunde oder Partner holen', html)
-        self.assertIn('Zum Kunden oder Partner zurückbringen', html)
+        self.assertIn('aria-label="Fahrzeug holen"', html)
+        self.assertIn('aria-label="Fahrzeug bringen"', html)
+        pdf = self.get('/werkstatt/buero/preise/pdf')
+        self.assertEqual(pdf.status_code, 200)
+        self.assertTrue(pdf.data.startswith(b'%PDF-'))
+        self.assertIn('no-store', pdf.headers['Cache-Control'])
 
     def test_02_personal_login_uses_existing_identity_and_routes_to_office(self):
         client = p.app.test_client()
@@ -446,7 +455,8 @@ class OfficeCockpitIntegration(unittest.TestCase):
         html = self.assert_limited_page(self.get('/werkstatt/buero'))
         self.assertNotIn('href="/werkstatt/buero/belege"', html)
         self.assertEqual(self.get('/werkstatt/buero/kalender').status_code, 200)
-        for path in ('/werkstatt/buero/belege', '/werkstatt/buero/planung', '/admin/mail', '/werkstatt/buero/lieferanten'):
+        for path in ('/werkstatt/buero/belege', '/werkstatt/buero/planung', '/admin/mail', '/werkstatt/buero/lieferanten',
+                     '/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf'):
             with self.subTest(path=path):
                 self.assertEqual(self.get(path).status_code, 403)
         self.grant([], active=False)
@@ -482,7 +492,8 @@ class OfficeCockpitIntegration(unittest.TestCase):
             db.commit()
             before = [tuple(row) for row in db.execute('SELECT * FROM mitarbeiter_zeitstempel ORDER BY id')]
         page = '/werkstatt/buero/arbeitszeiten?tag=' + day.isoformat()
-        form = self.rendered_form(self.get(page), mitarbeiter_id=MID, datum=day.isoformat())
+        form = self.rendered_form(self.get(page), form_action='/werkstatt/buero/arbeitszeiten/pruefen',
+                                  mitarbeiter_id=MID, datum=day.isoformat())
         response = self.submit_rendered(form, page, button=('status', 'geprueft'), notiz='Synthetische Originalzeiten geprüft.')
         self.assertEqual(response.status_code, 303)
         with closing(p.get_db()) as db:
@@ -538,7 +549,7 @@ class OfficeCockpitIntegration(unittest.TestCase):
         payment = self.rendered_form(response, action='payment', key=key)
         self.assertEqual(payment['data']['target'], 'zahlung_in_bearbeitung')
         home = self.assert_limited_page(self.get('/werkstatt/buero'))
-        self.assertIn('<span>Freigegebene Löhne</span><strong>1</strong>', home)
+        self.assertIn('<span>Löhne</span><strong>1</strong>', home)
         chef_preview = self.get('/werkstatt/buero', self.admin)
         self.assertEqual(chef_preview.status_code, 200)
         self.assertIn('href="/admin/buero/loehne"', chef_preview.get_data(as_text=True))
@@ -569,6 +580,183 @@ class OfficeCockpitIntegration(unittest.TestCase):
             with patch.dict(p.app.config, OFFICE_CEO_MAIL_ADDRESS=''):
                 self.assertEqual(self.get('/admin/mail').status_code, 403)
             connect.assert_not_called()
+
+    def test_13_file_only_html_upload_local_ocr_short_review_explicit_classification_and_chef_approval(self):
+        base = '/werkstatt/buero/belege'
+        initial = self.get(base)
+        form = self.rendered_form(initial, form_action=base + '/erfassen')
+        # The browser form needs no manually supplied document metadata. Keep
+        # its actual blank optional controls and both injected CSRF copies.
+        self.assertTrue(all(not value for name, value in form['data'].items(multi=True) if name != 'csrf_token'))
+        html = initial.get_data(as_text=True)
+        self.assertLess(html.index('>Beleg analysieren</button>'), html.index('<summary>Manuell erfassen</summary>'))
+        local_text = '\n'.join([
+            'Rechnung', 'Lieferant: Musterlieferant Integration GmbH',
+            'Rechnungsnummer: AUTO-HTML-2026-001', 'Rechnungsdatum: 01.11.2026',
+            'Fällig am: 15.11.2026', 'Gesamtbetrag brutto: 119,00 EUR',
+            'Nur synthetischer Testbeleg, keine Zahlungsaufforderung.',
+        ])
+        stream = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=200, height=250)
+        writer.add_metadata({'/Title': 'SYNTHETIC file-only OCR integration'})
+        writer.write(stream)
+        raw = stream.getvalue()
+        with patch.dict(p.app.config, OFFICE_AI_ANALYSIS_ENABLED=False), patch.object(
+                p, 'extract_document_text_local', return_value=local_text) as ocr:
+            response = self.submit_rendered(form, base, original=(BytesIO(raw), 'synthetic-ocr-invoice.pdf'))
+        self.assertEqual(response.status_code, 303)
+        ocr.assert_called_once()
+        path = response.headers['Location']
+        key = path.rstrip('/').rsplit('/', 1)[-1]
+        with closing(p.get_db()) as db:
+            draft = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual((draft['lieferant'], draft['belegnummer'], draft['betrag_cent']),
+                         ('Musterlieferant Integration GmbH', 'AUTO-HTML-2026-001', 11900))
+        self.assertEqual((draft['belegdatum'], draft['faelligkeit']), ('2026-11-01', '2026-11-15'))
+        self.assertEqual((draft['typ'], draft['kategorie'], draft['typ_vorschlag'], draft['kategorie_vorschlag']),
+                         ('post', '', 'rechnung', 'rechnung'))
+        self.assertEqual((draft['status'], draft['payable'], draft['business_confirmed']), ('entwurf', 0, 0))
+        reviewed = self.get(path)
+        compact = self.assert_limited_page(reviewed)
+        self.assertIn('<summary>Angaben bearbeiten</summary>', compact)
+        self.assertIn('<details class="bb-analysis-details">', compact)
+        self.assertIn('Musterlieferant Integration GmbH', compact)
+        submit = self.rendered_form(reviewed, form_action=base + '/' + key + '/einreichen')
+        self.assertEqual((submit['data']['typ'], submit['data']['kategorie']), ('rechnung', 'rechnung'))
+        self.assertEqual(self.get(base + '/' + key + '/original').data, raw)
+        response = self.submit_rendered(submit, path, typ='rechnung', kategorie='rechnung', confirmed='ja')
+        self.assertEqual(response.status_code, 303)
+        with closing(p.get_db()) as db:
+            submitted = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual((submitted['typ'], submitted['kategorie'], submitted['status'], submitted['payable']),
+                         ('rechnung', 'rechnung', 'eingereicht', 0))
+        chef_path = '/admin/buero/belege/' + key
+        approve = self.rendered_form(self.get(chef_path, self.admin), form_action=chef_path + '/freigeben')
+        with patch.object(p.office_lexware, 'send_approved', return_value={'state': 'linked'}) as upload:
+            response = self.submit_rendered(approve, chef_path, client=self.admin,
+                bereich='geschaeftlich', confirmed='ja', chef_notiz='Synthetisches Original und OCR-Angaben geprüft.')
+        self.assertEqual(response.status_code, 303)
+        with closing(p.get_db()) as db:
+            approved = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual((approved['status'], approved['payable'], approved['business_confirmed']), ('freigegeben', 1, 1))
+        upload.assert_called_once_with(key, approved['revision'])
+
+
+    def test_14_existing_personal_leave_request_chef_approval_and_office_absence_share_one_calendar(self):
+        # Reuse this module's guarded full-app fixture; no second startup,
+        # production database, mailbox or provider is involved.
+        self.enterContext(patch('werkstatt_mitarbeiter_selfservice._today',
+                                return_value=datetime(2026, 11, 2).date()))
+        mid, name = 910014, 'SYNTH Urlaubsmitarbeiter'
+        vacation = '/werkstatt/assistent/urlaub'
+        management = vacation + '/verwaltung'
+        start, end = '2026-11-23', '2026-11-27'
+        now = p.now_str()
+        with closing(p.get_db()) as db:
+            db.execute("""INSERT INTO mitarbeiter(id,name,rolle,aktiv,erstellt_am,geaendert_am)
+                VALUES(?,?,'Synthetischer Urlaubstest',1,?,?)""", (mid, name, now, now))
+            db.execute("""INSERT INTO assistent_rechte(mitarbeiter_id,passwort_hash,lesen,dokumentieren,einkaufen,
+                limit_cent,version,auth_version) VALUES(?,?,1,0,0,0,1,1)""",
+                (mid, generate_password_hash('SyntheticLeaveOnly2026!')))
+            pending_before = db.execute("SELECT COUNT(*) AS n FROM mitarbeiter_urlaubsantraege WHERE status='beantragt'").fetchone()['n']
+            db.commit()
+        employee = p.app.test_client()
+        with employee.session_transaction() as state:
+            state.update(assistent_mid=mid, assistent_version=1, assistent_auth_version=1,
+                         csrf_token='synthetic-leave-csrf')
+        self.grant(['urlaub'])
+        # Both a normal employee and an office employee keep their own existing
+        # selfservice route. Neither receives the chief approval capability.
+        personal_home = self.get('/werkstatt/mein-konto', employee)
+        self.assertEqual(personal_home.status_code, 200)
+        self.assertIn('href="' + vacation + '"', personal_home.get_data(as_text=True))
+        self.assertEqual(self.get(vacation).status_code, 200)
+        self.assertEqual(self.get(vacation + '/stand').status_code, 200)
+        self.assertEqual(self.get(management).status_code, 403)
+        apply_form = self.rendered_form(self.get(vacation, employee),
+                                        form_action=vacation + '/antrag')
+        missing_csrf = MultiDict(apply_form['data'])
+        missing_csrf.poplist('csrf_token')
+        for field, value in (('von', start), ('bis', end), ('confirmed', 'ja')):
+            missing_csrf.setlist(field, [value])
+        self.assertIn(self.post(vacation + '/antrag', missing_csrf, employee).status_code, (400, 403))
+        response = self.submit_rendered(apply_form, vacation, client=employee,
+                                        von=start, bis=end, confirmed='ja')
+        self.assertEqual(response.status_code, 303)
+        with closing(p.get_db()) as db:
+            request = dict(db.execute("""SELECT * FROM mitarbeiter_urlaubsantraege
+                WHERE mitarbeiter_id=? AND start_datum=? AND end_datum=?""", (mid, start, end)).fetchone())
+            self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM mitarbeiter_urlaubsantraege WHERE status='beantragt'").fetchone()['n'], pending_before + 1)
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM mitarbeiter_urlaub WHERE mitarbeiter_id=?', (mid,)).fetchone()['n'], 0)
+        self.assertEqual(request['status'], 'beantragt')
+        self.assertIsNone(request['kalender_id'])
+        self.assertNotIn(name, self.get('/werkstatt/buero/abwesenheit').get_data(as_text=True))
+        from flask import template_rendered
+        counts = []
+        def capture_count(sender, template, context, **extra):
+            if template.name == 'cockpit.html':
+                counts.append(context.get('urlaubfreigabe_count'))
+        with template_rendered.connected_to(capture_count, p.app):
+            chef = self.get('/admin/cockpit', self.admin)
+        self.assertEqual(chef.status_code, 200)
+        self.assertEqual(counts, [pending_before + 1])
+        self.assertIn('href="' + management + '"', chef.get_data(as_text=True))
+
+        # Configure the explicitly reviewed account through its actual chef
+        # form, then use the current request/account versions to approve.
+        account_form = self.rendered_form(self.get(management + '?jahr=2026', self.admin),
+                                          form_action=management + '/konto/' + str(mid))
+        response = self.submit_rendered(account_form, management, client=self.admin,
+            jahr='2026', resttage='10', stichtag='2026-11-02',
+            arbeitstage=['0', '1', '2', '3', '4'], feiertage='keine', confirmed='ja')
+        self.assertEqual(response.status_code, 303)
+        review_path = management + '/antrag/' + request['id']
+        review = self.rendered_form(self.get(management + '?jahr=2026', self.admin),
+                                    form_action=review_path)
+        denied = MultiDict(review['data'])
+        denied.setlist('csrf_token', ['synthetic-office-csrf'])
+        denied.setlist('confirmed', ['ja'])
+        denied.setlist('entscheidung', ['genehmigt'])
+        self.assertEqual(self.post(review_path, denied).status_code, 403)
+        # A stale version must not approve or create a calendar entry.
+        stale = self.submit_rendered(review, management, client=self.admin,
+            button=('entscheidung', 'genehmigt'), version='0', confirmed='ja')
+        self.assertEqual(stale.status_code, 303)
+        with closing(p.get_db()) as db:
+            self.assertEqual(db.execute('SELECT status FROM mitarbeiter_urlaubsantraege WHERE id=?', (request['id'],)).fetchone()['status'], 'beantragt')
+        response = self.submit_rendered(review, management, client=self.admin,
+                                        button=('entscheidung', 'genehmigt'), confirmed='ja')
+        self.assertEqual(response.status_code, 303)
+        # Replaying the old form cannot debit twice or create a second absence.
+        self.assertEqual(self.submit_rendered(review, management, client=self.admin,
+            button=('entscheidung', 'genehmigt'), confirmed='ja').status_code, 303)
+        with closing(p.get_db()) as db:
+            approved = dict(db.execute('SELECT * FROM mitarbeiter_urlaubsantraege WHERE id=?', (request['id'],)).fetchone())
+            calendar = [dict(row) for row in db.execute('SELECT * FROM mitarbeiter_urlaub WHERE mitarbeiter_id=?', (mid,))]
+            self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM mitarbeiter_urlaubsantraege WHERE status='beantragt'").fetchone()['n'], pending_before)
+            audit_before = db.execute('SELECT COUNT(*) AS n FROM mitarbeiter_urlaub_audit').fetchone()['n']
+        self.assertEqual((approved['status'], approved['belastung_halbtage']), ('genehmigt', 10))
+        self.assertEqual(len(calendar), 1)
+        self.assertEqual(calendar[0]['id'], approved['kalender_id'])
+        self.assertEqual((calendar[0]['start_datum'], calendar[0]['end_datum']), ('23.11.2026', '27.11.2026'))
+        for _ in range(2):
+            html = self.assert_limited_page(self.get('/werkstatt/buero/abwesenheit'))
+            self.assertIn(name, html)
+            self.assertIn('23.11.2026', html); self.assertIn('27.11.2026', html)
+            self.assertIn('Genehmigt', html); self.assertIn('5 Urlaubstage', html)
+        own = self.get(vacation + '/stand?jahr=2026', employee).get_json()
+        self.assertEqual(own['resttage'], '5')
+        self.assertEqual(own['antraege'][0]['status'], 'genehmigt')
+        self.assertEqual(self.get(vacation + '/stand?jahr=2026').get_json()['antraege'], [])
+        with template_rendered.connected_to(capture_count, p.app):
+            self.assertEqual(self.get('/admin/cockpit', self.admin).status_code, 200)
+        self.assertEqual(counts, [pending_before + 1, pending_before])
+        with closing(p.get_db()) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM mitarbeiter_urlaub_audit').fetchone()['n'], audit_before)
+        self.grant(['news'])
+        self.assertEqual(self.get('/werkstatt/buero/abwesenheit').status_code, 403)
+        self.assertEqual(self.get(vacation).status_code, 403)
 
 
 if __name__ == '__main__':

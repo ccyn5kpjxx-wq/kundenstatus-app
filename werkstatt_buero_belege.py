@@ -245,6 +245,8 @@ def _payment_order_ready(row):
         raise ValueError("Zahlungsauftrag ist unvollständig: geprüften Betrag, Empfänger, Fälligkeit und Verwendungszweck ergänzen.")
     if row["zahlungsmodus"] not in ("einzelzahlung", "monatliche_miete"):
         raise ValueError("Begründete Einzelzahlung oder monatliche Mietvorlage ausdrücklich auswählen.")
+    if row["zahlungsmodus"] == "monatliche_miete" and row["kategorie"] != "miete":
+        raise ValueError("Eine monatliche Mietvorlage nur im Ordner Miete verwenden.")
     if row["zahlungsmodus"] == "einzelzahlung" and not row["notiz"]:
         raise ValueError("Einzelzahlung anhand der vorliegenden Quelle in der Notiz begründen.")
 
@@ -363,7 +365,7 @@ class OfficeDocuments:
             (secrets.token_hex(16), key, who["actor"], revision, _now()))
 
     @staticmethod
-    def _audit(db, who, key, action, before=None):
+    def _audit(db, who, key, action, before=None, *, extra=None):
         row = OfficeDocuments._row(db, key)
         metadata = {k: row[k] for k in ("typ", "kategorie", "lieferant", "belegnummer", "belegdatum", "betrag_cent", "faelligkeit", "notiz",
                                       "zahlungsempfaenger", "verwendungszweck", "zahlungsmodus", "quelle_geprueft",
@@ -374,6 +376,8 @@ class OfficeDocuments:
                        decision_note=row["decision_note"], paid_date=row["paid_date"], payment_reference=row["payment_reference"])
         details.update(kategorie=row["kategorie"], kategorie_vorschlag=row["kategorie_vorschlag"],
                        typ_vorschlag=row["typ_vorschlag"], lexware_beleg_id=row["lexware_beleg_id"], lexware_status=row["lexware_status"])
+        if extra:
+            details.update(extra)
         db.execute("INSERT INTO buero_belege_audit(id,beleg_id,actor,aktion,details_json,created_at) VALUES(?,?,?,?,?,?)",
                    (secrets.token_hex(16), key, who["actor"], action, json.dumps(details, sort_keys=True, ensure_ascii=False), _now()))
         OfficeDocuments._seen(db, who, key, row["revision"])
@@ -468,6 +472,76 @@ class OfficeDocuments:
                 raise RevisionConflict("Beleg wurde während der Analyse geändert. Vorschlag nicht übernommen.")
             self._audit(db, who, key, "klassifizierung_vorgeschlagen", row["status"])
         self._backup()
+
+    def record_extracted_fields(self, key, revision, fields, hint="", source="local", *, intake=False):
+        """Fill empty draft metadata; classification remains an unapproved proposal.
+
+        The trusted intake capability is restricted to its own protected review
+        copies. No HTTP route accepts extraction payloads or this capability.
+        """
+        labels = {"lieferant": "Absender", "belegnummer": "Belegnummer", "belegdatum": "Belegdatum",
+                  "faelligkeit": "Fälligkeit", "betrag_brutto": "Bruttobetrag", "typ": "Belegart", "kategorie": "Ordner"}
+        if not isinstance(fields, dict) or set(fields) - set(labels):
+            raise ValueError("Nur vorgesehene Belegangaben aus der Analyse übernehmen.")
+        if source not in ("local", "ai", "mixed"):
+            raise ValueError("Gültige Analysequelle angeben.")
+        hint = _text(hint, 1000, "Analysehinweis", multiline=True)
+        values, skipped = {}, []
+        for name, value in fields.items():
+            if value is None or value == "":
+                continue
+            try:
+                if name == "lieferant": value = _text(value, 160, labels[name])
+                elif name == "belegnummer": value = _text(value, 100, labels[name])
+                elif name in ("belegdatum", "faelligkeit"): value = _day(value, labels[name])
+                elif name == "betrag_brutto": value = _amount(value)
+                elif name == "typ" and value not in set(KINDS) - {"zahlungsauftrag"}: raise ValueError()
+                elif name == "kategorie" and value not in CATEGORIES: raise ValueError()
+                if value not in (None, ""):
+                    values[name] = value
+            except (TypeError, ValueError):
+                skipped.append(name)
+        if skipped:
+            hint = (hint + "\nNicht eindeutig übernommen: " + ", ".join(labels[name] for name in skipped) + ". Bitte am Original prüfen.").strip()[:1000]
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            admin = not intake and bool(session.get("admin"))
+            who = {"actor": "system:chef-posteingang"} if intake else self.identity(admin=admin, db=db, lock=True)
+            row = self._current(db, key, revision, {"entwurf", "zurueckgewiesen", "eingereicht"})
+            own_intake = row["created_by"] == "system:chef-posteingang" and bool(row["source_ref_hash"])
+            if intake and not own_intake:
+                raise PermissionError("Kein eigener automatischer Eingang.")
+            if not intake:
+                self._visibility(row, who, admin=admin)
+            if row["status"] == "eingereicht" and not own_intake:
+                raise RevisionConflict("Bereits eingereichte Angaben bleiben unverändert. Zur Korrektur zurückgeben.")
+            if row["typ"] == "zahlungsauftrag":
+                raise ValueError("Zahlungsaufträge anhand ihrer Original-Zahlungsgrundlage manuell prüfen.")
+            changes, filled = {}, []
+            for name, value in values.items():
+                column = {"betrag_brutto": "betrag_cent", "typ": "typ_vorschlag", "kategorie": "kategorie_vorschlag"}.get(name, name)
+                if name in ("typ", "kategorie"):
+                    if name == "kategorie" and row["kategorie"]:
+                        continue
+                elif row[column] not in (None, ""):
+                    continue
+                if row[column] != value:
+                    changes[column] = value
+                    filled.append(name)
+            for column, value in (("klassifizierung_hinweis", hint), ("analyse_status", "vorschlag"), ("verarbeitung_hinweis", "")):
+                if row[column] != value:
+                    changes[column] = value
+            if not changes:
+                return row["revision"]
+            changed = db.execute("UPDATE buero_belege SET " + ",".join(column + "=?" for column in changes) +
+                                 ",revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status=?",
+                                 (*changes.values(), _now(), key, row["revision"], row["status"]))
+            if changed.rowcount != 1:
+                raise RevisionConflict("Beleg wurde während der Analyse geändert. Neu laden und erneut prüfen.")
+            self._audit(db, who, key, "belegangaben_erkannt", row["status"],
+                        extra={"analyse_quelle": source, "ergaenzte_felder": filled, "nicht_uebernommene_felder": skipped})
+            current_revision = row["revision"] + 1
+        self._backup()
+        return current_revision
 
     def record_lexware_reference(self, key, revision, document_id, url, status="bereit"):
         document_id = _text(document_id, 100, "Lexware-Belegreferenz")
@@ -616,12 +690,20 @@ class OfficeDocuments:
             self._audit(db, who, key, "angaben_geaendert", row["status"])
         self._backup()
 
-    def submit(self, key, version, *, admin=False):
+    def submit(self, key, version, *, admin=False, kind=None, category=None):
         with self.p.portal_originals_operation_lock(), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"entwurf", "zurueckgewiesen"})
             self._visibility(row, who, admin=admin)
-            if not row["lieferant"] and row["typ"] != "zahlungsauftrag":
+            if kind is not None:
+                if kind not in KINDS:
+                    raise ValueError("Belegart vor der Einreichung prüfen.")
+                row["typ"] = kind
+            if category is not None:
+                if category and category not in CATEGORIES:
+                    raise ValueError("Belegordner vor der Einreichung prüfen.")
+                row["kategorie"] = category
+            if not row["lieferant"] and row["typ"] in ("rechnung", "bescheid"):
                 raise ValueError("Lieferant / Absender vor der Einreichung ergänzen.")
             if row["typ"] in ("rechnung", "bescheid") and not row["belegdatum"]:
                 raise ValueError("Belegdatum vor der Einreichung ergänzen.")
@@ -630,8 +712,11 @@ class OfficeDocuments:
             if row["typ"] == "zahlungsauftrag":
                 _payment_order_ready(row)
             now = _now()
-            changed = db.execute("UPDATE buero_belege SET status='eingereicht',payable=0,business_confirmed=0,revision=revision+1,submitted_at=?,updated_at=? WHERE id=? AND revision=? AND status=?",
-                                 (now, now, key, row["revision"], row["status"]))
+            dedup_key = _dedup_key(row["sha256"], row)
+            if db.execute("SELECT id FROM buero_belege WHERE dedup_key=? AND id<>?", (dedup_key, key)).fetchone():
+                raise ValueError("Dieser Beleg oder Zahlungsauftrag besteht bereits. Bestehenden Eintrag prüfen.")
+            changed = db.execute("UPDATE buero_belege SET typ=?,kategorie=?,dedup_key=?,status='eingereicht',payable=0,business_confirmed=0,revision=revision+1,submitted_at=?,updated_at=? WHERE id=? AND revision=? AND status=?",
+                                 (row["typ"], row["kategorie"], dedup_key, now, now, key, row["revision"], row["status"]))
             if changed.rowcount != 1:
                 raise RevisionConflict("Beleg wurde gleichzeitig geändert. Bitte neu laden.")
             self._audit(db, who, key, "eingereicht", row["status"])
@@ -849,7 +934,9 @@ def register_office_documents(p):
     def upload():
         csrf_and_fields(FIELDS, upload=True)
         def create_and_analyse():
-            result = service.create({k: request.form.get(k, "") for k in FIELDS}, request.files["original"], admin=admin_route())
+            payload = {k: request.form.get(k, "") for k in FIELDS}
+            payload["typ"] = payload["typ"] or "post"
+            result = service.create(payload, request.files["original"], admin=admin_route())
             if not result[1] and request.form.get("typ") != "zahlungsauftrag":
                 run_hook("office_document_uploaded", result[0])
             return result
@@ -864,10 +951,11 @@ def register_office_documents(p):
     @bp.post("/werkstatt/buero/belege/<key>/einreichen")
     @bp.post("/admin/buero/belege/<key>/einreichen")
     def submit(key):
-        csrf_and_fields({"revision", "confirmed"})
+        csrf_and_fields({"revision", "confirmed", "typ", "kategorie"})
         if request.form.get("confirmed") != "ja":
             abort(400)
-        return mutate(lambda: service.submit(key, request.form.get("revision"), admin=admin_route()), key)
+        return mutate(lambda: service.submit(key, request.form.get("revision"), admin=admin_route(),
+                                             kind=request.form.get("typ"), category=request.form.get("kategorie")), key)
 
     def download(key):
         try:

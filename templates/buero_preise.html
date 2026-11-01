@@ -1,0 +1,27 @@
+{% from 'buero_icons.html' import icon %}
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Preise · Büro · Gärtner</title><link rel="stylesheet" href="{{ url_for('static', filename='buero_preise.css') }}"></head>
+<body class="buero-page">{% include 'buero_nav.html' %}<main class="buero-main office-prices">
+<header class="buero-heading"><div><p class="buero-eyebrow">INTERN · STAND {{ price_date }}</p><h1>Preise</h1><p class="prices-subtitle">Alle Beträge netto · zuzüglich 19 % MwSt.</p></div><div class="prices-actions"><a class="prices-button" href="{{ url_for('office_prices.pdf') }}" target="_blank" rel="noopener">{{ icon('receipt') }}PDF öffnen</a><a class="prices-download" href="{{ url_for('office_prices.pdf', download='1') }}">Herunterladen</a></div></header>
+
+<section class="prices-panel" aria-labelledby="paint-heading"><header class="prices-panel-heading"><h2 id="paint-heading">{{ icon('car') }}Lackierung</h2><span>Standard-Außenlackierung</span></header>
+<div class="prices-table-scroll" role="region" aria-label="Lackierpreise für Neu- und Gebrauchtteile" tabindex="0"><table class="prices-table"><thead><tr><th rowspan="2" scope="col">Bauteil</th><th colspan="2" scope="colgroup">Neuteil</th><th colspan="2" scope="colgroup" class="prices-used">Gebrauchtteil</th></tr><tr><th scope="col">Partner</th><th scope="col">Privat</th><th scope="col" class="prices-used">Partner</th><th scope="col">Privat</th></tr></thead><tbody>
+{% for label,new_partner,new_private,used_partner,used_private,provisional in paint_prices %}<tr><th scope="row">{{ label }}{% if provisional %}<span class="prices-provisional">vorläufig</span>{% endif %}</th><td>{{ price_euro(new_partner) }}</td><td>{{ price_euro(new_private) }}</td><td class="prices-used">{{ price_euro(used_partner) }}</td><td>{{ price_euro(used_private) }}</td></tr>{% endfor %}
+</tbody></table></div><p class="prices-note">Standardlackmaterial und normale Lackiervorarbeiten sind enthalten.</p>
+</section>
+
+<section class="prices-panel" aria-labelledby="extras-heading"><header class="prices-panel-heading"><h2 id="extras-heading">{{ icon('plus') }}Zusatzleistungen</h2></header><div class="prices-table-scroll"><table class="prices-table prices-extras"><thead><tr><th scope="col">Leistung</th><th scope="col">Partner</th><th scope="col">Privat</th></tr></thead><tbody>{% for label,hint,partner,private,surcharge in extra_prices %}<tr><th scope="row">{{ label }}<small>{{ hint }}</small></th><td>{{ '+ ' if surcharge else '' }}{{ price_euro(partner) }}</td><td>{{ '+ ' if surcharge else '' }}{{ price_euro(private) }}</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="prices-panel prices-repair" aria-labelledby="repair-heading"><header class="prices-panel-heading"><h2 id="repair-heading">{{ icon('edit') }}Instandsetzung</h2><span>Richtwerte nach Sichtprüfung</span></header><div class="prices-repair-grid"><div><strong>Dellen / Rost</strong><span>100–150 € netto</span></div><div><strong>Größere Dellen</strong><span>ca. 200 € netto</span></div></div><p class="prices-open">Partner-/Privatzuordnung noch abzustimmen. Diese Werte sind keine getrennten Festpreise und gelten nicht automatisch je einzelner Delle.</p></section>
+
+<details class="prices-rules"><summary>Anwendung & Paketgrenzen {{ icon('chevron') }}</summary><ul>
+<li>Gebrauchtteilpreise gelten bei intaktem, tragfähigem Altlack und normalen Vorarbeiten. Der Nachlass von 10 % betrifft nur die Lackierpauschale derselben Preisgruppe.</li>
+<li>Demontage und Montage werden zusammen je Bauteil berechnet, nur bei tatsächlicher Ausführung. Kein Gebrauchtteilnachlass auf Montage, Beilackieren oder Zuschläge.</li>
+<li>Beilackierung zählt je eigenständigem angrenzendem Bauteil. Eine vollständig lackierte Fläche nicht zusätzlich als Beilackierbauteil berechnen.</li>
+<li>Dreischichtlack: einmal zusätzlich je entsprechend lackiertem Bauteil. Kein weiterer Privat-Aufschlag auf den Zuschlag.</li>
+<li>Normale oberflächliche Kratzer lösen keine automatische Instandsetzungspauschale aus. Schäden, aufwendiger Untergrund, weitere Sonderlackierungen und zusätzliche Leistungen separat kalkulieren.</li>
+<li>Kofferraumdeckel nicht pauschal mit allen Heckklappen gleichsetzen. Die vorläufige Dachstufe ist kein allgemeines Reparatur-Kostenlimit.</li>
+</ul><p>Quelle ist die unveränderte interne Preisliste vom {{ price_date }}. Ihre organisatorischen Hinweise geben den damaligen Arbeitsstand wieder.</p></details>
+<footer class="prices-footer">Gärtner · Karosserie + Lack · Nur zur internen Verwendung</footer>
+</main></body></html>

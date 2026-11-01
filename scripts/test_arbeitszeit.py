@@ -238,7 +238,7 @@ class TimeTests(unittest.TestCase):
         names={'DbRow','PostgresCursor','PostgresConnection','convert_sqlite_sql_to_postgres','get_insert_table_name','split_sql_script'}
         tree=ast.parse((Path(__file__).resolve().parents[1]/'app.py').read_text(encoding='utf-8'))
         nodes=[node for node in tree.body if isinstance(node,(ast.ClassDef,ast.FunctionDef)) and node.name in names]
-        namespace={'re':re}
+        namespace={'re':re,'timed_database_call':lambda *args:lambda fn:fn}
         exec(compile(ast.Module(body=nodes,type_ignores=[]),'app.py (adapter only)','exec'),namespace)
         statements,path=[],self.p.path
         class Cursor:

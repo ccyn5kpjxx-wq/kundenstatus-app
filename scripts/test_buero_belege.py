@@ -21,7 +21,7 @@ from werkzeug.datastructures import FileStorage, MultiDict
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from werkstatt_buero_belege import MAX_ORIGINAL_BYTES, MAX_REQUEST_BYTES, TABLES, register_office_documents, _beleg_ddl, init_office_documents_schema
+from werkstatt_buero_belege import MAX_ORIGINAL_BYTES, MAX_REQUEST_BYTES, TABLES, RevisionConflict, register_office_documents, _beleg_ddl, init_office_documents_schema
 
 
 def pdf_bytes(marker="synthetic"):
@@ -143,6 +143,139 @@ class OfficeDocumentTests(unittest.TestCase):
     def approve(self, key, **changes):
         response = self.action(key, "freigeben", admin=True, **changes)
         self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+
+    def extract(self, key, fields, *, version=None, admin=False, mid=1, **kwargs):
+        with self.p.app.test_request_context():
+            if admin: session["admin"] = True
+            else: session["office_mid"] = mid
+            return self.p.documents.record_extracted_fields(key, str(version or self.row(key)["revision"]), fields, **kwargs)
+
+    def test_file_first_upload_analysis_and_short_confirmed_review(self):
+        initial = self.office.get("/werkstatt/buero/belege").get_data(as_text=True)
+        self.assertIn('<details class="bb-manual">', initial)
+        self.assertLess(initial.index('>Beleg analysieren</button>'), initial.index('<summary>Manuell erfassen</summary>'))
+        self.assertEqual(initial.count(" required"), 1)
+        raw = pdf_bytes("file-first-analysis")
+
+        def analyse(key):
+            return self.p.documents.record_extracted_fields(key, str(self.row(key)["revision"]),
+                {"typ": "rechnung", "kategorie": "rechnung", "lieferant": "Extracted Synthetic Supplier",
+                 "belegnummer": "AUTO-1", "belegdatum": "2026-01-03", "betrag_brutto": "119.50"},
+                "Synthetic source evidence", "local")
+
+        self.p.office_document_uploaded = analyse
+        response = self.office.post("/werkstatt/buero/belege/erfassen", data={
+            "csrf_token": "synthetic-csrf", "original": (io.BytesIO(raw), "synthetic.pdf")})
+        self.assertEqual(response.status_code, 303)
+        key = response.headers["Location"].rsplit("/", 1)[-1]
+        row = self.row(key)
+        self.assertEqual((row["typ"], row["typ_vorschlag"], row["kategorie"], row["kategorie_vorschlag"]), ("post", "rechnung", "", "rechnung"))
+        self.assertEqual((row["lieferant"], row["belegnummer"], row["betrag_cent"], row["faelligkeit"]), ("Extracted Synthetic Supplier", "AUTO-1", 11950, ""))
+        self.assertEqual((row["status"], row["payable"], row["business_confirmed"]), ("entwurf", 0, 0))
+        html = self.office.get(response.headers["Location"]).get_data(as_text=True)
+        self.assertIn('<summary>Angaben bearbeiten</summary>', html)
+        self.assertIn('<details class="bb-analysis-details">', html)
+        self.assertIn('Belegart prüfen', html)
+        self.assertEqual(self.action(key, "einreichen", typ="rechnung", kategorie="rechnung").status_code, 303)
+        self.assertEqual((self.row(key)["typ"], self.row(key)["status"], self.row(key)["payable"]), ("rechnung", "eingereicht", 0))
+        self.assertEqual(self.office.get("/werkstatt/buero/belege/" + key + "/original").data, raw)
+
+    def test_extracted_values_preserve_manual_metadata_and_confirmed_folder(self):
+        key = self.create(kategorie="rechnung", faelligkeit="")
+        original = self.row(key)
+        revision = self.extract(key, {"lieferant": "Other", "belegnummer": "OTHER", "belegdatum": "2026-02-01",
+            "betrag_brutto": "999.99", "faelligkeit": "2026-02-20", "typ": "bescheid", "kategorie": "steuern"},
+            hint="Synthetic fields only", source="ai")
+        row = self.row(key)
+        for name in ("lieferant", "belegnummer", "belegdatum", "betrag_cent", "notiz", "typ", "kategorie", "original_base64", "sha256"):
+            self.assertEqual(row[name], original[name], name)
+        self.assertEqual((row["faelligkeit"], row["typ_vorschlag"], row["kategorie_vorschlag"]), ("2026-02-20", "bescheid", ""))
+        self.assertEqual(row["revision"], revision)
+        with self.p.app.test_request_context():
+            session["office_mid"] = 1
+            detail = self.p.documents.detail(key)
+        evidence = next(entry["details"] for entry in detail["audit"] if entry["aktion"] == "belegangaben_erkannt")
+        self.assertEqual(evidence["analyse_quelle"], "ai")
+        self.assertEqual(set(evidence["ergaenzte_felder"]), {"faelligkeit", "typ"})
+
+    def test_zero_invalid_and_ambiguous_extraction_never_fabricates_a_value(self):
+        key = self.create(typ="post", lieferant="", belegnummer="", belegdatum="", faelligkeit="", betrag_brutto="", notiz="")
+        self.extract(key, {"lieferant": ["Supplier A", "Supplier B"], "belegnummer": {"first": "1", "second": "2"},
+            "belegdatum": "2026-02-30", "faelligkeit": ["2026-02-01", "2026-02-02"], "betrag_brutto": "0.00", "typ": ["rechnung", "bescheid"]},
+            hint="Mehrere Möglichkeiten; offen lassen", source="mixed")
+        row = self.row(key)
+        self.assertEqual((row["lieferant"], row["belegnummer"], row["belegdatum"], row["faelligkeit"], row["betrag_cent"], row["typ_vorschlag"]), ("", "", "", "", None, ""))
+        self.assertIn("Nicht eindeutig übernommen", row["klassifizierung_hinweis"])
+        # Unpayable post does not require invented sender, amount or due date.
+        self.assertEqual(self.action(key, "einreichen", typ="post").status_code, 303)
+        self.assertEqual(self.row(key)["payable"], 0)
+
+    def test_extraction_safety_fields_stale_revision_and_regular_submission_are_closed(self):
+        key = self.create(faelligkeit="")
+        before = self.row(key)
+        for field, value in (("payable", 1), ("business_confirmed", True), ("bereich", "geschaeftlich"), ("paid_date", "2026-01-03")):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.extract(key, {field: value})
+        self.assertEqual(self.row(key), before)
+        self.extract(key, {"faelligkeit": "2026-02-01"})
+        current = self.row(key)
+        with self.assertRaises(RevisionConflict):
+            self.extract(key, {"belegnummer": "stale"}, version=before["revision"])
+        with self.assertRaises(LookupError):
+            self.extract(key, {"lieferant": "Other actor"}, mid=2)
+        self.assertEqual(self.row(key), current)
+        self.submit(key)
+        submitted = self.row(key)
+        with self.assertRaises(RevisionConflict):
+            self.extract(key, {"faelligkeit": "2026-03-01"}, admin=True)
+        self.assertEqual(self.row(key), submitted)
+        self.approve(key)
+        approved = self.row(key)
+        with self.assertRaises(RevisionConflict):
+            self.extract(key, {"faelligkeit": "2026-04-01"}, admin=True)
+        self.assertEqual(self.row(key), approved)
+
+    def test_intake_extraction_remains_private_unapproved_and_limited_to_own_intake(self):
+        raw = pdf_bytes("intake-extraction")
+        payload = {"typ": "post"}
+        key, _ = self.p.documents.create_from_intake(payload, FileStorage(stream=io.BytesIO(raw), filename="synthetic.pdf"), source_ref="synthetic-intake")
+        revision = self.p.documents.record_extracted_fields(key, "1", {"lieferant": "Synthetic Private Sender",
+            "betrag_brutto": "1604.00", "typ": "bescheid", "kategorie": "privat"}, "Synthetic private suggestion", "local", intake=True)
+        row = self.row(key)
+        self.assertEqual((row["revision"], row["status"], row["bereich"], row["business_confirmed"], row["payable"]), (revision, "eingereicht", "unklar", 0, 0))
+        self.assertEqual(self.office.get("/werkstatt/buero/belege/" + key).status_code, 404)
+        self.assertEqual(base64.b64decode(row["original_base64"]), raw)
+        ordinary = self.create(raw=pdf_bytes("ordinary-extraction"))
+        with self.assertRaises(PermissionError):
+            self.p.documents.record_extracted_fields(ordinary, "1", {"lieferant": "Not own intake"}, intake=True)
+
+    def test_extraction_failure_after_upload_preserves_original_and_skips_payment_orders(self):
+        def failing(key):
+            return self.p.documents.record_extracted_fields(key, str(self.row(key)["revision"]), {"payable": 1})
+        self.p.office_document_uploaded = failing
+        raw = pdf_bytes("extract-failure")
+        key = self.create(raw=raw)
+        self.assertEqual(self.office.get("/werkstatt/buero/belege/" + key + "/original").data, raw)
+        self.assertIn("Scan-Analyse", self.row(key)["verarbeitung_hinweis"])
+        order = self.create(raw=pdf_bytes("order-no-extraction"), **self.order_fields())
+        before = self.row(order)
+        with self.assertRaises(ValueError):
+            self.extract(order, {"betrag_brutto": "999.00"})
+        self.assertEqual(self.row(order), before)
+
+    def test_concurrent_extraction_applies_only_one_current_revision(self):
+        key = self.create(typ="post", lieferant="", betrag_brutto="")
+        version = self.row(key)["revision"]
+        def attempt(supplier):
+            try:
+                self.extract(key, {"lieferant": supplier}, version=version)
+                return "saved"
+            except RevisionConflict:
+                return "stale"
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(attempt, ["First synthetic", "Second synthetic"])), ["saved", "stale"])
+        self.assertEqual(self.row(key)["revision"], version + 1)
+        self.assertEqual(len([row for row in self.rows(TABLES[1]) if row["aktion"] == "belegangaben_erkannt"]), 1)
 
     def test_invoice_full_workflow_original_integrity_and_audit(self):
         raw = pdf_bytes()

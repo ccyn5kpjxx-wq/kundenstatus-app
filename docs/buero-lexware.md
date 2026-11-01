@@ -1,12 +1,14 @@
-# Büro: Scanvorschlag und Lexware-Übergabe
+# Büro: automatische Belegerkennung und Lexware-Übergabe
 
-Das Modul `werkstatt_buero_lexware.py` erkennt Dokumenttext ausschließlich mit der vorhandenen lokalen Texterkennung. Feste Regeln schlagen eine Büroablage und Dokumentart vor. Das ist keine steuerliche Kontierung: Es werden weder Konten-/Kategorie-IDs noch Steuersätze an Lexware gesendet. Mehrere erkannte Umsatzsteuersätze erzeugen einen Prüfhinweis. Aus Dokumenttext werden keine Anweisungen ausgeführt.
+Nach einem Upload liest die vorhandene lokale Texterkennung das Original. `werkstatt_buero_analyse.py` extrahiert belegte Hauptdaten. Ist `OFFICE_AI_ANALYSIS_ENABLED` ausdrücklich aktiv und der vorhandene KI-Zugang eingerichtet, ergänzt `werkstatt_buero_ki.py` eine schema-begrenzte Analyse einschließlich Originalbildern. Es wird kein neuer Zugang angelegt. Ohne Konfiguration oder bei Ausfällen bleibt die lokale Erkennung mit sichtbarem Hinweis verfügbar.
+
+Lieferant, Rechnungsnummer, Belegdatum, Fälligkeit und ausgewiesener Bruttogesamtbetrag werden ausschließlich in leere Entwurfsfelder übernommen. Manuelle Werte bleiben erhalten. Mehrdeutige Felder bleiben auch nach einem KI-Vorschlag offen. Art und Ordner sind Vorschläge, die beim Einreichen bestätigt werden. Die Erkennung erteilt weder eine Zahlungsfreigabe noch eine steuerliche Kontierung; Konten, Steuersätze und Bankdaten werden nicht übertragen. Mehrere erkannte Umsatzsteuersätze erzeugen einen Prüfhinweis. Dokumentinhalt wird als untrusted Quelle verarbeitet.
 
 ## Integration
 
 `register_office_lexware(p)` registriert das Blueprint `office_lexware`, liefert den Service und setzt `p.office_lexware` sowie `p.office_lexware_init_schema`. Registrierung und Import greifen nicht auf Netzwerk oder Datenbank zu. `service.init_schema()` im bestehenden geschützten Initialisierungsablauf aufrufen. `TABLES` in die bestehende Sicherung/Wiederherstellung aufnehmen.
 
-- `analyse_scan(key)` nach dem lokalen Originalupload aufrufen. Die revisionsgeprüfte Speicherung des Vorschlags kann die Belegrevision erhöhen; anschließend den aktuellen Beleg neu laden.
+- `analyse_scan(key)` nach dem Originalupload aufrufen, für eigene geschützte Mail-Prüfkopien `analyse_scan(key, intake=True)`. Die revisionsgeprüfte Speicherung der Felder und Klassifizierung kann die Belegrevision erhöhen; anschließend den aktuellen Beleg neu laden.
 - `send_approved(key, version)` erst nach ausdrücklicher Chefprüfung, Bestätigung als betrieblicher Zahlungsbeleg und zulässiger Zahlungsfreigabe aufrufen. Rechnungen sowie ausdrücklich zahlbare betriebliche Bescheide sind zulässig. Lieferscheine, sonstige Post, persönliche Einkommensteuer und erkannte Anhörungen/Zeugenfragebögen werden nicht automatisch übertragen.
 - `sync_status(key)` liest ausschließlich den Lexware-Belegstatus. Selbst `paid` führt nicht zu einer lokalen Zahlungsbestätigung.
 
@@ -26,4 +28,6 @@ Die Mitarbeiterin prüft den Beleg in Lexware und bereitet dort gegebenenfalls d
 
 ## Isolierte Prüfung
 
-`python scripts/test_buero_lexware.py` verwendet ausschließlich synthetische Originale, temporäre SQLite-Dateien, lokale OCR-Stubs und HTTP-Mocks. Keine produktive App wird importiert, keine echten Dateien oder Konten werden angesprochen.
+`python scripts/test_buero_lexware.py`, `scripts/test_buero_analyse.py` und `scripts/test_buero_ki.py` verwenden synthetische Originale, temporäre SQLite-Dateien, OCR-Stubs und HTTP-Mocks. Geprüft werden zusätzlich Quellzitate, Bildherkunft, Mehrdeutigkeiten, Fehlerfallback und Transportgrenzen. Es werden keine echten Dateien oder Konten angesprochen.
+
+Der KI-Transport nutzt den vorhandenen Modellnamen und Schlüssel, ausschließlich den offiziellen OpenAI-Endpunkt, keine Tools und keine Weiterleitungen. Es gibt einen Versuch mit begrenzter Laufzeit und Antwortgröße. Abgebrochene oder verweigerte Antworten werden nicht übernommen. `visual_evidence` ist eine vom Host gesetzte Information über tatsächlich beigefügte Bilder, niemals eine Modellbehauptung. Sie kennzeichnet Bildvorschläge ausdrücklich als nicht durch OCR bestätigt. Grundlage sind die offiziellen Dokumentationen zu [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat) und [Bildeingaben](https://developers.openai.com/api/docs/guides/images-vision?api-mode=chat).

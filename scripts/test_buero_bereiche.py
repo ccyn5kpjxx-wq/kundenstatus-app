@@ -60,6 +60,7 @@ class OfficeSectionTests(TestCase):
         with closing(db()) as value:
             value.executescript("""CREATE TABLE mitarbeiter(id INTEGER PRIMARY KEY,name TEXT);
                 CREATE TABLE mitarbeiter_urlaub(id INTEGER PRIMARY KEY,mitarbeiter_id INTEGER,start_datum TEXT,end_datum TEXT,notiz TEXT);
+                CREATE TABLE mitarbeiter_urlaubsantraege(id TEXT PRIMARY KEY,mitarbeiter_id INTEGER,kalender_id INTEGER,status TEXT,start_datum TEXT,end_datum TEXT,belastung_halbtage INTEGER);
                 CREATE TABLE mitarbeiter_zeitstempel(id TEXT PRIMARY KEY,mitarbeiter_id INTEGER,aktion TEXT,zeit TEXT,revision INTEGER);
                 INSERT INTO mitarbeiter_zeitstempel VALUES('start',1,'kommen','2026-11-01T08:00:00+00:00',1);
                 INSERT INTO mitarbeiter_zeitstempel VALUES('end',1,'gehen','2026-11-01T16:00:00+00:00',2);
@@ -120,7 +121,28 @@ class OfficeSectionTests(TestCase):
             self.assertEqual(self.get("arbeitszeiten", query=query).status_code, 400)
 
     def test_absence_excludes_notes_and_personal_originals(self):
-        self.assertEqual(self.service.absences(), {"items": [{"name": "Employee A", "start_datum": "02.11.2026", "end_datum": "03.11.2026"}]})
+        self.assertEqual(self.service.absences(), {"items": [{"name": "Employee A", "start_datum": "02.11.2026", "end_datum": "03.11.2026",
+            "status_label": "Kalendereintrag", "dauer_label": "Nicht als Urlaubstage berechnet", "belastung_halbtage": None}]})
+
+    def test_absence_uses_approved_request_charge_without_calendar_day_arithmetic(self):
+        with closing(self.p.get_db()) as db:
+            db.execute("INSERT INTO mitarbeiter_urlaubsantraege VALUES('approved',1,1,'genehmigt','2026-11-02','2026-11-03',1)")
+            db.commit()
+        item = self.service.absences()["items"][0]
+        self.assertEqual((item["status_label"], item["dauer_label"], item["belastung_halbtage"]), ("Genehmigt", "0,5 Urlaubstage", 1))
+        html = self.get("abwesenheit").get_data(as_text=True)
+        self.assertIn("Eigenen Urlaub beantragen", html)
+        self.assertNotIn("Eigenen Urlaub beantragen", self.get("abwesenheit", self.admin).get_data(as_text=True))
+        for column, value in (("mitarbeiter_id", 2), ("start_datum", "2026-11-01")):
+            with closing(self.p.get_db()) as db:
+                db.execute("UPDATE mitarbeiter_urlaubsantraege SET " + column + "=? WHERE id='approved'", (value,))
+                db.commit()
+            item = self.service.absences()["items"][0]
+            self.assertEqual((item["status_label"], item["belastung_halbtage"]), ("Zuordnung prüfen", None))
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE mitarbeiter_urlaubsantraege SET status='abgelehnt'")
+            db.commit()
+        self.assertEqual(self.service.absences()["items"], [])
 
     def test_reminders_suppliers_and_applicants_project_away_private_fields(self):
         self.assertNotIn("iban", self.service.reminders()["due"][0])

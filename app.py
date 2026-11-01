@@ -39756,6 +39756,7 @@ def betriebs_cockpit():
         ki_assistent_subtitle="Fragen zu Auftrag, Upload oder Portal.",
         belegfreigabe=office_documents.counters(admin=True),
         lohnfreigabe_count=office_payroll.pending_review_count(),
+        urlaubfreigabe_count=office_vacation_pending_count(),
     )
 
 
@@ -59757,6 +59758,8 @@ from werkstatt_buero_anbindung import register_office_inbox_bindings
 from werkstatt_buero_lohn import register_office_payroll, BACKUP_TABLES as OFFICE_PAYROLL_TABLES, SCHEMA_FEATURE as OFFICE_PAYROLL_FEATURE
 from werkstatt_buero_sicherung import ensure_office_state_for_import
 from werkstatt_buero import register_office_cockpit
+from werkstatt_buero_ki import register_office_document_ai
+from werkstatt_buero_preise import register_office_prices
 
 office_access = register_office_access(sys.modules[__name__])
 office_access.init_schema()
@@ -59767,6 +59770,8 @@ office_documents = register_office_documents(sys.modules[__name__])
 office_planning = register_office_planning(sys.modules[__name__])
 office_lexware = register_office_lexware(sys.modules[__name__])
 office_lexware.init_schema()
+app.config['OFFICE_AI_ANALYSIS_ENABLED'] = env_flag('OFFICE_AI_ANALYSIS_ENABLED', True)
+office_document_ai = register_office_document_ai(sys.modules[__name__])
 app.config['OFFICE_LEXWARE_UPLOAD_ENABLED'] = env_flag('OFFICE_LEXWARE_UPLOAD_ENABLED', True)
 app.config['OFFICE_CEO_MAIL_ADDRESS'] = os.environ.get('OFFICE_CEO_MAIL_ADDRESS', 'geschaeftsfuehrung@auto-lackierzentrum.de')
 office_inbox = register_office_inbox(sys.modules[__name__])
@@ -59776,6 +59781,7 @@ office_inbox_bindings = register_office_inbox_bindings(sys.modules[__name__])
 office_payroll = register_office_payroll(sys.modules[__name__])
 office_payroll_init_schema = office_payroll.init_schema
 office_payroll.init_schema()
+office_prices = register_office_prices(sys.modules[__name__])
 register_office_cockpit(sys.modules[__name__])
 office_access_init_schema = office_access.init_schema
 OFFICE_BACKUP_TABLES = (*OFFICE_ACCESS_TABLES, *OFFICE_SECTION_TABLES, *OFFICE_DOCUMENT_TABLES, *OFFICE_LEXWARE_TABLES, *OFFICE_INBOX_TABLES, *OFFICE_PAYROLL_TABLES)
@@ -59786,6 +59792,15 @@ office_document_uploaded = office_lexware.analyse_scan
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)
     return office_lexware.send_approved(key, item['revision'])
+
+def office_vacation_pending_count():
+    if not session.get('admin'):
+        abort(403)
+    db = get_db()
+    try:
+        return db.execute("SELECT COUNT(*) AS n FROM mitarbeiter_urlaubsantraege WHERE status='beantragt'").fetchone()['n']
+    finally:
+        db.close()
 
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])

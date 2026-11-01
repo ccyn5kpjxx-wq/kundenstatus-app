@@ -22,16 +22,16 @@ BERLIN = ZoneInfo('Europe/Berlin')
 NOTE_FIELDS = ('id', 'datum', 'titel', 'notiz', 'kategorie', 'wiederholung', 'erstellt_am')
 # Do not hydrate full orders: descriptions, analyses, money, staff records and
 # original documents are intentionally absent from this query and view model.
-ORDER_FIELDS = ('id', 'fahrzeug', 'kennzeichen', 'status', 'archiviert', 'transport_art',
+ORDER_FIELDS = ('id', 'fahrzeug', 'kennzeichen', 'kunde_name', 'status', 'archiviert', 'transport_art',
                 'annahme_datum', 'annahme_uhrzeit', 'abholtermin', 'abhol_uhrzeit',
                 'fertig_datum', 'fertig_uhrzeit', 'abhol_adresse', 'fahrzeug_abholbereit')
 GROUPS = (
-    ('abholung_durch_werkstatt_heute', 'Bei Kunde oder Partner holen'),
-    ('rueckbringung_heute', 'Zum Kunden oder Partner zurückbringen'),
-    ('anlieferung_heute', 'Kunde bringt das Fahrzeug'),
-    ('kundenabholung_heute', 'Kunde holt das Fahrzeug'),
-    ('heute_faellig', 'Fertigstellung heute geplant'),
-    ('ueberfaellig', 'Fertigtermin überschritten'),
+    ('abholung_durch_werkstatt_heute', 'Fahrzeug holen'),
+    ('rueckbringung_heute', 'Fahrzeug bringen'),
+    ('anlieferung_heute', 'Kunde bringt'),
+    ('kundenabholung_heute', 'Kunde holt'),
+    ('heute_faellig', 'Fertig geplant'),
+    ('ueberfaellig', 'Fertigtermin offen'),
     ('transport_ungeklaert', 'Transportart klären'),
 )
 NOTE_CLOCK = re.compile(r'^((?:[01]\d|2[0-3]):[0-5]\d) · (.+)$', re.S)
@@ -149,19 +149,33 @@ class OfficePlanning:
                 item = {field: event[field] for field in
                         ('auftrag_id', 'fahrzeug', 'kennzeichen', 'datum', 'uhrzeit')}
                 item['datum_text'] = _day(event['datum']).strftime('%d.%m.%Y')
+                item['kunde'] = _text(row.get('kunde_name'), 120)
                 item['partner'] = _text(row.get('autohaus_name'), 120)
                 item['adresse'] = _text(row.get('abhol_adresse'), 300) if key == 'abholung_durch_werkstatt_heute' else ''
+                try:
+                    item['fertig_datum_text'] = _day(row.get('fertig_datum', '')).strftime('%d.%m.%Y')
+                except ValueError:
+                    item['fertig_datum_text'] = ''
+                clock = _text(row.get('fertig_uhrzeit'), 20)
+                item['fertig_uhrzeit'] = clock if re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', clock) else ''
+                item['fertig_status'] = 'Fertig' if int(row['status']) == 4 else 'Fertigstellung geplant'
                 item['hinweise'] = []
+                item['warnungen'] = []
                 if not item['uhrzeit']:
                     item['hinweise'].append('Uhrzeit fehlt – bitte abstimmen.')
+                    item['warnungen'].append('Uhrzeit offen')
                 if key == 'abholung_durch_werkstatt_heute':
                     if not item['adresse']:
                         item['hinweise'].append('Abholadresse fehlt – bitte abstimmen.')
+                        item['warnungen'].append('Adresse offen')
                     item['hinweise'].append('Partner hat das Fahrzeug als abholbereit gemeldet.'
                                             if row.get('fahrzeug_abholbereit')
                                             else 'Abholbereitschaft ist noch nicht gemeldet.')
+                    if not row.get('fahrzeug_abholbereit'):
+                        item['warnungen'].append('Abholbereitschaft offen')
                 elif key == 'rueckbringung_heute':
                     item['hinweise'].append('Rückbringadresse bitte mit der Werkstattleitung abstimmen.')
+                    item['warnungen'].append('Rückbringadresse offen')
                 items.append(item)
             groups.append({'key': key, 'titel': title, 'items': items})
         warnings = []

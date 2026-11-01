@@ -103,14 +103,37 @@ Betrag oder ein Mailbetreff genügt nicht. Der Metadatencallback darf keinen
 unsicheren OCR-Vorschlag als geprüfte Identität ausgeben.
 
 Die konkrete Bindung prüft PDF/Bildintegrität vor der lokalen Texterkennung.
-`extract_document_text_local` arbeitet im konfigurierten geschützten Datenordner;
-temporäre Dateien werden danach entfernt. Die Analyse speichert ausschließlich
-Vorschläge zu Belegart und Kategorie an eigenen Intakebelegen, ohne Lieferant,
-Belegnummer, Betrag, Steuer oder betriebliche Zuordnung zu erfinden. Hinweise
-auf Privatpost unterdrücken vorsorglich den GmbH-Lexware-Abgleich, bleiben ohne
-Chefentscheidung aber als Bereich `unklar` gekennzeichnet. Bereits als privat
-zugeordnete Portaloriginale bleiben getrennt. Nicht unterstützte/fehlbenannte
-oder Inline-Anhänge werden im Bericht zur manuellen Prüfung genannt.
+`extract_document_text_local` arbeitet im konfigurierten geschützten Datenordner.
+Wie beim manuellen Upload prüft anschließend `analyse_document` die erkannten
+Angaben. Die temporäre Originaldatei bleibt während dieser Analyse verfügbar
+und wird danach entfernt. Nur bei ausdrücklich gesetztem
+`OFFICE_AI_ANALYSIS_ENABLED=True` darf der bereits vorhandene Hostcallback
+`office_extract_fields_ai` ergänzende Vorschläge liefern; ein fehlender oder
+nicht verfügbarer Callback belässt die lokale Erkennung. Die Anbindung führt
+keinen weiteren KI-Provider, keine neuen Zugangsdaten und keinen eigenen
+KI-Transport ein.
+
+Belegte Lieferanten-/Absenderangaben, Belegnummer, Belegdatum, Fälligkeit und
+Bruttogesamtbetrag können leere Felder eigener Intakebelege vorbelegen. Belegart
+und Ordner bleiben Vorschläge, unsichere Angaben bleiben offen. Die Quellen-
+und Prüfhinweise werden mitgespeichert; der Rückgabewert ist niemals eine
+verifizierte Belegidentität. Extraktion ersetzt deshalb weder einen vollständigen
+Dublettenabgleich noch die Chefprüfung und bestimmt keine Steuern, Kontierung
+oder betriebliche Zuordnung. Hinweise auf Privatpost aus OCR oder ausschließlich
+den akzeptierten Quell-Evidenzen der erkannten Felder unterdrücken weiterhin
+vorsorglich den GmbH-Lexware-Abgleich, bleiben ohne Chefentscheidung aber als
+Bereich `unklar` gekennzeichnet. Bereits als privat zugeordnete Portaloriginale
+bleiben getrennt. Nicht unterstützte/fehlbenannte oder Inline-Anhänge werden im
+Bericht zur manuellen Prüfung genannt.
+
+Nach dem Intake schreibt `record_extracted_fields(..., intake=True)` nur
+revisionstreu in den eigenen automatischen Eingang. Erst mit dessen aktueller
+Revision folgt die Klassifizierung. Gleichzeitige Änderungen werden nicht
+überschrieben. Deadlineprüfungen vor und nach OCR/Analyse sowie zwischen den
+Speicherschritten verhindern neue Arbeit nach Ablauf des Gesamtbudgets;
+bereits gespeicherte Originale, Feldvorschläge und Abgleichsnachweise bleiben
+bei Konflikten oder Abbruch erhalten. Keine Analyse erteilt eine Zahlungsfreigabe
+oder legt einen zusätzlichen Lexware-Beleg an.
 
 ## Ergebnis und Freigabe
 

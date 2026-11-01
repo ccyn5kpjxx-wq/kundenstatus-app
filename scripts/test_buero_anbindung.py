@@ -11,7 +11,7 @@ import sys
 import tempfile
 from threading import RLock
 from unittest import TestCase, main
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
 
 from flask import Flask
@@ -29,6 +29,11 @@ CEO="geschaeftsfuehrung@auto-lackierzentrum.de"
 ROUTE="/admin/buero/posteingang-abgleich"
 VOUCHER="8bfa038e-e125-4c4c-bb3a-13ac2aa0f518"
 FILE="3074cc5c-4e90-4bbb-96b7-a7581eeffedc"
+SOURCE_INVOICE="\n".join([
+    "Rechnung", "Lieferant: Mail Musterfirma GmbH", "Rechnungsnummer: MAIL-2026-001",
+    "Rechnungsdatum: 01.11.2026", "Fällig am: 15.11.2026", "Gesamtbetrag brutto: 119,50 EUR",
+    "Synthetische Testquelle, keine Zahlungsaufforderung.",
+])
 
 
 def pdf(marker="synthetic"):
@@ -313,10 +318,13 @@ class InboxBindingsTests(TestCase):
         self.assertFalse(self.rows());self.assertTrue(self.connection.closed)
     def test_deadline_after_ocr_stops_before_inventory_or_intake(self):
         clock=[0.0];self.service.clock=lambda:clock[0]
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        self.p.office_extract_fields_ai=Mock(return_value={"unavailable":True})
         def extract(*args):clock[0]=61.0;return "Rechnung"
         self.p.extract_document_text_local.side_effect=extract
         with self.assertRaises(InboxDeadline):self.run_chef()
         self.p.http.request.assert_not_called();self.assertFalse(self.rows())
+        self.p.office_extract_fields_ai.assert_not_called()
         self.assertTrue(any("Zeitbudget" in text for text in self.service.last_source_issues))
     def test_deadline_preserves_receipt_and_first_intake_but_blocks_second_attachment(self):
         mail=EmailMessage();mail.set_content("Synthetic only")
@@ -358,6 +366,200 @@ class InboxBindingsTests(TestCase):
         self.assertIn("Abgleichsnachweise bleiben erhalten",result.get_data(as_text=True))
         self.assertEqual(self.p.http.request.call_count,1)
         self.assertFalse(self.rows());response.close.assert_called_once()
+
+    def test_metadata_keeps_source_fields_unverified_and_missing_host_hook_local_in_private_tempfile(self):
+        paths=[]
+        def extract(path,name):
+            self.assertTrue(path.is_file())
+            self.assertEqual(path.read_bytes(),pdf())
+            self.assertEqual(name,path.name)
+            self.assertEqual(path.parent.parent,self.p.DATA_DIR)
+            paths.append(path)
+            return SOURCE_INVOICE
+        self.p.extract_document_text_local.side_effect=extract
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        meta=self.service._metadata("synthetic.pdf","application/pdf",pdf())
+        suggestion=meta["scan_suggestion"]
+        self.assertFalse(meta["identity_verified"])
+        self.assertFalse(meta["bereich_verified"])
+        self.assertEqual(meta["bereich"],"unklar")
+        self.assertFalse(suggestion["identity_verified"])
+        self.assertEqual((suggestion["source"],suggestion["analysis_status"]),("local","local_no_ai"))
+        self.assertEqual(suggestion["fields"],dict(lieferant="Mail Musterfirma GmbH",belegnummer="MAIL-2026-001",
+            belegdatum="2026-11-01",faelligkeit="2026-11-15",betrag_brutto="119.50",typ="rechnung",kategorie="rechnung"))
+        self.assertIn("Gesamtbetrag brutto",suggestion["field_sources"]["betrag_brutto"]["evidence"])
+        self.assertTrue(paths);self.assertTrue(all(not path.exists() for path in paths))
+        self.assertFalse(self.rows());self.p.http.request.assert_not_called()
+
+    def test_private_tax_photo_evidence_skips_company_inventory_without_confirming_private_area(self):
+        self.p.ocr_text=""
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        def analyse(**kwargs):
+            names=kwargs["schema"]["properties"]["fields"]["required"]
+            fields={name:{"value":"","evidence":"","confidence":"unsicher"} for name in names}
+            fields["typ"]={"value":"post","evidence":"Einkommensteuerbescheid","confidence":"hoch"}
+            fields["kategorie"]={"value":"steuern","evidence":"Einkommensteuerbescheid","confidence":"hoch"}
+            return {"data":{"fields":fields,"warnings":[]},"visual_evidence":True}
+        self.p.office_extract_fields_ai=Mock(side_effect=analyse)
+        meta=self.service._metadata("synthetic.pdf","application/pdf",pdf())
+        self.assertTrue(meta["private_review_only"])
+        self.assertEqual(meta["bereich"],"unklar")
+        self.assertFalse(meta["identity_verified"]);self.assertFalse(meta["bereich_verified"])
+        self.assertEqual(meta["scan_suggestion"]["field_sources"]["typ"]["source"],"ai_visual")
+        self.assertTrue(meta["scan_suggestion"]["blocked_auto"])
+        report=self.run_chef()
+        self.p.http.request.assert_not_called();self.p.lexware_request.assert_not_called()
+        self.assertEqual((report["lexware_writes"],report["bank_actions"]),(0,0))
+        row=self.rows()[0]
+        self.assertEqual((row["bereich"],row["business_confirmed"],row["payable"]),("unklar",0,0))
+        self.assertEqual(row["typ_vorschlag"],"post")
+
+    def test_unaccepted_model_warning_or_unseen_quote_cannot_supply_private_evidence(self):
+        self.p.ocr_text=""
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        def analyse(**kwargs):
+            fields={name:{"value":"","evidence":"","confidence":"unsicher"}
+                    for name in kwargs["schema"]["properties"]["fields"]["required"]}
+            fields["typ"]={"value":"post","evidence":"Einkommensteuerbescheid","confidence":"hoch"}
+            return {"data":{"fields":fields,"warnings":["private Einkommensteuer"]},"visual_evidence":False}
+        self.p.office_extract_fields_ai=Mock(side_effect=analyse)
+        meta=self.service._metadata("synthetic.pdf","application/pdf",pdf())
+        self.assertFalse(meta["private_review_only"])
+        self.assertEqual(meta["scan_suggestion"]["field_sources"],{})
+        self.assertEqual(meta["bereich"],"unklar")
+
+    def test_mail_intake_fills_source_fields_before_classification_using_current_revision(self):
+        self.p.ocr_text=SOURCE_INVOICE
+        original_fields=self.p.office_documents.record_extracted_fields
+        returned=[]
+        def extract(*args,**kwargs):
+            revision=original_fields(*args,**kwargs);returned.append(revision);return revision
+        with patch.object(self.p.office_documents,"record_extracted_fields",side_effect=extract) as fields, \
+             patch.object(self.p.office_documents,"record_scan_suggestion",wraps=self.p.office_documents.record_scan_suggestion) as classify:
+            report=self.run_chef()
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["belegnummer"],row["betrag_cent"]),("Mail Musterfirma GmbH","MAIL-2026-001",11950))
+        self.assertEqual((row["belegdatum"],row["faelligkeit"]),("2026-11-01","2026-11-15"))
+        self.assertEqual((row["typ"],row["typ_vorschlag"],row["kategorie_vorschlag"]),("post","rechnung","rechnung"))
+        self.assertEqual((row["status"],row["bereich"],row["payable"],row["business_confirmed"]),("eingereicht","unklar",0,0))
+        fields.assert_called_once();classify.assert_called_once()
+        self.assertTrue(fields.call_args.kwargs["intake"]);self.assertTrue(classify.call_args.kwargs["intake"])
+        self.assertEqual(classify.call_args.args[1],str(returned[0]))
+        self.assertGreaterEqual(row["revision"],returned[0])
+        self.assertEqual(base64.b64decode(row["original_base64"]),pdf())
+        self.assertEqual((report["lexware_writes"],report["bank_actions"]),(0,0))
+        self.assertTrue(all(call.args[0]=="GET" for call in self.p.http.request.call_args_list))
+        audit=[json.loads(item["details_json"]) for item in self.rows("buero_belege_audit") if item["aktion"]=="belegangaben_erkannt"]
+        self.assertEqual(audit[0]["analyse_quelle"],"local")
+        before=dict(row)
+        self.run_chef()
+        self.assertEqual(self.rows(),[before])
+        self.assertEqual(len(self.rows("buero_posteingang_receipts")),1)
+
+    def test_enabled_host_hook_sees_existing_original_and_only_grounded_unverified_fields_reach_intake(self):
+        self.p.ocr_text=SOURCE_INVOICE.replace("Lieferant: Mail Musterfirma GmbH","Ausgestellt von: Mail Musterfirma GmbH")
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        paths=[]
+        def analyse(**kwargs):
+            path=kwargs["path"];paths.append(path)
+            self.assertTrue(path.is_file());self.assertEqual(path.read_bytes(),pdf())
+            self.assertEqual(kwargs["filename"],path.name)
+            self.assertEqual(kwargs["text"],self.p.ocr_text)
+            names=kwargs["schema"]["properties"]["fields"]["required"]
+            fields={name:{"value":"","evidence":"","confidence":"unsicher"} for name in names}
+            fields["lieferant"]={"value":"Mail Musterfirma GmbH",
+                "evidence":"Ausgestellt von: Mail Musterfirma GmbH","confidence":"hoch"}
+            return {"data":{"fields":fields,"warnings":[]},"visual_evidence":False}
+        self.p.office_extract_fields_ai=Mock(side_effect=analyse)
+        report=self.run_chef()
+        self.p.office_extract_fields_ai.assert_called_once()
+        self.assertTrue(paths);self.assertTrue(all(not path.exists() for path in paths))
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["betrag_cent"],row["payable"],row["business_confirmed"]),("Mail Musterfirma GmbH",11950,0,0))
+        audit=next(item for item in self.rows("buero_belege_audit") if item["aktion"]=="belegangaben_erkannt")
+        self.assertEqual(json.loads(audit["details_json"])["analyse_quelle"],"mixed")
+        self.assertEqual(report["lexware_writes"],0)
+
+    def test_stale_intake_fields_preserve_concurrent_correction_original_and_receipt(self):
+        self.p.ocr_text=SOURCE_INVOICE
+        original=self.p.office_documents.record_extracted_fields
+        def race(key,revision,*args,**kwargs):
+            with closing(self.p.get_db()) as db:
+                db.execute("UPDATE buero_belege SET lieferant='Synthetic chef correction',revision=revision+1 WHERE id=?",(key,));db.commit()
+            return original(key,revision,*args,**kwargs)
+        with patch.object(self.p.office_documents,"record_extracted_fields",side_effect=race), \
+             patch.object(self.p.office_documents,"record_scan_suggestion") as classify:
+            report=self.run_chef()
+        classify.assert_not_called()
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["belegnummer"],row["betrag_cent"]),("Synthetic chef correction","",None))
+        self.assertEqual(base64.b64decode(row["original_base64"]),pdf())
+        self.assertEqual(len(self.rows("buero_posteingang_receipts")),1)
+        self.assertTrue(any("geänderten Belegstands" in issue for issue in report["source_issues"]))
+
+    def test_host_analysis_failure_keeps_local_fields_and_review_receipt_without_secret_disclosure(self):
+        self.p.ocr_text=SOURCE_INVOICE
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        self.p.office_extract_fields_ai=Mock(side_effect=RuntimeError("synthetic-private-provider-secret"))
+        report=self.run_chef()
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["betrag_cent"],row["status"],row["payable"]),
+                         ("Mail Musterfirma GmbH",11950,"eingereicht",0))
+        self.assertEqual(len(self.rows("buero_posteingang_receipts")),1)
+        self.assertEqual(base64.b64decode(row["original_base64"]),pdf())
+        self.assertIn("fehlgeschlagen",row["klassifizierung_hinweis"])
+        self.assertNotIn("synthetic-private-provider-secret",json.dumps({"row":row,"report":report}))
+        self.p.office_extract_fields_ai.assert_called_once()
+        self.assertEqual((report["lexware_writes"],report["bank_actions"]),(0,0))
+
+    def test_concurrent_classification_after_field_write_is_not_overwritten(self):
+        self.p.ocr_text=SOURCE_INVOICE
+        original=self.p.office_documents.record_extracted_fields
+        def race(key,revision,*args,**kwargs):
+            updated=original(key,revision,*args,**kwargs)
+            with closing(self.p.get_db()) as db:
+                db.execute("UPDATE buero_belege SET typ_vorschlag='bescheid',revision=revision+1 WHERE id=?",(key,));db.commit()
+            return updated
+        with patch.object(self.p.office_documents,"record_extracted_fields",side_effect=race):
+            report=self.run_chef()
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["betrag_cent"],row["typ_vorschlag"]),("Mail Musterfirma GmbH",11950,"bescheid"))
+        self.assertEqual((row["payable"],row["business_confirmed"]),(0,0))
+        self.assertEqual(len(self.rows("buero_posteingang_receipts")),1)
+        self.assertTrue(any("geänderten Belegstands" in issue for issue in report["source_issues"]))
+
+    def test_deadline_after_host_analysis_stops_before_inventory_or_intake(self):
+        clock=[0.0];self.service.clock=lambda:clock[0]
+        self.p.ocr_text=SOURCE_INVOICE
+        self.p.app.config["OFFICE_AI_ANALYSIS_ENABLED"]=True
+        paths=[]
+        def analyse(**kwargs):
+            paths.append(kwargs["path"]);self.assertTrue(paths[-1].is_file())
+            clock[0]=61.0
+            return {"unavailable":True}
+        self.p.office_extract_fields_ai=Mock(side_effect=analyse)
+        with self.assertRaises(InboxDeadline):self.run_chef()
+        self.p.office_extract_fields_ai.assert_called_once()
+        self.p.http.request.assert_not_called();self.assertFalse(self.rows())
+        self.assertFalse(self.rows("buero_posteingang_receipts"))
+        self.assertTrue(all(not path.exists() for path in paths));self.assertTrue(self.connection.closed)
+
+    def test_deadline_after_persisting_fields_retains_intake_and_receipt_without_new_classification(self):
+        clock=[0.0];self.service.clock=lambda:clock[0]
+        self.p.ocr_text=SOURCE_INVOICE
+        original=self.p.office_documents.record_extracted_fields
+        def store(*args,**kwargs):
+            revision=original(*args,**kwargs);clock[0]=61.0;return revision
+        with patch.object(self.p.office_documents,"record_extracted_fields",side_effect=store), \
+             patch.object(self.p.office_documents,"record_scan_suggestion") as classify:
+            with self.assertRaises(InboxDeadline):self.run_chef()
+        classify.assert_not_called()
+        row=self.rows()[0]
+        self.assertEqual((row["lieferant"],row["betrag_cent"],row["payable"]),("Mail Musterfirma GmbH",11950,0))
+        self.assertEqual(base64.b64decode(row["original_base64"]),pdf())
+        self.assertEqual(len(self.rows("buero_posteingang_receipts")),1)
+        self.assertEqual(len(self.rows("buero_posteingang_audit")),1)
+        self.assertTrue(any("Zeitbudget" in issue for issue in self.service.last_source_issues))
 
 
 if __name__=="__main__":main()

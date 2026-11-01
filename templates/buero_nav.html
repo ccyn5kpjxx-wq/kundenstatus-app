@@ -1,8 +1,15 @@
+{% from 'buero_icons.html' import icon, area_icon, area_label %}
 <link rel="stylesheet" href="{{ url_for('static', filename='buero.css') }}">
 <header class="buero-header">
-  <a class="buero-brand" href="/werkstatt/buero">GÄRTNER <span>Büro-Cockpit</span></a>
-  <div class="buero-account">{% if buero_preview %}<a href="/admin/cockpit">Zur Chef-Ansicht</a>{% else %}<span>{{ (buero_current_user or {}).get('mitarbeiter_name', '') }}</span>{% endif %}</div>
+  <a class="buero-brand" href="/werkstatt/buero"><span class="buero-brand-mark">{{ icon('car') }}</span><span>GÄRTNER<small>Büro</small></span></a>
+  <div class="buero-account">{% if buero_preview %}<a href="/admin/cockpit">Chef-Ansicht {{ icon('arrow') }}</a>{% else %}{{ icon('person') }}<span>{{ (buero_current_user or {}).get('mitarbeiter_name', '') }}</span>{% endif %}</div>
 </header>
-{% if buero_nav_items %}<nav class="buero-navigation" aria-label="Bürobereiche">
-{% for item in buero_nav_items %}<a href="{{ item.path }}"{% if request.path == item.path %} aria-current="page"{% endif %}>{{ item.title }}</a>{% endfor %}
-</nav>{% endif %}
+{% if buero_nav_items %}
+<nav class="buero-navigation" aria-label="Bürobereiche">
+  <div class="buero-primary-nav">{% for item in buero_nav_items if item.key in ('termine','hol_bring','belege','loehne','preise') or item.path == '/werkstatt/buero' %}
+    <a href="{{ item.path }}"{% if request.path == item.path or (item.path != '/werkstatt/buero' and request.path.startswith(item.path + '/')) %} aria-current="page"{% endif %}>{{ area_icon(item) }}<span>{{ area_label(item) }}</span></a>
+  {% endfor %}</div>
+  {% set other_items = buero_nav_items|rejectattr('key','in',('termine','hol_bring','belege','loehne','preise'))|rejectattr('path','equalto','/werkstatt/buero')|list %}
+  {% if other_items %}<details class="buero-menu"><summary>{{ icon('grid') }}<span>Bereiche</span>{{ icon('chevron', 'buero-menu-chevron') }}</summary><div class="buero-menu-items">{% for item in other_items %}<a href="{{ item.path }}"{% if request.path == item.path %} aria-current="page"{% endif %}>{{ area_icon(item) }}<span>{{ area_label(item) }}</span></a>{% endfor %}</div></details>{% endif %}
+</nav>
+{% endif %}

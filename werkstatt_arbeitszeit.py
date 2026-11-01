@@ -5,6 +5,7 @@ Raw work/break seconds remain unchanged. The derived view applies a minimum
 boundaries to the nearest five minutes using the visible full minute.
 """
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import re
 import uuid
@@ -109,7 +110,7 @@ class TimeTracking:
         return {'ok': True, 'wiederholt': repeated, 'aktion': action, 'zeit': when,
                 'hinweis': f"{LABELS[action]} um {local.strftime('%H:%M')} Uhr erfasst."}
 
-    def report(self, mid, month):
+    def report(self, mid, month, *, original_only=False):
         if type(mid) is not int or mid < 1 or not isinstance(month, str) or not re.fullmatch(r'20\d{2}-(?:0[1-9]|1[0-2])', month):
             raise ValueError('Mitarbeiter und Monat gültig auswählen.')
         start = datetime.strptime(month, '%Y-%m').replace(tzinfo=BERLIN)
@@ -135,6 +136,18 @@ class TimeTracking:
             events = [dict(row) for row in db.execute('SELECT aktion,zeit,revision FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND zeit>=? AND zeit<=? ORDER BY revision LIMIT 10001', (mid,since,until)).fetchall()]
         if len(events) > 10000:
             raise ValueError('Zu viele Zeitstempel in diesem Zeitraum. Bitte Werkstattleitung prüfen lassen.')
+        provider = getattr(getattr(self.p, 'office_sections', None), 'time_overrides', None)
+        correction_inputs = list(provider(mid, month)) if not original_only and callable(provider) else []
+        approved_end_days = set()
+        for correction in correction_inputs:
+            if correction.get('applicable'):
+                try:
+                    a, b = datetime.fromisoformat(correction['von']), datetime.fromisoformat(correction['bis'])
+                    if 0 < (b-a).total_seconds() <= 24*3600 and a.astimezone(BERLIN).date().isoformat() == correction['datum']:
+                        approved_end_days.add(b.astimezone(BERLIN).date().isoformat())
+                except (TypeError, ValueError, KeyError):
+                    pass
+        original_errors = []
         all_shifts, shift, paused, cursor, previous_event = [], None, False, None, None
         def seconds(a,b):
             return max(0, int((min(b,end_utc)-max(a,start_utc)).total_seconds()))
@@ -164,6 +177,11 @@ class TimeTracking:
                     raise ValueError('Zeitstempel sind nicht lückenlos. Werkstattleitung muss prüfen.')
                 shift={'start':when,'arbeit_sekunden':0,'pause_sekunden':0,'_segments':[],'_invalid':backwards};cursor=when;paused=False
             elif not shift:
+                if action == 'gehen' and when.astimezone(BERLIN).date().isoformat() in approved_end_days:
+                    # A reviewed explicit interval can supply a genuinely
+                    # missing start. Do not manufacture an original shift.
+                    original_errors.append('Arbeitsbeginn fehlt zu einem Original-Endstempel; geprüfte Tageskorrektur gesondert berücksichtigt.')
+                    continue
                 raise ValueError('Arbeitsbeginn fehlt zu vorhandenen Zeitstempeln. Bitte prüfen lassen.')
             elif action=='gehen':
                 finish(when,False);shift=None;cursor=None;paused=False
@@ -181,6 +199,74 @@ class TimeTracking:
         if shift:
             finish(now,True)
         days = self._calculated_days(all_shifts, start_utc, end_utc)
+        original_days = deepcopy(days)
+        corrections = []
+        if correction_inputs:
+            effective = deepcopy(all_shifts)
+            replacements, neighboring = {}, {}
+            for correction in correction_inputs:
+                # The next month's first start day can overlap an extended
+                # final workday. Its frame protects this report, but contributes
+                # neither a displayed correction nor computed hours here.
+                neighbor_only = correction.get('neighbor_only') is True
+                item = dict(correction, applied=False)
+                if not neighbor_only:
+                    corrections.append(item)
+                if not correction.get('applicable'):
+                    continue
+                try:
+                    beginning = datetime.fromisoformat(correction['von']).astimezone(timezone.utc)
+                    ending = datetime.fromisoformat(correction['bis']).astimezone(timezone.utc)
+                    if not 0 < (ending-beginning).total_seconds() <= 24*3600 or beginning.astimezone(BERLIN).date().isoformat() != correction['datum']:
+                        raise ValueError('Ungültiger Tagesrahmen')
+                    if neighbor_only:
+                        neighboring[correction['datum']] = {'start': beginning, 'ende': ending}
+                        continue
+                    originals = [shift for shift in all_shifts if shift['start'].astimezone(BERLIN).date().isoformat() == correction['datum']]
+                    replacement = self._corrected_day(originals, beginning, ending, start_utc, end_utc)
+                except (TypeError, ValueError, KeyError):
+                    item['status_label'] = 'Korrektur fachlich prüfen; ursprüngliche Berechnung bleibt erhalten'
+                    continue
+                effective = [shift for shift in effective if shift['start'].astimezone(BERLIN).date().isoformat() != correction['datum']]
+                effective.append(replacement)
+                replacements[correction['datum']] = replacement
+                item['applied'] = True
+            frame_replacements = {**replacements, **neighboring}
+            active = set(frame_replacements)
+            if active:
+                try:
+                    raw_frames = self._raw_frames(mid, min(item['start'] for item in frame_replacements.values()),
+                                                  max(item['ende'] for item in frame_replacements.values()))
+                except (ValueError, TypeError):
+                    raw_frames = []
+                    active.clear()
+                # Reversion can expose a different original neighbor, so repeat
+                # until all remaining overrides coexist without overlapping.
+                while active:
+                    frames = [frame for frame in raw_frames if frame[0] not in active]
+                    frames.extend((day, frame_replacements[day]['start'], frame_replacements[day]['ende']) for day in active)
+                    frames.sort(key=lambda frame: frame[1])
+                    conflicts = set()
+                    for index, (day, start, end) in enumerate(frames):
+                        for next_day, next_start, next_end in frames[index+1:]:
+                            if next_start >= end:
+                                break
+                            if day != next_day and next_end > start:
+                                conflicts.update({day, next_day} & active)
+                    if not conflicts:
+                        break
+                    active.difference_update(conflicts)
+                for item in corrections:
+                    if item['applied'] and item['datum'] not in active:
+                        item.update(applied=False, status_label='Überschneidung oder unklarer Nachbarstand – erneut prüfen; ursprüngliche Berechnung bleibt erhalten')
+                active_current = active & set(replacements)
+                effective = deepcopy([shift for shift in all_shifts if shift['start'].astimezone(BERLIN).date().isoformat() not in active_current])
+                effective.extend(deepcopy(replacements[day]) for day in sorted(active_current))
+            days = self._calculated_days(effective, start_utc, end_utc)
+            by_day = {day['datum']: day for day in days}
+            for correction in corrections:
+                day = by_day.get(correction['datum'])
+                correction['berechnete_arbeitszeit'] = day['berechnete_arbeitszeit'] if correction['applied'] and day else None
         shifts = [item for item in all_shifts if item['_in_month']]
         for item in shifts:
             item['original_beginn_iso'] = item['start'].isoformat()
@@ -204,15 +290,96 @@ class TimeTracking:
                 'pausenabzug':self.exact_duration(sum(day['pausenabzug_sekunden'] or 0 for day in days)),
                 'pausenabzug_sekunden':sum(day['pausenabzug_sekunden'] or 0 for day in days),
                 'arbeitstage':days,
-                'berechnung_pruefen':any(day['berechnung_pruefen'] for day in days),
+                'berechnung_pruefen':any(day['berechnung_pruefen'] for day in days) or any(not item['applied'] for item in corrections),
                 'pruefen':any(item['pruefen'] for item in shifts),
                 'hinweis':'Beginn und Ende werden nur rechnerisch auf die nächstgelegenen 5 Minuten gerundet: volle Minute 0–2 abwärts, 3–4 aufwärts; Originalsekunden bleiben erhalten. Historische Pausengrenzen folgen derselben Rechenregel. Mindestens 45 Minuten Pause einmal je Arbeitstag (ursprüngliches Berliner Datum des Arbeitsbeginns); längere berechnete Altpausen bleiben erhalten. Der zusätzliche Pausenabzug ergänzt nur die fehlenden Minuten. Keine Änderung der Rohstempel, gemessenen Zeiten oder Lohnabrechnung. Offene oder auffällige Arbeitstage sind nicht in der berechneten Summe abgeschlossener Zeiten.'}
+        result['tageskorrekturen'] = corrections
+        result['original_auswertungsfehler'] = original_errors
+        if original_errors:
+            result['hinweis'] += ' ' + ' '.join(dict.fromkeys(original_errors))
+        if corrections:
+            original_seconds = sum(day['berechnete_arbeit_sekunden'] or 0 for day in original_days)
+            result.update(urspruengliche_arbeitstage=original_days,
+                          urspruenglich_berechnete_abgeschlossene_arbeit_sekunden=original_seconds,
+                          urspruenglich_berechnete_abgeschlossene_arbeitszeit=self.exact_duration(original_seconds))
+            applied = sum(bool(item['applied']) for item in corrections)
+            result['hinweis'] += (f' {applied} geprüfte Tageskorrektur(en) sind in der berechneten Tages- und Monatssumme enthalten; '
+                                  f'ursprüngliche berechnete Monatssumme: {self.exact_duration(original_seconds)}. '
+                                  'Offene oder veraltete Korrekturen werden nicht übernommen. Erfasste Schichten und Rohdauern zeigen weiterhin die Originale.')
         # The optional personal profile supplies a separately labelled Sollplan.
         # It never changes events, measured work/break duration or monthly sums.
         work_plan = getattr(getattr(self.p, 'employee_portal', None), 'work_plan', None)
         if callable(work_plan):
             result['arbeitsplan'] = work_plan(mid)
         return result
+
+    @staticmethod
+    def _corrected_day(originals, beginning, ending, month_start, month_end):
+        """Calculation-only audited envelope, preserving known non-work time.
+
+        No clock event/shift is written or presented as another original. Real
+        pauses stay pauses; gaps between separate shifts remain excluded work
+        without being credited as a newly invented explicit pause. The existing
+        daily rounding and 45-minute policy then calculate this envelope.
+        """
+        originals = sorted(originals, key=lambda item: item['start'])
+        if any(item['_invalid'] for item in originals):
+            raise ValueError('Auffällige Originalfolge braucht eine gesonderte Prüfung.')
+        non_work = []
+        for item in originals:
+            non_work.extend((kind, start, end) for kind, start, end in item['_segments'] if kind == 'pause')
+        for left, right in zip(originals, originals[1:]):
+            if left['ende'] is None or left['ende'] > right['start']:
+                raise ValueError('Überlappende Originalschichten.')
+            if left['ende'] < right['start']:
+                non_work.append(('luecke', left['ende'], right['start']))
+        clipped = sorted((kind, max(start, beginning), min(end, ending)) for kind, start, end in non_work if end > beginning and start < ending)
+        clipped.sort(key=lambda part: part[1])
+        segments, cursor = [], beginning
+        for kind, start, end in clipped:
+            if start < cursor:
+                raise ValueError('Überlappende Originalpausen.')
+            if start > cursor:
+                segments.append(('arbeit', cursor, start))
+            segments.append((kind, start, end))
+            cursor = end
+        if cursor < ending:
+            segments.append(('arbeit', cursor, ending))
+        return {'start': beginning, 'ende': ending, 'offen': False, 'pruefen': False, '_invalid': False,
+                '_in_month': ending > month_start and beginning < month_end, '_segments': segments}
+
+    def _raw_frames(self, mid, beginning, ending):
+        """Fresh neighboring clock frames, including those beyond month clipping."""
+        since = beginning - timedelta(days=1)
+        until = ending + timedelta(days=1)
+        with self.db() as db:
+            prior = db.execute("SELECT zeit FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND aktion='kommen' AND zeit<? ORDER BY revision DESC LIMIT 1",
+                               (mid, since.isoformat())).fetchone()
+            if prior:
+                since = datetime.fromisoformat(prior['zeit']).astimezone(timezone.utc)
+            events = db.execute("SELECT aktion,zeit FROM mitarbeiter_zeitstempel WHERE mitarbeiter_id=? AND zeit>=? AND zeit<=? ORDER BY revision LIMIT 10001",
+                                (mid, since.isoformat(), until.isoformat())).fetchall()
+        if len(events) > 10000:
+            raise ValueError('Nachbarstempel überschreiten das Prüflimit.')
+        frames, opened, previous = [], None, None
+        for event in events:
+            when = datetime.fromisoformat(event['zeit'])
+            if when.tzinfo is None:
+                raise ValueError('Unklare Zeitzone eines Nachbarstempels.')
+            when = when.astimezone(timezone.utc)
+            if previous is not None and when < previous:
+                raise ValueError('Widersprüchliche Nachbarstempel.')
+            previous = when
+            if event['aktion'] == 'kommen':
+                if opened is not None:
+                    raise ValueError('Überlappende Nachbarschichten.')
+                opened = when
+            elif event['aktion'] == 'gehen' and opened is not None:
+                frames.append((opened.astimezone(BERLIN).date().isoformat(), opened, when))
+                opened = None
+        if opened is not None:
+            frames.append((opened.astimezone(BERLIN).date().isoformat(), opened, self.now().astimezone(timezone.utc)))
+        return frames
 
     @classmethod
     def _calculated_days(cls, shifts, month_start, month_end):

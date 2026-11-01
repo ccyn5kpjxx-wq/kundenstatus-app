@@ -18,7 +18,7 @@ from flask import Blueprint, abort, has_request_context, render_template, reques
 from werkzeug.datastructures import FileStorage
 
 from mailbox_client import Mailbox
-from werkstatt_buero_lexware import classify_scan
+from werkstatt_buero_analyse import analyse_document
 from werkstatt_buero_posteingang import (InboxBlocked, OfficeInbox, ReadonlyIMAP, PortalInventory,
                                        LexwarePurchaseIndex, MAX_ATTACHMENT, document_identity)
 from werkstatt_mitarbeiter_portal import _document
@@ -301,9 +301,9 @@ class OfficeInboxBindings:
         try:return json.loads(raw)
         except (ValueError,UnicodeError):raise InboxBlocked("Lexware-Bestandsantwort ist nicht lesbar.") from None
 
-    def _metadata(self,name,mime,raw):
-        # Only local extraction/classification. No inferred identity, tax, payee
-        # or private/business decision enters the verified matching key.
+    def _metadata(self,name,mime,raw,*,budget=None):
+        # Same source-bound proposals as uploads. Neither local nor optional
+        # host analysis establishes a verified matching key or payment release.
         raw, _, validated_mime = _document(
             FileStorage(stream=io.BytesIO(raw), filename=name, content_type=mime), label="Mailbeleg")
         if validated_mime != mime:
@@ -323,12 +323,20 @@ class OfficeInboxBindings:
             suffix={"application/pdf":".pdf","image/jpeg":".jpg","image/png":".png"}[mime]
             path=Path(folder)/("scan"+suffix);path.write_bytes(raw)
             text=extractor(path,path.name)
-        text=str(text or "")[:100000]
+            if budget:budget.check()
+            text=str(text or "")[:100000]
+            app=getattr(self.p,"app",None)
+            suggestion=analyse_document(text,ai_hook=getattr(self.p,"office_extract_fields_ai",None),
+                ai_enabled=app is not None and app.config.get("OFFICE_AI_ANALYSIS_ENABLED") is True,
+                path=path,filename=path.name)
+            if budget:budget.check()
+        accepted_evidence="\n".join(item.get("evidence","") for name,item in suggestion["field_sources"].items()
+                                    if name in suggestion["fields"])
         private_hint = bool(re.search(
             r"einkommensteuer|kirchensteuer|solidarit[äa]tszuschlag|privatrechnung|privateinkauf|nur\s+privat|privater\s+(?:beleg|einkauf)",
-            text.casefold()))
+            (text+"\n"+accepted_evidence).casefold()))
         return {"identity_verified":False,"bereich":"unklar","bereich_verified":False,
-                "private_review_only":private_hint,"scan_suggestion":classify_scan(text)}
+                "private_review_only":private_hint,"scan_suggestion":suggestion}
 
     def run(self,*,lookback_days=14):
         if not self.authorize():raise PermissionError("Ein ausdrücklicher Chefauftrag ist erforderlich.")
@@ -354,7 +362,7 @@ class OfficeInboxBindings:
                                     download=lambda *a,**k:self._download(*a,**k,budget=budget))
         def metadata(name,mime,raw):
             budget.check()
-            value=self._metadata(name,mime,raw)
+            value=self._metadata(name,mime,raw,budget=budget)
             budget.check()
             suggestions[hashlib.sha256(raw).hexdigest()]=value["scan_suggestion"]
             return value
@@ -370,10 +378,14 @@ class OfficeInboxBindings:
                     try:
                         detail,_=self.p.office_documents.intake_snapshot(row["portal_key"])
                         budget.check()
-                        self.p.office_documents.record_scan_suggestion(row["portal_key"],str(detail["revision"]),
+                        revision=self.p.office_documents.record_extracted_fields(row["portal_key"],str(detail["revision"]),
+                            suggestion["fields"],suggestion["hint"],suggestion["source"],intake=True)
+                        budget.check()
+                        self.p.office_documents.record_scan_suggestion(row["portal_key"],str(revision),
                             suggestion["category"],suggestion["hint"],suggestion["suggested_kind"],intake=True)
+                        budget.check()
                     except (ValueError,LookupError,PermissionError):
-                        issues.append("Ein lokaler Vorschlag konnte wegen eines geänderten Belegstands nicht gespeichert werden. Bestehendes Original manuell prüfen.")
+                        issues.append("Ein Analyse-Vorschlag konnte wegen eines geänderten Belegstands nicht gespeichert werden. Bestehendes Original manuell prüfen.")
         except InboxDeadline as exc:
             issues.append(str(exc));raise
         finally:

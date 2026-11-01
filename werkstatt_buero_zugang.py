@@ -34,6 +34,7 @@ CATEGORY_LABELS = {
     "autohausportale": "Autohausportale",
     "belege": "Eingangsbelege vorbereiten",
     "loehne": "Freigegebene Löhne zur Überweisung",
+    "preise": "Interne Preisliste",
 }
 # Populated with audited, exact Flask endpoint names by application integration.
 # Format: category -> {endpoint: frozenset({"GET", "POST", ...})}.

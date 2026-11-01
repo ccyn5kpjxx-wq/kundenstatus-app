@@ -1,0 +1,43 @@
+.office-prices{max-width:1268px}
+.prices-subtitle{margin:9px 0 0;color:var(--buero-muted);font-size:13px}
+.prices-actions{display:flex;align-items:center;gap:15px;flex-wrap:wrap;justify-content:flex-end}
+.prices-button{display:inline-flex;align-items:center;justify-content:center;gap:9px;padding:12px 17px;border-radius:10px;background:var(--buero-teal);color:#fff;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap}
+.prices-button:hover{background:#105652;color:#fff}
+.prices-download{font-size:12px;color:var(--buero-teal);text-underline-offset:3px}
+.prices-panel{margin:22px 0;border:1px solid var(--buero-line);border-radius:14px;background:#fff;overflow:hidden}
+.prices-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:19px 23px;border-bottom:1px solid var(--buero-line)}
+.prices-panel-heading h2{display:flex;align-items:center;gap:9px;margin:0;font-size:16px;font-weight:700}
+.prices-panel-heading h2 .buero-icon{color:var(--buero-teal);width:21px;height:21px}
+.prices-panel-heading>span{font-size:12px;color:var(--buero-muted)}
+.prices-table-scroll{overflow-x:auto;overscroll-behavior-inline:contain}
+.prices-table{width:100%;min-width:680px;border-collapse:collapse;text-align:right;font-variant-numeric:tabular-nums;font-size:14px}
+.prices-table th,.prices-table td{padding:15px 23px;border-bottom:1px solid #edf1f0;white-space:nowrap}
+.prices-table thead th{background:#f7f9f9;color:#64787a;font-size:12px;font-weight:650}
+.prices-table thead th[colspan]{text-align:center}
+.prices-table thead tr:first-child th{padding-bottom:8px;color:#314f51}
+.prices-table thead tr:nth-child(2) th{padding-top:5px}
+.prices-table th:first-child{text-align:left}
+.prices-table tbody th{font-size:13px;font-weight:600;white-space:normal;min-width:210px}
+.prices-table tbody td{font-weight:700;color:#243d40}
+.prices-table tbody tr:last-child>*{border-bottom:0}
+.prices-table tbody tr:hover{background:#fafcfb}
+.prices-table .prices-used{border-left:1px solid var(--buero-line)}
+.prices-provisional{display:inline-block;margin-left:8px;border-radius:5px;padding:2px 6px;background:#fff4dd;color:#88601d;font-size:10px;font-weight:600;vertical-align:middle}
+.prices-note{margin:0;padding:14px 23px;border-top:1px solid var(--buero-line);color:var(--buero-muted);font-size:12px}
+.prices-extras{min-width:520px}
+.prices-extras th small{display:block;margin-top:4px;color:var(--buero-muted);font-size:11px;font-weight:400}
+.prices-repair-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:21px 23px 12px}
+.prices-repair-grid>div{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.prices-repair-grid strong{font-size:13px;font-weight:600}
+.prices-repair-grid span{font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.prices-open{margin:0;padding:9px 23px 20px;color:#856631;font-size:12px;line-height:1.6}
+.prices-rules{padding:18px 22px;border:1px solid var(--buero-line);border-radius:12px;background:#fff;color:var(--buero-muted);font-size:12px;line-height:1.7}
+.prices-rules>summary{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13px;font-weight:650;color:#35595b;list-style:none}
+.prices-rules>summary::-webkit-details-marker{display:none}
+.prices-rules>summary .buero-icon{width:17px;height:17px}
+.prices-rules li{margin:9px 0}
+.prices-rules ul{padding-left:19px;margin-bottom:0}
+.prices-footer{margin-top:25px;color:var(--buero-muted);font-size:11px}
+.prices-button:focus-visible,.prices-download:focus-visible,.prices-table-scroll:focus-visible,.prices-rules>summary:focus-visible{outline:3px solid #98c8bf;outline-offset:4px}
+@media(max-width:760px){.prices-panel-heading{align-items:flex-start;flex-direction:column;gap:5px;padding:17px 18px}.prices-table th,.prices-table td{padding:13px 18px}.prices-repair-grid{grid-template-columns:1fr;padding:18px 18px 9px;gap:14px}.prices-note,.prices-open{padding-left:18px;padding-right:18px}.prices-actions{gap:12px}.prices-actions .prices-button{padding:11px 13px}.prices-repair-grid>div{font-size:14px}}
+@media(max-width:520px){.office-prices>.buero-heading{align-items:flex-start;flex-direction:column;gap:16px}.prices-actions{justify-content:flex-start}.prices-rules{padding:16px 18px}.prices-panel{margin:17px 0}.prices-table{font-size:13px}.prices-table tbody th{min-width:185px}}

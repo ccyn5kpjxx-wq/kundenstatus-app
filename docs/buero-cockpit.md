@@ -4,7 +4,9 @@ Der persönliche Bürozugang liegt unter `/werkstatt/buero`. Die Werkstattleitun
 vergibt die Bereiche unter `/admin/buero-zugaenge` für einen bereits vorhandenen
 persönlichen Mitarbeiterzugang. Es wird kein Mitarbeiter automatisch
 freigeschaltet und keine allgemeine Admin-Session erzeugt. Die neue Rolle
-schaltet den bisherigen Assistenten und dessen Bestellaktionen nicht frei.
+schaltet dessen Bestellaktionen nicht frei. Eigene persönliche Arbeitszeit und
+Urlaubsanträge sind über exakt erlaubte persönliche Endpunkte erreichbar;
+fremde Konten und Chefentscheidungen bleiben gesperrt.
 
 ## Tagesgeschäft
 
@@ -12,8 +14,17 @@ Heute zeigt die offenen Arbeitszeitprüfungen, geplante Hol-/Bringfahrten,
 Bürotermine und freigegebene Zahlungen. Fahrten stammen aus den bestehenden
 Fahrzeugterminen; fehlende Adressen oder Uhrzeiten bleiben sichtbar. Bürotermine
 werden im bestehenden Kalender als gemeinsame Büroeinträge gespeichert.
-Arbeitszeiten werden geprüft oder mit einer Rückfrage markiert. Eine Änderung
-der ursprünglichen Zeitbuchungen macht die Prüfung erneut erforderlich.
+Arbeitszeiten werden geprüft oder mit einer Rückfrage markiert. Tatsächlich
+abweichende Von-/Bis-Zeiten können mit Begründung als getrennte Korrektur
+gespeichert werden. Rohbuchungen bleiben erhalten. Erst ausdrücklich geprüfte,
+weiterhin zur Quelle passende Korrekturen beeinflussen berechnete Tages- und
+Monatssummen; Pausen und Schichtlücken bleiben berücksichtigt. Neue Stempel
+machen eine frühere Prüfung und Korrektur erneut prüfpflichtig.
+
+Der vorhandene persönliche Urlaubsantrag bleibt die Quelle. Der Chef sieht
+offene Anträge unter **Urlaub zur Freigabe**. Nach Genehmigung erscheint der
+zugehörige Kalendereintrag im Büro mit bestätigtem Status und gespeicherten
+Urlaubstagen. Ältere Kalendereinträge ohne Antrag werden entsprechend bezeichnet.
 
 Abwesenheiten, Mahnungen, News, Bewerbungen, Lieferanten, Portalpost und
 Autohauszugänge werden auf eigenen Seiten mit begrenzten Feldern dargestellt.
@@ -21,13 +32,24 @@ Bewerbungseinladungen werden als Entwurf für das Mailprogramm vorbereitet.
 Das allgemeine geschäftliche Mailpostfach ist für den Bürozugang lesbar;
 ein als Geschäftsführer-Postfach konfiguriertes Konto bleibt gesperrt.
 
+Unter **Preise** steht die interne Nettopreisliste vom 30.10.2026 direkt als
+Übersicht mit Neu-/Gebrauchtteilen, Partner-/Privatpreisen, Montage,
+Beilackierung und Dreischichtzuschlag. Instandsetzungsrichtwerte sind getrennt
+als noch abzustimmen gekennzeichnet. Die unveränderte Original-PDF wird über
+eine geschützte Route bereitgestellt; sie liegt nicht im öffentlichen
+Static-Verzeichnis. Der frühere Lexware-Hinweis im Original ist ein historischer
+Dokumentstand, keine live abgefragte Bestandsanzeige. Der eigene Bereich
+`preise` muss für den persönlichen Zugang freigegeben sein.
+
 ## Rechnungen, Gebühren, private Belege und Zahlungsaufträge
 
 Im Chef-Cockpit führt **Rechnungen zur Freigabe** nach
 `/admin/buero/belege`. Der Bürozugang nutzt `/werkstatt/buero/belege`.
 
-1. Original erfassen. Lokale Texterkennung schlägt Dokumentart und Ordner vor.
-   Lieferant, Nummer, Datum und Betrag werden am Original geprüft.
+1. Datei auswählen und analysieren. Lokale Erkennung und optional der vorhandene
+   KI-Zugang füllen belegte Hauptdaten vor; unklare Werte bleiben offen. Art und
+   Ordner werden vorgeschlagen. Die kurze Prüfansicht zeigt die erkannten Daten;
+   längere Hinweise und die manuelle Erfassung sind aufklappbar.
 2. Zur Chefprüfung einreichen. Ungeklärte und private Originale bleiben bis zur
    Freigabe auf Chef und erfassende Person begrenzt.
 3. Chef bestätigt die geschäftliche oder private Zuordnung ausdrücklich.

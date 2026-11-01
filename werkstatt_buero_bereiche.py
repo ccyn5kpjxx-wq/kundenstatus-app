@@ -16,6 +16,7 @@ from flask import Blueprint, abort, redirect, render_template, request, session,
 
 BACKUP_TABLES = ("buero_arbeitszeit_pruefungen", "buero_arbeitszeit_pruefung_audit")
 SCHEMA_FEATURE = "office_time_review_v1"
+_CORRECTION_COLUMNS = ("korrektur_von", "korrektur_bis", "korrektur_grund", "korrektur_fingerprint", "korrektur_am", "korrektur_actor")
 
 SECTION_CATEGORIES = {
     "arbeitszeiten": "arbeitszeiten", "abwesenheit": "urlaub", "mahnungen": "mahnungen",
@@ -30,6 +31,7 @@ SECTION_TITLES = {
 OFFICE_SECTION_ENDPOINTS = {"office_sections." + key: frozenset({"GET", "HEAD"}) for key in SECTION_CATEGORIES}
 OFFICE_SECTION_ENDPOINTS["office_sections.bewerbungen"] = frozenset({"GET", "HEAD", "POST"})
 OFFICE_SECTION_ENDPOINTS["office_sections.arbeitszeit_pruefen"] = frozenset({"POST"})
+OFFICE_SECTION_ENDPOINTS["office_sections.arbeitszeit_korrigieren"] = frozenset({"POST"})
 
 
 def _pick(row, keys):
@@ -76,6 +78,12 @@ class OfficeSections:
             db.execute("""CREATE TABLE IF NOT EXISTS buero_arbeitszeit_pruefung_audit (
                 id TEXT PRIMARY KEY, mitarbeiter_id INTEGER NOT NULL, datum TEXT NOT NULL,
                 actor TEXT NOT NULL, details_json TEXT NOT NULL, erstellt_am TEXT NOT NULL)""")
+            for column in _CORRECTION_COLUMNS:
+                ensure = getattr(self.p, "ensure_column", None)
+                if callable(ensure):
+                    ensure(db, "buero_arbeitszeit_pruefungen", column, "TEXT NOT NULL DEFAULT ''")
+                elif column not in {row[1] for row in db.execute("PRAGMA table_info(buero_arbeitszeit_pruefungen)").fetchall()}:
+                    db.execute("ALTER TABLE buero_arbeitszeit_pruefungen ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''")
 
     @staticmethod
     def _day(value=None):
@@ -87,14 +95,16 @@ class OfficeSections:
         except ValueError:
             raise ValueError("Prüftag ungültig.") from None
 
-    def day_snapshot(self, mid, day, db):
+    def day_snapshot(self, mid, day, db, *, original_report=None):
         """Hash original events, never durations ticking while a shift is open."""
         day = self._day(day)
         start = datetime.combine(day, datetime.min.time(), ZoneInfo("Europe/Berlin")).astimezone(timezone.utc)
         end = datetime.combine(day + timedelta(days=1), datetime.min.time(), ZoneInfo("Europe/Berlin")).astimezone(timezone.utc)
         error, shifts = "", []
         try:
-            report = self.p.assistant_time.report(mid, day.strftime("%Y-%m"))
+            report = original_report if original_report is not None else self.p.assistant_time.report(mid, day.strftime("%Y-%m"), original_only=True)
+            if report.get("_snapshot_error"):
+                raise ValueError(report["_snapshot_error"])
             for raw in report.get("schichten", []):
                 workday = raw.get("arbeitstag")
                 if not workday and raw.get("beginn"):
@@ -124,7 +134,31 @@ class OfficeSections:
             except (TypeError, ValueError):
                 when = "Zeitstempel ungültig"
             display.append({"action": {"kommen": "Beginn", "gehen": "Ende", "pause": "Pause", "weiter": "Weiter"}.get(event["aktion"], "Prüfen"), "time": when})
-        return {"fingerprint": fingerprint, "shifts": shifts, "events": display, "error": error}
+        beginnings = [event["zeit"] for event in events if event["aktion"] == "kommen"]
+        endings = [event["zeit"] for event in events if event["aktion"] == "gehen"]
+        return {"fingerprint": fingerprint, "shifts": shifts, "events": display, "error": error,
+                "original_von": beginnings[0] if beginnings else "", "original_bis": endings[-1] if endings else ""}
+
+    @staticmethod
+    def _clock_display(value):
+        if not value:
+            return ""
+        try:
+            return datetime.fromisoformat(value).astimezone(ZoneInfo("Europe/Berlin")).strftime("%d.%m.%Y %H:%M:%S")
+        except (TypeError, ValueError):
+            return "Ungültige Zeit"
+
+    def _time_mutation_identity(self, db, mid):
+        # Personal stamping takes this same employee row lock. No new raw
+        # stamp can slip between the source fingerprint check and correction.
+        if db.execute("UPDATE mitarbeiter SET id=id WHERE id=?", (mid,)).rowcount != 1:
+            raise ValueError("Mitarbeiter nicht gefunden.")
+        actor_mid = session.get("assistent_mid")
+        if not session.get("admin") and type(actor_mid) is int:
+            db.execute("UPDATE mitarbeiter SET id=id WHERE id=?", (actor_mid,))
+            db.execute("UPDATE assistent_rechte SET version=version WHERE mitarbeiter_id=?", (actor_mid,))
+            db.execute("UPDATE buero_zugaenge SET version=version WHERE mitarbeiter_id=?", (actor_mid,))
+        return self.identity("arbeitszeiten", db)
 
     def daily_reviews(self, day=None, *, db=None):
         day = self._day(day).isoformat()
@@ -140,15 +174,66 @@ class OfficeSections:
             row = db.execute("SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum=?", (mid, day)).fetchone()
             changed = bool(row and row["quell_fingerprint"] != snapshot["fingerprint"])
             status = row["status"] if row and not changed else "offen"
+            correction = {column: row[column] if row else "" for column in _CORRECTION_COLUMNS}
+            corrected = bool(correction["korrektur_von"] or correction["korrektur_bis"])
+            start = correction["korrektur_von"] if corrected else snapshot["original_von"]
+            end = correction["korrektur_bis"] if corrected else snapshot["original_bis"]
+            def clock(value):
+                return datetime.fromisoformat(value).astimezone(ZoneInfo("Europe/Berlin")).strftime("%H:%M:%S") if value else ""
+            history = [dict(entry) for entry in db.execute("SELECT actor,details_json,erstellt_am FROM buero_arbeitszeit_pruefung_audit WHERE mitarbeiter_id=? AND datum=? ORDER BY erstellt_am,id", (mid, day)).fetchall()]
+            for entry in history:
+                entry["details"] = json.loads(entry.pop("details_json"))
             items.append({"mitarbeiter_id": mid, "name": employee["name"], "datum": day,
                           "status": status, "version": row["version"] if row else 0,
                           "notiz": row["notiz"] if row and not changed else "",
-                          "source_changed": changed, **snapshot})
+                          "source_changed": changed, **snapshot, **correction,
+                          "corrected": corrected, "correction_stale": corrected and correction["korrektur_fingerprint"] != snapshot["fingerprint"],
+                          "von_input": clock(start), "bis_input": clock(end),
+                          "bis_folgetag": bool(end and datetime.fromisoformat(end).astimezone(ZoneInfo("Europe/Berlin")).date().isoformat() > day),
+                          "von_label": self._clock_display(start), "bis_label": self._clock_display(end),
+                          "original_von_label": self._clock_display(snapshot["original_von"]),
+                          "original_bis_label": self._clock_display(snapshot["original_bis"]), "history": history})
         return items
 
     def daily_time_review_count(self):
         self.identity("arbeitszeiten")
         return sum(item["status"] != "geprueft" for item in self.daily_reviews())
+
+    def time_overrides(self, mid, month):
+        """Internal read-only hook for the existing time calculation, no route.
+
+        Only a fresh, explicitly checked correction may replace calculated
+        values. A preceding start day can contribute an overnight month part.
+        The following start day is supplied only to reject conflicting frames;
+        it never becomes a correction shown or calculated in this month.
+        """
+        if type(mid) is not int or mid < 1 or not re.fullmatch(r"20[0-9]{2}-(?:0[1-9]|1[0-2])", month):
+            raise ValueError("Mitarbeiter und Monat gültig auswählen.")
+        start = datetime.strptime(month, "%Y-%m").date()
+        finish = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+        result, reports = [], {}
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            rows = db.execute("""SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum>=? AND datum<?
+                AND korrektur_am<>'' ORDER BY datum""", (mid, (start-timedelta(days=1)).isoformat(), (finish+timedelta(days=1)).isoformat())).fetchall()
+            for row in rows:
+                if not row["korrektur_von"] and not row["korrektur_bis"] and row["status"] == "geprueft":
+                    continue
+                source_month = row["datum"][:7]
+                if source_month not in reports:
+                    try: reports[source_month] = self.p.assistant_time.report(mid, source_month, original_only=True)
+                    except ValueError as exc: reports[source_month] = {"_snapshot_error": str(exc)}
+                source = self.day_snapshot(mid, row["datum"], db, original_report=reports[source_month])
+                fresh = row["korrektur_fingerprint"] == source["fingerprint"] == row["quell_fingerprint"]
+                complete = bool(row["korrektur_von"] and row["korrektur_bis"])
+                applicable = row["status"] == "geprueft" and fresh and complete
+                result.append({"datum": row["datum"], "von": row["korrektur_von"], "bis": row["korrektur_bis"],
+                               "grund": row["korrektur_grund"], "actor": row["korrektur_actor"], "erstellt_am": row["korrektur_am"],
+                               "version": row["version"], "applicable": applicable,
+                               "neighbor_only": row["datum"] >= finish.isoformat(),
+                               "status_label": "Geprüfte Tageskorrektur" if applicable else "Originale geändert – erneut prüfen" if not fresh
+                               else "Korrektur zurückgenommen – erneut prüfen" if not row["korrektur_von"] and not row["korrektur_bis"]
+                               else "Korrektur unvollständig" if not complete else "Korrektur noch offen"})
+        return result
 
     def save_time_review(self, form):
         for key in ("mitarbeiter_id", "datum", "status", "notiz", "fingerprint", "version"):
@@ -162,32 +247,112 @@ class OfficeSections:
         status, note = form["status"], form["notiz"].strip()
         if status not in {"geprueft", "rueckfrage"} or len(note) > 2000 or "\x00" in note or (status == "rueckfrage" and not note):
             raise ValueError("Geprüft oder Rückfrage wählen; für Rückfragen eine sachliche Notiz ergänzen.")
-        now = datetime.now(ZoneInfo("Europe/Berlin")).isoformat(timespec="seconds")
+        now = datetime.now(ZoneInfo("Europe/Berlin")).isoformat(timespec="microseconds")
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            who = self.identity("arbeitszeiten", db)
+            who = self._time_mutation_identity(db, mid)
             current = next((row for row in self.daily_reviews(day, db=db) if row["mitarbeiter_id"] == mid), None)
             if current is None or current["version"] != version or current["fingerprint"] != form["fingerprint"]:
                 raise ValueError("Zeitstempel oder Prüfstand haben sich geändert. Neu laden und erneut prüfen.")
+            if status == "geprueft" and current["corrected"] and not (current["korrektur_von"] and current["korrektur_bis"]):
+                raise ValueError("Die Tageskorrektur ist noch unvollständig. Fehlende tatsächliche Zeit ergänzen oder eine Rückfrage notieren.")
             old = db.execute("SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum=?", (mid, day)).fetchone()
             values = (status, note, current["fingerprint"], now, who["actor"])
             if old:
                 changed = db.execute("""UPDATE buero_arbeitszeit_pruefungen SET status=?,notiz=?,quell_fingerprint=?,
+                    korrektur_fingerprint=CASE WHEN ?='geprueft' THEN ? ELSE korrektur_fingerprint END,
                     geaendert_am=?,geaendert_von=?,version=version+1 WHERE mitarbeiter_id=? AND datum=? AND version=?
-                    RETURNING version""", values + (mid, day, version)).fetchone()
+                    RETURNING version""", values[:3] + (status, current["fingerprint"]) + values[3:] + (mid, day, version)).fetchone()
             else:
                 changed = db.execute("""INSERT INTO buero_arbeitszeit_pruefungen
                     (mitarbeiter_id,datum,status,notiz,quell_fingerprint,geaendert_am,geaendert_von,version)
                     VALUES(?,?,?,?,?,?,?,1) RETURNING version""", (mid, day) + values).fetchone()
             if not changed:
                 raise ValueError("Prüfstand wurde inzwischen geändert. Seite neu laden.")
+            saved = dict(db.execute("SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum=?", (mid, day)).fetchone())
             details = {"vorher": dict(old) if old else None,
-                       "nachher": {"status": status, "notiz": note, "fingerprint": current["fingerprint"], "version": changed["version"]}}
+                       "nachher": {"status": status, "notiz": note, "fingerprint": current["fingerprint"], "version": changed["version"],
+                                    **{column: saved[column] for column in _CORRECTION_COLUMNS}}}
             db.execute("""INSERT INTO buero_arbeitszeit_pruefung_audit
                 (id,mitarbeiter_id,datum,actor,details_json,erstellt_am) VALUES(?,?,?,?,?,?)""",
                        (uuid4().hex, mid, day, who["actor"], json.dumps(details, ensure_ascii=False), now))
         hook = getattr(self.p, "schedule_change_backup", None)
         if callable(hook):
             hook("buero-arbeitszeit-pruefung")
+        return day
+
+    @staticmethod
+    def _correction_instant(day, value, *, following=False):
+        if not value:
+            return ""
+        if not re.fullmatch(r"[0-9]{2}:[0-9]{2}(?::[0-9]{2})?", value):
+            raise ValueError("Von und Bis als Uhrzeit eingeben.")
+        try:
+            naive = datetime.fromisoformat(day + "T" + value) + timedelta(days=int(following))
+            zone = ZoneInfo("Europe/Berlin")
+            instants = {naive.replace(tzinfo=zone, fold=fold).astimezone(timezone.utc) for fold in (0, 1)
+                        if naive.replace(tzinfo=zone, fold=fold).astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) == naive}
+            if len(instants) != 1:
+                raise ValueError()
+        except (TypeError, ValueError):
+            raise ValueError("Gültige, eindeutige Ortszeit wählen; Zeitumstellungen bitte mit der Werkstattleitung klären.") from None
+        instant = instants.pop()
+        if instant > datetime.now(timezone.utc):
+            raise ValueError("Nur tatsächlich vergangene Arbeitszeiten eintragen.")
+        return instant.isoformat()
+
+    def save_time_correction(self, form):
+        required = {"mitarbeiter_id", "datum", "fingerprint", "version", "von", "bis", "grund", "action"}
+        if set(form) - required - {"csrf_token", "bis_folgetag", "confirmed"} or any(len(form.getlist(key)) != 1 for key in required):
+            raise ValueError("Korrekturformular eindeutig ausfüllen.")
+        if form.getlist("confirmed") != ["1"] or form.getlist("bis_folgetag") not in ([], ["1"]):
+            raise ValueError("Tatsächliche Zeiten und Korrekturgrund ausdrücklich bestätigen.")
+        if (not re.fullmatch(r"[1-9][0-9]{0,9}", form["mitarbeiter_id"])
+                or not re.fullmatch(r"[0-9]{1,10}", form["version"]) or not re.fullmatch(r"[a-f0-9]{64}", form["fingerprint"])):
+            raise ValueError("Korrekturstand ungültig. Seite neu laden.")
+        mid, day, version = int(form["mitarbeiter_id"]), self._day(form["datum"]).isoformat(), int(form["version"])
+        reason = form["grund"].strip()
+        if not reason or len(reason) > 2000 or any(ord(char) < 32 and char not in "\n\r\t" for char in reason):
+            raise ValueError("Eine sachliche Begründung der tatsächlichen Zeitkorrektur angeben.")
+        action = form["action"]
+        if action not in ("save", "reset"):
+            raise ValueError("Ungültige Korrekturaktion.")
+        beginning = self._correction_instant(day, form["von"]) if action == "save" else ""
+        ending = self._correction_instant(day, form["bis"], following=form.get("bis_folgetag") == "1") if action == "save" else ""
+        if action == "save" and not (beginning or ending):
+            raise ValueError("Mindestens eine tatsächlich bekannte Zeit angeben. Unbekannte Zeiten bleiben leer.")
+        if beginning and ending:
+            elapsed = (datetime.fromisoformat(ending) - datetime.fromisoformat(beginning)).total_seconds()
+            if not 0 < elapsed <= 24 * 3600:
+                raise ValueError("Bis muss nach Von liegen; bei einer Nachtschicht den Folgetag wählen. Sonderfälle über 24 Stunden mit der Werkstattleitung klären.")
+        now = datetime.now(ZoneInfo("Europe/Berlin")).isoformat(timespec="microseconds")
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            who = self._time_mutation_identity(db, mid)
+            current = next((row for row in self.daily_reviews(day, db=db) if row["mitarbeiter_id"] == mid), None)
+            if current is None or current["version"] != version or current["fingerprint"] != form["fingerprint"]:
+                raise ValueError("Zeitstempel oder Korrekturstand haben sich geändert. Neu laden und erneut prüfen.")
+            if action == "reset" and not current["corrected"]:
+                raise ValueError("Für diesen Tag besteht keine Korrektur zum Zurücknehmen.")
+            old = db.execute("SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum=?", (mid, day)).fetchone()
+            values = (current["fingerprint"], now, who["actor"], beginning, ending, reason, current["fingerprint"], now, who["actor"])
+            if old:
+                changed = db.execute("""UPDATE buero_arbeitszeit_pruefungen SET status='offen',notiz='',quell_fingerprint=?,
+                    geaendert_am=?,geaendert_von=?,korrektur_von=?,korrektur_bis=?,korrektur_grund=?,korrektur_fingerprint=?,
+                    korrektur_am=?,korrektur_actor=?,version=version+1 WHERE mitarbeiter_id=? AND datum=? AND version=? RETURNING version""",
+                    values + (mid, day, version)).fetchone()
+            else:
+                changed = db.execute("""INSERT INTO buero_arbeitszeit_pruefungen
+                    (mitarbeiter_id,datum,status,notiz,quell_fingerprint,geaendert_am,geaendert_von,korrektur_von,korrektur_bis,
+                    korrektur_grund,korrektur_fingerprint,korrektur_am,korrektur_actor,version)
+                    VALUES(?,?,'offen','',?,?,?,?,?,?,?,?,?,1) RETURNING version""", (mid, day) + values).fetchone()
+            if not changed:
+                raise ValueError("Korrekturstand wurde inzwischen geändert. Neu laden.")
+            after = dict(db.execute("SELECT * FROM buero_arbeitszeit_pruefungen WHERE mitarbeiter_id=? AND datum=?", (mid, day)).fetchone())
+            details = {"aktion": "zeitkorrektur" if action == "save" else "korrektur_zurueckgenommen", "vorher": dict(old) if old else None,
+                       "nachher": after, "originale": {"fingerprint": current["fingerprint"], "events": current["events"]}}
+            db.execute("INSERT INTO buero_arbeitszeit_pruefung_audit(id,mitarbeiter_id,datum,actor,details_json,erstellt_am) VALUES(?,?,?,?,?,?)",
+                       (uuid4().hex, mid, day, who["actor"], json.dumps(details, ensure_ascii=False), now))
+        hook = getattr(self.p, "schedule_change_backup", None)
+        if callable(hook): hook("buero-arbeitszeit-korrektur")
         return day
 
     def times(self, employee="", month="", day=None):
@@ -210,9 +375,14 @@ class OfficeSections:
         result = {"employees": employees, "selected_employee": mid, "month": month, "report": None,
                   "review_day": day, "daily_reviews": self.daily_reviews(day)}
         if mid is not None:
-            source = self.p.assistant_time.report(mid, month)
+            try:
+                source = self.p.assistant_time.report(mid, month)
+            except ValueError as exc:
+                result["report_error"] = str(exc)
+                return result
             report = _pick(source, ("monat", "berechnete_abgeschlossene_arbeitszeit", "abgeschlossene_arbeitszeit",
-                                    "pausenabzug", "berechnung_pruefen", "pruefen", "hinweis"))
+                                    "pausenabzug", "berechnung_pruefen", "pruefen", "hinweis", "tageskorrekturen",
+                                    "urspruenglich_berechnete_abgeschlossene_arbeitszeit"))
             report["schichten"] = [_pick(row, ("beginn", "ende", "berechneter_beginn", "berechnetes_ende",
                                                "berechnete_arbeitszeit", "arbeitszeit", "pause", "offen", "pruefen"))
                                      for row in source.get("schichten", [])]
@@ -220,12 +390,46 @@ class OfficeSections:
         return result
 
     def absences(self):
-        # Dates only. Neither illness originals/diagnoses nor free-text notes
-        # from personnel or vacation records enter the office read model.
+        # Use the actual approved request's stored charge, never calendar-day
+        # arithmetic. No private notes, illness details or account basis leak.
         with closing(self.p.get_db()) as db:
-            rows = db.execute("""SELECT m.name,u.start_datum,u.end_datum FROM mitarbeiter_urlaub u
+            rows = db.execute("""SELECT u.id,u.mitarbeiter_id,m.name,u.start_datum,u.end_datum FROM mitarbeiter_urlaub u
                 JOIN mitarbeiter m ON m.id=u.mitarbeiter_id ORDER BY u.id DESC LIMIT 300""").fetchall()
-        return {"items": [_pick(row, ("name", "start_datum", "end_datum")) for row in rows]}
+            requests = {}
+            if rows:
+                for row in db.execute("SELECT kalender_id,mitarbeiter_id,status,start_datum,end_datum,belastung_halbtage FROM mitarbeiter_urlaubsantraege WHERE kalender_id IN (" +
+                                      ",".join("?" for _ in rows) + ")", tuple(row["id"] for row in rows)).fetchall():
+                    requests.setdefault(row["kalender_id"], []).append(dict(row))
+        def iso(value):
+            for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+                try: return datetime.strptime(value, fmt).date().isoformat()
+                except (TypeError, ValueError): pass
+            return None
+        items = []
+        for row in rows:
+            linked = requests.get(row["id"], [])
+            item = dict(_pick(row, ("name", "start_datum", "end_datum")), status_label="Kalendereintrag",
+                        dauer_label="Nicht als Urlaubstage berechnet", belastung_halbtage=None)
+            if linked:
+                if len(linked) != 1:
+                    item["status_label"] = "Zuordnung prüfen"
+                else:
+                    request_row = linked[0]
+                    if request_row["status"] != "genehmigt":
+                        continue
+                    exact = (request_row["mitarbeiter_id"] == row["mitarbeiter_id"] and iso(row["start_datum"]) is not None
+                             and iso(row["start_datum"]) == iso(request_row["start_datum"])
+                             and iso(row["end_datum"] or row["start_datum"]) == iso(request_row["end_datum"] or request_row["start_datum"]))
+                    if not exact:
+                        item["status_label"] = "Zuordnung prüfen"
+                    else:
+                        half_days = request_row["belastung_halbtage"]
+                        item["status_label"] = "Genehmigt"
+                        if type(half_days) is int and half_days > 0:
+                            amount = str(half_days // 2) + (",5" if half_days % 2 else "")
+                            item.update(belastung_halbtage=half_days, dauer_label=amount + (" Urlaubstag" if half_days == 2 else " Urlaubstage"))
+            items.append(item)
+        return {"items": items}
 
     def reminders(self):
         due, later = self.p.mahnungen_uebersicht()
@@ -341,6 +545,18 @@ def register_office_sections(p):
             abort(400)
         try:
             day = service.save_time_review(request.form)
+        except ValueError as exc:
+            return str(exc), 409
+        return redirect(url_for("office_sections.arbeitszeiten", tag=day), code=303)
+
+    @bp.post("/werkstatt/buero/arbeitszeiten/korrigieren")
+    def arbeitszeit_korrigieren():
+        service.identity("arbeitszeiten")
+        tokens, expected = request.form.getlist("csrf_token"), session.get("csrf_token")
+        if not tokens or not isinstance(expected, str) or any(not hmac.compare_digest(expected, str(token)) for token in tokens):
+            abort(400)
+        try:
+            day = service.save_time_correction(request.form)
         except ValueError as exc:
             return str(exc), 409
         return redirect(url_for("office_sections.arbeitszeiten", tag=day), code=303)

@@ -12,6 +12,7 @@ NAVIGATION = (
     ('urlaub', 'Urlaub & Abwesenheit', '/werkstatt/buero/abwesenheit', 'Abwesenheiten im Blick behalten'),
     ('belege', 'Belege & Freigaben', '/werkstatt/buero/belege', 'Erfassen, zur Freigabe vorlegen und Zahlung bearbeiten'),
     ('loehne', 'Löhne', '/werkstatt/buero/loehne', 'Vom Chef freigegebene Lohnläufe bearbeiten'),
+    ('preise', 'Preise', '/werkstatt/buero/preise', 'Partner- und Privatpreise direkt nachschlagen'),
     ('mahnungen', 'Mahnungen', '/werkstatt/buero/mahnungen', 'Offene und fällige Mahnungen ansehen'),
     ('news', 'News', '/werkstatt/buero/news', 'Mitteilungen aus dem Betrieb'),
     ('bewerbungen', 'Bewerbungen', '/werkstatt/buero/bewerbungen', 'Bewerbungen ansehen und Einladungen vorbereiten'),
@@ -52,6 +53,14 @@ def configure_office_endpoints():
     })
     OFFICE_ALLOWED_ENDPOINTS['hol_bring']['office_planning.planning'] = read
     OFFICE_ALLOWED_ENDPOINTS['arbeitszeiten']['office_sections.arbeitszeit_pruefen'] = frozenset(('POST',))
+    OFFICE_ALLOWED_ENDPOINTS['arbeitszeiten']['office_sections.arbeitszeit_korrigieren'] = frozenset(('POST',))
+    OFFICE_ALLOWED_ENDPOINTS['arbeitszeiten']['assistent.personal_time'] = read
+    OFFICE_ALLOWED_ENDPOINTS['urlaub'].update({
+        'assistent.vacation_page': read,
+        'assistent.vacation_summary': read,
+        'assistent.vacation_apply': frozenset(('POST',)),
+        'assistent.vacation_withdraw': frozenset(('POST',)),
+    })
     for key, endpoint in (
         ('arbeitszeiten', 'arbeitszeiten'), ('urlaub', 'abwesenheit'),
         ('mahnungen', 'mahnungen'), ('news', 'news'), ('bewerbungen', 'bewerbungen'),
@@ -71,6 +80,10 @@ def configure_office_endpoints():
     OFFICE_ALLOWED_ENDPOINTS['loehne'].update({
         'office_payroll.office': frozenset(('GET', 'HEAD', 'POST')),
         'office_payroll.office_original': read,
+    })
+    OFFICE_ALLOWED_ENDPOINTS['preise'].update({
+        'office_prices.index': read,
+        'office_prices.pdf': read,
     })
 
 
@@ -133,8 +146,9 @@ def register_office_cockpit(p):
         if request.endpoint == 'assistent.page':
             return redirect('/werkstatt/buero')
         if request.blueprint == 'assistent' and request.endpoint not in ('assistent.login', 'assistent.logout'):
-            abort(403, description='Dieser Bereich gehört nicht zum Bürozugang.')
-        if request.blueprint in ('office_planning', 'office_sections', 'buero_belege', 'office_lexware', 'office_payroll'):
+            if not p.office_access.allows(request.endpoint, request.method):
+                abort(403, description='Dieser Bereich gehört nicht zum Bürozugang.')
+        if request.blueprint in ('office_planning', 'office_sections', 'buero_belege', 'office_lexware', 'office_payroll', 'office_prices'):
             if not p.office_access.allows(request.endpoint, request.method):
                 abort(403, description='Dieser Bürobereich ist für deinen Zugang nicht freigegeben.')
         return None

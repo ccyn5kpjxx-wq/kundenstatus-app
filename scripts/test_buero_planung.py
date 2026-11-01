@@ -43,7 +43,7 @@ class OfficePlanningTests(unittest.TestCase):
             db.executescript('''CREATE TABLE autohaeuser(id INTEGER PRIMARY KEY,name TEXT);
                 INSERT INTO autohaeuser VALUES(1,'Testpartner');
                 CREATE TABLE auftraege(id INTEGER PRIMARY KEY,autohaus_id INTEGER,fahrzeug TEXT,
-                kennzeichen TEXT,status INTEGER,archiviert INTEGER DEFAULT 0,transport_art TEXT,
+                kennzeichen TEXT,kunde_name TEXT,status INTEGER,archiviert INTEGER DEFAULT 0,transport_art TEXT,
                 annahme_datum TEXT,annahme_uhrzeit TEXT,abholtermin TEXT,abhol_uhrzeit TEXT,
                 fertig_datum TEXT,fertig_uhrzeit TEXT,abhol_adresse TEXT,fahrzeug_abholbereit INTEGER,
                 werkstatt_angebot_preis TEXT,beschreibung TEXT);
@@ -58,7 +58,7 @@ class OfficePlanningTests(unittest.TestCase):
             state.update(office=True, csrf_token='test-csrf')
 
     def order(self, oid, **values):
-        row = dict(id=oid, autohaus_id=1, fahrzeug='Testfahrzeug', kennzeichen=f'TEST-{oid}', status=2,
+        row = dict(id=oid, autohaus_id=1, fahrzeug='Testfahrzeug', kennzeichen=f'TEST-{oid}', kunde_name='Testkunde', status=2,
                    archiviert=0, transport_art='hol_und_bring', annahme_datum='01.11.2026',
                    annahme_uhrzeit='09:00', abholtermin='01.11.2026', abhol_uhrzeit='17:00',
                    fertig_datum='', fertig_uhrzeit='', abhol_adresse='Testweg 1', fahrzeug_abholbereit=0,
@@ -82,10 +82,21 @@ class OfficePlanningTests(unittest.TestCase):
         self.assertEqual(data['gruppen'][1]['items'][0]['uhrzeit'], '17:00')
         self.assertEqual(data['gruppen'][0]['items'][0]['adresse'], 'Testweg 1')
         self.assertEqual(data['gruppen'][1]['items'][0]['adresse'], '')
+        self.assertEqual(data['gruppen'][0]['items'][0]['kunde'], 'Testkunde')
+        self.assertEqual(data['gruppen'][0]['items'][0]['warnungen'], ['Abholbereitschaft offen'])
         html = self.client.get('/werkstatt/buero/planung?datum=2026-11-01').get_data(as_text=True)
         for private in ('FINANZGEHEIMNIS', 'GEHALT BANKING', 'IBAN PRIVAT', 'VERTRAULICHE GEHALTSLISTE', '/admin/'):
             self.assertNotIn(private, html)
         self.assertIn('keine Abhol- oder Rückgabefreigabe', html)
+
+    def test_finish_date_is_only_planned_until_actual_finished_state(self):
+        self.order(1, status=3, fertig_datum='02.11.2026', fertig_uhrzeit='14:30', fahrzeug_abholbereit=1)
+        self.order(2, status=4, fertig_datum='01.11.2026', fertig_uhrzeit='25:00')
+        items = self.view()['gruppen'][1]['items']
+        planned, finished = (next(item for item in items if item['auftrag_id'] == oid) for oid in (1, 2))
+        self.assertEqual((planned['fertig_status'], planned['fertig_datum_text'], planned['fertig_uhrzeit']),
+                         ('Fertigstellung geplant', '02.11.2026', '14:30'))
+        self.assertEqual((finished['fertig_status'], finished['fertig_uhrzeit']), ('Fertig', ''))
 
     def test_missing_dates_times_address_unknown_transport_and_archives(self):
         self.order(1, annahme_uhrzeit='25:89', abhol_adresse='', abholtermin='')

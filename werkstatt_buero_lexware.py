@@ -1,9 +1,10 @@
-"""Local scan suggestions and approved original-file handoff to Lexware.
+"""Scan suggestions and approved original-file handoff to Lexware.
 
 Only the files endpoint can write externally. No voucher finalization, posting
-category IDs, tax rates, payments, bank calls or remote OCR are implemented.
-Registration is inert; schema initialization is explicit and requests occur only
-in send_approved()/sync_status(). The original bytes are the retry identity.
+category IDs, tax rates, payments or bank calls are implemented. Optional AI
+extraction is injected by the host during draft analysis; transfer checks remain
+local. Registration is inert and schema initialization is explicit.
+The original bytes are the retry identity for the Lexware handoff.
 """
 from contextlib import contextmanager
 import hashlib
@@ -160,9 +161,10 @@ class OfficeLexware:
             raise LexwareConflict('Original oder Belegstand hat sich geändert. Beleg neu prüfen.')
         return meta, raw
 
-    def _scan(self, meta, raw):
+    def _scan(self, meta, raw, *, allow_ai=True):
         # Private, random directory; generated filename, no user-controlled path.
-        # OCR uses only the existing local extraction function. No model/network.
+        # Existing local OCR always runs first. Optional online analysis is only
+        # an explicitly enabled host callback; no provider client lives here.
         parent = getattr(self.p, 'DATA_DIR', None)
         if parent is not None:
             parent = Path(parent)
@@ -177,16 +179,31 @@ class OfficeLexware:
                 text = self.p.extract_document_text_local(path, path.name)
             except Exception:
                 text = ''
-            return classify_scan(text)
+            from werkstatt_buero_analyse import analyse_document
+            enabled = allow_ai and getattr(self.p, 'app', None) is not None and self.p.app.config.get('OFFICE_AI_ANALYSIS_ENABLED', False) is True
+            return analyse_document(text, ai_hook=getattr(self.p, 'office_extract_fields_ai', None),
+                                    ai_enabled=enabled, path=path, filename=path.name)
 
-    def analyse_scan(self, key):
-        detail = self._detail(key)
+    def analyse_scan(self, key, *, intake=False):
+        if intake:
+            detail, raw = self.p.office_documents.intake_snapshot(_key(key))
+            meta = detail
+            if (not isinstance(raw, bytes) or len(raw) != detail.get('size_bytes')
+                    or not 0 < len(raw) <= MAX_SCAN_BYTES or detail.get('mime') not in MIMES
+                    or hashlib.sha256(raw).hexdigest() != detail.get('sha256')):
+                raise LexwareConflict('Original oder Belegstand hat sich geändert. Beleg neu prüfen.')
+        else:
+            detail = self._detail(key)
+            meta, raw = self._original(key, detail)
         if detail['status'] not in ('entwurf', 'zurueckgewiesen', 'eingereicht'):
             raise LexwareConflict('Bereits geprüfte Belege nicht ungefragt neu klassifizieren.')
-        meta, raw = self._original(key, detail)
         suggestion = self._scan(meta, raw)
-        self.p.office_documents.record_scan_suggestion(key, str(detail['revision']), suggestion['category'],
-                                                     suggestion['hint'], suggestion['suggested_kind'])
+        revision = detail['revision']
+        if intake or detail['status'] in ('entwurf', 'zurueckgewiesen'):
+            revision = self.p.office_documents.record_extracted_fields(
+                key, str(revision), suggestion['fields'], suggestion['hint'], suggestion['source'], intake=intake)
+        self.p.office_documents.record_scan_suggestion(key, str(revision), suggestion['category'],
+                                                     suggestion['hint'], suggestion['suggested_kind'], intake=intake)
         return suggestion
 
     def _config(self):
@@ -313,7 +330,7 @@ class OfficeLexware:
         meta, raw = self._original(key, detail)
         if len(raw) > MAX_UPLOAD_BYTES:
             raise ValueError('Lexware-Datei muss höchstens 5 MB groß sein. Original nicht automatisch komprimiert oder verändert.')
-        suggestion = self._scan(meta, raw)
+        suggestion = self._scan(meta, raw, allow_ai=False)
         if suggestion['blocked_auto']:
             raise ValueError(suggestion['hint'])
         metadata_hint = classify_scan('\n'.join(str(detail.get(field) or '') for field in

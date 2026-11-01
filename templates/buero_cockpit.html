@@ -1,14 +1,29 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Büro-Cockpit · Gärtner</title></head>
+{% from 'buero_icons.html' import icon, area_icon, area_label %}
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Heute · Büro · Gärtner</title></head>
 <body class="buero-page">{% include 'buero_nav.html' %}<main class="buero-main">
-<div class="buero-heading"><div><p class="buero-eyebrow">DEIN ARBEITSTAG</p><h1>Das Wichtigste fürs Büro.</h1><p>Termine, Fahrzeuge und die nächsten Aufgaben an einem Ort.</p></div>{% if day.datum_text %}<time>{{ day.datum_text }}</time>{% endif %}</div>
-{% if buero_preview %}<p class="buero-preview">Chef-Vorschau · <a href="/admin/buero-zugaenge">Persönliche Bürozugänge verwalten</a> · <a href="/admin/buero/posteingang-abgleich">Chef-Posteingang abgleichen</a></p>{% endif %}
-<section class="buero-priorities" aria-label="Heute erledigen">
-{% if payroll_payment_count is not none %}<a class="buero-priority" href="{{ '/admin/buero/loehne' if buero_preview else '/werkstatt/buero/loehne' }}"><span>Freigegebene Löhne</span><strong>{{ payroll_payment_count }}</strong><small>zur Überweisung bearbeiten</small></a>{% endif %}
-{% if document_counts is not none %}<a class="buero-priority" href="{{ '/admin/buero/belege' if buero_preview else '/werkstatt/buero/belege' }}"><span>Belege & Freigaben</span><strong>{{ document_counts.zahlung_offen }}</strong><small>zur Zahlung bearbeiten{% if document_counts.neue_anzahl %} · <b>{{ document_counts.neue_anzahl }} neu</b>{% endif %}</small></a>{% endif %}
-{% if daily_time_count is not none %}<a class="buero-priority" href="/werkstatt/buero/arbeitszeiten"><span>Arbeitszeiten kontrollieren</span><strong>{{ daily_time_count }}</strong><small>heute noch zu prüfen</small></a>{% endif %}
-{% if 'hol_bring' in (office_identity.office_categories or []) or buero_preview %}<a class="buero-priority" href="/werkstatt/buero/planung"><span>Fahrzeuge holen / bringen</span><strong>{{ day.anzahl_fahrten }}</strong><small>heute geplant</small></a>{% endif %}
-{% if 'termine' in (office_identity.office_categories or []) or buero_preview %}<a class="buero-priority" href="/werkstatt/buero/kalender"><span>Bürotermine</span><strong>{{ day.anzahl_termine }}</strong><small>heute im Kalender</small></a>{% endif %}
-</section>
-{% if day.offene_hinweise %}<section class="buero-attention"><h2>Vor der Fahrt klären</h2>{% for item in day.offene_hinweise %}<p><strong>{{ item.kennzeichen }}</strong> · {{ item.hinweis }}</p>{% endfor %}</section>{% endif %}
-<section class="buero-areas" aria-label="Alle Bürobereiche">{% for item in office_cards if item.path != '/werkstatt/buero' %}<a class="buero-area" href="{{ item.path }}"><h2>{{ item.title }} <span aria-hidden="true">↗</span></h2><p>{{ item.hint }}</p></a>{% endfor %}</section>
+<header class="buero-heading"><div><p class="buero-eyebrow">DEIN ARBEITSTAG</p><h1>Heute</h1></div>{% if day.datum_text %}<time class="buero-date">{{ icon('calendar') }}{{ day.datum_text }}</time>{% endif %}</header>
+{% if buero_preview %}<details class="buero-preview"><summary>Chef-Vorschau {{ icon('chevron') }}</summary><div><a href="/admin/buero-zugaenge">Bürozugänge</a><a href="/admin/buero/posteingang-abgleich">Chef-Posteingang</a></div></details>{% endif %}
+
+{% if document_counts is not none or payroll_payment_count is not none or daily_time_count is not none %}<section class="buero-priorities" aria-label="Heute erledigen">
+{% if document_counts is not none %}<a class="buero-priority" href="{{ '/admin/buero/belege' if buero_preview else '/werkstatt/buero/belege' }}"><span class="buero-task-icon">{{ icon('receipt') }}</span><div><span>Belege</span><strong>{{ document_counts.offen_anzahl }}</strong><small>bearbeiten{% if document_counts.neue_anzahl %} <b>{{ document_counts.neue_anzahl }} neu</b>{% endif %}</small></div>{{ icon('arrow', 'buero-task-arrow') }}</a>{% endif %}
+{% if payroll_payment_count is not none %}<a class="buero-priority" href="{{ '/admin/buero/loehne' if buero_preview else '/werkstatt/buero/loehne' }}"><span class="buero-task-icon">{{ icon('wallet') }}</span><div><span>Löhne</span><strong>{{ payroll_payment_count }}</strong><small>zur Überweisung</small></div>{{ icon('arrow', 'buero-task-arrow') }}</a>{% endif %}
+{% if daily_time_count is not none %}<a class="buero-priority" href="/werkstatt/buero/arbeitszeiten"><span class="buero-task-icon">{{ icon('clock') }}</span><div><span>Arbeitszeiten</span><strong>{{ daily_time_count }}</strong><small>prüfen</small></div>{{ icon('arrow', 'buero-task-arrow') }}</a>{% endif %}
+</section>{% endif %}
+
+{% set can_drive = 'hol_bring' in (office_identity.office_categories or []) or buero_preview %}
+{% set can_calendar = 'termine' in (office_identity.office_categories or []) or buero_preview %}
+{% if can_drive or can_calendar %}<div class="buero-today-grid{% if not can_drive or not can_calendar %} buero-today-single{% endif %}">
+{% if can_drive %}<section class="buero-panel"><header class="buero-panel-heading"><h2>{{ icon('car') }}Holen & Bringen <span class="buero-count">{{ day.anzahl_fahrten }}</span></h2><a href="/werkstatt/buero/planung" aria-label="Alle Fahrten ansehen">{{ icon('arrow') }}</a></header>
+  {% if day.anzahl_fahrten %}<div class="buero-trip-list">{% for group in day.gruppen if group.key in ('abholung_durch_werkstatt_heute','rueckbringung_heute') %}{% for item in group['items'] %}
+  <article class="buero-trip"><div class="buero-trip-when"><strong>{{ item.uhrzeit or 'Zeit offen' }}</strong><span class="buero-direction{% if group.key == 'rueckbringung_heute' %} buero-direction-return{% endif %}">{{ 'Holen' if group.key == 'abholung_durch_werkstatt_heute' else 'Bringen' }}</span></div><div class="buero-trip-body"><h3>{{ item.kennzeichen or 'Kennzeichen offen' }}</h3><p>{{ item.fahrzeug or 'Fahrzeug offen' }}</p><p class="buero-trip-customer">{% if item.kunde %}{{ item.kunde }}{% elif item.partner %}{{ item.partner }} <span>· Partner</span>{% else %}Kunde offen{% endif %}</p><p class="buero-trip-address">{{ icon('pin') }}{{ item.adresse or 'Adresse abstimmen' }}</p>{% for hint in item.warnungen|default([]) %}<p class="buero-inline-warning">{{ icon('warning') }}{{ hint }}</p>{% endfor %}</div></article>
+  {% endfor %}{% endfor %}</div>{% else %}<div class="buero-empty">{{ icon('car') }}<p>Heute keine Fahrten.</p></div>{% endif %}
+  {% if day.offene_hinweise %}<details class="buero-trip-clarify" open><summary>{{ icon('warning') }}{{ day.offene_hinweise|length }} Punkte abstimmen {{ icon('chevron') }}</summary>{% for item in day.offene_hinweise %}<p><strong>{{ item.kennzeichen or ('Auftrag ' ~ item.auftrag_id) }}</strong> · {{ item.hinweis }}</p>{% endfor %}</details>{% endif %}
+</section>{% endif %}
+{% if can_calendar %}<section class="buero-panel buero-appointments"><header class="buero-panel-heading"><h2>{{ icon('calendar') }}Termine <span class="buero-count">{{ day.termine|length }}</span></h2><a href="/werkstatt/buero/kalender" aria-label="Kalender öffnen">{{ icon('arrow') }}</a></header>
+{% for note in day.termine %}<article class="buero-appointment"><time>{{ note.uhrzeit or 'Zeit offen' }}</time><div><h3>{{ note.titel }}</h3>{% if note.notiz %}<details><summary>Notiz</summary><p>{{ note.notiz }}</p></details>{% endif %}</div></article>{% else %}<div class="buero-empty">{{ icon('calendar') }}<p>Keine weiteren Termine.</p></div>{% endfor %}
+<a class="buero-add-link" href="/werkstatt/buero/kalender#neuer-termin">{{ icon('plus') }}Termin eintragen</a></section>{% endif %}
+</div>{% endif %}
+
+{% set extra_cards = office_cards|rejectattr('key','in',('termine','hol_bring','belege','loehne','arbeitszeiten'))|rejectattr('path','equalto','/werkstatt/buero')|list %}
+{% if extra_cards %}<section class="buero-more"><h2>Weitere Bereiche</h2><div class="buero-areas">{% for item in extra_cards %}<a class="buero-area" href="{{ item.path }}">{{ area_icon(item) }}<span>{{ area_label(item) }}</span>{{ icon('arrow', 'buero-area-arrow') }}</a>{% endfor %}</div></section>{% endif %}
 </main></body></html>
