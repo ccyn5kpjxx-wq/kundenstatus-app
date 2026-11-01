@@ -424,7 +424,7 @@
   <div class="container py-2">
     {% if session.get('admin') %}<button type="button" class="sidebar-close" aria-label="Menü einklappen">‹ <span>Menü einklappen</span></button>{% endif %}
     <a class="navbar-brand d-flex align-items-center gap-2" href="{{ url_for('betriebs_cockpit') }}" aria-label="Werkstatt-Cockpit Startseite">
-      <img src="{{ static_asset_url('logo-nav-192.webp') }}" alt="Gärtner GmbH Karosserie + Lack">
+      <img src="{{ static_asset_url('logo-nav-192.webp') }}" alt="{{ werkstatt_oeffentlich.name }}">
       <span>Werkstatt-Cockpit</span>
     </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#hauptNavigation" aria-controls="hauptNavigation" aria-expanded="false" aria-label="Navigation umschalten">&#9776;</button>
@@ -476,7 +476,7 @@
   </div>
 </main>
 
-<footer>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }} · {{ werkstatt_oeffentlich.telefon }} · {% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a> · {% endif %}<a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
+<footer>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.adresse }} · {{ werkstatt_oeffentlich.telefon }} · {% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a> · {% endif %}<a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
   (() => {

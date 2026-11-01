@@ -36,7 +36,7 @@
 <body>
   <header>
     <div class="shell top">
-      <a href="{{ url_for('oeffentliche_homepage') }}"><img class="logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack"></a>
+      <a href="{{ url_for('oeffentliche_homepage') }}"><img class="logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="{{ werkstatt_oeffentlich.name }}"></a>
       <a class="back" href="{{ url_for('oeffentliche_homepage') }}">← Startseite</a>
     </div>
   </header>
@@ -58,6 +58,6 @@
       <div class="help"><a href="{{ werkstatt_oeffentlich.telefon_url }}">Werkstatt anrufen</a><a href="https://wa.me/4915227706694" target="_blank" rel="noopener">Per WhatsApp fragen</a></div>
     </section>
   </main>
-  <footer><div class="shell foot"><span>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }}</span><span><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></span></div></footer>
+  <footer><div class="shell foot"><span>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.adresse }}</span><span><a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></span></div></footer>
 </body>
 </html>

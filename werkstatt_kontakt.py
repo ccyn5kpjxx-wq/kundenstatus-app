@@ -3,7 +3,7 @@
 from urllib.parse import quote
 
 
-NAME = "Gärtner GmbH Karosserie + Lack"
+NAME = "Gärtner GmbH Karosserie & Lack"
 STREET = "Alte Neckarelzer Straße 18/1"
 POSTCODE = "74821"
 LOCALITY = "Mosbach"

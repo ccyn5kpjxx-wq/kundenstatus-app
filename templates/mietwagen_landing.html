@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mietwagen Mosbach — Auto mieten beim Meisterbetrieb | Gärtner GmbH Karosserie + Lack</title>
+<title>Mietwagen Mosbach — Auto mieten beim Meisterbetrieb | {{ werkstatt_oeffentlich.name }}</title>
 <meta name="description" content="Mietwagen &amp; Ersatzwagen in Mosbach direkt vom Meisterbetrieb. Online anfragen, digital unterschreiben, losfahren.">
 <style>
   :root { --akzent: #e8650d; --dunkel: #131313; --dunkel2: #1d1d1d; --hell: #f7f6f4; --text: #222; }
@@ -72,7 +72,7 @@
 <body>
 <nav>
   <div class="wrap">
-    <div class="logo">Gärtner GmbH <span>Karosserie + Lack</span> · MIETWAGEN</div>
+    <div class="logo">Gärtner GmbH <span>Karosserie &amp; Lack</span> · MIETWAGEN</div>
     <a class="telbtn" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
   </div>
 </nav>
@@ -147,14 +147,14 @@
       <div><b>WhatsApp / Telefon</b><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><br><a href="https://wa.me/4915227706694">WhatsApp öffnen →</a></div>
       <div><b>Online-Anfrage</b><a href="{{ url_for('mietwagen_anfrage') }}">Anfrageformular öffnen →</a><br><span style="opacity:.75">Wunschtermin angeben — wir bereiten alles vor.</span></div>
       <div><b>E-Mail</b><a href="mailto:info@auto-lackierzentrum.de">info@auto-lackierzentrum.de</a></div>
-      <div><b>Adresse</b>Gärtner GmbH Karosserie + Lack<br>{{ werkstatt_oeffentlich.adresse }}</div>
+      <div><b>Adresse</b>{{ werkstatt_oeffentlich.name }}<br>{{ werkstatt_oeffentlich.adresse }}</div>
     </div>
   </div>
 </section>
 
 <footer>
   <div class="wrap">
-    © Gärtner GmbH Karosserie + Lack · Mosbach
+    © {{ werkstatt_oeffentlich.name }} · Mosbach
     <p style="margin-top:4px;">{% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a> · {% endif %}<a href="{{ url_for('impressum_seite') }}">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a> · Alle Preise inkl. gesetzl. MwSt.</p>
   </div>
 </footer>

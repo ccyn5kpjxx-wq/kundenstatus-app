@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <title>{% if partner_mode %}Versicherungsfall melden{% elif cockpit_mode %}Versicherungsschaden aufnehmen{% else %}Schaden online melden{% endif %} · Gärtner GmbH Karosserie + Lack</title>
+  <title>{% if partner_mode %}Versicherungsfall melden{% elif cockpit_mode %}Versicherungsschaden aufnehmen{% else %}Schaden online melden{% endif %} · {{ werkstatt_oeffentlich.name }}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -378,7 +378,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand-lockup">
-        <div class="logo-card"><img src="{{ url_for('static', filename='logo.png') }}" alt="Gärtner GmbH Karosserie + Lack"></div>
+        <div class="logo-card"><img src="{{ url_for('static', filename='logo.png') }}" alt="{{ werkstatt_oeffentlich.name }}"></div>
         <div class="brand-copy"><strong>Gärtner Schadenservice</strong><span>Karosserie, Lack, Versicherung und Ersatzmobilität</span></div>
       </div>
       <div class="top-actions">
@@ -700,7 +700,7 @@
     </section>
   </main>
 
-  <footer class="page-footer"><div>Gärtner GmbH Karosserie + Lack · {{ werkstatt_oeffentlich.adresse }}</div><div><a href="{{ url_for('impressum_seite') }}" target="_blank" rel="noopener">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutz</a></div></footer>
+  <footer class="page-footer"><div>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.adresse }}</div><div><a href="{{ url_for('impressum_seite') }}" target="_blank" rel="noopener">Impressum</a> · <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutz</a></div></footer>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>

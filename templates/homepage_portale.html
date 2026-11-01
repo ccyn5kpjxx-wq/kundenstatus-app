@@ -13,7 +13,7 @@
 <body class="compact-home portal-page">
   <a class="skip-link" href="#inhalt">Zum Inhalt springen</a>
   <header class="site-header"><nav class="wrap site-nav" aria-label="Hauptnavigation">
-    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="Gärtner Karosserie und Lack" width="210" height="80" decoding="async"></a>
+    <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="{{ werkstatt_oeffentlich.name }}" width="210" height="80" decoding="async"></a>
     <a class="portal-back" href="{{ url_for('oeffentliche_portale') if business_access else url_for('oeffentliche_homepage') }}">← {{ 'Alle Zugänge' if business_access else 'Startseite' }}</a>
   </nav></header>
   <main id="inhalt" class="wrap">
@@ -50,7 +50,7 @@
     </section>
     <aside class="portal-help"><p><strong>Sie brauchen Unterstützung beim Zugang?</strong><br>Wir helfen Ihnen persönlich weiter.</p><a class="text-link" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }} <span aria-hidden="true">↗</span></a></aside>
   </main>
-  <footer class="site-footer"><div class="wrap portal-footer"><span>Gärtner GmbH Karosserie + Lack</span><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></nav></div></footer>
+  <footer class="site-footer"><div class="wrap portal-footer"><span>{{ werkstatt_oeffentlich.name }}</span><nav aria-label="Weitere Informationen"><a href="{{ url_for('oeffentliche_homepage') }}">Startseite</a><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></nav></div></footer>
   {% include '_besucher_tracking.html' %}
 </body>
 </html>

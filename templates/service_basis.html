@@ -7,7 +7,7 @@
 <body>
 <a class="sa-skip" href="#inhalt">Zum Inhalt</a>
 <aside class="sa-sidebar">
-  <a class="sa-brand" href="{{ url_for('serviceapp.index') }}"><img {{ image_attrs('logo-transparent.png',sizes='145px') }} width="145" height="55" alt="Gärtner Karosserie & Lack"><span>Mein Service<span class="sa-brand-dot"></span></span></a>
+  <a class="sa-brand" href="{{ url_for('serviceapp.index') }}"><img {{ image_attrs('logo-transparent.png',sizes='145px') }} width="145" height="55" alt="{{ werkstatt_oeffentlich.name }}"><span>Mein Service<span class="sa-brand-dot"></span></span></a>
   <p class="sa-nav-caption">{{ 'Ihr Arbeitsbereich' if workshop else 'Ihr Serviceportal' }}</p>
   <nav class="sa-side-nav" aria-label="Hauptnavigation">
     <a class="{{ 'active' if request.endpoint == 'serviceapp.index' else '' }}" href="{{ url_for('serviceapp.index') }}">{{ icon('home') }}<span>Übersicht</span></a>
@@ -36,7 +36,7 @@
 </header>
 {% if service_demo %}<div class="sa-demo"><span class="sa-demo-dot"></span>Lokale Vorschau · Beispieldaten · kein Versand oder Zahlung <a href="/demo">Beispielrolle wechseln {{ icon('arrow') }}</a></div>{% endif %}
 <main id="inhalt" class="sa-main">{% for category,message in get_flashed_messages(with_categories=true) %}<p class="sa-notice {{ category }}" role="status">{{ icon('check') }}{{ message }}</p>{% endfor %}{% block content %}{% endblock %}</main>
-<footer class="sa-footer"><span>Gärtner GmbH Karosserie + Lack</span><div><a href="{{ werkstatt_oeffentlich.telefon_url }}">Kontakt</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></footer>
+<footer class="sa-footer"><span>{{ werkstatt_oeffentlich.name }}</span><div><a href="{{ werkstatt_oeffentlich.telefon_url }}">Kontakt</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></div></footer>
 </div>
 <nav class="sa-bottom-nav" aria-label="Mobile Navigation">
 <a class="{{ 'active' if request.endpoint == 'serviceapp.index' else '' }}" href="{{ url_for('serviceapp.index') }}">{{ icon('home') }}<span>Übersicht</span></a>
