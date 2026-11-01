@@ -2,8 +2,10 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing, contextmanager
 import ast
+import base64
 import hashlib
 import io
+import json
 from pathlib import Path
 import re
 import sys
@@ -65,6 +67,15 @@ class OfficeLexwareTests(unittest.TestCase):
             database.assert_not_called()
         self.p.get_requests.assert_not_called()
         self.service.init_schema()
+        def review_copy(detail, raw, max_bytes):
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), detail['sha256'])
+            self.assertEqual(max_bytes, MAX_UPLOAD_BYTES)
+            copy = pdf_bytes('Synthetic review cover ' + detail['id'] + ' revision ' + str(detail['revision']))
+            return dict(bytes=copy, mime='application/pdf', filename='Pruefkopie-' + detail['id'] + '.pdf',
+                        sha256=hashlib.sha256(copy).hexdigest(), original_sha256=detail['sha256'], transformed=True, source_pages=1)
+        self.review_copy = Mock(side_effect=review_copy)
+        copy_patch = patch('werkstatt_buero_lexware_kopie.prepare_lexware_review_copy', self.review_copy)
+        copy_patch.start(); self.addCleanup(copy_patch.stop)
 
     @contextmanager
     def office(self, admin=False):
@@ -101,6 +112,11 @@ class OfficeLexwareTests(unittest.TestCase):
         with self.office(admin=admin):
             version = version or self.p.office_documents.detail(key, admin=admin)['revision']
             return self.service.send_approved(key, str(version))
+
+    def file(self, key, version=None, admin=False):
+        with self.office(admin=admin):
+            revision = self.p.office_documents.detail(key, admin=admin)['revision'] if version is None else version
+            return self.service.file_for_review(key, str(revision))
 
     def test_deterministic_classification_never_produces_posting_ids_or_tax_rates(self):
         cases = [
@@ -437,6 +453,265 @@ class OfficeLexwareTests(unittest.TestCase):
     def detail_revision_without_identity(self, key):
         with closing(self.p.get_db()) as db:
             return db.execute('SELECT revision FROM buero_belege WHERE id=?', (key,)).fetchone()[0]
+
+    def test_explicit_filing_covers_every_kind_category_and_state_without_payment_changes(self):
+        cases = [('kind', value) for value in ('rechnung','bescheid','post','lieferschein','zahlungsauftrag')]
+        cases += [('category', value) for value in ('rechnung','gebuehren','steuern','sonstige','privat','miete','kaution')]
+        cases += [('state', value) for value in ('entwurf','eingereicht','zurueckgewiesen','freigegeben','zahlung_in_bearbeitung','bezahlt')]
+        for dimension, value in cases:
+            with self.subTest(dimension=dimension, value=value):
+                key = self.create(kind='post', raw=pdf_bytes(dimension + value))
+                changes = {'typ': 'post', 'kategorie': 'privat', 'bereich': 'privat', 'status': 'entwurf'}
+                changes[{'kind':'typ','category':'kategorie','state':'status'}[dimension]] = value
+                with closing(self.p.get_db()) as db:
+                    db.execute('UPDATE buero_belege SET typ=?,kategorie=?,bereich=?,status=? WHERE id=?',
+                               (*(changes[name] for name in ('typ','kategorie','bereich','status')),key)); db.commit()
+                before = self.detail(key)
+                result = self.file(key)
+                after = self.detail(key)
+                self.assertEqual(result['voucher_id'], VOUCHER_ID)
+                self.assertEqual(result['lexware_status'], 'unbekannt')
+                for field in ('status','typ','kategorie','bereich','payable','business_confirmed','quelle_geprueft',
+                              'decided_at','decided_by','decision_note','paid_date','payment_reference','sha256','size_bytes'):
+                    self.assertEqual(after[field], before[field], field)
+                self.assertEqual(after['revision'], before['revision'] + 1)
+                self.assertEqual(after['lexware_beleg_id'], VOUCHER_ID)
+        self.p.extract_document_text_local.assert_not_called()
+        self.p.lexware_request.assert_not_called()
+        for call in self.http.request.call_args_list:
+            self.assertEqual(call.args, ('POST','https://api.lexware.io/v1/files'))
+            self.assertEqual(call.kwargs['data'], {'type':'voucher'})
+            self.assertNotIn('json', call.kwargs)
+
+    def test_manual_copy_is_frozen_before_post_and_source_is_unchanged_even_above_api_limit(self):
+        original = pdf_bytes('large-synthetic-source' + 'x' * MAX_UPLOAD_BYTES)
+        key = self.create(kind='post', raw=original)
+        before = self.detail(key)
+        def accepted_after_freeze(*args, **kwargs):
+            receipt = self.service._receipt(key)
+            uploaded = kwargs['files']['file'][1]
+            self.assertEqual(base64.b64decode(receipt['upload_base64']), uploaded)
+            self.assertEqual(receipt['upload_sha256'], hashlib.sha256(uploaded).hexdigest())
+            self.assertEqual(receipt['sha256'], hashlib.sha256(original).hexdigest())
+            self.assertNotEqual(receipt['upload_sha256'],receipt['sha256'])
+            metadata = json.loads(receipt['upload_meta_json'])
+            self.assertEqual((metadata['scope'],metadata['source_revision'],metadata['original_sha256']),
+                             ('manual_review',before['revision'],before['sha256']))
+            self.assertLessEqual(len(uploaded),MAX_UPLOAD_BYTES)
+            return accepted()
+        self.http.request.side_effect = accepted_after_freeze
+        self.file(key,admin=True)
+        with self.office(admin=True):
+            metadata, stored = self.p.office_documents.original(key,admin=True)
+        self.assertEqual(stored,original)
+        self.assertEqual(metadata['sha256'],before['sha256'])
+
+    def test_manual_timeout_retry_reuses_frozen_bytes_despite_new_metadata_and_approval_scope(self):
+        key = self.create(kind='post')
+        self.http.request.side_effect = [TimeoutError('synthetic timeout'),accepted()]
+        with self.assertRaises(LexwareUnavailable): self.file(key)
+        receipt = self.service._receipt(key)
+        self.assertEqual(receipt['state'],'uncertain')
+        self.assertTrue(receipt['upload_base64'])
+        self.assertFalse(self.detail(key)['lexware_beleg_id'])
+        with self.office():
+            current = self.p.office_documents.detail(key)
+            self.p.office_documents.update(key,str(current['revision']),{'lieferant':'New synthetic metadata'})
+        self.review_copy.reset_mock()
+        self.file(key)
+        first,second = [call.kwargs['files']['file'] for call in self.http.request.call_args_list]
+        self.assertEqual(first,second)
+        self.review_copy.assert_not_called()
+        self.assertEqual(self.service._receipt(key)['upload_meta_json'],receipt['upload_meta_json'])
+        self.assertEqual(self.detail(key)['lieferant'],'New synthetic metadata')
+        self.assertEqual((self.detail(key)['status'],self.detail(key)['payable']),('entwurf',0))
+        with self.assertRaises(ValueError): self.send(key)
+        self.assertEqual(self.http.request.call_count,2)
+
+    def test_manual_and_automatic_share_existing_receipt_without_duplicate_upload(self):
+        automatic = self.create(approve=True,raw=pdf_bytes('auto-before-manual'))
+        self.send(automatic)
+        original_upload = self.http.request.call_args.kwargs['files']['file'][1]
+        self.file(automatic)
+        self.assertEqual(self.http.request.call_count,1)
+        self.review_copy.assert_not_called()
+        self.assertEqual(hashlib.sha256(original_upload).hexdigest(),self.detail(automatic)['sha256'])
+        manual = self.create(approve=True,raw=pdf_bytes('manual-before-auto'))
+        self.file(manual)
+        self.send(manual)
+        self.assertEqual(self.http.request.call_count,2)
+        self.assertEqual(self.review_copy.call_count,1)
+        # An older uncertain automatic attempt has no frozen columns yet.
+        legacy = self.create(approve=True,raw=pdf_bytes('legacy-uncertain-original'))
+        with self.office():
+            detail = self.p.office_documents.detail(legacy)
+            _,_,fingerprint = self.service._config()
+            lease,_ = self.service._claim(legacy,detail,fingerprint)
+        self.service._mark_attempt(legacy,lease,'uncertain')
+        self.review_copy.reset_mock()
+        self.file(legacy)
+        uploaded = self.http.request.call_args.kwargs['files']['file'][1]
+        self.assertEqual(hashlib.sha256(uploaded).hexdigest(),self.detail(legacy)['sha256'])
+        self.review_copy.assert_not_called()
+        self.assertEqual(json.loads(self.service._receipt(legacy)['upload_meta_json'])['scope'],'legacy_original')
+
+    def test_same_contract_creates_distinct_frozen_review_files_for_rent_and_deposit(self):
+        raw = pdf_bytes('shared-synthetic-contract')
+        with self.office():
+            keys=[]
+            for category,mode in (('miete','monatliche_miete'),('kaution','einzelzahlung')):
+                key,duplicate=self.p.office_documents.create(dict(typ='zahlungsauftrag',kategorie=category,
+                    betrag_brutto='100.00',zahlungsmodus=mode,notiz='Synthetic source-backed task'),
+                    FileStorage(stream=io.BytesIO(raw),filename='contract.pdf',content_type='application/pdf'))
+                self.assertFalse(duplicate);keys.append(key)
+        other = Mock(status_code=202)
+        other.json.return_value={'id':'33333333-3333-4333-8333-333333333333','voucherId':'44444444-4444-4444-8444-444444444444'}
+        self.http.request.side_effect=[accepted(),other]
+        self.file(keys[0]);self.file(keys[1])
+        receipts=[self.service._receipt(key) for key in keys]
+        self.assertEqual(receipts[0]['sha256'],receipts[1]['sha256'])
+        self.assertNotEqual(receipts[0]['upload_sha256'],receipts[1]['upload_sha256'])
+        self.assertNotEqual(receipts[0]['voucher_id'],receipts[1]['voucher_id'])
+        self.assertEqual([self.detail(key)['payable'] for key in keys],[0,0])
+        self.p.lexware_request.return_value={'id':VOUCHER_ID,'voucherStatus':'paid'}
+        with self.office():self.service.sync_status(keys[0])
+        self.assertEqual([self.detail(key)['status'] for key in keys],['entwurf','entwurf'])
+
+    def test_manual_missing_voucher_id_remains_uncertain_then_retries_identical_copy(self):
+        key=self.create(kind='post')
+        malformed=Mock(status_code=202);malformed.json.return_value={'id':FILE_ID}
+        self.http.request.side_effect=[malformed,accepted()]
+        with self.assertRaises(ValueError):self.file(key)
+        receipt=self.service._receipt(key)
+        self.assertEqual((receipt['state'],receipt['voucher_id']),('uncertain',''))
+        self.assertFalse(self.detail(key)['lexware_beleg_id'])
+        self.file(key)
+        self.assertEqual(self.http.request.call_args_list[0].kwargs['files'],self.http.request.call_args_list[1].kwargs['files'])
+        self.assertEqual(self.review_copy.call_count,1)
+
+    def test_manual_remote_success_then_local_cas_conflict_keeps_receipt_and_does_not_reupload(self):
+        key=self.create(kind='post')
+        def concurrent_change(*args,**kwargs):
+            with closing(self.p.get_db()) as db:
+                db.execute('UPDATE buero_belege SET revision=revision+1 WHERE id=?',(key,));db.commit()
+            return accepted()
+        self.http.request.side_effect=concurrent_change
+        with self.assertRaises(LexwareConflict):self.file(key)
+        receipt=self.service._receipt(key)
+        self.assertEqual((receipt['state'],receipt['voucher_id']),('uploaded',VOUCHER_ID))
+        self.assertFalse(self.detail(key)['lexware_beleg_id'])
+        self.file(key)
+        self.assertEqual(self.http.request.call_count,1)
+        self.assertEqual(self.review_copy.call_count,1)
+        self.assertEqual(self.service._receipt(key)['state'],'linked')
+
+    def test_manual_filing_checks_cas_visibility_csrf_and_revoked_identity(self):
+        key=self.create(kind='post')
+        version=self.detail(key)['revision']
+        with self.assertRaises(LexwareConflict):self.file(key,version=version+1)
+        self.review_copy.assert_not_called()
+        client=self.p.app.test_client()
+        path='/werkstatt/buero/belege/'+key+'/lexware/ablegen'
+        self.assertEqual(client.post(path).status_code,403)
+        with client.session_transaction() as state:state['office_mid']=1
+        self.assertEqual(client.post(path,data={'revision':str(version)}).status_code,400)
+        with client.session_transaction() as state:state['csrf_token']='synthetic-csrf';state['office_mid']=2
+        data={'csrf_token':'synthetic-csrf','revision':str(version)}
+        self.assertEqual(client.post(path,data=data).status_code,404)
+        with client.session_transaction() as state:state['office_mid']=1
+        self.assertEqual(client.post(path,data=dict(data,finalize='true')).status_code,400)
+        self.assertEqual(client.post(path,data=dict(data,revision=str(version+1))).status_code,409)
+        self.http.request.assert_not_called()
+        self.assertEqual(client.post(path,data=data).status_code,303)
+        with closing(self.p.get_db()) as db:
+            db.execute('UPDATE synthetic_office SET active=0 WHERE id=1');db.commit()
+        self.assertEqual(client.post(path,data=data).status_code,403)
+        self.assertEqual(self.http.request.call_count,1)
+
+    def test_linked_replays_reject_changed_api_identity_and_corrupt_frozen_copy(self):
+        key=self.create(approve=True)
+        self.file(key)
+        self.p.LEXWARE_API_KEY='different-synthetic-account'
+        for action in (self.file,self.send):
+            with self.assertRaises(LexwareConflict):action(key)
+        self.assertEqual(self.http.request.call_count,1)
+        self.p.LEXWARE_API_KEY='synthetic-never-live-api-key'
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_lexware_transfers SET upload_sha256='incorrect' WHERE beleg_id=?",(key,));db.commit()
+        with self.assertRaises(LexwareConflict):self.file(key)
+        self.assertEqual(self.http.request.call_count,1)
+
+    def test_manual_disabled_invalid_copy_or_original_tampering_never_posts(self):
+        key=self.create(kind='post')
+        self.p.app.config['OFFICE_LEXWARE_UPLOAD_ENABLED']=False
+        with self.assertRaises(LexwareUnavailable):self.file(key)
+        self.assertIsNone(self.service._receipt(key));self.review_copy.assert_not_called()
+        self.p.app.config['OFFICE_LEXWARE_UPLOAD_ENABLED']=True
+        self.review_copy.side_effect=lambda detail,raw,max_bytes:dict(bytes=b'bad',mime='application/pdf',filename='unsafe/../copy.pdf',
+            sha256='wrong',original_sha256=detail['sha256'],transformed=True,source_pages=1)
+        with self.assertRaises(LexwareConflict):self.file(key)
+        self.assertIsNone(self.service._receipt(key))
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_belege SET original_base64='invalid-base64' WHERE id=?",(key,));db.commit()
+        with self.assertRaises(LookupError):self.file(key)
+        self.http.request.assert_not_called()
+
+    def test_partial_frozen_copy_never_becomes_a_different_legacy_retry(self):
+        key=self.create(kind='post')
+        self.http.request.side_effect=TimeoutError('synthetic timeout')
+        with self.assertRaises(LexwareUnavailable):self.file(key)
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_lexware_transfers SET upload_base64='' WHERE beleg_id=?",(key,));db.commit()
+        before=self.service._receipt(key)
+        self.review_copy.reset_mock();self.http.request.reset_mock()
+        with self.assertRaises(LexwareConflict):self.file(key)
+        self.review_copy.assert_not_called();self.http.request.assert_not_called()
+        self.assertEqual(self.service._receipt(key),before)
+
+    def test_preexisting_reference_without_receipt_stays_unknown_and_never_reuploads(self):
+        key=self.create(kind='post')
+        with self.office():
+            detail=self.p.office_documents.detail(key)
+            self.p.office_documents.record_lexware_filing_reference(key,str(detail['revision']),VOUCHER_ID,voucher_url(VOUCHER_ID))
+        result=self.file(key)
+        self.assertEqual(result['voucher_id'],VOUCHER_ID)
+        self.assertEqual(result['lexware_status'],'unbekannt')
+        self.assertIn('unbekannt',result['hinweis'])
+        self.assertIsNone(self.service._receipt(key))
+        self.review_copy.assert_not_called();self.http.request.assert_not_called()
+
+    def test_manual_concurrent_filing_has_one_persistent_copy_and_one_post(self):
+        key=self.create(kind='post')
+        entered,release=threading.Event(),threading.Event()
+        def slow_upload(*args,**kwargs):
+            entered.set()
+            if not release.wait(5):raise AssertionError('Synthetic upload was not released')
+            return accepted()
+        self.http.request.side_effect=slow_upload
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first=pool.submit(self.file,key)
+            self.assertTrue(entered.wait(5))
+            try:
+                with self.assertRaises(LexwareConflict):self.file(key)
+            finally:release.set()
+            self.assertEqual(first.result(timeout=5)['voucher_id'],VOUCHER_ID)
+        self.assertEqual(self.http.request.call_count,1)
+        self.assertEqual(self.review_copy.call_count,1)
+
+    def test_transfer_schema_migration_preserves_legacy_receipt_and_is_idempotent(self):
+        key=self.create(approve=True)
+        with self.office():
+            detail=self.p.office_documents.detail(key);_,_,fingerprint=self.service._config()
+            self.service._claim(key,detail,fingerprint)
+        before=self.service._receipt(key)
+        columns=('upload_base64','upload_sha256','upload_mime','upload_filename','upload_meta_json')
+        with closing(self.p.get_db()) as db:
+            for column in columns:db.execute('ALTER TABLE buero_lexware_transfers DROP COLUMN '+column)
+            db.commit()
+        self.service.init_schema();self.service.init_schema()
+        after=self.service._receipt(key)
+        self.assertEqual(before,after)
+        self.http.request.assert_not_called()
 
 
 if __name__ == '__main__':

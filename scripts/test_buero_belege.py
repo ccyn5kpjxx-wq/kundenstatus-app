@@ -714,7 +714,7 @@ class OfficeDocumentTests(unittest.TestCase):
         row = self.row(key)
         self.assertEqual((row["status"], row["paid_date"]), ("freigegeben", ""))
         self.assertEqual(row["lexware_beleg_id"], "synthetic-id")
-        self.assertIn("Beleg in Lexware öffnen", self.office.get("/werkstatt/buero/belege/" + key).get_data(as_text=True))
+        self.assertIn("In Lexware öffnen", self.office.get("/werkstatt/buero/belege/" + key).get_data(as_text=True))
 
     def test_read_counters_require_current_role_and_filter_does_not_mark_seen(self):
         key = self.create(kategorie="rechnung")

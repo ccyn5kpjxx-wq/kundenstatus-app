@@ -954,5 +954,54 @@ class OfficeCockpitIntegration(unittest.TestCase):
         self.assertIn('Fehlende Zahlungsangaben vor der Überweisung klären.', text)
         self.assertNotIn('<h3>Jetzt überweisen</h3>', text)
 
+    def test_18_manual_lexware_filing_preserves_payment_and_accounting_decisions(self):
+        kinds = (('post', 'privat'), ('lieferschein', 'sonstige'), ('zahlungsauftrag', 'kaution'),
+                 ('rechnung', 'rechnung'), ('bescheid', 'gebuehren'))
+        for index, (kind, category) in enumerate(kinds):
+            with self.subTest(kind=kind):
+                client = self.staff if index == 0 else self.admin
+                base = '/werkstatt/buero/belege' if index == 0 else '/admin/buero/belege'
+                upload = self.rendered_form(self.get(base, client), form_action=base + '/erfassen')
+                writer = PdfWriter(); writer.add_blank_page(width=200, height=250)
+                writer.add_metadata({'/Title': 'Synthetic manual filing ' + kind})
+                stream = BytesIO(); writer.write(stream); raw = stream.getvalue()
+                with patch.object(p, 'extract_document_text_local', return_value=''):
+                    response = self.submit_rendered(upload, base, client=client, typ=kind, kategorie=category,
+                        lieferant='Synthetic manual filing', belegnummer='SYN-FILE-' + str(index),
+                        belegdatum='2026-11-01', betrag_brutto='90.00', zahlungsmodus='einzelzahlung' if kind == 'zahlungsauftrag' else '',
+                        notiz='Synthetic original basis. No payment approval.',
+                        original=(BytesIO(raw), 'synthetic-filing.pdf'))
+                self.assertEqual(response.status_code, 303)
+                detail_path = response.headers['Location']
+                key = detail_path.rsplit('/', 1)[-1]
+                filing_path = detail_path + '/lexware/ablegen'
+                form = self.rendered_form(self.get(detail_path, client), form_action=filing_path)
+                with closing(p.get_db()) as db:
+                    before = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+                file_id = '11111111-1111-4111-8111-' + f'{index + 1:012d}'
+                voucher_id = '22222222-2222-4222-8222-' + f'{index + 1:012d}'
+                accepted = Mock(status_code=202)
+                accepted.json.return_value = {'id': file_id, 'voucherId': voucher_id}
+                http = Mock(); http.request.return_value = accepted
+                with patch.object(p, 'LEXWARE_API_KEY', 'synthetic-never-live-filing-key'), patch.object(
+                        p, 'get_requests', return_value=http), patch.dict(p.app.config, OFFICE_LEXWARE_UPLOAD_ENABLED=True):
+                    filed = self.submit_rendered(form, detail_path, client=client)
+                self.assertEqual(filed.status_code, 303, filed.get_data(as_text=True))
+                http.request.assert_called_once()
+                self.assertEqual(http.request.call_args.args[:2], ('POST', 'https://api.lexware.io/v1/files'))
+                self.assertEqual(http.request.call_args.kwargs['data'], {'type': 'voucher'})
+                with closing(p.get_db()) as db:
+                    after = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+                untouched = set(before) - {'revision', 'updated_at', 'lexware_beleg_id', 'lexware_url', 'lexware_status', 'verarbeitung_hinweis'}
+                self.assertEqual({k:before[k] for k in untouched}, {k:after[k] for k in untouched})
+                self.assertEqual((after['status'], after['payable'], after['business_confirmed']), ('entwurf', 0, 0))
+                self.assertEqual(after['lexware_beleg_id'], voucher_id)
+                self.assertEqual(after['revision'], before['revision'] + 1)
+                self.assertEqual(self.get(detail_path + '/original', client).data, raw)
+                shown = self.get(detail_path, client).get_data(as_text=True)
+                self.assertIn('https://app.lexware.de/permalink/vouchers/edit/' + voucher_id, shown)
+                self.assertIn('In Lexware öffnen', shown)
+                self.assertNotIn('action="' + filing_path + '"', shown)
+
 if __name__ == '__main__':
     unittest.main()

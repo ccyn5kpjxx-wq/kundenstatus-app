@@ -1,7 +1,9 @@
 """Synthetic restore tests: office actors keep their identity and login state."""
 from contextlib import closing
 from copy import deepcopy
+import base64
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import sys
@@ -84,6 +86,39 @@ class OfficeRestoreTests(TestCase):
             ensure_office_state_for_import(self.p, export=export)
         self.assertNotIn('synthetic-auth-secret', str(error.exception))
         self.assertNotIn('private-import-secret', str(error.exception))
+
+    def seed_transfer_copy(self):
+        """A persisted retry copy differs from its unchanged source original."""
+        original_sha = hashlib.sha256(b'abc').hexdigest()
+        upload = b'%PDF-1.4\nSynthetic persistent Lexware retry copy\n%%EOF'
+        copy_fields = {
+            'upload_base64': base64.b64encode(upload).decode('ascii'),
+            'upload_sha256': hashlib.sha256(upload).hexdigest(),
+            'upload_mime': 'application/pdf',
+            'upload_filename': 'synthetic-transfer-copy.pdf',
+            'upload_meta_json': json.dumps({'kind': 'synthetic-transfer-copy', 'original_sha256': original_sha}, sort_keys=True),
+        }
+        self.assertNotEqual(original_sha, copy_fields['upload_sha256'])
+        with closing(self.p.get_db()) as db:
+            # Use the real transfer schema: a missing migration must fail here.
+            columns = {row[1] for row in db.execute('PRAGMA table_info(buero_lexware_transfers)')}
+            self.assertTrue(copy_fields.keys() <= columns)
+            names = ('beleg_id', 'sha256', 'approved_revision', 'state', 'api_fingerprint', 'created_at', 'updated_at', *copy_fields)
+            values = ('a' * 32, original_sha, 1, 'uncertain', hashlib.sha256(b'synthetic-api-identity').hexdigest(),
+                      '2026-11-02', '2026-11-02', *copy_fields.values())
+            db.execute('INSERT INTO buero_lexware_transfers(' + ','.join(names) + ') VALUES(' + ','.join('?' for _ in names) + ')', values)
+            db.commit()
+        return copy_fields
+
+    @staticmethod
+    def changed_transfer_copy_fields():
+        return {
+            'upload_base64': base64.b64encode(b'different synthetic copy').decode('ascii'),
+            'upload_sha256': hashlib.sha256(b'different synthetic copy').hexdigest(),
+            'upload_mime': 'image/png',
+            'upload_filename': 'different-synthetic-copy.png',
+            'upload_meta_json': json.dumps({'kind': 'changed-synthetic-copy'}, sort_keys=True),
+        }
 
     def test_matching_json_keeps_external_connection_open_and_performs_no_write(self):
         before = self.snapshot()
@@ -212,6 +247,58 @@ class OfficeRestoreTests(TestCase):
             for table in reversed(TABLES): db.execute('DELETE FROM ' + table)
             db.commit()
         ensure_office_state_for_import(self.p, export={'tables': {}})
+
+    def test_json_preserves_exact_retry_copy_and_rejects_missing_empty_or_changed_fields(self):
+        copy_fields = self.seed_transfer_copy()
+        changed_fields = self.changed_transfer_copy_fields()
+        original = self.snapshot()
+        ensure_office_state_for_import(self.p, export=original)
+        for field in copy_fields:
+            for mode in ('missing', 'empty', 'changed'):
+                with self.subTest(field=field, mode=mode):
+                    incoming = deepcopy(original)
+                    row = incoming['tables']['buero_lexware_transfers'][0]
+                    if mode == 'missing':
+                        row.pop(field)
+                    elif mode == 'empty':
+                        row[field] = '{}' if field == 'upload_meta_json' else ''
+                    else:
+                        row[field] = changed_fields[field]
+                    self.reject_json(incoming)
+                    self.assertEqual(self.snapshot(), original)
+        incoming = deepcopy(original)
+        incoming['tables']['buero_lexware_transfers'] = []
+        self.reject_json(incoming)
+        self.assertEqual(self.snapshot(), original)
+
+    def test_sqlite_preserves_retry_copy_schema_bytes_metadata_and_source_fingerprint(self):
+        copy_fields = self.seed_transfer_copy()
+        changed_fields = self.changed_transfer_copy_fields()
+        original = self.snapshot()
+        matching = self.sqlite_copy()
+        matching_bytes = matching.read_bytes()
+        ensure_office_state_for_import(self.p, imported_db=matching)
+        self.assertEqual(matching.read_bytes(), matching_bytes)
+        mutations = []
+        for field in copy_fields:
+            mutations.extend([
+                ('ALTER TABLE buero_lexware_transfers DROP COLUMN ' + field, ()),
+                ('UPDATE buero_lexware_transfers SET ' + field + '=?', (changed_fields[field],)),
+                ('UPDATE buero_lexware_transfers SET ' + field + '=?', ('{}' if field == 'upload_meta_json' else '',)),
+            ])
+        mutations.extend([
+            ('DELETE FROM buero_lexware_transfers', ()),
+            ('UPDATE buero_lexware_transfers SET sha256=?', (copy_fields['upload_sha256'],)),
+            ('UPDATE buero_lexware_transfers SET api_fingerprint=?', ('different-synthetic-api-identity',)),
+        ])
+        for sql, params in mutations:
+            with self.subTest(sql=sql):
+                path = self.sqlite_copy(sql, params)
+                source_bytes = path.read_bytes()
+                with self.assertRaises(ValueError):
+                    ensure_office_state_for_import(self.p, imported_db=path)
+                self.assertEqual(path.read_bytes(), source_bytes)
+                self.assertEqual(self.snapshot(), original)
 
 
 if __name__ == '__main__':

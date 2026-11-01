@@ -17,6 +17,7 @@ import secrets
 import sqlite3
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, send_file, session
 
@@ -426,7 +427,7 @@ class OfficeDocuments:
                      kategorie_effektiv=category, kategorie_label=CATEGORIES.get(category, "Sonstige Post"),
                      bereich_label=AREAS.get(value["bereich"], AREAS["unklar"]),
                      is_new=recipient and value["revision"] > value.get("seen_revision", value["revision"]),
-                     lexware_link=_lexware_url(value["lexware_url"]) if value["payable"] and value["business_confirmed"] else "",
+                     lexware_link=_lexware_url(value["lexware_url"]) if value["lexware_beleg_id"] else "",
                      betrag_label=_display_amount(value["betrag_cent"]),
                      betrag_input="" if value["betrag_cent"] is None else f"{value['betrag_cent'] // 100}.{value['betrag_cent'] % 100:02d}",
                      transfer_missing=transfer_missing,
@@ -674,6 +675,34 @@ class OfficeDocuments:
             if changed.rowcount != 1:
                 raise RevisionConflict("Beleg wurde gleichzeitig geändert. Lexware-Verweis erneut prüfen.")
             self._audit(db, who, key, "lexware_verweis_hinterlegt", row["status"])
+        self._backup()
+
+    def record_lexware_filing_reference(self, key, revision, document_id, url, status="uebertragen"):
+        """Link an explicit filing without granting payment or business approval."""
+        try:
+            canonical_id = str(UUID(document_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("Gültige Lexware-Belegreferenz angeben.") from None
+        expected_url = "https://app.lexware.de/permalink/vouchers/edit/" + canonical_id
+        if document_id.lower() != canonical_id or url != expected_url or status not in ("bereit", "uebertragen"):
+            raise ValueError("Geprüfte Lexware-Belegreferenz mit passendem offiziellen Link angeben.")
+        with self.p.portal_originals_operation_lock(), self.db() as db:
+            admin = bool(session.get("admin"))
+            who = self.identity(admin=admin, db=db, lock=True)
+            row = self._current(db, key, revision, set(STATES))
+            self._visibility(row, who, admin=admin)
+            _review_original(db, row)
+            if row["lexware_beleg_id"] and row["lexware_beleg_id"] != canonical_id:
+                raise RevisionConflict("Beleg ist bereits einer anderen Lexware-Referenz zugeordnet.")
+            if (row["lexware_beleg_id"], row["lexware_url"], row["lexware_status"], row["verarbeitung_hinweis"]) == (canonical_id, url, status, ""):
+                return
+            changed = db.execute("""UPDATE buero_belege SET lexware_beleg_id=?,lexware_url=?,lexware_status=?,
+                verarbeitung_hinweis='',revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status=?""",
+                (canonical_id, url, status, _now(), key, row["revision"], row["status"]))
+            if changed.rowcount != 1:
+                raise RevisionConflict("Beleg wurde gleichzeitig geändert. Lexware-Ablage erneut prüfen.")
+            self._audit(db, who, key, "lexware_ablage_hinterlegt", row["status"],
+                        extra={"ablage_zur_pruefung": True, "keine_zahlungsfreigabe": True})
         self._backup()
 
     def record_processing_notice(self, key, message):

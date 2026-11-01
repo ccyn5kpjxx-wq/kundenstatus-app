@@ -90,6 +90,13 @@ sein. Die Freigabe öffnet die Büro-Bearbeitungsaufgabe auch bei fehlenden
 Bestätigung mit Datum und Referenz. Dieselbe Mietunterlage darf beide unterschiedlichen Aufträge
 belegen. Eine monatliche Mietvorlage erzeugt keine automatischen Folgezahlungen.
 Private Belege und Kautionen werden nicht automatisch als GmbH-Rechnung gebucht.
+Jeder sichtbare Beleg bietet zusätzlich „In Lexware ablegen“, unabhängig von
+Art und Zahlungsfreigabe. Die ausdrückliche Ablage erstellt nur einen Prüfbeleg
+mit gekennzeichneter Prüfkopie und erhält Original, Freigabe und Zahlungsstatus.
+Anschließend öffnen „In Lexware öffnen“ und „Überweisungen in Lexware“ die
+konkrete Lexware-Erfassung bzw. den Zahlungsbereich. Steuerliche Zuordnung und
+tatsächliche Bankfreigabe erfolgen dort. Miete und Kaution bleiben auch mit
+demselben Vertragsoriginal zwei getrennte Prüfbelege und Zahlungszwecke.
 
 ## Monatliche Löhne
 

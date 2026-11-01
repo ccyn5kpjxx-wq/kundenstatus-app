@@ -76,7 +76,7 @@ def configure_office_endpoints():
         OFFICE_ALLOWED_ENDPOINTS['belege']['buero_belege.' + endpoint] = read
     for endpoint in ('upload', 'update', 'submit', 'start_payment', 'paid'):
         OFFICE_ALLOWED_ENDPOINTS['belege']['buero_belege.' + endpoint] = frozenset(('POST',))
-    for endpoint in ('analyse', 'transfer', 'status'):
+    for endpoint in ('analyse', 'transfer', 'filing', 'status'):
         OFFICE_ALLOWED_ENDPOINTS['belege']['office_lexware.' + endpoint] = frozenset(('POST',))
     OFFICE_ALLOWED_ENDPOINTS['loehne'].update({
         'office_payroll.office': frozenset(('GET', 'HEAD', 'POST')),

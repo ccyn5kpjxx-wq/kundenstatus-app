@@ -7,8 +7,10 @@ local. Registration is inert and schema initialization is explicit.
 The original bytes are the retry identity for the Lexware handoff.
 """
 from contextlib import contextmanager
+import base64
 import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import re
@@ -40,7 +42,14 @@ class LexwareUnavailable(RuntimeError):
     pass
 
 
-def init_office_lexware_schema(db):
+_UPLOAD_COLUMNS = {
+    'upload_base64': "TEXT NOT NULL DEFAULT ''", 'upload_sha256': "TEXT NOT NULL DEFAULT ''",
+    'upload_mime': "TEXT NOT NULL DEFAULT ''", 'upload_filename': "TEXT NOT NULL DEFAULT ''",
+    'upload_meta_json': "TEXT NOT NULL DEFAULT '{}'",
+}
+
+
+def init_office_lexware_schema(db, ensure_column=None, *, postgres=False):
     db.execute('''CREATE TABLE IF NOT EXISTS buero_lexware_transfers (
         beleg_id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, approved_revision INTEGER NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending', lease_id TEXT NOT NULL DEFAULT '',
@@ -50,6 +59,16 @@ def init_office_lexware_schema(db):
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
         CHECK(state IN ('pending','sending','uncertain','uploaded','linked','error')),
         CHECK(approved_revision>0))''')
+    if callable(ensure_column):
+        for column, definition in _UPLOAD_COLUMNS.items():
+            ensure_column(db, 'buero_lexware_transfers', column, definition)
+    else:
+        columns = ({row['column_name'] for row in db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='buero_lexware_transfers' AND table_schema=current_schema()").fetchall()}
+            if postgres else {row[1] for row in db.execute('PRAGMA table_info(buero_lexware_transfers)').fetchall()})
+        for column, definition in _UPLOAD_COLUMNS.items():
+            if column not in columns:
+                db.execute('ALTER TABLE buero_lexware_transfers ADD COLUMN ' + column + ' ' + definition)
 
 
 def _key(value):
@@ -140,7 +159,7 @@ class OfficeLexware:
 
     def init_schema(self):
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            init_office_lexware_schema(db)
+            init_office_lexware_schema(db, getattr(self.p, 'ensure_column', None), postgres=bool(getattr(self.p, 'USE_POSTGRES', False)))
 
     def _identity(self, db=None, *, lock=False):
         if db is not None:
@@ -240,28 +259,34 @@ class OfficeLexware:
     def _view(receipt):
         voucher = _uuid(receipt['voucher_id'])
         return {'state': receipt['state'], 'file_id': receipt.get('file_id') or '', 'voucher_id': voucher,
-                'url': voucher_url(voucher), 'lexware_status': receipt.get('remote_status') or 'blank',
-                'hinweis': 'Original in Lexware bereitgestellt. Erfassung, steuerliche Zuordnung und Überweisung dort prüfen; Bankfreigabe bleibt persönlich.'}
+                'url': voucher_url(voucher), 'lexware_status': receipt.get('remote_status') or 'unbekannt',
+                'hinweis': 'Datei in Lexware zur Prüfung bereitgestellt. Erfassung, private oder geschäftliche Zuordnung und Überweisung dort prüfen; Bankfreigabe bleibt persönlich.'}
 
-    def _claim(self, key, detail, fingerprint):
+    def _claim(self, key, detail, fingerprint, *, manual=False, upload=None):
         lease, now = secrets.token_hex(16), int(time.time())
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            self._identity(db, lock=True)
-            current = db.execute('SELECT revision,status,typ,payable,business_confirmed,decided_by,sha256 '
+            who = self._identity(db, lock=True)
+            current = db.execute('SELECT revision,status,typ,payable,business_confirmed,decided_by,sha256,created_by,bereich '
                                  'FROM buero_belege WHERE id=?', (_key(key),)).fetchone()
             if not current or current['revision'] != detail['revision'] or current['sha256'] != detail['sha256']:
                 raise LexwareConflict('Der Chef-Freigabestand wurde geändert. Bitte neu öffnen.')
-            self._approved(dict(current))
+            self.p.office_documents._visibility(dict(current), who, admin=bool(session.get('admin')))
+            if not manual:
+                self._approved(dict(current))
             timestamp = self.p.now_str()
             db.execute('''INSERT INTO buero_lexware_transfers
                 (beleg_id,sha256,approved_revision,api_fingerprint,created_at,updated_at)
                 VALUES(?,?,?,?,?,?) ON CONFLICT(beleg_id) DO NOTHING RETURNING beleg_id''',
                 (key, detail['sha256'], detail['revision'], fingerprint, timestamp, timestamp))
             row = db.execute('SELECT * FROM buero_lexware_transfers WHERE beleg_id=?', (key,)).fetchone()
-            if row['sha256'] != detail['sha256'] or row['api_fingerprint'] != fingerprint:
-                raise LexwareConflict('Original oder Lexware-Zugang unterscheidet sich vom bisherigen Übertragungsversuch. Intern abgleichen.')
+            self._receipt_matches(dict(row), detail, fingerprint)
             if row['voucher_id']:
                 return '', dict(row)
+            if not row['upload_base64'] and upload is not None:
+                db.execute('''UPDATE buero_lexware_transfers SET upload_base64=?,upload_sha256=?,upload_mime=?,
+                    upload_filename=?,upload_meta_json=? WHERE beleg_id=? AND upload_base64='' ''',
+                    (base64.b64encode(upload['bytes']).decode('ascii'), upload['sha256'], upload['mime'], upload['filename'],
+                     json.dumps(upload['metadata'], sort_keys=True, ensure_ascii=False), key))
             claimed = db.execute('''UPDATE buero_lexware_transfers SET state='sending',lease_id=?,lease_until=?,
                 approved_revision=?,last_error='',updated_at=? WHERE beleg_id=?
                 AND (state<>'sending' OR lease_until<=?) RETURNING beleg_id''',
@@ -286,7 +311,7 @@ class OfficeLexware:
             raise LexwareUnavailable('Das vorhandene HTTP-Modul ist nicht verfügbar.')
         response = http.request('POST', base + '/v1/files',
             headers={'Authorization': 'Bearer ' + api_key, 'Accept': 'application/json'},
-            data={'type': 'voucher'}, files={'file': ('beleg-' + key + MIMES[meta['mime']], raw, meta['mime'])},
+            data={'type': 'voucher'}, files={'file': (meta.get('upload_filename') or 'beleg-' + key + MIMES[meta['mime']], raw, meta['mime'])},
             timeout=(10, 45), allow_redirects=False)
         if response.status_code != 202:
             raise LexwareUnavailable('Lexware hat die Datei nicht mit einer bestätigten Belegreferenz angenommen. Status prüfen und denselben Beleg später erneut versuchen.')
@@ -295,9 +320,10 @@ class OfficeLexware:
             raise ValueError('Keine gültige Lexware-Antwort erhalten.')
         return _uuid(payload.get('id')), _uuid(payload.get('voucherId'))
 
-    def _link(self, key, detail, receipt):
+    def _link(self, key, detail, receipt, *, manual=False):
         current = self._detail(key)
-        self._approved(current)
+        if not manual:
+            self._approved(current)
         if current['sha256'] != detail['sha256']:
             raise LexwareConflict('Das lokale Original wurde geändert. Übergabe intern prüfen.')
         voucher = _uuid(receipt['voucher_id'])
@@ -307,51 +333,124 @@ class OfficeLexware:
         else:
             if current['revision'] != detail['revision']:
                 raise LexwareConflict('Der Freigabestand wurde während der Übergabe geändert. Die gespeicherte Lexware-Referenz intern abgleichen.')
-            self.p.office_documents.record_lexware_reference(key, str(current['revision']), voucher,
-                                                            voucher_url(voucher), status='uebertragen')
+            record = (self.p.office_documents.record_lexware_filing_reference if manual
+                      else self.p.office_documents.record_lexware_reference)
+            record(key, str(current['revision']), voucher, voucher_url(voucher), status='uebertragen')
         with self.db() as db:
             db.execute("UPDATE buero_lexware_transfers SET state='linked',last_error='',updated_at=? WHERE beleg_id=? AND voucher_id=?",
                        (self.p.now_str(), key, voucher))
         self._backup()
         return self._view(dict(receipt, state='linked'))
 
+    @staticmethod
+    def _receipt_matches(receipt, detail, fingerprint):
+        if receipt and (receipt['sha256'] != detail['sha256'] or receipt['api_fingerprint'] != fingerprint):
+            raise LexwareConflict('Original oder Lexware-Zugang unterscheidet sich vom bisherigen Übertragungsversuch. Intern abgleichen.')
+        if receipt and not receipt.get('upload_base64') and (
+                receipt.get('upload_sha256') or receipt.get('upload_mime') or receipt.get('upload_filename')
+                or receipt.get('upload_meta_json') != '{}'):
+            raise LexwareConflict('Die gespeicherte Lexware-Uploadkopie ist unvollständig. Intern abgleichen; keine andere Datei senden.')
+        if receipt and receipt.get('upload_base64'):
+            OfficeLexware._frozen_upload(receipt, detail)
+
+    @staticmethod
+    def _frozen_upload(receipt, detail):
+        try:
+            raw = base64.b64decode(receipt['upload_base64'], validate=True)
+            metadata = json.loads(receipt['upload_meta_json'])
+            mime, filename = receipt['upload_mime'], receipt['upload_filename']
+            if (not 0 < len(raw) <= MAX_UPLOAD_BYTES or mime not in MIMES
+                    or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,179}', filename)
+                    or not filename.lower().endswith(MIMES[mime])
+                    or hashlib.sha256(raw).hexdigest() != receipt['upload_sha256']
+                    or not isinstance(metadata, dict) or metadata.get('original_sha256') != detail['sha256']):
+                raise ValueError
+        except (KeyError, ValueError, TypeError):
+            raise LexwareConflict('Die gespeicherte Lexware-Uploadkopie ist nicht unverändert prüfbar. Intern abgleichen; keine neue Kopie senden.') from None
+        return {'bytes': raw, 'mime': mime, 'filename': filename, 'sha256': receipt['upload_sha256'], 'metadata': metadata}
+
+    def _prepare_upload(self, key, detail, meta, raw, receipt, *, manual):
+        if receipt and receipt.get('upload_base64'):
+            return self._frozen_upload(receipt, detail)
+        # A legacy attempt may already have reached Lexware with these exact
+        # original bytes. Never replace its retry identity with a new cover.
+        if not manual or receipt:
+            if len(raw) > MAX_UPLOAD_BYTES:
+                raise ValueError('Lexware-Datei muss höchstens 5 MB groß sein. Original nicht automatisch komprimiert oder verändert.')
+            return dict(bytes=raw, mime=meta['mime'], filename='beleg-' + key + MIMES[meta['mime']],
+                        sha256=hashlib.sha256(raw).hexdigest(), metadata={
+                            'original_sha256': detail['sha256'], 'source_revision': detail['revision'],
+                            'scope': 'legacy_original' if receipt else 'approved_original', 'transformed': False})
+        from werkstatt_buero_lexware_kopie import prepare_lexware_review_copy
+        prepared = prepare_lexware_review_copy(detail, raw, max_bytes=MAX_UPLOAD_BYTES)
+        if not isinstance(prepared, dict) or prepared.get('original_sha256') != detail['sha256']:
+            raise ValueError('Lexware-Prüfkopie gehört nicht zum unveränderten Original.')
+        upload = {'bytes': prepared.get('bytes'), 'mime': prepared.get('mime'), 'filename': prepared.get('filename'),
+                  'sha256': prepared.get('sha256'), 'metadata': {
+                      'scope': 'manual_review', 'source_revision': detail['revision'], 'original_sha256': detail['sha256'],
+                      'transformed': prepared.get('transformed'), 'source_pages': prepared.get('source_pages')}}
+        if not isinstance(upload['bytes'], bytes):
+            raise ValueError('Keine gültige Lexware-Prüfkopie erhalten.')
+        # Apply the same content/hash/name checks before anything is persisted.
+        self._frozen_upload(dict(upload_base64=base64.b64encode(upload['bytes']).decode('ascii'),
+            upload_meta_json=json.dumps(upload['metadata']), upload_mime=upload['mime'],
+            upload_filename=upload['filename'], upload_sha256=upload['sha256']), detail)
+        return upload
+
     def send_approved(self, key, version):
+        """The existing automatic handoff retains its stricter payment gates."""
+        return self._send(key, version, manual=False)
+
+    def file_for_review(self, key, version):
+        """Explicit user-requested filing, independent of payment approval."""
+        return self._send(key, version, manual=True)
+
+    def _send(self, key, version, *, manual):
         detail = self._detail(key)
-        self._approved(detail)
+        if not manual:
+            self._approved(detail)
+        if detail['revision'] != _revision(version):
+            raise LexwareConflict('Der Belegstand wurde geändert. Beleg neu öffnen.')
+        base, api_key, fingerprint = self._config()
         receipt = self._receipt(key)
+        self._receipt_matches(receipt, detail, fingerprint)
         # A successful replay returns its existing reference without another POST.
         if detail.get('lexware_beleg_id'):
             voucher = _uuid(detail['lexware_beleg_id'])
             if receipt and (receipt['sha256'] != detail['sha256'] or receipt['voucher_id'] and receipt['voucher_id'] != voucher):
                 raise LexwareConflict('Lokaler Beleg und Übertragungsreferenz widersprechen sich.')
-            return self._view(dict(receipt or {}, state='linked', voucher_id=voucher))
-        if detail['revision'] != _revision(version):
-            raise LexwareConflict('Der Belegstand wurde geändert. Freigabe neu prüfen.')
+            result = self._view(dict(receipt or {}, state='linked', voucher_id=voucher))
+            if not receipt:
+                result['hinweis'] = 'Vorhandener Lexware-Verweis geöffnet. Übertragungsnachweis und Belegstatus sind hier unbekannt; keine neue Datei gesendet.'
+            return result
         meta, raw = self._original(key, detail)
-        if len(raw) > MAX_UPLOAD_BYTES:
-            raise ValueError('Lexware-Datei muss höchstens 5 MB groß sein. Original nicht automatisch komprimiert oder verändert.')
-        suggestion = self._scan(meta, raw, allow_ai=False)
-        if suggestion['blocked_auto']:
-            raise ValueError(suggestion['hint'])
-        metadata_hint = classify_scan('\n'.join(str(detail.get(field) or '') for field in
-                                               ('lieferant', 'belegnummer', 'notiz')))
-        if metadata_hint['blocked_auto']:
-            raise ValueError(metadata_hint['hint'])
-        if suggestion['suggested_kind'] and suggestion['suggested_kind'] != detail['typ']:
-            raise ValueError('Erkannte Dokumentart und geprüfte Art widersprechen sich. Chef muss den Beleg erneut prüfen.')
-        base, api_key, fingerprint = self._config()
+        if not manual:
+            if len(raw) > MAX_UPLOAD_BYTES:
+                raise ValueError('Lexware-Datei muss höchstens 5 MB groß sein. Original nicht automatisch komprimiert oder verändert.')
+            suggestion = self._scan(meta, raw, allow_ai=False)
+            if suggestion['blocked_auto']:
+                raise ValueError(suggestion['hint'])
+            metadata_hint = classify_scan('\n'.join(str(detail.get(field) or '') for field in
+                                                   ('lieferant', 'belegnummer', 'notiz')))
+            if metadata_hint['blocked_auto']:
+                raise ValueError(metadata_hint['hint'])
+            if suggestion['suggested_kind'] and suggestion['suggested_kind'] != detail['typ']:
+                raise ValueError('Erkannte Dokumentart und geprüfte Art widersprechen sich. Chef muss den Beleg erneut prüfen.')
         if self.p.app.config.get('OFFICE_LEXWARE_UPLOAD_ENABLED') is not True:
-            raise LexwareUnavailable('Die automatische Lexware-Übergabe ist noch nicht aktiviert.')
-        lease, prior = self._claim(key, detail, fingerprint)
+            raise LexwareUnavailable('Die Lexware-Übergabe ist noch nicht aktiviert.')
+        upload = None if receipt and receipt.get('voucher_id') else self._prepare_upload(key, detail, meta, raw, receipt, manual=manual)
+        lease, prior = self._claim(key, detail, fingerprint, manual=manual, upload=upload)
         if prior:
-            return self._link(key, detail, prior)
+            return self._link(key, detail, prior, manual=manual)
         try:
             # Recheck immediately before the external write, after local claim.
             current = self._detail(key)
-            self._approved(current)
+            if not manual:
+                self._approved(current)
             if current['revision'] != detail['revision'] or current['sha256'] != detail['sha256']:
                 raise LexwareConflict('Freigabestand wurde vor der Übertragung geändert.')
-            file_id, voucher = self._multipart(key, meta, raw, base, api_key)
+            frozen = self._frozen_upload(self._receipt(key), detail)
+            file_id, voucher = self._multipart(key, {'mime': frozen['mime'], 'upload_filename': frozen['filename']}, frozen['bytes'], base, api_key)
         except Exception as exc:
             # Timeouts and malformed replies may follow a successful remote write.
             # Never manufacture success, never change bytes or create a voucher.
@@ -360,7 +459,7 @@ class OfficeLexware:
                 raise
             raise LexwareUnavailable('Übertragungsergebnis unbestätigt. Derselbe Originalbeleg kann nach Statusprüfung erneut versucht werden.') from None
         self._mark_attempt(key, lease, 'uploaded', file_id=file_id, voucher_id=voucher)
-        return self._link(key, detail, self._receipt(key))
+        return self._link(key, detail, self._receipt(key), manual=manual)
 
     def sync_status(self, key):
         detail = self._detail(key)
@@ -438,6 +537,11 @@ def register_office_lexware(p):
     @bp.post('/admin/buero/belege/<key>/lexware')
     def transfer(key):
         return perform(key, lambda: service.send_approved(key, request.form.get('revision')))
+
+    @bp.post('/werkstatt/buero/belege/<key>/lexware/ablegen')
+    @bp.post('/admin/buero/belege/<key>/lexware/ablegen')
+    def filing(key):
+        return perform(key, lambda: service.file_for_review(key, request.form.get('revision')))
 
     @bp.post('/werkstatt/buero/belege/<key>/lexware/status')
     @bp.post('/admin/buero/belege/<key>/lexware/status')
