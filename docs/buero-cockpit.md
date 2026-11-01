@@ -41,6 +41,13 @@ Static-Verzeichnis. Der frühere Lexware-Hinweis im Original ist ein historische
 Dokumentstand, keine live abgefragte Bestandsanzeige. Der eigene Bereich
 `preise` muss für den persönlichen Zugang freigegeben sein.
 
+Die Übersicht enthält außerdem die bereits abgeglichenen 18 Reifenservice- und
+zwei Achsvermessungspositionen mit ihrer jeweiligen Einheit, Netto- und
+Bruttopreis. Reifenpreise behalten ihre führende Bruttobasis; Achsvermessung
+ihre führende Nettobasis. Lackierpreis-Aufschläge werden darauf nicht angewandt.
+Die eigene Reifen-/Achsvermessungs-PDF bleibt ebenfalls unverändert geschützt
+abrufbar. Sprunglinks führen direkt zu Lackierung, Reifen und Achsvermessung.
+
 ## Rechnungen, Gebühren, private Belege und Zahlungsaufträge
 
 Im Chef-Cockpit führt **Rechnungen zur Freigabe** nach

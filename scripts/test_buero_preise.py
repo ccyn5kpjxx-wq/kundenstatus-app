@@ -14,7 +14,8 @@ from pypdf import PdfReader
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from werkstatt_buero_preise import (register_office_prices, PAINT_PRICES, EXTRAS,
-                                    PDF_PATH, PDF_SHA256, euro)
+                                    PDF_PATH, PDF_SHA256, euro, TYRE_TARIFFS,
+                                    TYRE_PDF_PATH, TYRE_PDF_SHA256, TYRE_SET_EXAMPLES)
 
 
 class OfficePriceTests(unittest.TestCase):
@@ -37,7 +38,7 @@ class OfficePriceTests(unittest.TestCase):
 
     def test_fresh_identity_required_for_index_pdf_and_head(self):
         guest = self.app.test_client()
-        for path in ('/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf'):
+        for path in ('/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf', '/werkstatt/buero/preise/reifen-pdf'):
             with self.subTest(path=path):
                 self.assertEqual(guest.get(path).status_code, 403)
                 self.assertEqual(self.client.head(path).status_code, 200)
@@ -105,9 +106,10 @@ class OfficePriceTests(unittest.TestCase):
         self.assertNotIn('Lexware wurde', html)
         self.assertEqual(euro(22275), '222,75 €')
         self.assertEqual(euro(120000), '1.200,00 €')
+        self.assertEqual(euro(-420), '-4,20 €')
 
     def test_private_no_cache_and_no_writing_routes(self):
-        for path in ('/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf'):
+        for path in ('/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf', '/werkstatt/buero/preise/reifen-pdf'):
             response = self.client.get(path)
             self.assertIn('no-store', response.headers['Cache-Control'])
             self.assertIn('noindex', response.headers['X-Robots-Tag'])
@@ -122,6 +124,71 @@ class OfficePriceTests(unittest.TestCase):
         with patch('pathlib.Path.read_bytes', return_value=b'%PDF-not-the-confirmed-source'):
             self.assertEqual(self.client.get('/werkstatt/buero/preise/pdf').status_code, 503)
             self.assertEqual(self.client.get('/werkstatt/buero/preise').status_code, 503)
+
+    def test_twenty_verified_services_match_all_applicable_source_pdf_price_pairs(self):
+        text = PdfReader(TYRE_PDF_PATH).pages[0].extract_text()
+        amounts = []
+        for line in text.splitlines():
+            match = re.fullmatch(r'(-?)(\d+),(\d{2}) €', line.strip())
+            if match:
+                value = int(match[2]) * 100 + int(match[3])
+                amounts.append(-value if match[1] else value)
+        self.assertEqual(len(amounts), 48, 'The source PDF has exactly 24 net/gross price rows.')
+        pairs = list(zip(amounts[::2], amounts[1::2]))
+        source_positions = (0, 1, 2, 3, 4, 5, 7, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23)
+        self.assertEqual(len(TYRE_TARIFFS), 20)
+        self.assertEqual(len({row[1] for row in TYRE_TARIFFS}), 20)
+        for row, position in zip(TYRE_TARIFFS, source_positions):
+            with self.subTest(article=row[1]):
+                self.assertEqual(row[4:6], pairs[position])
+        self.assertEqual(tuple((row[1], row[2]) for row in TYRE_SET_EXAMPLES), tuple(pairs[i] for i in (6, 8, 10)))
+        self.assertEqual(pairs[21], (-420, -500))
+        self.assertEqual([row[6] for row in TYRE_TARIFFS], ['GROSS'] * 18 + ['NET'] * 2)
+
+    def test_eighteen_tyre_services_match_current_repository_catalogue_without_price_markup(self):
+        from reifenservice import reifen_preiskatalog, berechne_reifenservice
+        current = {row['id']: row for row in reifen_preiskatalog()}
+        self.assertEqual(set(current), {row[0] for row in TYRE_TARIFFS[:18]})
+        for source_id, article, title, unit, net, gross, basis, scope in TYRE_TARIFFS[:18]:
+            with self.subTest(article=article):
+                self.assertEqual(gross, current[source_id]['brutto_cent'])
+                self.assertEqual(unit, 'Satz (4 Räder)' if current[source_id]['einheit'] == 'Satz' else current[source_id]['einheit'])
+                single = berechne_reifenservice([{'preis_id': source_id, 'menge': 1}]) if current[source_id]['gruppe'] != 'montage_zusatz' else None
+                if single is not None:
+                    self.assertEqual(single['positionen'][0]['netto_cent'], net)
+        for source_id, example in zip(('montage_13_16', 'montage_17_18', 'montage_19_20'), TYRE_SET_EXAMPLES):
+            result = berechne_reifenservice([{'preis_id': source_id, 'menge': 4}])
+            self.assertEqual((result['positionen'][0]['netto_cent'], result['positionen'][0]['brutto_cent']), example[1:])
+
+    def test_tyres_alignment_and_discount_units_are_clear_and_no_duplicate_services_created(self):
+        html = self.client.get('/werkstatt/buero/preise').get_data(as_text=True)
+        self.assertEqual(html.count('data-price-article='), 20)
+        for row in TYRE_TARIFFS:
+            with self.subTest(article=row[1]):
+                self.assertIn('data-price-article="' + row[1] + '"', html)
+                self.assertIn(euro(row[4]), html)
+                self.assertIn(euro(row[5]), html)
+        for phrase in ('href="#lackierung"', 'href="#reifenservice"', 'href="#achsvermessung"',
+                       '28.10.2026', '20 Reifen-/Achsartikel am 30.10.2026 abgeglichen',
+                       'Brutto · 19 % MwSt.', 'Satz (4 Räder)', 'keine zusätzlichen Artikel',
+                       '-4,20 € netto / -5,00 € brutto', 'nicht nochmals abziehen',
+                       'Saisonpakete enthalten genau einen Wechsel', 'keine Jahrespreise',
+                       'Netto-Tarife', 'Zusatzarbeiten und Kosten vorab abstimmen'):
+            self.assertIn(phrase, html)
+        self.assertNotIn('C:\\Users\\', html)
+        self.assertNotIn('lexware_id', html)
+
+    def test_tyre_pdf_is_exact_one_page_private_original_and_not_public(self):
+        raw = TYRE_PDF_PATH.read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), TYRE_PDF_SHA256)
+        self.assertEqual(len(PdfReader(BytesIO(raw)).pages), 1)
+        result = self.client.get('/werkstatt/buero/preise/reifen-pdf')
+        self.assertEqual(result.data, raw)
+        self.assertTrue(result.headers['Content-Disposition'].startswith('inline;'))
+        result = self.client.get('/werkstatt/buero/preise/reifen-pdf?download=1')
+        self.assertTrue(result.headers['Content-Disposition'].startswith('attachment;'))
+        self.assertEqual(self.client.get('/static/resources/buero/Preisliste_Reifenservice_Achsvermessung.pdf').status_code, 404)
+        self.assertEqual(self.client.get('/resources/buero/Preisliste_Reifenservice_Achsvermessung.pdf').status_code, 404)
 
 
 if __name__ == '__main__':

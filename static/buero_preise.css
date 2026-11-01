@@ -38,6 +38,29 @@
 .prices-rules li{margin:9px 0}
 .prices-rules ul{padding-left:19px;margin-bottom:0}
 .prices-footer{margin-top:25px;color:var(--buero-muted);font-size:11px}
+.prices-jumps{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:9px;margin:24px 0;padding:8px 0;background:var(--buero-bg)}
+.prices-jumps a{display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--buero-line);border-radius:9px;background:#fff;color:var(--buero-teal);font-size:13px;font-weight:650;text-decoration:none}
+.prices-jumps .buero-icon{width:19px;height:19px}
+.prices-jumps a:hover{background:#eaf4f1}
+.prices-anchor{scroll-margin-top:86px}
+.prices-section-meta{margin:7px 0 0;color:var(--buero-muted);font-size:11px}
+.prices-small-pdf{display:flex;align-items:center;gap:7px;font-size:12px;white-space:nowrap;color:var(--buero-teal);text-underline-offset:3px}
+.prices-small-pdf .buero-icon{width:16px;height:16px}
+.prices-tariff-group h3{margin:0;padding:13px 23px;background:#eef5f3;border-bottom:1px solid var(--buero-line);font-size:12px;font-weight:700;color:#365b5a}
+.prices-tyres{min-width:620px}
+.prices-tyres th:first-child{width:52%}
+.prices-tyres tbody td{font-size:13px}
+.prices-tyres .prices-unit{font-size:12px;font-weight:500;color:var(--buero-muted)}
+.prices-tyres .prices-gross{font-weight:500;color:var(--buero-muted)}
+.prices-scope{margin:5px 0 0;padding:0;border:0;background:transparent;font-size:11px;font-weight:400;color:var(--buero-muted)}
+.prices-scope summary{display:inline;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.prices-scope p{margin:8px 0 0;white-space:normal;max-width:640px;font-size:12px;line-height:1.6}
+.prices-set-examples{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 18px;padding:17px 23px;border-top:1px solid var(--buero-line);background:#fafcfb;font-size:11px;color:#546c6d}
+.prices-set-examples>strong,.prices-set-examples>small{grid-column:1/-1}
+.prices-set-examples>small{font-size:11px}
+.prices-discount{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 20px;margin:19px 23px;padding:15px 17px;border-radius:9px;background:#f0f6f4;color:#365e57;font-size:12px}
+.prices-discount>p{flex-basis:100%;margin:2px 0 0;font-size:11px}
+.prices-tyre-rules{margin:0;border-width:1px 0 0;border-radius:0}
 .prices-button:focus-visible,.prices-download:focus-visible,.prices-table-scroll:focus-visible,.prices-rules>summary:focus-visible{outline:3px solid #98c8bf;outline-offset:4px}
-@media(max-width:760px){.prices-panel-heading{align-items:flex-start;flex-direction:column;gap:5px;padding:17px 18px}.prices-table th,.prices-table td{padding:13px 18px}.prices-repair-grid{grid-template-columns:1fr;padding:18px 18px 9px;gap:14px}.prices-note,.prices-open{padding-left:18px;padding-right:18px}.prices-actions{gap:12px}.prices-actions .prices-button{padding:11px 13px}.prices-repair-grid>div{font-size:14px}}
+@media(max-width:760px){.prices-panel-heading{align-items:flex-start;flex-direction:column;gap:8px;padding:17px 18px}.prices-table th,.prices-table td{padding:13px 18px}.prices-repair-grid{grid-template-columns:1fr;padding:18px 18px 9px;gap:14px}.prices-note,.prices-open{padding-left:18px;padding-right:18px}.prices-actions{gap:12px}.prices-actions .prices-button{padding:11px 13px}.prices-repair-grid>div{font-size:14px}.prices-tariff-group h3{padding:13px 18px}.prices-set-examples{grid-template-columns:1fr;padding:17px 18px}.prices-discount{margin:17px 18px}.prices-small-pdf{white-space:normal}.prices-jumps{gap:7px}.prices-jumps a{padding:9px 11px;font-size:12px}}
 @media(max-width:520px){.office-prices>.buero-heading{align-items:flex-start;flex-direction:column;gap:16px}.prices-actions{justify-content:flex-start}.prices-rules{padding:16px 18px}.prices-panel{margin:17px 0}.prices-table{font-size:13px}.prices-table tbody th{min-width:185px}}

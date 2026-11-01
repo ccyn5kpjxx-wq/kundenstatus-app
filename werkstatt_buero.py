@@ -84,6 +84,7 @@ def configure_office_endpoints():
     OFFICE_ALLOWED_ENDPOINTS['preise'].update({
         'office_prices.index': read,
         'office_prices.pdf': read,
+        'office_prices.tyre_pdf': read,
     })
 
 

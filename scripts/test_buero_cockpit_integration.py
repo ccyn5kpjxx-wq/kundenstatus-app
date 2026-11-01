@@ -352,10 +352,14 @@ class OfficeCockpitIntegration(unittest.TestCase):
         self.assertIn('SYNTH-910002', html)
         self.assertIn('aria-label="Fahrzeug holen"', html)
         self.assertIn('aria-label="Fahrzeug bringen"', html)
-        pdf = self.get('/werkstatt/buero/preise/pdf')
-        self.assertEqual(pdf.status_code, 200)
-        self.assertTrue(pdf.data.startswith(b'%PDF-'))
-        self.assertIn('no-store', pdf.headers['Cache-Control'])
+        from werkstatt_buero_preise import PDF_PATH, TYRE_PDF_PATH
+        for path, source in (('/werkstatt/buero/preise/pdf', PDF_PATH),
+                             ('/werkstatt/buero/preise/reifen-pdf', TYRE_PDF_PATH)):
+            with self.subTest(pdf=path):
+                pdf = self.get(path)
+                self.assertEqual(pdf.status_code, 200)
+                self.assertEqual(pdf.data, source.read_bytes())
+                self.assertIn('no-store', pdf.headers['Cache-Control'])
 
     def test_02_personal_login_uses_existing_identity_and_routes_to_office(self):
         client = p.app.test_client()
@@ -456,7 +460,8 @@ class OfficeCockpitIntegration(unittest.TestCase):
         self.assertNotIn('href="/werkstatt/buero/belege"', html)
         self.assertEqual(self.get('/werkstatt/buero/kalender').status_code, 200)
         for path in ('/werkstatt/buero/belege', '/werkstatt/buero/planung', '/admin/mail', '/werkstatt/buero/lieferanten',
-                     '/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf'):
+                     '/werkstatt/buero/preise', '/werkstatt/buero/preise/pdf',
+                     '/werkstatt/buero/preise/reifen-pdf'):
             with self.subTest(path=path):
                 self.assertEqual(self.get(path).status_code, 403)
         self.grant([], active=False)
