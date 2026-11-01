@@ -6,8 +6,6 @@
   const button = panel.querySelector('[data-tire-search-button]');
   const status = panel.querySelector('[data-tire-search-status]');
   const results = panel.querySelector('[data-tire-search-results]');
-  const selectedStatus = panel.querySelector('[data-tire-selected]');
-  const productWish = panel.querySelector('[data-tire-product-wish]');
   const criteria = ['reifen_groesse_vorne', 'reifen_groesse_hinten', 'reifen_saison', 'reifen_qualitaet', 'reifen_anzahl', 'reifen_montage'];
   const money = new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'});
   const clock = new Intl.DateTimeFormat('de-DE', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin'});
@@ -15,7 +13,6 @@
   const qualities = {preisbewusst:'Preisbewusst', mittelklasse:'Mittelklasse', markenqualitaet:'Markenqualität', premium:'Premium'};
   let controller = null;
   let generation = 0;
-  let selected = null;
   let expiryTimer = null;
 
   const value = name => String(new FormData(form).get(name) || '').trim();
@@ -34,10 +31,6 @@
     if (controller) controller.abort();
     controller = null;
     window.clearTimeout(expiryTimer);
-    selected = null;
-    productWish.value = '';
-    selectedStatus.hidden = true;
-    selectedStatus.textContent = '';
     results.replaceChildren();
     button.disabled = false;
     button.textContent = 'Reifenpreise anzeigen';
@@ -53,6 +46,10 @@
     if (!product || typeof product !== 'object' || !product.preis || typeof product.preis !== 'object') return false;
     if (!['artikel_id','bezeichnung','groesse','lieferzeit'].every(k => typeof product[k] === 'string' && product[k].length > 0 && product[k].length <= 250)) return false;
     if (product.saison !== query.saison || product.qualitaet !== query.qualitaet || product.preis.waehrung !== 'EUR') return false;
+    try {
+      const destination = new URL(product.bestell_url, window.location.origin);
+      if (typeof product.bestell_url !== 'string' || destination.origin !== window.location.origin || !destination.pathname.startsWith('/reifen/bestellen/')) return false;
+    } catch (_) { return false; }
     const until = Date.parse(product.gueltig_bis);
     const at = Date.parse(product.preisstand);
     if (!Number.isFinite(until) || until <= Date.now() || !Number.isFinite(at)) return false;
@@ -85,19 +82,12 @@
       total.append(node('span', '', 'Gesamt inkl. MwSt.'), node('strong', '', money.format(amount(product.preis.gesamt_brutto) / 100)));
       card.append(total, node('p', 'tire-result-delivery', `Lieferzeit: ${product.lieferzeit}`));
       card.append(node('p', 'tire-result-validity', `Preisstand ${clock.format(new Date(product.preisstand))} Uhr · Preis gültig bis ${clock.format(new Date(product.gueltig_bis))} Uhr (Mosbach)`));
-      const choose = node('button', 'tire-result-select', 'Diesen Reifen anfragen');
-      choose.type = 'button';
-      choose.addEventListener('click', () => {
+      const choose = node('a', 'tire-result-select', 'Reifen bestellen');
+      choose.href = product.bestell_url;
+      choose.addEventListener('click', event => {
         if (Date.parse(product.gueltig_bis) <= Date.now()) {
-          clear(); say('Der angezeigte Preis ist abgelaufen. Bitte die Preise erneut abrufen.'); return;
+          event.preventDefault(); clear(); say('Der angezeigte Preis ist abgelaufen. Bitte die Preise erneut abrufen.'); return;
         }
-        selected = product;
-        productWish.value = `${product.bezeichnung} (${product.groesse}), Artikel ${product.artikel_id}`;
-        results.querySelectorAll('.tire-result').forEach(el => el.classList.remove('is-selected'));
-        card.classList.add('is-selected');
-        selectedStatus.textContent = `Ausgewählt: ${product.bezeichnung}, ${product.groesse}. Bitte Ihre Kontaktdaten ergänzen und die unverbindliche Anfrage absenden.`;
-        selectedStatus.hidden = false;
-        document.getElementById('email').focus();
       });
       card.append(choose); results.append(card);
     });
@@ -144,7 +134,7 @@
       const products = payload.produkte.slice(0,12).filter(p => validProduct(p, query));
       if (!products.length) { say('Für diese Auswahl sind gerade keine bestätigten Preise verfügbar. Wir erstellen Ihnen gern ein persönliches Angebot.'); return; }
       render(products, query);
-      say(`${products.length} passende${products.length === 1 ? 's Angebot' : ' Angebote'}. Preise inklusive Mehrwertsteuer. Mit Ihrer Anfrage stimmen wir Abholung oder Montage persönlich ab.`);
+      say(`${products.length} passende${products.length === 1 ? 's Angebot' : ' Angebote'}. Preise inklusive Mehrwertsteuer. Reifen auswählen und Bestellung mit Zahlungsart${query.montage === 'ja' ? ' und Montagetermin' : ''} prüfen.`);
     } catch (_) {
       if (current === generation) say('Die Preise konnten gerade nicht abgerufen werden. Ihre persönliche Anfrage können Sie unten trotzdem absenden.');
     } finally {
@@ -160,17 +150,5 @@
       field.addEventListener('change', () => { clear(); say('Auswahl geändert. Bitte Preise erneut abrufen.'); });
     });
   });
-  form.addEventListener('submit', event => {
-    if (event.defaultPrevented) return;
-    if (!selected) return;
-    if (Date.parse(selected.gueltig_bis) <= Date.now()) {
-      clear(); say('Der Preis ist abgelaufen. Bitte erneut abrufen oder ohne Reifenauswahl persönlich anfragen.', true);
-      event.preventDefault(); return;
-    }
-  });
-  if (productWish.value) {
-    selectedStatus.textContent = `Ihr Reifenwunsch: ${productWish.value}. Für aktuelle Preise bitte die Suche erneut starten.`;
-    selectedStatus.hidden = false;
-  }
   panel.hidden = false;
 })();

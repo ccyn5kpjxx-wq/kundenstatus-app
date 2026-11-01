@@ -44,6 +44,7 @@
 </form></details>
 {% endmacro %}
 <div class="page-header"><div><h1>Reifenportal</h1><p>Reifenbuchungen, Einlagerung und Reifenaufträge.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Gemeinsame Werkstatt-Tafel →</a></div>
+<p><a class="btn btn-soft" href="{{ url_for('admin_reifenbestellungen') }}">Reifenbestellungen · Zahlungsstatus →</a></p>
 {% if check24_review_count %}
 <div class="alert alert-warning" role="alert" data-check24-review-alert>
   <strong>CHECK24: {{ check24_review_count }} Nachricht(en) müssen geprüft werden.</strong>

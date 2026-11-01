@@ -64,6 +64,9 @@ from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
     reifenangebot_summary, reifenangebot_deadline, reifenangebot_frist, reifenangebot_mail, reifenangebot_preis)
 from reifen_suche import suche_reifenangebote, ReifenSucheEingabefehler
+from reifen_bestellung import (erstelle_auswahl_token, register_reifen_bestellung,
+    init_schema as init_reifen_bestellung_schema, BACKUP_TABLES as REIFEN_BESTELLUNG_TABLES,
+    SCHEMA_FEATURE as REIFEN_BESTELLUNG_FEATURE)
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
@@ -11367,6 +11370,7 @@ def init_db():
         """
     )
     mietwagen_checkout.init_schema(db)
+    init_reifen_bestellung_schema(db)
     mos_handover.init_schema(db)
     mos_order_receipt.init_schema(db)
     ensure_index(db, "idx_mietvorgaenge_fahrzeug", "mietvorgaenge", ("mietfahrzeug_id", "status"))
@@ -45528,6 +45532,10 @@ def reifenangebote_suche():
         except ReifenSucheEingabefehler as exc:
             payload, status = {"status": "ungueltige_suche", "verfuegbar": False,
                                "produkte": [], "nachricht": str(exc)}, 400
+        if status == 200 and payload.get("status") == "ok":
+            for product in payload["produkte"]:
+                token = erstelle_auswahl_token(app.secret_key, request.args, product["artikel_id"])
+                product["bestell_url"] = url_for("reifen_bestellung.start", token=token)
         response = jsonify(payload)
         response.status_code = status
     response.headers["Cache-Control"] = "no-store"
@@ -45597,6 +45605,20 @@ def admin_reifentermine():
                                             check24_review_count=check24_bookings.review_count(),
                                             reifen_entsorgung_cent=next(p['brutto_cent'] for p in reifen_preiskatalog() if p['id']=='entsorgung')))
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/admin/reifenbestellungen")
+@admin_required
+def admin_reifenbestellungen():
+    db = get_db()
+    try:
+        rows = db.execute("SELECT * FROM reifen_bestellungen ORDER BY erstellt_am DESC LIMIT 100").fetchall()
+    finally:
+        db.close()
+    orders = [reifen_bestellungen.order(dict(row)) for row in rows]
+    response = make_response(render_template("reifen_bestellungen_admin.html", bestellungen=orders))
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -49351,6 +49373,9 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "mitarbeiter_arbeitsvertraege",
     }
     required_tables.difference_update(OFFICE_BACKUP_TABLES)
+    required_tables.difference_update(REIFEN_BESTELLUNG_TABLES)
+    if REIFEN_BESTELLUNG_FEATURE in schema_features:
+        required_tables.update(REIFEN_BESTELLUNG_TABLES)
     for feature, office_tables in (
         (OFFICE_ACCESS_FEATURE, OFFICE_ACCESS_TABLES),
         (OFFICE_SECTION_FEATURE, OFFICE_SECTION_TABLES),
@@ -60006,6 +60031,10 @@ OFFICE_BACKUP_TABLES = (*OFFICE_ACCESS_TABLES, *OFFICE_SECTION_TABLES, *OFFICE_D
 BACKUP_TABLES += OFFICE_BACKUP_TABLES
 BACKUP_SCHEMA_FEATURES += (OFFICE_ACCESS_FEATURE, OFFICE_SECTION_FEATURE, 'office_documents_v1', 'office_lexware_v1', OFFICE_INBOX_FEATURE, OFFICE_PAYROLL_FEATURE)
 office_document_uploaded = office_lexware.analyse_scan
+
+reifen_bestellungen = register_reifen_bestellung(sys.modules[__name__])
+BACKUP_TABLES += REIFEN_BESTELLUNG_TABLES
+BACKUP_SCHEMA_FEATURES += (REIFEN_BESTELLUNG_FEATURE,)
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)

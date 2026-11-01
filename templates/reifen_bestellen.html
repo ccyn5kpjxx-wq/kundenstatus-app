@@ -1,0 +1,89 @@
+{% from "_homepage_images.html" import image_attrs %}
+{% set b = bestellung or {} %}
+{% set p = b.get('produkt') or produkt %}
+{% set q = b.get('query') or query %}
+{% set kunde = b.get('kunde') or formdata or {} %}
+{% macro euro(value) %}{{ value|replace('.', ',') }} €{% endmacro %}
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><title>Reifen bestellen | Gärtner GmbH Karosserie + Lack</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-bestellen.css') }}">
+</head>
+<body>
+  {% if checkout.demo %}<div class="demo"><strong>DEMO · Kein echter Kauf, keine Zahlung und keine echte SMS.</strong><span>Nur Beispieldaten verwenden. Preise, Termine und Bedingungen dienen der Vorschau.</span></div>{% endif %}
+  <header><nav class="wrap"><a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='104px', dimensions=true) }} alt="Gärtner GmbH Karosserie + Lack"><span>Gärtner GmbH<br><small>Karosserie + Lack</small></span></a><a class="back" href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}">← Reifenauswahl</a></nav></header>
+  <main class="wrap">
+    <div class="intro"><p class="eyebrow">Reifen in Mosbach</p><h1>{% if b.get('bestaetigt') %}Ihre Bestellung.{% else %}Alles drin.<br>Alles im Blick.{% endif %}</h1><p>Ihre Reifen, der vollständige Preis und Ihre Zahlungsart. Auf Wunsch mit Montage bei uns.</p></div>
+    <ol class="steps" aria-label="Bestellschritte"><li class="is-done">1 · Reifen auswählen</li><li class="{% if not b %}is-current{% else %}is-done{% endif %}">2 · Daten &amp; Termin</li><li class="{% if b and not b.get('bestaetigt') %}is-current{% endif %}">3 · Prüfen &amp; bestellen</li></ol>
+    {% if fehler %}<div class="alert error" role="alert">{% if fehler is string %}{{ fehler }}{% else %}<ul>{% for f in fehler %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}</div>{% endif %}
+    {% if not checkout.zahlung_freigegeben %}<div class="alert"><strong>Die Onlinebestellung wird vorbereitet.</strong><p>{{ checkout.grund }}</p><p>Der verbindliche Abschluss ist noch nicht freigeschaltet.</p></div>{% endif %}
+    <div class="layout">
+      <div class="content">
+      {% if b.get('bestaetigt') %}
+        <section class="card success" role="status"><span class="success-mark">✓</span><p class="eyebrow">{% if checkout.demo %}Demobestellung{% else %}Bestellung{% endif %}</p><h2>{% if b.get('zahlungsart') == 'vor_ort' %}Bestellt. Zahlung vor Ort.{% else %}Zahlung bestätigt.{% endif %}</h2><p>Bestellnummer <strong>{{ b.id }}</strong></p><div class="payment-state {% if b.get('zahlungsart') == 'vor_ort' %}open{% endif %}">{% if b.get('zahlungsart') == 'vor_ort' %}Zahlung offen · {{ euro(p.preis.gesamt_brutto) }} bei Abholung oder Montage{% else %}{{ euro(p.preis.gesamt_brutto) }} bezahlt{% endif %}</div>{% if b.get('montage_datum') %}<p><strong>Montage:</strong> {{ b.montage_datum }} um {{ b.montage_uhrzeit }} Uhr</p>{% endif %}<p>{% if checkout.demo %}Dieser Ablauf wurde nur lokal simuliert. Es werden keine Reifen geliefert und keine echten Termine gebucht.{% else %}Ihre Vertragsbestätigung erhalten Sie per E-Mail.{% endif %}</p></section>
+      {% elif not b %}
+        <form class="card" method="post" action="{{ url_for('reifen_bestellung.entwurf', token=auswahl_token) }}">
+          {{ csrf_field()|safe }}
+          <h2>Ihre Daten</h2><p class="muted">Für Bestellung, Rechnung und Rückfragen. Pflichtfelder sind mit * gekennzeichnet.</p>
+          <fieldset {% if not checkout.zahlung_freigegeben %}disabled{% endif %}>
+          <div class="grid">
+            <label>Name *<input name="name" autocomplete="name" maxlength="120" value="{{ kunde.get('name','') }}" required></label>
+            <label>E-Mail *<input name="email" type="email" autocomplete="email" maxlength="200" value="{{ kunde.get('email','') }}" required></label>
+            <label class="full">Mobilnummer *<input name="telefon" type="tel" inputmode="tel" autocomplete="tel" maxlength="32" placeholder="z. B. +49 170 1234567" value="{{ kunde.get('telefon','') }}" required><small>Diese Nummer prüfen Sie im nächsten Schritt mit einem Code.</small></label>
+            <label class="full">Straße und Hausnummer *<input name="strasse" autocomplete="street-address" maxlength="150" value="{{ kunde.get('strasse','') }}" required></label>
+            <label>Postleitzahl *<input name="plz" autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" value="{{ kunde.get('plz','') }}" required></label>
+            <label>Ort *<input name="ort" autocomplete="address-level2" maxlength="100" value="{{ kunde.get('ort','') }}" required></label>
+            <label>Fahrzeug <small>(optional)</small><input name="fahrzeug" maxlength="160" value="{{ kunde.get('fahrzeug','') }}" placeholder="z. B. VW Golf"></label>
+            <label>Kennzeichen <small>(optional)</small><input name="kennzeichen" maxlength="30" value="{{ kunde.get('kennzeichen','') }}"></label>
+          </div>
+          <h2 class="section-title">Wie möchten Sie bezahlen?</h2>
+          <div class="payment-options">
+            <label class="choice"><input type="radio" name="zahlungsart" value="online" {% if formdata.get('zahlungsart') == 'online' %}checked{% endif %} required><span><strong>Jetzt online bezahlen</strong><small>Karte · Apple Pay / Google Pay, soweit verfügbar</small></span></label>
+            <label class="choice"><input type="radio" name="zahlungsart" value="vor_ort" {% if formdata.get('zahlungsart') == 'vor_ort' %}checked{% endif %} required><span><strong>Zahlung vor Ort</strong><small>Verbindlich bestellen · bei Abholung oder Montage bezahlen</small></span></label>
+          </div>
+          {% if q.montage == 'ja' or q.montage == true %}
+          <h2 class="section-title">Ihr Montagetermin</h2><p class="muted">Der Termin muss nach der bestätigten Reifenlieferung liegen. Vor dem Abschluss prüfen wir die Verfügbarkeit erneut.</p>
+          {% if termine_nur_vorschau %}<p class="tag">Terminvorschau · noch nicht reserviert</p>{% endif %}
+          <div class="grid"><label>Datum *<input type="date" name="montage_datum" min="{{ fruehestes_montagedatum }}" value="{{ formdata.get('montage_datum', fruehestes_montagedatum) }}" required data-tire-date></label><label>Freie Uhrzeit *<select name="montage_uhrzeit" required data-tire-time>{% for zeit in freie_termine %}<option value="{{ zeit }}" {% if formdata.get('montage_uhrzeit') == zeit %}selected{% endif %}>{{ zeit }} Uhr</option>{% else %}<option value="">Noch keine freigegebenen Termine</option>{% endfor %}</select></label></div>
+          <p class="hint" data-tire-time-status>Montage einschließlich Radab-/anbau, Ab-/Aufziehen und Wuchten. Standard-Gummiventil ohne RDKS.</p>
+          <label class="choice"><input type="checkbox" name="standardmontage" value="ja" required><span>Standardbereifung ohne Runflat und ohne RDKS-Arbeiten. Die vorhandenen Felgen passen zu den gewählten Reifen.</span></label>
+          {% else %}<h2 class="section-title">Abholung bei uns</h2><p class="muted">Gärtner GmbH Karosserie + Lack, Alte Neckarelzer Straße 18/1, 74821 Mosbach. Den bestätigten Bereitstellungstermin sehen Sie vor dem Bestellabschluss.</p>{% endif %}
+          <p class="hint">Keine automatisch hinzugefügten Extras. RDKS-Arbeiten und Altreifenentsorgung sind in dieser Bestellung nicht enthalten.</p>
+          <button class="button" type="submit">Weiter zur Bestellprüfung</button>
+          </fieldset>
+        </form>
+      {% else %}
+        <section class="card"><p class="eyebrow">Ihre Angaben</p><h2>{{ b.kunde.name }}</h2><p>{{ b.kunde.strasse }}<br>{{ b.kunde.plz }} {{ b.kunde.ort }}<br>{{ b.kunde.email }}</p><p><strong>Zahlungsart:</strong> {{ 'Sofort online bezahlen' if b.zahlungsart == 'online' else 'Zahlung bei Abholung oder Montage vor Ort' }}</p>{% if b.montage_datum %}<p><strong>Montage:</strong> {{ b.montage_datum }} um {{ b.montage_uhrzeit }} Uhr<br><small>{% if termine_nur_vorschau %}Bis zum Abschluss eine Terminvorschau.{% endif %}</small></p>{% endif %}{% if b.aenderbar %}<a href="{{ url_for('reifen_bestellung.start', token=auswahl_token) }}">Angaben ändern</a>{% endif %}</section>
+        <section class="card"><p class="eyebrow">Telefonprüfung</p><h2>{% if b.telefon_bestaetigt %}Nummer bestätigt.{% else %}Ein Code. Ihre Nummer.{% endif %}</h2><p>{{ b.kunde.telefon }}</p>{% if b.telefon_bestaetigt %}<p class="tag">✓ Telefonnummer bestätigt</p>{% else %}<p class="muted">Fordern Sie den Code an und geben Sie ihn hier ein.</p><form method="post" action="{{ url_for('reifen_bestellung.telefon_code', bestell_id=b.id) }}">{{ csrf_field()|safe }}<button class="secondary" type="submit">Bestätigungscode senden</button></form><form method="post" action="{{ url_for('reifen_bestellung.telefon_pruefen', bestell_id=b.id) }}">{{ csrf_field()|safe }}<label>Bestätigungscode<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label><button class="button" type="submit">Telefonnummer bestätigen</button></form>{% endif %}</section>
+        {% if b.status == 'zahlung_offen' %}
+          <section class="card"><h2>Zahlung abschließen</h2><p class="muted">Die Bestellung ist noch nicht als bezahlt bestätigt.</p>{% if b.get('zahlung_url') %}<a class="button" href="{{ b.zahlung_url }}">Zur sicheren Zahlung</a>{% endif %}<form method="post" action="{{ url_for('reifen_bestellung.zahlung_pruefen', bestell_id=b.id) }}">{{ csrf_field()|safe }}<button class="secondary">Zahlungsstatus prüfen</button></form></section>
+        {% elif not b.aenderbar %}
+          <section class="card"><h2>Ihr Bestellstatus wird geprüft.</h2><p>Der Abschluss ist noch nicht bestätigt. Bitte starten Sie keine weitere Zahlung.</p><a href="{{ url_for('reifen_bestellung.uebersicht', bestell_id=b.id) }}">Status aktualisieren</a></section>
+        {% else %}
+        <form class="card" method="post" action="{{ url_for('reifen_bestellung.zahlung_vorbereiten', bestell_id=b.id) }}">
+          {{ csrf_field()|safe }}<input type="hidden" name="quote_hash" value="{{ b.quote_hash }}">
+          <p class="eyebrow">Letzter Schritt</p><h2>Bestellung prüfen.</h2>
+          <p><strong>{{ q.anzahl }} × {{ p.bezeichnung }}</strong><br>{{ p.groesse }}<br>{% if b.montage_datum %}Mit Montage am {{ b.montage_datum }} um {{ b.montage_uhrzeit }} Uhr{% else %}Zur Abholung in Mosbach{% endif %}</p>
+          <div class="review-total"><span>Zu zahlen, inkl. MwSt.</span><strong>{{ euro(p.preis.gesamt_brutto) }}</strong></div>
+          <p>{{ 'Onlinezahlung im nächsten Schritt.' if b.zahlungsart == 'online' else 'Zahlung bei Abholung oder Montage vor Ort. Die Bestellung ist trotzdem verbindlich.' }}</p>
+          <fieldset {% if not b.telefon_bestaetigt or not checkout.zahlung_freigegeben %}disabled{% endif %}>
+            <label class="choice"><input name="bestellpflicht" type="checkbox" value="ja" required><span>Ich bestelle die oben aufgeführten Reifen und Leistungen zum angezeigten Gesamtpreis zahlungspflichtig.</span></label>
+            <label class="choice"><input name="bedingungen" type="checkbox" value="ja" required><span>Ich habe die Bestellbedingungen und Widerrufsinformationen unten gelesen.</span></label>
+            {% if fruehe_montage %}<div class="early-service"><p><strong>Montage vor Ablauf der Widerrufsfrist</strong></p><label class="choice"><input name="frueher_montagebeginn" type="checkbox" value="ja" required><span>Ich wünsche ausdrücklich, dass die Montage zum gewählten Termin gegebenenfalls vor Ablauf der Widerrufsfrist beginnt.</span></label><label class="choice"><input name="kenntnis_montagewiderruf" type="checkbox" value="ja" required><span>Ich weiß, dass das Widerrufsrecht für die Montage bei vollständiger Erbringung unter den gesetzlichen Voraussetzungen erlischt. Mein Widerrufsrecht für den Warenkauf wird dadurch nicht pauschal ausgeschlossen.</span></label></div>{% endif %}
+            <button class="button" type="submit">zahlungspflichtig bestellen</button>
+          </fieldset>
+          {% if not b.telefon_bestaetigt %}<p class="hint">Bitte zuerst Ihre Telefonnummer bestätigen.</p>{% endif %}
+        </form>
+        {% endif %}
+      {% endif %}
+      </div>
+      <aside class="card summary" aria-label="Bestellübersicht"><p class="eyebrow">Ihre Auswahl</p><h2>{{ p.bezeichnung }}</h2><p class="muted">{{ p.groesse }}<br>{{ {'sommer':'Sommerreifen','winter':'Winterreifen','ganzjahr':'Ganzjahresreifen'}.get(p.saison,p.saison) }}</p><dl><dt>{{ q.anzahl }} Reifen à {{ euro(p.preis.einzel_brutto) }}</dt><dd>{{ euro(p.preis.gesamt_reifen_brutto) }}</dd><dt>Versand / Bezugskosten</dt><dd>{{ euro(p.preis.versand_brutto) }}</dd>{% if q.montage == 'ja' or q.montage == true %}<dt>Montage inkl. Wuchten</dt><dd>{{ euro(p.preis.montage_brutto) }}</dd>{% endif %}</dl><div class="total"><span>Gesamt inkl. MwSt.</span><strong>{{ euro(p.preis.gesamt_brutto) }}</strong></div><p class="hint">{{ p.lieferzeit }}</p>{% if b.get('lieferdatum') %}<p>Bestätigte Reifenlieferung: {{ b.lieferdatum }}</p>{% endif %}<p class="hint">Abholung oder Montage bei uns in Mosbach. Keine Lieferung an die Rechnungsadresse.</p></aside>
+    </div>
+    {% if rechtstexte %}<section class="legal card"><h2>Bestellinformationen</h2>{% for key,label in [('lieferung','Lieferung und Abholung'),('agb','Bestellbedingungen'),('widerruf','Widerrufsinformation'),('datenschutz','Datenschutz')] %}{% if rechtstexte.get(key) %}<details><summary>{{ label }}</summary><p>{{ rechtstexte[key] }}</p></details>{% endif %}{% endfor %}<p class="hint">Stand {{ rechtstexte.get('version','') }}</p></section>{% endif %}
+  </main>
+  <footer class="wrap">Gärtner GmbH Karosserie + Lack · Mosbach <a href="{{ url_for('impressum_seite') }}">Impressum</a> <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a><span class="hint">{% if checkout.demo %}Demo-Vorbereitung: Eine echte Bestell- und Widerrufsfunktion wird erst nach vollständiger Anbindung freigegeben.{% endif %}</span></footer>
+  {% if not b and checkout.zahlung_freigegeben %}<script src="{{ url_for('static', filename='homepage-reifen-bestellen.js') }}" defer></script>{% endif %}
+</body>
+</html>

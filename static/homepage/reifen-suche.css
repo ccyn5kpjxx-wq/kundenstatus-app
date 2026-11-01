@@ -18,7 +18,7 @@
 .tire-result-total strong { font-variant-numeric:tabular-nums; }
 .tire-result-delivery { margin:12px 0 5px; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
 .tire-result-validity { margin:0 0 15px; color:var(--muted); font-size:11px; line-height:1.5; }
-.tire-result-select { width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:999px; color:white; background:var(--ink); font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
+.tire-result-select { display:flex; align-items:center; justify-content:center; text-align:center; text-decoration:none; width:100%; min-height:46px; padding:10px 14px; border:0; border-radius:999px; color:white; background:var(--ink); font:inherit; font-size:13px; font-weight:850; cursor:pointer; }
 .tire-result-select:hover { background:var(--teal); }
 .tire-selected { margin:0; padding:13px; border:1px solid #b9d8d1; border-radius:12px; color:var(--teal); background:#edf8f6; font-size:13px; line-height:1.5; }
 .tire-contact-heading { margin-top:8px; padding-top:25px; border-top:1px solid var(--line); scroll-margin-top:20px; }

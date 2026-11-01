@@ -150,8 +150,8 @@
     <section class="hero">
       <div class="wrap">
         {% if ist_reifenangebot %}
-        <div class="time-pill">● Angebot per E-Mail innerhalb von 24 Stunden</div><div class="eyebrow">Neue Reifen in Mosbach</div>
-        <h1>Die passenden Reifen.<br>Ihr persönliches Angebot.</h1><p>Sommer-, Winter- oder Ganzjahresreifen: Größe eingeben oder ein Foto hochladen. Wir stellen Ihr Angebot zusammen – auf Wunsch mit Montage.</p>
+        <div class="time-pill">● Reifen · Montage · ein Gesamtpreis</div><div class="eyebrow">Neue Reifen in Mosbach</div>
+        <h1>Reifen auswählen.<br>Direkt bestellen.</h1><p>Sommer-, Winter- oder Ganzjahresreifen finden und den Komplettpreis prüfen. Mit Montage oder zur Abholung – online bezahlen oder verbindlich mit Zahlung vor Ort bestellen.</p>
         {% elif ausgewaehltes_anliegen == 'bremsenservice' or bremsen_gesendet %}
         <div class="time-pill">● Passende Teile vorbereiten</div><div class="eyebrow">Bremsenservice in Mosbach</div>
         <h1>Bremsenservice anfragen.</h1><p>Fahrzeug und FIN angeben, Achse und Teilequalität auswählen. Die Arbeiten und den Termin stimmen wir persönlich mit Ihnen ab.</p>
@@ -264,7 +264,7 @@
 
     {% if formdata.get('anliegen') in ['reifenservice', 'reifenangebot'] and not gesendet %}
     <nav class="wrap tire-modes" aria-label="Reifenservice auswählen">
-      <a class="tire-mode" href="{{ url_for('website_anfrage', anliegen='reifenangebot', service_context=formdata.get('service_context') or None) }}#kurzanfrage" {% if ist_reifenangebot %}aria-current="page"{% endif %}><strong>Reifenangebot anfragen</strong><span>Neue Reifen auswählen · auch ohne Montage oder Termin</span></a>
+      <a class="tire-mode" href="{{ url_for('website_anfrage', anliegen='reifenangebot', service_context=formdata.get('service_context') or None) }}#kurzanfrage" {% if ist_reifenangebot %}aria-current="page"{% endif %}><strong>Reifen finden und bestellen</strong><span>Komplettpreis · Zahlung wählen · auf Wunsch mit Montage</span></a>
       <a class="tire-mode" href="{{ url_for('website_anfrage', anliegen='reifenservice', service_context=formdata.get('service_context') or None) }}#kurzanfrage" {% if not ist_reifenangebot %}aria-current="page"{% endif %}><strong>Werkstatttermin buchen</strong><span>Radwechsel, Montage oder Einlagerung · freie Uhrzeit wählen</span></a>
     </nav>
     {% endif %}
@@ -281,9 +281,9 @@
         <aside class="info">
           <div class="eyebrow">Ganz einfach</div>
           {% if ist_reifenangebot %}
-          <h2>Neue Reifen. Persönlich angeboten.</h2>
-          <p>Sie wählen die gewünschte Ausführung. Wir prüfen passende Reifen und den Gesamtpreis.</p>
-          <ul><li>Reifengröße eingeben oder Beschriftung fotografieren</li><li>Saison, Anzahl und Preiswunsch auswählen</li><li>Angebot innerhalb von 24 Stunden per E-Mail</li></ul>
+          <h2>Ihre Reifen.<br>Ihr Komplettpreis.</h2>
+          <p>Sie wählen passende Reifen und prüfen Ihre Bestellung vor dem verbindlichen Abschluss.</p>
+          <ul><li>Größe, Saison und Anzahl auswählen</li><li>Montage einschließlich Wuchten nach Zollgröße</li><li>Online bezahlen oder Zahlung vor Ort wählen</li></ul>
           {% elif formdata.get('anliegen') == 'bremsenservice' %}
           <h2>Passende Teile. Klar abgestimmt.</h2>
           <p>Mit Ihrer FIN können wir die passenden Teile zuordnen.</p>
@@ -298,7 +298,7 @@
           <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.{% if formdata.get('anliegen') == 'glasschaden' %} Für die eindeutige Scheibenzuordnung benötigen wir lediglich die FIN.{% endif %}</p>
           <ul><li>Name und Rückrufmöglichkeit</li><li>Kurze Beschreibung</li><li>Bis zu fünf Bilder, wenn Sie möchten</li></ul>
           {% endif %}
-          <p class="info-note">{% if formdata.get('anliegen') == 'bremsenservice' %}Teile, Kosten und Termin stimmen wir vor den Arbeiten persönlich mit Ihnen ab.{% else %}Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.{% endif %}</p>
+          <p class="info-note">{% if ist_reifenangebot %}Vor dem Bestellabschluss sehen Sie Reifen, Leistungen, Termin und Zahlungsart in einer Übersicht. Bei unklarer Größe helfen wir Ihnen persönlich.{% elif formdata.get('anliegen') == 'bremsenservice' %}Teile, Kosten und Termin stimmen wir vor den Arbeiten persönlich mit Ihnen ab.{% else %}Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.{% endif %}</p>
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
           {{ csrf_field()|safe }}
@@ -347,13 +347,12 @@
             <div class="field"><label for="reifen_qualitaet">Preis- und Qualitätswunsch *</label><select id="reifen_qualitaet" name="reifen_qualitaet" required><option value="">Bitte auswählen</option>{% for key,label in reifen_qualitaeten.items() %}<option value="{{ key }}" {% if formdata.get('reifen_qualitaet') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             <div class="field full"><label for="reifen_groesse_vorne">Reifengröße <span class="hint">(oder Foto unten hochladen)</span></label><input id="reifen_groesse_vorne" name="reifen_groesse_vorne" maxlength="80" value="{{ formdata.get('reifen_groesse_vorne','') }}" placeholder="z. B. 205/55 R16 91V" aria-describedby="reifen-groesse-hinweis"><p class="hint" id="reifen-groesse-hinweis">Die Größe steht auf der Reifenflanke. Last- und Geschwindigkeitsindex bitte angeben, soweit bekannt. Alternativ genügt ein Foto der Beschriftung oder des Fahrzeugscheins.</p></div>
             <div class="field full"><label for="reifen_groesse_hinten">Andere Größe an der Hinterachse <span class="hint">(optional)</span></label><input id="reifen_groesse_hinten" name="reifen_groesse_hinten" maxlength="80" value="{{ formdata.get('reifen_groesse_hinten','') }}" placeholder="Nur bei unterschiedlichen Größen vorne und hinten"></div>
-            <fieldset><legend>Montage bei uns gewünscht? *</legend><div class="choice-grid"><label class="choice"><input type="radio" name="reifen_montage" value="ja" {% if formdata.get('reifen_montage') == 'ja' %}checked{% endif %} required><span>Reifen inklusive Montage anbieten</span></label><label class="choice"><input type="radio" name="reifen_montage" value="nein" {% if formdata.get('reifen_montage') == 'nein' %}checked{% endif %} required><span>Nur Reifen zur Abholung anbieten</span></label></div><p class="hint">Einen Montagetermin stimmen wir nach dem Angebot mit Ihnen ab.</p></fieldset>
+            <fieldset><legend>Montage bei uns gewünscht? *</legend><div class="choice-grid"><label class="choice"><input type="radio" name="reifen_montage" value="ja" {% if formdata.get('reifen_montage') == 'ja' %}checked{% endif %} required><span>Reifen inklusive Montage anbieten</span></label><label class="choice"><input type="radio" name="reifen_montage" value="nein" {% if formdata.get('reifen_montage') == 'nein' %}checked{% endif %} required><span>Nur Reifen zur Abholung anbieten</span></label></div><p class="hint">Einen freien Montagetermin wählen Sie anschließend im Bestellablauf. Bei persönlicher Anfrage stimmen wir den Termin mit Ihnen ab.</p></fieldset>
             <section class="tire-search-panel field full" data-tire-search data-search-url="{{ url_for('reifenangebote_suche') }}" hidden>
               <input type="hidden" name="reifen_produktwunsch" value="{{ formdata.get('reifen_produktwunsch', '') }}" data-tire-product-wish>
               <div class="tire-search-controls"><button class="button" type="button" data-tire-search-button>Reifenpreise anzeigen</button><a class="tire-personal-link" href="#reifenangebot-kontakt">Persönliches Angebot anfragen</a></div>
               <p class="tire-search-status" data-tire-search-status role="status" aria-live="polite">Für die Preissuche sind noch keine Kontaktdaten nötig.</p>
               <div class="tire-search-results" data-tire-search-results></div>
-              <p class="tire-selected" data-tire-selected aria-live="polite" hidden></p>
             </section>
             {% elif formdata.get('anliegen') == 'reifenservice' %}
             <div class="field"><label for="kennzeichen">Kennzeichen <span class="hint">(optional)</span></label><input id="kennzeichen" name="kennzeichen" maxlength="30" placeholder="z. B. MOS AB 123" value="{{ formdata.get('kennzeichen','') }}"></div>
@@ -406,7 +405,7 @@
             <div class="field full"><label for="weitere_anfrage_art">Welche Anfrage passt am besten? *</label><select id="weitere_anfrage_art" name="weitere_anfrage_art" required>{% for key,label in weitere_anfrage_arten.items() %}<option value="{{ key }}" {% if formdata.get('weitere_anfrage_art','allgemein') == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
             {% endif %}
             {% if ist_reifenangebot %}
-            <div class="field full tire-contact-heading" id="reifenangebot-kontakt"><h3>Ihr persönliches Angebot</h3><p class="hint">Wir prüfen Ihre Auswahl und senden Ihnen innerhalb von 24 Stunden ein Angebot per E-Mail. Ihre Anfrage ist unverbindlich.</p></div>
+            <div class="field full tire-contact-heading" id="reifenangebot-kontakt"><h3>Sie brauchen Hilfe bei der Auswahl?</h3><p class="hint">Bei unklarer Reifengröße oder besonderen Anforderungen können Sie uns persönlich anfragen. Dafür genügt auch ein Foto. Ihr Angebot kommt innerhalb von 24 Stunden per E-Mail. Für einen gefundenen Reifen nutzen Sie oben „Reifen bestellen“.</p></div>
             <div class="field"><label for="name">Name *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
             <div class="field"><label for="email">E-Mail *</label><input id="email" name="email" maxlength="200" type="email" autocomplete="email" value="{{ formdata.get('email','') }}" required></div>
             <div class="field"><label for="telefon">Telefon (optional)</label><input id="telefon" name="telefon" maxlength="80" type="tel" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="Für Rückfragen"></div>

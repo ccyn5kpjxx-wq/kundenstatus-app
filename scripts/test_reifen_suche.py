@@ -177,16 +177,18 @@ class ReifenSucheTest(unittest.TestCase):
 
     def test_public_response_is_a_strict_whitelist_without_purchase_prices_or_raw_provider_data(self):
         item = article(api_key="SECRET-MARKER-KEY", credentials={"password": "SECRET-MARKER-PASSWORD"},
-                       raw={"wholesale": "SECRET-MARKER-RAW"}, internal_margin="SECRET-MARKER-MARGIN")
+                       raw={"wholesale": "SECRET-MARKER-RAW"}, internal_margin="SECRET-MARKER-MARGIN",
+                       bestell_url="https://SECRET-MARKER-PROVIDER-LINK.invalid/checkout")
         self.provider([item], token="SECRET-MARKER-TOKEN")
         response = self.search()
         price = self.price(response)
         self.assertLessEqual(set(response.json), {"status", "verfuegbar", "produkte", "nachricht"})
         product = response.json["produkte"][0]
         self.assertLessEqual(set(product), {"artikel_id", "ean", "bezeichnung", "groesse", "saison",
-                                            "qualitaet", "bestand", "lieferzeit", "preisstand", "gueltig_bis", "preis"})
+                                            "qualitaet", "bestand", "lieferzeit", "preisstand", "gueltig_bis", "preis", "bestell_url"})
         self.assertEqual(set(price), {"einzel_brutto", "gesamt_reifen_brutto", "versand_brutto",
                                      "montage_brutto", "gesamt_brutto", "waehrung"})
+        self.assertTrue(product["bestell_url"].startswith("/reifen/bestellen/"))
         body = response.get_data(as_text=True)
         for private in ("SECRET-MARKER", "netto_einkauf", "fracht_netto", "aufschlag_prozent",
                         "kalkulationsbasis", "credentials", "api_key", "abgerufen_am", "montage_standard_bestaetigt"):
