@@ -63,6 +63,7 @@ import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
     reifenangebot_summary, reifenangebot_deadline, reifenangebot_frist, reifenangebot_mail, reifenangebot_preis)
+from reifen_suche import suche_reifenangebote, ReifenSucheEingabefehler
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
@@ -45509,6 +45510,28 @@ def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
 def reifenservice_termine():
     response = jsonify({"zeiten": freie_reifen_slots(clean_text(request.args.get("datum")))})
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/reifenangebote/suche")
+def reifenangebote_suche():
+    limited, wait_seconds = public_form_rate_limit_status("reifenangebot-suche")
+    if limited:
+        response = jsonify(status="zu_viele_anfragen", verfuegbar=False, produkte=[],
+                           nachricht="Bitte warten Sie kurz und versuchen Sie die Reifensuche erneut.")
+        response.status_code = 429
+        response.headers["Retry-After"] = str(wait_seconds)
+    else:
+        record_public_form_attempt("reifenangebot-suche")
+        try:
+            payload, status = suche_reifenangebote(request.args, app.config.get("REIFENANGEBOT_PROVIDER"))
+        except ReifenSucheEingabefehler as exc:
+            payload, status = {"status": "ungueltige_suche", "verfuegbar": False,
+                               "produkte": [], "nachricht": str(exc)}, 400
+        response = jsonify(payload)
+        response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 

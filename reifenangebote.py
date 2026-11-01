@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 import re
+import unicodedata
 from zoneinfo import ZoneInfo
 
 
@@ -15,6 +16,15 @@ def parse_reifenangebot(form, *, has_photo=False):
     data = {key: str(form.get("reifen_" + key) or "").strip()
             for key in ("saison", "qualitaet", "anzahl", "groesse_vorne", "groesse_hinten", "montage")}
     errors = []
+    # This is unverified customer prose, never a selected article or a price.
+    # Keep it separate from the customer's free-text message and do not consume
+    # any client-side price fields when creating the quotation request.
+    produktwunsch = form.get("reifen_produktwunsch", "")
+    if not isinstance(produktwunsch, str) or len(produktwunsch) > 400 or any(
+            unicodedata.category(char).startswith("C") for char in produktwunsch):
+        errors.append("Der Reifen-Produktwunsch darf höchstens 400 Zeichen ohne Steuerzeichen enthalten.")
+    elif produktwunsch.strip():
+        data["produktwunsch"] = produktwunsch.strip()
     if data["saison"] not in REIFEN_SAISONS:
         errors.append("Bitte Sommer-, Winter- oder Ganzjahresreifen auswählen.")
     if data["qualitaet"] not in REIFEN_QUALITAETEN:
@@ -44,7 +54,8 @@ def reifenangebot_summary(data):
         REIFEN_QUALITAETEN.get(data.get("qualitaet"), ""), f"{data.get('anzahl', '')} Stück",
         "Größe: " + (data.get("groesse_vorne") or "nach Foto prüfen"),
         *(('Hinterachse: ' + data['groesse_hinten'],) if data.get('groesse_hinten') else ()),
-        "mit Montage" if data.get("montage") else "ohne Montage"))
+        "mit Montage" if data.get("montage") else "ohne Montage",
+        *(("Kundenwunsch (ungeprüft): " + data["produktwunsch"],) if data.get("produktwunsch") else ())))
 
 
 def reifenangebot_deadline(now=None):
