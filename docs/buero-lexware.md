@@ -2,7 +2,40 @@
 
 Nach einem Upload liest die vorhandene lokale Texterkennung das Original. `werkstatt_buero_analyse.py` extrahiert belegte Hauptdaten. Ist `OFFICE_AI_ANALYSIS_ENABLED` ausdrücklich aktiv und der vorhandene KI-Zugang eingerichtet, ergänzt `werkstatt_buero_ki.py` eine schema-begrenzte Analyse einschließlich Originalbildern. Es wird kein neuer Zugang angelegt. Ohne Konfiguration oder bei Ausfällen bleibt die lokale Erkennung mit sichtbarem Hinweis verfügbar.
 
-Lieferant, Rechnungsnummer, Belegdatum, Fälligkeit und ausgewiesener Bruttogesamtbetrag werden ausschließlich in leere Entwurfsfelder übernommen. Manuelle Werte bleiben erhalten. Mehrdeutige Felder bleiben auch nach einem KI-Vorschlag offen. Art und Ordner sind Vorschläge, die beim Einreichen bestätigt werden. Die Erkennung erteilt weder eine Zahlungsfreigabe noch eine steuerliche Kontierung; Konten, Steuersätze und Bankdaten werden nicht übertragen. Mehrere erkannte Umsatzsteuersätze erzeugen einen Prüfhinweis. Dokumentinhalt wird als untrusted Quelle verarbeitet.
+Lieferant, Rechnungsnummer, Belegdatum, Fälligkeit und ausgewiesener Bruttogesamtbetrag werden ausschließlich in leere Entwurfsfelder übernommen. Manuelle Werte bleiben erhalten. Mehrdeutige Felder bleiben auch nach einem KI-Vorschlag offen. Art und Ordner sind Vorschläge, die beim Einreichen bestätigt werden. Die Erkennung erteilt weder eine Zahlungsfreigabe noch eine steuerliche Kontierung; Konten und Steuersätze werden nicht erfunden; es wird kein Zahlungsauftrag an eine Bank gesendet. Mehrere erkannte Umsatzsteuersätze erzeugen einen Prüfhinweis. Dokumentinhalt wird als untrusted Quelle verarbeitet.
+
+
+## Überweisungsdaten am Beleg
+
+`zahlungsempfaenger`, `iban`, `bic`, `verwendungszweck` und `faelligkeit` sind
+innerhalb desselben geschützten Belegs sichtbar und korrigierbar. IBAN/BIC sind
+neue Textspalten mit leerem Default; die idempotente SQLite-/PostgreSQL-Migration
+erhält bestehende Entwürfe, Originale, IDs, Revisionen, Freigaben und Audit.
+Backups enthalten alle Felder; der bestehende Office-Restoreguard schützt sie.
+
+IBAN wird lokal ohne Leerzeichen in Großbuchstaben gespeichert und anhand
+Länderformat/Länge sowie MOD97 geprüft. BIC wird auf das 8-/11-Zeichenformat
+geprüft, bleibt bei fehlender Quelle leer und ist für einen Zahlungsauftrag
+keine Pflichtangabe. Diese Prüfungen bestätigen weder Kontoinhaber noch
+Kontobestand. Normquellen: [SWIFT IBAN Registry](https://www.swift.com/sites/default/files/files/iban-registry-v101.pdf),
+[SWIFT BIC](https://www.swift.com/standards/data-standards/bic-business-identifier-code).
+
+Nur explizit belegte Empfänger-/Kontoinhaber-, IBAN-, BIC- und Zweckangaben dürfen
+leere Entwurfsfelder ergänzen. Mehrere mögliche Bankverbindungen oder nur ein
+Lastschrift-/Mandatsbezug erzeugen keine automatische Überweisungsverbindung.
+Manuelle Angaben bleiben erhalten; widersprechende oder nicht eindeutig zur
+vorhandenen IBAN/BIC/Empfängerin gehörende Bankvorschläge werden gemeinsam
+übersprungen. Ein Quellenname oder die Adresse eines Steuerberaters ersetzt
+keinen Original-Steuerbescheid und begründet keine Zahlungsfreigabe.
+
+Zahlungsaufträge verlangen vor Freigabe geprüften Empfänger, gültige IBAN,
+Betrag, Fälligkeit, Zweck und Auftragsart; Einzelzahlungen behalten die
+Begründungspflicht. Fehlendes wird konkret angezeigt. Chefprüfung und
+Transferkorrektur verwenden eine gemeinsame CAS-Revision und Transaktion.
+Ungültige Werte oder veraltete Revisionen speichern keine Teilfreigabe.
+Rechnungen/Bescheide bleiben nach ihrem bisherigen Prüf-/Lexware-Workflow
+freigebbar, auch wenn ihre Bankfelder noch leer sind. Eine Freigabe erzeugt
+nur eine Büroaufgabe, keine tatsächliche Überweisung und kein „bezahlt“.
 
 ## Integration
 

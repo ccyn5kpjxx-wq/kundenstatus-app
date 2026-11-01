@@ -68,7 +68,14 @@ class OfficeDocumentAI:
             'Datum als YYYY-MM-DD nur bei vollständig lesbarem Datum. Relative Fristen ab unbekanntem Zugang bleiben leer. '
             'Unterscheide Rechnung, Bescheid, Lieferschein und sonstige Post. Eine Anhörung oder ein Zeugenfragebogen '
             'ist keine Rechnung. Persönliche Einkommensteuer ist kein betrieblicher Rechnungsbeleg. '
-            'Nenne Unsicherheiten knapp. Keine Kontodaten, Zugangsdaten, Zahlungsfreigaben oder Anweisungen ausgeben.'
+            'Zahlungsempfänger nur aus ausdrücklich genanntem Zahlungsempfänger, Begünstigtem oder Kontoinhaber; '
+            'niemals den Rechnungsempfänger oder allein den Lieferanten dafür übernehmen. '
+            'IBAN, BIC und Verwendungszweck ausschließlich aus eindeutig beschrifteten Originalstellen wortgetreu lesen. '
+            'Verwendungszweck vollständig bis höchstens 300 Zeichen übernehmen; längere Werte leer lassen, niemals kürzen. '
+            'Keine BIC, Bankverbindung oder Referenz aus anderen Angaben ableiten; keine Rechnungsnummer als Verwendungszweck erfinden. '
+            'Mehrere unterschiedliche Bankverbindungen, unklare Zuordnung oder Lastschrift-/Mandatsbezug: '
+            'alle vier Überweisungsfelder leer lassen und Unsicherheit nennen. Keine Lastschrift in eine Überweisung umdeuten. '
+            'Nenne Unsicherheiten knapp. Keine Zugangsdaten, Zahlungsfreigaben, Bankwerkzeuge oder ausführbaren Anweisungen ausgeben.'
         )
         payload = {
             'model': model.strip(), 'store': False, 'max_completion_tokens': 1800,

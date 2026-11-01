@@ -6,13 +6,14 @@ import base64
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from flask import Flask, session
 from jinja2 import ChoiceLoader, DictLoader
@@ -22,7 +23,7 @@ from werkzeug.datastructures import FileStorage, MultiDict
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from werkstatt_buero_belege import MAX_ORIGINAL_BYTES, MAX_REQUEST_BYTES, TABLES, RevisionConflict, register_office_documents, _beleg_ddl, init_office_documents_schema
+from werkstatt_buero_belege import MAX_ORIGINAL_BYTES, MAX_REQUEST_BYTES, TABLES, RevisionConflict, register_office_documents, _beleg_ddl, init_office_documents_schema, normalize_iban, normalize_bic
 
 
 def pdf_bytes(marker="synthetic"):
@@ -836,7 +837,7 @@ class OfficeDocumentTests(unittest.TestCase):
     def order_fields(**changes):
         data = dict(typ="zahlungsauftrag", kategorie="miete", lieferant="", belegnummer="", belegdatum="", betrag_brutto="1500.00",
                     faelligkeit="2026-11-03", zahlungsempfaenger="Synthetic Landlord", verwendungszweck="Synthetic rent November 2026",
-                    zahlungsmodus="monatliche_miete", notiz="Synthetic reviewed contract basis")
+                    iban="DE89 3704 0044 0532 0130 00", zahlungsmodus="monatliche_miete", notiz="Synthetic reviewed contract basis")
         data.update(changes)
         return data
 
@@ -985,6 +986,124 @@ class OfficeDocumentTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(row["original_base64"]), raw)
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='buero_belege_schema_next'").fetchone())
 
+
+
+    def test_transfer_normalization_rejects_invalid_bank_values_without_any_lookup(self):
+        self.assertEqual(normalize_iban("de89 3704 0044 0532 0130 00"), "DE89370400440532013000")
+        self.assertEqual(normalize_iban("GB82 WEST 1234 5698 7654 32"), "GB82WEST12345698765432")
+        self.assertEqual(normalize_bic("test de ff xxx"), "TESTDEFFXXX")
+        self.assertEqual(normalize_bic("1ESTDEFF"), "1ESTDEFF")
+        self.assertEqual((normalize_iban(""), normalize_bic("")), ("", ""))
+        for value in ("DE89370400440532013001", "DE8937040044053201300", "ZZ89370400440532013000", "DE89A70400440532013000", "DE00 3704 0044 0532 0130 00", None):
+            with self.subTest(iban=value), self.assertRaises(ValueError): normalize_iban(value)
+        for value in ("!ESTDEFF", "TEST12FF", "TESTDEFFXX", "TEST-DE-FF", "ßßDEFF", None):
+            with self.subTest(bic=value), self.assertRaises(ValueError): normalize_bic(value)
+        with self.assertRaises(ValueError): normalize_iban("", required=True)
+        self.assertEqual(self.upload(iban="DE89370400440532013001").status_code, 400)
+        self.assertEqual(self.upload(bic="BAD!DEFF").status_code, 400)
+        self.assertEqual(self.rows(), [])
+
+    def test_transfer_fields_are_protected_editable_and_audited_for_each_payable_kind(self):
+        for kind in ("rechnung", "bescheid", "zahlungsauftrag"):
+            payload = self.order_fields() if kind == "zahlungsauftrag" else dict(typ=kind, kategorie="rechnung" if kind == "rechnung" else "gebuehren")
+            payload.update(zahlungsempfaenger="Synthetic checked payee", iban="de89 3704 0044 0532 0130 00", bic="testdeffxxx", verwendungszweck="Synthetic original reference")
+            key = self.create(raw=pdf_bytes("bank-fields-" + kind), **payload)
+            row = self.row(key)
+            self.assertEqual((row["iban"], row["bic"]), ("DE89370400440532013000", "TESTDEFFXXX"))
+            html = self.admin.get("/admin/buero/belege/" + key).get_data(as_text=True)
+            for label in ("Überweisungsdaten", "Zahlungsempfänger", 'name="iban"', 'name="bic"', "Verwendungszweck"):
+                self.assertIn(label, html)
+            audit = json.loads(next(a for a in self.rows(TABLES[1]) if a["beleg_id"] == key)["details_json"])
+            self.assertEqual((audit["metadata"]["iban"], audit["metadata"]["bic"]), (row["iban"], row["bic"]))
+            self.assertEqual(self.anon.get("/admin/buero/belege/" + key).status_code, 403)
+            self.assertEqual((row["status"], row["payable"], row["business_confirmed"]), ("entwurf", 0, 0))
+
+    def test_payment_order_missing_names_are_concrete_and_bic_is_optional(self):
+        approved = Mock(); self.p.office_document_approved = approved
+        key = self.create(raw=pdf_bytes("missing-transfer"), **self.order_fields(zahlungsempfaenger="", iban="", faelligkeit="", verwendungszweck=""))
+        before = self.row(key)
+        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Für den Zahlungsauftrag fehlen: Zahlungsempfänger, IBAN, Fälligkeit, Verwendungszweck.", response.get_data(as_text=True))
+        self.assertEqual(self.row(key), before)
+        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja",
+            zahlungsempfaenger="Synthetic reviewed landlord", iban="DE89 3704 0044 0532 0130 00", bic="",
+            faelligkeit="2026-11-03", verwendungszweck="Synthetic rent due November")
+        self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+        row = self.row(key)
+        self.assertEqual((row["status"], row["revision"], row["payable"], row["quelle_geprueft"]), ("freigegeben", before["revision"] + 1, 1, 1))
+        self.assertEqual((row["iban"], row["bic"], row["paid_date"], row["payment_reference"]), ("DE89370400440532013000", "", "", ""))
+        approved.assert_not_called()  # No Lexware invoice upload for an order.
+        shown = self.office.get("/werkstatt/buero/belege/" + key).get_data(as_text=True)
+        self.assertIn(row["iban"], shown); self.assertIn("Nicht angegeben", shown)
+
+    def test_invalid_atomic_transfer_approval_rolls_back_and_keeps_user_input(self):
+        key = self.create(raw=pdf_bytes("invalid-transfer"), **self.order_fields(zahlungsempfaenger="", iban=""))
+        before, audits = self.row(key), len(self.rows(TABLES[1]))
+        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja",
+            zahlungsempfaenger="Synthetic unsaved payee", iban="DE89370400440532013001", bic="TESTDEFF",
+            faelligkeit="2026-11-03", verwendungszweck="Synthetic unsaved purpose")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("IBAN-Prüfziffer ist ungültig", response.get_data(as_text=True))
+        self.assertIn('value="Synthetic unsaved payee"', response.get_data(as_text=True))
+        self.assertEqual((self.row(key), len(self.rows(TABLES[1]))), (before, audits))
+        response = self.action(key, "freigeben", admin=True, version=str(before["revision"] + 1), typ="zahlungsauftrag", kategorie="miete",
+                               zahlungspflichtig="ja", iban="DE89370400440532013000")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.row(key), before)
+
+    def test_legacy_partial_edits_and_conflicting_scans_preserve_manual_bank_block(self):
+        key = self.create(raw=pdf_bytes("manual-bank-preserve"), iban="DE89370400440532013000", bic="TESTDEFF", zahlungsempfaenger="Manual holder", verwendungszweck="Manual reference")
+        response = self.office.post("/werkstatt/buero/belege/" + key + "/bearbeiten",
+            data={"csrf_token":"synthetic-csrf", "revision":str(self.row(key)["revision"]), "notiz":"New synthetic note"})
+        self.assertEqual(response.status_code, 303)
+        revision = self.extract(key, {"iban":"GB82WEST12345698765432", "bic":"TESTGB22", "zahlungsempfaenger":"Other source holder", "verwendungszweck":"Other reference"})
+        with self.p.app.test_request_context():
+            session["office_mid"] = 1
+            self.p.documents.record_scan_suggestion(key, str(revision), "rechnung", "Synthetic classification", "rechnung")
+        row = self.row(key)
+        self.assertEqual((row["iban"], row["bic"], row["zahlungsempfaenger"], row["verwendungszweck"]),
+                         ("DE89370400440532013000", "TESTDEFF", "Manual holder", "Manual reference"))
+        self.assertIn("Bankangaben passen nicht eindeutig", row["klassifizierung_hinweis"])
+        for field, value in (("iban", "DE89370400440532013001"), ("bic", "BAD!DEFF")):
+            response = self.office.post("/werkstatt/buero/belege/" + key + "/bearbeiten", data={
+                "csrf_token":"synthetic-csrf", "revision":str(self.row(key)["revision"]), field:value})
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(self.row(key)["iban"], "DE89370400440532013000")
+            self.assertEqual(self.row(key)["bic"], "TESTDEFF")
+        for manual in ({"bic":"TESTDEFF"}, {"zahlungsempfaenger":"Manually chosen holder"}):
+            another = self.create(raw=pdf_bytes("partial-manual-" + next(iter(manual))), **manual)
+            self.extract(another, {"iban":"GB82WEST12345698765432", "zahlungsempfaenger":"Other source holder"})
+            self.assertEqual(self.row(another)["iban"], "")
+
+    def test_existing_eight_drafts_gain_empty_bank_columns_without_other_changes(self):
+        for i in range(6):
+            self.create(raw=pdf_bytes("old-photo-" + str(i)), typ="post", kategorie="sonstige")
+        raw = pdf_bytes("old-shared-contract")
+        self.create(raw=raw, **self.order_fields(iban=""))
+        self.create(raw=raw, **self.order_fields(kategorie="kaution", iban="", zahlungsmodus="einzelzahlung", verwendungszweck="Synthetic old deposit"))
+        before = {r["id"]:{k:v for k,v in r.items() if k not in ("iban","bic")} for r in self.rows()}
+        old_audits, old_seen = self.rows(TABLES[1]), self.rows(TABLES[2])
+        with closing(self.p.get_db()) as db:
+            db.execute("ALTER TABLE buero_belege DROP COLUMN iban")
+            db.execute("ALTER TABLE buero_belege DROP COLUMN bic")
+            db.commit()
+        self.p.documents.init_schema(); self.p.documents.init_schema()
+        after = self.rows()
+        self.assertEqual(len(after), 8)
+        for row in after:
+            self.assertEqual((row["iban"], row["bic"]), ("", ""))
+            self.assertEqual({k:v for k,v in row.items() if k not in ("iban","bic")}, before[row["id"]])
+            self.assertEqual((row["status"], row["payable"], row["business_confirmed"], row["quelle_geprueft"]), ("entwurf",0,0,0))
+        self.assertEqual((self.rows(TABLES[1]), self.rows(TABLES[2])), (old_audits, old_seen))
+
+    def test_payment_order_can_be_reclassified_as_nonpayable_without_hidden_rental_mode(self):
+        key = self.create(raw=pdf_bytes("retire-mode"), **self.order_fields())
+        response = self.action(key, "freigeben", admin=True, typ="post", kategorie="sonstige")
+        self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+        row = self.row(key)
+        self.assertEqual((row["typ"],row["zahlungsmodus"],row["payable"],row["quelle_geprueft"]), ("post","",0,0))
+        self.assertEqual(row["iban"], "DE89370400440532013000")
 
 if __name__ == "__main__":
     unittest.main()

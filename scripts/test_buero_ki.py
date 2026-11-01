@@ -94,6 +94,37 @@ class OfficeAITransportTests(unittest.TestCase):
         self.assertEqual(result['field_sources']['betrag_brutto']['source'], 'ai_visual')
         self.assertFalse(result['identity_verified'])
 
+    def test_payment_schema_and_prompt_allow_only_evidenced_transfer_fields_without_tools(self):
+        from werkstatt_buero_analyse import AI_FIELDS_SCHEMA, PAYMENT_FIELDS
+        self.service.extract(text='SYNTHETIC invoice only',schema=AI_FIELDS_SCHEMA)
+        payload=self.http.post.call_args.kwargs['json']
+        properties=payload['response_format']['json_schema']['schema']['properties']['fields']
+        self.assertTrue(set(PAYMENT_FIELDS)<=set(properties['required']))
+        self.assertTrue(set(PAYMENT_FIELDS)<=set(properties['properties']))
+        prompt=payload['messages'][0]['content']
+        for instruction in ('Kontoinhaber','Verwendungszweck','Keine BIC','Lastschrift','alle vier Überweisungsfelder leer'):
+            self.assertIn(instruction,prompt)
+        self.assertNotIn('Keine Kontodaten',prompt)
+        self.assertNotIn('tools',payload)
+        self.http.post.assert_called_once()
+
+    def test_real_adapter_payment_photo_chain_keeps_data_as_unapproved_source_proposals(self):
+        from werkstatt_buero_analyse import FIELDS, PAYMENT_FIELDS, analyse_document
+        bban='0'*18
+        iban='DE'+f'{98-int(bban+"131400")%97:02d}'+bban
+        values={'zahlungsempfaenger':('Synthetische Transfer GmbH','Kontoinhaber: Synthetische Transfer GmbH'),
+                'iban':(iban,'IBAN: '+iban),'bic':('ZZZZDE00','BIC: ZZZZDE00'),
+                'verwendungszweck':('TEST-RE-001','Verwendungszweck: TEST-RE-001')}
+        fields={name:{'value':'','evidence':'','confidence':'unsicher'} for name in FIELDS}
+        fields.update({name:{'value':value,'evidence':quote,'confidence':'hoch'} for name,(value,quote) in values.items()})
+        self.http.post.return_value=response({'fields':fields,'warnings':[]})
+        self.p.build_openai_visual_inputs.return_value=[{'type':'image_url','image_url':{'url':'data:image/png;base64,c3ludGhldGlj'}}]
+        result=analyse_document('',ai_hook=self.service.extract,ai_enabled=True,path=self.photo,filename=self.photo.name)
+        self.assertEqual(set(result['fields']),set(PAYMENT_FIELDS))
+        self.assertEqual(result['source'],'ai')
+        self.assertFalse(result['identity_verified'])
+        self.http.post.assert_called_once()
+
     def test_remote_image_and_custom_provider_never_receive_document_or_key(self):
         self.p.build_openai_visual_inputs.return_value = [{'type': 'image_url', 'image_url': {'url': 'https://example.invalid/private.png'}}]
         with self.assertRaises(OfficeAIUnavailable):

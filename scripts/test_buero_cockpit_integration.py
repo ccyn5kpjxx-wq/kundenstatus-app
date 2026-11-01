@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
+import json
 import os
 import sys
 import tempfile
@@ -826,6 +827,72 @@ class OfficeCockpitIntegration(unittest.TestCase):
                          ('freigegeben', 'rechnung', 'rechnung', 1))
         transfer.assert_called_once_with(key, approved['revision'])
 
+
+
+    def test_15_transfer_fields_roundtrip_invalid_correction_atomic_release_and_backup_guard(self):
+        base = '/admin/buero/belege'
+        initial = self.get(base, self.admin)
+        upload = self.rendered_form(initial, form_action=base + '/erfassen')
+        writer = PdfWriter(); writer.add_blank_page(width=200, height=250)
+        stream = BytesIO(); writer.write(stream); raw = stream.getvalue()
+        with patch.object(p, 'extract_document_text_local', return_value=''):
+            response = self.submit_rendered(upload, base, client=self.admin, typ='post', kategorie='sonstige',
+                betrag_brutto='500.00', notiz='Synthetic one-off deposit basis', original=(BytesIO(raw), 'synthetic-transfer.pdf'))
+        self.assertEqual(response.status_code, 303)
+        detail_path = response.headers['Location']
+        key = detail_path.rsplit('/', 1)[-1]
+        shown = self.get(detail_path, self.admin)
+        form = self.rendered_form(shown, form_action=detail_path + '/freigeben')
+        for name in ('zahlungsempfaenger', 'iban', 'bic', 'verwendungszweck', 'faelligkeit', 'zahlungsmodus'):
+            self.assertIn(name, form['data'])
+        with closing(p.get_db()) as db:
+            before = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+            audits = db.execute('SELECT COUNT(*) AS n FROM buero_belege_audit WHERE beleg_id=?', (key,)).fetchone()['n']
+        changes = dict(typ='zahlungsauftrag', kategorie='kaution', bereich='geschaeftlich', confirmed='ja', zahlungspflichtig='ja',
+            zahlungsempfaenger='Synthetic Original Payee', iban='DE89370400440532013001', bic='',
+            verwendungszweck='Synthetic deposit source', faelligkeit='2026-11-03', zahlungsmodus='einzelzahlung')
+        rejected = self.submit_rendered(form, detail_path, client=self.admin, **changes)
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn('IBAN-Prüfziffer ist ungültig', rejected.get_data(as_text=True))
+        self.assertIn('value="Synthetic Original Payee"', rejected.get_data(as_text=True))
+        with closing(p.get_db()) as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone()), before)
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM buero_belege_audit WHERE beleg_id=?', (key,)).fetchone()['n'], audits)
+        corrected = next(f for f in RenderedForms(rejected.get_data(as_text=True)).forms if f['action'] == detail_path + '/freigeben')
+        self.assertEqual(corrected['data']['typ'], 'zahlungsauftrag')
+        self.assertEqual(corrected['data']['zahlungsmodus'], 'einzelzahlung')
+        self.assertEqual(corrected['data']['bereich'], 'geschaeftlich')
+        self.assertGreaterEqual(len(corrected['data'].getlist('csrf_token')), 2)
+        with patch.object(p.office_lexware, 'send_approved', side_effect=AssertionError('No invoice upload for a payment order')) as lexware:
+            accepted = self.submit_rendered(corrected, detail_path, client=self.admin,
+                iban='de89 3704 0044 0532 0130 00', confirmed='ja', zahlungspflichtig='ja')
+        self.assertEqual(accepted.status_code, 303, accepted.get_data(as_text=True))
+        lexware.assert_not_called()
+        with closing(p.get_db()) as db:
+            approved = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+            audit = json.loads(db.execute("SELECT details_json FROM buero_belege_audit WHERE beleg_id=? AND aktion='freigegeben'", (key,)).fetchone()['details_json'])
+        self.assertEqual((approved['revision'], approved['status'], approved['payable'], approved['quelle_geprueft']),
+                         (before['revision'] + 1, 'freigegeben', 1, 1))
+        self.assertEqual((approved['iban'], approved['bic'], approved['paid_date'], approved['payment_reference']),
+                         ('DE89370400440532013000', '', '', ''))
+        self.assertEqual(audit['metadata']['iban'], approved['iban'])
+        self.assertEqual(self.get(detail_path + '/original', self.admin).data, raw)
+        office = self.get('/werkstatt/buero/belege/' + key)
+        self.assert_limited_page(office)
+        for text in ('Überweisungsdaten', 'Synthetic Original Payee', approved['iban'], 'Nicht angegeben', 'Synthetic deposit source'):
+            self.assertIn(text, office.get_data(as_text=True))
+        self.assertNotIn('<dt>Belegnummer</dt>', office.get_data(as_text=True))
+        self.assertNotIn('<dt>Belegdatum</dt>', office.get_data(as_text=True))
+        self.assertEqual(self.post(detail_path + '/freigeben', {'csrf_token':'synthetic-office-csrf'}).status_code, 403)
+        with closing(p.get_db()) as db:
+            snapshot = {'tables':{table:[dict(row) for row in db.execute('SELECT * FROM ' + table)]
+                                  for table in (*OFFICE_BACKUP_TABLES,'mitarbeiter','assistent_rechte')}}
+        p.ensure_office_state_for_import(p, export=snapshot)
+        changed = deepcopy(snapshot)
+        next(row for row in changed['tables']['buero_belege'] if row['id'] == key)['iban'] = ''
+        with self.assertRaises(ValueError):p.ensure_office_state_for_import(p, export=changed)
+        with closing(p.get_db()) as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone()), approved)
 
 if __name__ == '__main__':
     unittest.main()

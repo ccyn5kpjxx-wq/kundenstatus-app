@@ -7,11 +7,22 @@ document.querySelectorAll('.bb-chef-review').forEach((form) => {
   const payment = paymentLabel.querySelector('input');
   const confirmation = form.querySelector('[data-review-confirm]');
   const button = form.querySelector('[data-review-button]');
+  const transfer = form.querySelector('[data-transfer-fields]');
   kind.required = true;
   category.required = true;
 
   const update = () => {
     const specialPayment = ['bescheid', 'zahlungsauftrag'].includes(kind.value);
+    if (transfer) {
+      const showTransfer = ['rechnung', 'bescheid', 'zahlungsauftrag'].includes(kind.value);
+      transfer.hidden = !showTransfer;
+      transfer.querySelectorAll('input, select').forEach((field) => { field.disabled = !showTransfer; });
+      const orderMode = transfer.querySelector('[data-order-mode]');
+      if (orderMode) {
+        orderMode.hidden = kind.value !== 'zahlungsauftrag';
+        orderMode.querySelector('select').disabled = kind.value !== 'zahlungsauftrag';
+      }
+    }
     paymentLabel.hidden = !specialPayment;
     payment.disabled = !specialPayment;
     payment.required = kind.value === 'zahlungsauftrag';

@@ -8,18 +8,20 @@ from decimal import Decimal, InvalidOperation
 import re
 import unicodedata
 
-FIELDS=("lieferant","belegnummer","belegdatum","faelligkeit","betrag_brutto","typ","kategorie")
+PAYMENT_FIELDS=("zahlungsempfaenger","iban","bic","verwendungszweck")
+FIELDS=("lieferant","belegnummer","belegdatum","faelligkeit","betrag_brutto","typ","kategorie",*PAYMENT_FIELDS)
 KINDS={"rechnung","lieferschein","bescheid","post"}
 CATEGORIES={"rechnung","gebuehren","steuern","sonstige","privat"}
 LABELS={"lieferant":"Lieferant", "belegnummer":"Belegnummer", "belegdatum":"Belegdatum",
-        "faelligkeit":"Fälligkeit", "betrag_brutto":"Bruttogesamtbetrag", "typ":"Belegart", "kategorie":"Ordner"}
+        "faelligkeit":"Fälligkeit", "betrag_brutto":"Bruttogesamtbetrag", "typ":"Belegart", "kategorie":"Ordner",
+        "zahlungsempfaenger":"Zahlungsempfänger", "iban":"IBAN", "bic":"BIC", "verwendungszweck":"Verwendungszweck"}
 MAX_TEXT=100000
 AI_FIELDS_SCHEMA={"type":"object","additionalProperties":False,
     "properties":{
         "fields":{"type":"object","additionalProperties":False,"required":list(FIELDS),
             "properties":{name:{"type":"object","additionalProperties":False,
                 "required":["value","evidence","confidence"],
-                "properties":{"value":{"type":"string"},"evidence":{"type":"string","description":"Kurzes wortgetreues Quellzitat mit Feldbezeichnung. Bruttogesamtbetrag benötigt Gesamt-/Bruttobeschriftung; unsicher bedeutet leer."},
+                "properties":{"value":{"type":"string"},"evidence":{"type":"string","description":"Kurzes wortgetreues Quellzitat mit Feldbezeichnung. Bruttogesamtbetrag benötigt Gesamt-/Bruttobeschriftung. Zahlungsdaten benötigen eigene ausdrückliche Quellenlabels, keine Ableitung aus Lieferant, Rechnungsnummer oder Mandat; mehrere Bankverbindungen und Unsicherheiten bedeuten leer."},
                               "confidence":{"type":"string","enum":["hoch","unsicher"]}}} for name in FIELDS}},
         "warnings":{"type":"array","items":{"type":"string"}}},
     "required":["fields","warnings"]}
@@ -34,6 +36,15 @@ _NUMBER_LABEL=re.compile(
     r"|Beleg[- ]?(?:nummer|nr\.?))(?:\s*[:#]\s*|\s+)(.*?)\s*$",re.I)
 _NUMBER_VALUE=re.compile(r"[\w](?:[\w./-]*[\w])?(?:\s*[-/]\s*[\w](?:[\w./-]*[\w])?)*")
 _RECEIPT_RELATIVE=re.compile(r"(?:ab|nach)\s+(?:dem\s+)?(?:Zugang|Erhalt|Eingang)",re.I)
+_PAYMENT_LABELS={
+    "zahlungsempfaenger":r"Zahlungsempf(?:ä|ae|a)nger|Kontoinhaber(?:in)?|Beg(?:ü|ue|u)nstigte(?:r|n)?|Account\s+holder|Beneficiary",
+    "iban":r"IBAN",
+    "bic":r"BIC\s*/\s*SWIFT|SWIFT(?:[- /]BIC)?|BIC",
+    "verwendungszweck":r"Verwendungszweck|[ÜU]berweisungszweck|Zahlungsreferenz|Payment\s+reference|Remittance\s+reference",
+}
+_DIRECT_DEBIT=re.compile(r"Lastschrift|Bankeinzug|Einzugserm[äa]chtigung|SEPA[- ]?Mandat|Mandatsreferenz|\babgebucht\b",re.I)
+_BANK_WARNING=re.compile(r"IBAN|BIC|Bankverbindung|Kontoverbindung|Kontoinhaber|Zahlungsempf(?:ä|ae|a)nger",re.I)
+_UNCERTAIN_BANK=re.compile(r"mehrere|mehrdeutig|abweichend|alternativ|unterschiedlich|unklar|nicht\s+eindeutig|unsicher",re.I)
 
 
 def _normal(value):
@@ -80,6 +91,17 @@ def _value(name,value):
     if name=="betrag_brutto":return _amount(value)
     if name=="typ":return value if value in KINDS else ""
     if name=="kategorie":return value if value in CATEGORIES else ""
+    if name in {"iban","bic"}:
+        # The document service owns format/checksum rules. Import only during
+        # analysis, avoiding its registration/import cycle with this module.
+        from werkstatt_buero_belege import normalize_iban, normalize_bic
+        try:return normalize_iban(value) if name=="iban" else normalize_bic(value)
+        except (TypeError,ValueError):return ""
+    if name in {"zahlungsempfaenger","verwendungszweck"}:
+        maximum=160 if name=="zahlungsempfaenger" else 300
+        has_content=any(c.isalpha() for c in value) if name=="zahlungsempfaenger" else any(c.isalnum() for c in value)
+        return value if (0<len(value)<=maximum and has_content
+                         and not re.search(r"\b(?:IBAN|BIC|SWIFT)\b",value,re.I)) else ""
     if name=="belegnummer":
         return value if (0<len(value)<=100 and re.fullmatch(r"[\w][\w./ -]*",value)
                          and any(c.isdigit() for c in value) and not re.search(r"\b(?:IBAN|BIC|SWIFT)\b",value,re.I)) else ""
@@ -135,6 +157,45 @@ def _number_from_line(line):
     return _value("belegnummer",value) if _NUMBER_VALUE.fullmatch(value) else ""
 
 
+def _payment_values(text):
+    """Only labelled transfer data; ambiguity never chooses an account."""
+    candidates={name:[] for name in PAYMENT_FIELDS}
+    rejected=set()
+    raw_accounts={name:set() for name in ("zahlungsempfaenger","iban","bic")}
+    lines=[line.strip() for line in text.splitlines() if line.strip()]
+    for index,line in enumerate(lines):
+        if _INSTRUCTION.search(line):continue
+        # OCR tables may print the IBAN label only once for several rows.
+        # An unlabelled second account can block selection, never supply one.
+        compact=re.sub(r"\s+","",line).casefold()
+        if re.fullmatch(r"[A-Za-z]{2}\s*\d{2}[A-Za-z0-9 \t]+",line) and 15<=len(compact)<=34:
+            raw_accounts["iban"].add(compact)
+        markers=[]
+        for name,pattern in _PAYMENT_LABELS.items():
+            for match in re.finditer(r"(?<!\w)(?:"+pattern+r")(?:\s*:\s*|\s+(?=\S)|$)",line,re.I):
+                markers.append((match.start(),match.end(),name))
+        markers.sort()
+        for offset,(start,end,name) in enumerate(markers):
+            stop=markers[offset+1][0] if offset+1<len(markers) else len(line)
+            value=line[end:stop].strip() if name=="verwendungszweck" else line[end:stop].strip(" \t|;")
+            quote=line
+            if not value and offset+1==len(markers) and index+1<len(lines):
+                value=lines[index+1]
+                quote=line+"\n"+value
+                if any(re.search(r"^(?:"+pattern+r")(?:\s*:|\s|$)",value,re.I) for pattern in _PAYMENT_LABELS.values()):
+                    continue
+            if name in raw_accounts and value:
+                raw_accounts[name].add(re.sub(r"\s+","",value).casefold() if name in {"iban","bic"} else _normal(value))
+            normalised=_value(name,value)
+            if normalised:candidates[name].append((normalised,quote[:500]))
+            elif value:rejected.add(name)
+    if _DIRECT_DEBIT.search(text):
+        return candidates,"Lastschrift-/Mandatsbezug erkannt; Überweisungsdaten am Original manuell prüfen, keine Umdeutung in eine Überweisung.",rejected
+    if any(len(values)>1 for values in raw_accounts.values()):
+        return candidates,"Mehrere abweichende Bankverbindungen oder Kontoinhaber erkannt; Überweisungsdaten bleiben zur persönlichen Prüfung leer.",rejected
+    return candidates,"",rejected
+
+
 def local_fields(text):
     text=_text(text);lines=[line.strip() for line in text.splitlines() if line.strip()]
     candidates={name:[] for name in FIELDS};warnings=[]
@@ -170,12 +231,17 @@ def local_fields(text):
             if not _INSTRUCTION.search(line) and re.search(r"\b(?:GmbH(?:\s*&\s*Co\.?\s*KG)?|AG|UG(?:\s*\(haftungsbeschr[äa]nkt\))?|e\.?\s*K\.?|OHG|KG)\s*$",line,re.I):
                 header.append((line,line))
         for value,quote in header:add("lieferant",value,quote)
+    payment,blocked_payment,rejected_payment=_payment_values(text)
+    if blocked_payment:warnings.append(blocked_payment)
+    else:
+        for name,values in payment.items():candidates[name].extend(values)
     classification=_classify(text)
     evidence="\n".join(lines[:12])[:500]
     if classification["suggested_kind"]:add("typ",classification["suggested_kind"],evidence)
     if classification["suggested_kind"] or classification["category"]!="sonstige":add("kategorie",classification["category"],evidence)
-    fields,origins,ambiguous={},{},set()
+    fields,origins,ambiguous={},{},set(PAYMENT_FIELDS) if blocked_payment else set(rejected_payment)
     for name,values in candidates.items():
+        if name in ambiguous:continue
         unique={value for value,_ in values}
         if len(unique)==1:
             fields[name]=values[0][0];origins[name]={"source":"local","evidence":values[0][1]}
@@ -190,14 +256,17 @@ def _validate_payload(data):
     fields,warnings=data["fields"],data["warnings"]
     if (not isinstance(fields,dict) or set(fields)!=set(FIELDS) or not isinstance(warnings,list)
             or len(warnings)>20 or any(not isinstance(v,str) or len(v)>500 for v in warnings)):raise ValueError()
-    for item in fields.values():
+    for name,item in fields.items():
         if (not isinstance(item,dict) or set(item)!={"value","evidence","confidence"}
-                or not all(isinstance(v,str) for v in item.values()) or len(item["value"])>200
+                or not all(isinstance(v,str) for v in item.values()) or len(item["value"])>(300 if name=="verwendungszweck" else 200)
                 or len(item["evidence"])>500 or item["confidence"] not in {"hoch","unsicher"}):raise ValueError()
     return fields
 
 
 def _grounded(name,value,evidence):
+    if name in PAYMENT_FIELDS:
+        candidates,blocked,rejected=_payment_values(evidence)
+        return not blocked and name not in rejected and value in {candidate for candidate,_ in candidates[name]}
     if name in {"belegdatum","faelligkeit"}:
         dates={_day(m[0]) for m in _DATE.finditer(evidence)}-{''}
         if dates!={value}:return False
@@ -239,10 +308,25 @@ def analyse_document(text,*,ai_hook=None,ai_enabled=False,path=None,filename="")
                 if not isinstance(response,dict) or set(response)-{"data","visual_evidence"}:raise ValueError()
                 visual=response.get("visual_evidence") is True
                 ai=_validate_payload(response.get("data"))
+                # Use all payment quotes together: selecting a single quote
+                # must not hide a second account or a mandate elsewhere.
+                payment_quotes="\n".join(item["evidence"] for name,item in ai.items() if name in PAYMENT_FIELDS)
+                _,payment_block,rejected_payment=_payment_values(text+"\n"+payment_quotes)
+                ambiguous.update(rejected_payment)
+                for name in rejected_payment:
+                    fields.pop(name,None);origins.pop(name,None);local_keys.discard(name)
+                uncertain_bank=any(_BANK_WARNING.search(warning) and _UNCERTAIN_BANK.search(warning)
+                                   for warning in response["data"]["warnings"])
+                if payment_block or uncertain_bank:
+                    ambiguous.update(PAYMENT_FIELDS)
+                    for name in PAYMENT_FIELDS:
+                        fields.pop(name,None);origins.pop(name,None);local_keys.discard(name)
+                    warnings.append(payment_block or "KI meldet unsichere Bankverbindungen; Überweisungsdaten bleiben zur persönlichen Prüfung leer.")
                 for name,item in ai.items():
                     if not item["value"]:continue
                     if name in ambiguous:
-                        warnings.append(LABELS[name]+": mehrdeutige Quellwerte bleiben auch bei einem KI-Vorschlag leer; persönlich prüfen.")
+                        reason="nicht eindeutig vollständig übernehmbare Zahlungsangaben" if name in PAYMENT_FIELDS else "mehrdeutige Quellwerte"
+                        warnings.append(LABELS[name]+": "+reason+" bleiben auch bei einem KI-Vorschlag leer; persönlich prüfen.")
                         continue
                     value=_value(name,item["value"]);evidence=_text(item["evidence"])
                     if (not value or item["confidence"]!="hoch" or not evidence or _INSTRUCTION.search(evidence)

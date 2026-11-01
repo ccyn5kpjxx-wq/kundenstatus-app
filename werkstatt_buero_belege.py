@@ -33,16 +33,18 @@ STATES = {"entwurf": "In Erfassung", "eingereicht": "Zur Cheffreigabe", "freigeg
 MAX_ORIGINAL_BYTES = 10 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_ORIGINAL_BYTES + 128 * 1024
 FIELDS = {"typ", "kategorie", "lieferant", "belegnummer", "belegdatum", "betrag_brutto", "faelligkeit", "notiz",
-          "zahlungsempfaenger", "verwendungszweck", "zahlungsmodus"}
+          "zahlungsempfaenger", "iban", "bic", "verwendungszweck", "zahlungsmodus"}
 _WRITE_FIELDS = ("typ", "kategorie", "lieferant", "belegnummer", "belegdatum", "betrag_cent", "faelligkeit", "notiz",
-                 "zahlungsempfaenger", "verwendungszweck", "zahlungsmodus")
+                 "zahlungsempfaenger", "iban", "bic", "verwendungszweck", "zahlungsmodus")
+TRANSFER_FIELDS = ("zahlungsempfaenger", "iban", "bic", "verwendungszweck", "faelligkeit", "zahlungsmodus")
+_BANK_CONFLICT_HINT = "Bankangaben passen nicht eindeutig zur vorhandenen Kontoverbindung; manuelle Angaben bleiben erhalten. "
 _KEY = re.compile(r"[a-f0-9]{32}")
 _META = ("id,typ,lieferant,belegnummer,belegdatum,betrag_cent,faelligkeit,notiz,status,revision,"
          "filename,mime,size_bytes,sha256,created_by,created_at,updated_at,submitted_at,"
          "decided_at,decided_by,decision_note,payable,paid_date,payment_reference,"
          "kategorie,kategorie_vorschlag,typ_vorschlag,klassifizierung_hinweis,analyse_status,"
          "lexware_beleg_id,lexware_status,lexware_url,business_confirmed,bereich,verarbeitung_hinweis,source_ref_hash,"
-         "dedup_key,zahlungsempfaenger,verwendungszweck,zahlungsmodus,quelle_geprueft")
+         "dedup_key,zahlungsempfaenger,iban,bic,verwendungszweck,zahlungsmodus,quelle_geprueft")
 _NEW_COLUMNS = {"kategorie": "TEXT NOT NULL DEFAULT ''", "kategorie_vorschlag": "TEXT NOT NULL DEFAULT ''",
                 "typ_vorschlag": "TEXT NOT NULL DEFAULT ''", "klassifizierung_hinweis": "TEXT NOT NULL DEFAULT ''",
                 "analyse_status": "TEXT NOT NULL DEFAULT ''", "lexware_beleg_id": "TEXT NOT NULL DEFAULT ''",
@@ -50,6 +52,7 @@ _NEW_COLUMNS = {"kategorie": "TEXT NOT NULL DEFAULT ''", "kategorie_vorschlag": 
                 "business_confirmed": "INTEGER NOT NULL DEFAULT 0", "bereich": "TEXT NOT NULL DEFAULT 'unklar'",
                 "verarbeitung_hinweis": "TEXT NOT NULL DEFAULT ''", "source_ref_hash": "TEXT NOT NULL DEFAULT ''",
                 "dedup_key": "TEXT NOT NULL DEFAULT ''", "zahlungsempfaenger": "TEXT NOT NULL DEFAULT ''",
+                "iban": "TEXT NOT NULL DEFAULT ''", "bic": "TEXT NOT NULL DEFAULT ''",
                 "verwendungszweck": "TEXT NOT NULL DEFAULT ''", "zahlungsmodus": "TEXT NOT NULL DEFAULT ''",
                 "quelle_geprueft": "INTEGER NOT NULL DEFAULT 0"}
 _VISIBLE = "(b.created_by=? OR (b.bereich IN ('geschaeftlich','privat') AND b.status IN ('freigegeben','zahlung_in_bearbeitung','bezahlt') AND b.decided_by='admin'))"
@@ -205,6 +208,48 @@ def _amount(value):
     return int(amount * 100)
 
 
+# Registered national lengths, SWIFT ISO 13616 registry release 101 (Dec 2025).
+# Validation is local only; it does not verify ownership or account existence.
+_IBAN_LENGTHS = dict(pair.split(":") for pair in (
+    "AD:24 AE:23 AL:28 AT:20 AZ:28 BA:20 BE:16 BG:22 BH:22 BI:27 BR:29 BY:28 "
+    "CH:21 CR:22 CY:28 CZ:24 DE:22 DJ:27 DK:18 DO:28 EE:20 EG:29 ES:24 FI:18 "
+    "FK:18 FO:18 FR:27 GB:22 GE:22 GI:23 GL:18 GR:27 GT:28 HN:28 HR:21 HU:28 "
+    "IE:22 IL:23 IQ:23 IS:26 IT:27 JO:30 KW:30 KZ:20 LB:28 LC:32 LI:21 LT:20 "
+    "LU:20 LV:21 LY:25 MC:27 MD:24 ME:22 MK:19 MN:20 MR:27 MT:31 MU:30 NI:28 "
+    "NL:18 NO:15 OM:23 PK:24 PL:28 PS:29 PT:25 QA:29 RO:24 RS:22 RU:33 SA:24 "
+    "SC:31 SD:18 SE:24 SI:19 SK:24 SM:27 SO:23 ST:25 SV:28 TL:23 TN:24 TR:26 "
+    "UA:29 VA:22 VG:24 XK:20 YE:30"
+).split())
+
+
+def normalize_iban(value, required=False):
+    if not isinstance(value, str) or len(value) > 100 or not re.sub(r"\s+", "", value).isascii():
+        raise ValueError("IBAN im vorgesehenen Format angeben.")
+    value = re.sub(r"\s+", "", value).upper()
+    if not value:
+        if required:
+            raise ValueError("IBAN aus der Original-Zahlungsgrundlage ergänzen.")
+        return ""
+    if (not re.fullmatch(r"[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}", value)
+            or len(value) != int(_IBAN_LENGTHS.get(value[:2], 0))
+            or not 2 <= int(value[2:4]) <= 98
+            or value.startswith("DE") and not value[4:].isdigit()):
+        raise ValueError("IBAN: Länderformat oder Länge ist ungültig. Am Original prüfen.")
+    numeric = "".join(str(ord(c) - 55) if c.isalpha() else c for c in value[4:] + value[:4])
+    if int(numeric) % 97 != 1:
+        raise ValueError("IBAN-Prüfziffer ist ungültig. Am Original prüfen.")
+    return value
+
+
+def normalize_bic(value):
+    if not isinstance(value, str) or len(value) > 30 or not re.sub(r"\s+", "", value).isascii():
+        raise ValueError("BIC muss aus 8 oder 11 Zeichen bestehen.")
+    value = re.sub(r"\s+", "", value).upper()
+    if value and not re.fullmatch(r"[A-Z0-9]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?", value):
+        raise ValueError("BIC-Format ist ungültig: 8 oder 11 Zeichen am Original prüfen.")
+    return value
+
+
 def _fields(payload):
     if not isinstance(payload, dict) or set(payload) - FIELDS:
         raise ValueError("Nur die vorgesehenen Belegangaben bearbeiten.")
@@ -224,6 +269,7 @@ def _fields(payload):
                 faelligkeit=_day(payload.get("faelligkeit", ""), "Fälligkeit"),
                 notiz=_text(payload.get("notiz", ""), 2000, "Notiz", multiline=True),
                 zahlungsempfaenger=_text(payload.get("zahlungsempfaenger", ""), 160, "Zahlungsempfänger"),
+                iban=normalize_iban(payload.get("iban", "")), bic=normalize_bic(payload.get("bic", "")),
                 verwendungszweck=_text(payload.get("verwendungszweck", ""), 300, "Verwendungszweck"), zahlungsmodus=mode)
 
 
@@ -238,11 +284,25 @@ def _dedup_key(digest, fields):
     return "auftrag:" + hashlib.sha256(json.dumps(normalised, ensure_ascii=False).encode()).hexdigest()
 
 
+def _payment_order_missing(row):
+    missing = [label for column, label in (("betrag_cent", "Zahlbetrag"), ("zahlungsempfaenger", "Zahlungsempfänger"),
+               ("iban", "IBAN"), ("faelligkeit", "Fälligkeit"), ("verwendungszweck", "Verwendungszweck"))
+               if row.get(column) in (None, "")]
+    if row.get("zahlungsmodus") not in ("einzelzahlung", "monatliche_miete"):
+        missing.append("Auftragsart")
+    if row.get("zahlungsmodus") == "einzelzahlung" and not row.get("notiz"):
+        missing.append("Begründung der Einzelzahlung in der Notiz")
+    return missing
+
+
 def _payment_order_ready(row):
     if row["kategorie"] not in ("miete", "kaution"):
         raise ValueError("Zahlungsauftrag als Miete oder Kaution einordnen.")
-    if row["betrag_cent"] is None or not row["zahlungsempfaenger"] or not row["faelligkeit"] or not row["verwendungszweck"]:
-        raise ValueError("Zahlungsauftrag ist unvollständig: geprüften Betrag, Empfänger, Fälligkeit und Verwendungszweck ergänzen.")
+    missing = _payment_order_missing(row)
+    if missing:
+        raise ValueError("Für den Zahlungsauftrag fehlen: " + ", ".join(missing) + ".")
+    normalize_iban(row.get("iban", ""), required=True)
+    normalize_bic(row.get("bic", ""))
     if row["zahlungsmodus"] not in ("einzelzahlung", "monatliche_miete"):
         raise ValueError("Begründete Einzelzahlung oder monatliche Mietvorlage ausdrücklich auswählen.")
     if row["zahlungsmodus"] == "monatliche_miete" and row["kategorie"] != "miete":
@@ -356,6 +416,7 @@ class OfficeDocuments:
     @staticmethod
     def _view(row, *, admin=False):
         value = dict(row)
+        transfer_missing = _payment_order_missing(value) if value["typ"] == "zahlungsauftrag" else []
         category = "privat" if value["bereich"] == "privat" else value["kategorie"] or value["kategorie_vorschlag"] or "sonstige"
         recipient = value["status"] in ("entwurf", "eingereicht") if admin else value["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung")
         value.update(typ_label=KINDS[value["typ"]], status_label=STATES[value["status"]],
@@ -366,10 +427,12 @@ class OfficeDocuments:
                      lexware_link=_lexware_url(value["lexware_url"]) if value["payable"] and value["business_confirmed"] else "",
                      betrag_label=_display_amount(value["betrag_cent"]),
                      betrag_input="" if value["betrag_cent"] is None else f"{value['betrag_cent'] // 100}.{value['betrag_cent'] % 100:02d}",
+                     transfer_missing=transfer_missing,
+                     transfer_warning="Es fehlen: " + ", ".join(transfer_missing) + "." if transfer_missing else "",
                      editable=value["status"] in ("entwurf", "zurueckgewiesen"),
                      payment_allowed=bool(value["payable"] and (value["business_confirmed"] or value["bereich"] == "privat")
                                           and value["typ"] in ("rechnung", "bescheid", "zahlungsauftrag")
-                                          and (value["typ"] != "zahlungsauftrag" or value["quelle_geprueft"])
+                                          and (value["typ"] != "zahlungsauftrag" or value["quelle_geprueft"] and not transfer_missing)
                                           and value["status"] in ("freigegeben", "zahlung_in_bearbeitung")))
         return value
 
@@ -393,7 +456,7 @@ class OfficeDocuments:
     def _audit(db, who, key, action, before=None, *, extra=None):
         row = OfficeDocuments._row(db, key)
         metadata = {k: row[k] for k in ("typ", "kategorie", "lieferant", "belegnummer", "belegdatum", "betrag_cent", "faelligkeit", "notiz",
-                                      "zahlungsempfaenger", "verwendungszweck", "zahlungsmodus", "quelle_geprueft",
+                                      "zahlungsempfaenger", "iban", "bic", "verwendungszweck", "zahlungsmodus", "quelle_geprueft",
                                       "kategorie_vorschlag", "typ_vorschlag", "klassifizierung_hinweis", "lexware_beleg_id", "lexware_status", "lexware_url")}
         details = dict(revision=row["revision"], status=row["status"], vorher_status=before, metadata=metadata, bereich=row["bereich"],
                        payable=row["payable"], business_confirmed=row["business_confirmed"], original_sha256=row["sha256"],
@@ -483,6 +546,8 @@ class OfficeDocuments:
         with self.p.portal_originals_operation_lock(), self.db() as db:
             who = {"actor": "system:chef-posteingang"} if intake else self.identity(admin=bool(session.get("admin")), db=db, lock=True)
             row = self._current(db, key, revision, {"entwurf", "zurueckgewiesen", "eingereicht"})
+            if row["klassifizierung_hinweis"].startswith(_BANK_CONFLICT_HINT) and not hint.startswith(_BANK_CONFLICT_HINT):
+                hint = (_BANK_CONFLICT_HINT + hint)[:1000]
             if intake:
                 if row["created_by"] != "system:chef-posteingang" or not row["source_ref_hash"]:
                     raise PermissionError("Kein eigener automatischer Eingang.")
@@ -505,7 +570,8 @@ class OfficeDocuments:
         copies. No HTTP route accepts extraction payloads or this capability.
         """
         labels = {"lieferant": "Absender", "belegnummer": "Belegnummer", "belegdatum": "Belegdatum",
-                  "faelligkeit": "Fälligkeit", "betrag_brutto": "Bruttobetrag", "typ": "Belegart", "kategorie": "Ordner"}
+                  "faelligkeit": "Fälligkeit", "betrag_brutto": "Bruttobetrag", "typ": "Belegart", "kategorie": "Ordner",
+                  "zahlungsempfaenger": "Zahlungsempfänger", "iban": "IBAN", "bic": "BIC", "verwendungszweck": "Verwendungszweck"}
         if not isinstance(fields, dict) or set(fields) - set(labels):
             raise ValueError("Nur vorgesehene Belegangaben aus der Analyse übernehmen.")
         if source not in ("local", "ai", "mixed"):
@@ -520,6 +586,10 @@ class OfficeDocuments:
                 elif name == "belegnummer": value = _text(value, 100, labels[name])
                 elif name in ("belegdatum", "faelligkeit"): value = _day(value, labels[name])
                 elif name == "betrag_brutto": value = _amount(value)
+                elif name == "zahlungsempfaenger": value = _text(value, 160, labels[name])
+                elif name == "iban": value = normalize_iban(value)
+                elif name == "bic": value = normalize_bic(value)
+                elif name == "verwendungszweck": value = _text(value, 300, labels[name])
                 elif name == "typ" and value not in set(KINDS) - {"zahlungsauftrag"}: raise ValueError()
                 elif name == "kategorie" and value not in CATEGORIES: raise ValueError()
                 if value not in (None, ""):
@@ -541,6 +611,16 @@ class OfficeDocuments:
                 raise RevisionConflict("Bereits eingereichte Angaben bleiben unverändert. Zur Korrektur zurückgeben.")
             if row["typ"] == "zahlungsauftrag":
                 raise ValueError("Zahlungsaufträge anhand ihrer Original-Zahlungsgrundlage manuell prüfen.")
+            bank_fields = {"zahlungsempfaenger", "iban", "bic"}
+            bank_conflict = (bool(row["iban"]) and values.get("iban") != row["iban"] or
+                             bool(row["bic"]) and values.get("bic") != row["bic"] or
+                             bool(row["zahlungsempfaenger"]) and
+                             " ".join(str(values.get("zahlungsempfaenger", "")).casefold().split()) !=
+                             " ".join(row["zahlungsempfaenger"].casefold().split()))
+            if bank_conflict and bank_fields.intersection(values):
+                for name in bank_fields:
+                    values.pop(name, None)
+                hint = (_BANK_CONFLICT_HINT + hint)[:1000]
             changes, filled = {}, []
             for name, value in values.items():
                 column = {"betrag_brutto": "betrag_cent", "typ": "typ_vorschlag", "kategorie": "kategorie_vorschlag"}.get(name, name)
@@ -697,11 +777,16 @@ class OfficeDocuments:
         return row
 
     def update(self, key, version, payload, *, admin=False):
-        fields = _fields(payload)
+        if not isinstance(payload, dict) or set(payload) - FIELDS:
+            raise ValueError("Nur die vorgesehenen Belegangaben bearbeiten.")
         with self.p.portal_originals_operation_lock(), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"entwurf", "zurueckgewiesen", "eingereicht"} if admin else {"entwurf", "zurueckgewiesen"})
             self._visibility(row, who, admin=admin)
+            combined = {name: row[name] for name in FIELDS if name != "betrag_brutto"}
+            combined["betrag_brutto"] = "" if row["betrag_cent"] is None else f"{row['betrag_cent'] // 100}.{row['betrag_cent'] % 100:02d}"
+            combined.update(payload)
+            fields = _fields(combined)
             dedup_key = _dedup_key(row["sha256"], fields)
             if db.execute("SELECT id FROM buero_belege WHERE dedup_key=? AND id<>?", (dedup_key, key)).fetchone():
                 raise ValueError("Dieser Beleg oder Zahlungsauftrag ist bereits vorhanden. Bestehenden Eintrag prüfen.")
@@ -741,7 +826,7 @@ class OfficeDocuments:
         self._backup()
 
     def decide(self, key, version, *, approve, note="", payment_release=False, business_confirmed=False, bereich="unklar", source_confirmed=False,
-               kind=None, category=None):
+               kind=None, category=None, transfer_fields=None):
         note = _text(note, 1000, "Chefnotiz", multiline=True)
         if not approve and not note:
             raise ValueError("Für die Rückgabe bitte den Korrekturgrund angeben.")
@@ -760,6 +845,23 @@ class OfficeDocuments:
                 if not approve or not isinstance(category, str) or category and category not in CATEGORIES:
                     raise ValueError("Gültigen Belegordner für die Chef-Freigabe auswählen.")
                 row["kategorie"] = category
+            transfer_changed = []
+            if approve and row["typ"] != "zahlungsauftrag" and row["zahlungsmodus"]:
+                # An explicitly chosen non-order classification retires only
+                # the rental mode; retain source bank metadata for the audit.
+                row["zahlungsmodus"] = ""
+                transfer_changed.append("zahlungsmodus")
+            if transfer_fields is not None:
+                if not approve or not isinstance(transfer_fields, dict) or set(transfer_fields) - set(TRANSFER_FIELDS):
+                    raise ValueError("Nur vorgesehene Überweisungsdaten bei der Chefprüfung übernehmen.")
+                combined = {name: row[name] for name in FIELDS if name != "betrag_brutto"}
+                combined["betrag_brutto"] = "" if row["betrag_cent"] is None else f"{row['betrag_cent'] // 100}.{row['betrag_cent'] % 100:02d}"
+                combined.update(transfer_fields)
+                checked = _fields(combined)
+                for name in TRANSFER_FIELDS:
+                    if row[name] != checked[name]:
+                        transfer_changed.append(name)
+                    row[name] = checked[name]
             classification_changed = (row["typ"], row["kategorie"]) != (old_kind, old_category)
             if approve:
                 if direct or classification_changed:
@@ -772,7 +874,7 @@ class OfficeDocuments:
             if approve and row["typ"] == "zahlungsauftrag":
                 _payment_order_ready(row)
                 if not payment_release or source_confirmed is not True:
-                    raise ValueError("Original-Zahlungsgrundlage, Betrag, Empfänger, Fälligkeit und Verwendungszweck ausdrücklich prüfen und die Zahlung freigeben.")
+                    raise ValueError("Original-Zahlungsgrundlage, Betrag, Empfänger, IBAN, Fälligkeit und Verwendungszweck ausdrücklich prüfen und die Zahlung freigeben.")
             payable = approve and (row["typ"] == "rechnung" or (row["typ"] in ("bescheid", "zahlungsauftrag") and payment_release))
             if payable and bereich == "geschaeftlich" and business_confirmed is not True:
                 raise ValueError("Die betriebliche Zuordnung vor der Zahlungsfreigabe ausdrücklich bestätigen.")
@@ -787,14 +889,15 @@ class OfficeDocuments:
             if approve and db.execute("SELECT id FROM buero_belege WHERE dedup_key=? AND id<>?", (dedup_key, key)).fetchone():
                 raise ValueError("Dieser Beleg oder Zahlungsauftrag besteht bereits. Bestehenden Eintrag prüfen.")
             state, now = ("freigegeben" if approve else "zurueckgewiesen"), _now()
-            changed = db.execute("""UPDATE buero_belege SET typ=?,kategorie=?,dedup_key=?,status=?,payable=?,business_confirmed=?,quelle_geprueft=?,bereich=?,decided_at=?,decided_by=?,decision_note=?,
+            changed = db.execute("""UPDATE buero_belege SET typ=?,kategorie=?,dedup_key=?,zahlungsempfaenger=?,iban=?,bic=?,verwendungszweck=?,faelligkeit=?,zahlungsmodus=?,status=?,payable=?,business_confirmed=?,quelle_geprueft=?,bereich=?,decided_at=?,decided_by=?,decision_note=?,
                 revision=revision+1,updated_at=? WHERE id=? AND revision=? AND status=?""",
-                (row["typ"], chosen_category, dedup_key, state, int(payable), int(payable and business_confirmed and chosen_area == "geschaeftlich"),
+                (row["typ"], chosen_category, dedup_key, *(row[name] for name in TRANSFER_FIELDS), state, int(payable), int(payable and business_confirmed and chosen_area == "geschaeftlich"),
                  int(payable and row["typ"] == "zahlungsauftrag" and source_confirmed), chosen_area, now, who["actor"], note, now, key, row["revision"], row["status"]))
             if changed.rowcount != 1:
                 raise RevisionConflict("Beleg wurde gleichzeitig entschieden. Bitte neu laden.")
             self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"],
-                        extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed})
+                        extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed,
+                               "transferdaten_geaendert": transfer_changed})
         self._backup()
 
     def payment(self, key, version, *, paid=False, paid_date="", reference=""):
@@ -812,6 +915,8 @@ class OfficeDocuments:
             if (not row["payable"] or not (row["business_confirmed"] or row["bereich"] == "privat") or row["typ"] not in ("rechnung", "bescheid", "zahlungsauftrag")
                     or (row["typ"] == "zahlungsauftrag" and not row["quelle_geprueft"])):
                 raise ValueError("Dieser Beleg hat keine Chef-Zahlungsfreigabe. Lieferscheine und sonstige Post sind nicht zahlbar.")
+            if row["typ"] == "zahlungsauftrag":
+                _payment_order_ready(row)
             state = "bezahlt" if paid else "zahlung_in_bearbeitung"
             changed = db.execute("""UPDATE buero_belege SET status=?,paid_date=?,payment_reference=?,revision=revision+1,updated_at=?
                 WHERE id=? AND revision=? AND status=? AND payable=1 AND (business_confirmed=1 OR bereich='privat')
@@ -891,6 +996,23 @@ def register_office_documents(p):
             if (status != "alle" and status not in STATES) or (category != "alle" and category not in CATEGORIES) or group not in ("alle", "ungeprueft", "freigegeben"):
                 raise ValueError("Gültigen Ordner und Arbeitsbereich auswählen.")
             selected = service.detail(key, admin=admin) if key else None
+            if selected and error and status_code == 400 and request.method == "POST":
+                # Retain the user's unsaved transfer entries for correction;
+                # the protected record/revision remains unchanged on failure.
+                for name in TRANSFER_FIELDS:
+                    if name in request.form:
+                        selected[name] = request.form[name][:300]
+                if request.form.get("typ") in KINDS:
+                    selected["typ"] = request.form["typ"]
+                    selected["typ_label"] = KINDS[selected["typ"]]
+                    selected["typ_vorschlag"] = ""
+                if request.form.get("kategorie") in CATEGORIES:
+                    selected["kategorie"] = request.form["kategorie"]
+                if request.form.get("bereich") in AREAS:
+                    selected["review_bereich"] = request.form["bereich"]
+                if selected["typ"] == "zahlungsauftrag":
+                    missing = _payment_order_missing(selected)
+                    selected["transfer_warning"] = "Es fehlen: " + ", ".join(missing) + "." if missing else ""
             listing = service.list(admin=admin, status=status, category=category, group=group)
             counts = service.counters(admin=admin)
         except PermissionError:
@@ -990,7 +1112,7 @@ def register_office_documents(p):
     @bp.post("/admin/buero/belege/<key>/bearbeiten")
     def update(key):
         csrf_and_fields(FIELDS | {"revision"})
-        return mutate(lambda: service.update(key, request.form.get("revision"), {k: request.form.get(k, "") for k in FIELDS}, admin=admin_route()), key)
+        return mutate(lambda: service.update(key, request.form.get("revision"), {k: request.form.get(k, "") for k in FIELDS if k in request.form}, admin=admin_route()), key)
 
     @bp.post("/werkstatt/buero/belege/<key>/einreichen")
     @bp.post("/admin/buero/belege/<key>/einreichen")
@@ -1023,7 +1145,7 @@ def register_office_documents(p):
 
     @bp.post("/admin/buero/belege/<key>/freigeben")
     def approve(key):
-        csrf_and_fields({"revision", "chef_notiz", "zahlungspflichtig", "confirmed", "bereich", "typ", "kategorie"})
+        csrf_and_fields({"revision", "chef_notiz", "zahlungspflichtig", "confirmed", "bereich", "typ", "kategorie"} | set(TRANSFER_FIELDS))
         if request.form.get("confirmed") != "ja" or request.form.get("zahlungspflichtig", "") not in ("", "ja"):
             abort(400)
         def approve_and_transfer():
@@ -1031,7 +1153,8 @@ def register_office_documents(p):
                            note=request.form.get("chef_notiz", ""), payment_release=request.form.get("zahlungspflichtig") == "ja",
                            business_confirmed=request.form.get("confirmed") == "ja", bereich=request.form.get("bereich", "unklar"),
                            source_confirmed=request.form.get("zahlungspflichtig") == "ja" and request.form.get("confirmed") == "ja",
-                           kind=request.form.get("typ"), category=request.form.get("kategorie"))
+                           kind=request.form.get("typ"), category=request.form.get("kategorie"),
+                           transfer_fields={name: request.form[name] for name in TRANSFER_FIELDS if name in request.form})
             approved = service.detail(key, admin=True)
             if (approved["bereich"] == "geschaeftlich" and approved["business_confirmed"] and approved["payable"]
                     and approved["typ"] in ("rechnung", "bescheid")):

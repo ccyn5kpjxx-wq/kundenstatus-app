@@ -75,8 +75,14 @@ Das Öffnen eines Belegs entfernt nur dessen Neu-Markierung für diese Person.
 Es erteilt keine Freigabe und bestätigt keine Zahlung.
 
 Miete und Kaution sind eigene Zahlungsaufträge auf Basis einer geprüften
-Originalunterlage. Betrag, Zahlungsempfänger, Fälligkeit und Verwendungszweck
-sind erforderlich. Dieselbe Mietunterlage darf beide unterschiedlichen Aufträge
+Originalunterlage. Betrag, Zahlungsempfänger, gültige IBAN, Fälligkeit und
+Verwendungszweck sind erforderlich. Fehlende Angaben werden konkret benannt.
+BIC bleibt optional und wird ausschließlich aus einer belegten Quelle übernommen;
+es gibt keine Ableitung aus der IBAN. Die Chefansicht kann Überweisungsdaten und
+Freigabe atomar mit derselben Revision speichern. Leere Rechnungsnummer und
+Belegdatum sind bei Zahlungsaufträgen keine offenen Pflichtangaben.
+IBAN/BIC werden auch bei Rechnungen und Bescheiden geschützt angezeigt und
+bearbeitet; für deren bestehende Lexware-Übergabe bleiben sie optional. Dieselbe Mietunterlage darf beide unterschiedlichen Aufträge
 belegen. Eine monatliche Mietvorlage erzeugt keine automatischen Folgezahlungen.
 Private Belege und Kautionen werden nicht automatisch als GmbH-Rechnung gebucht.
 

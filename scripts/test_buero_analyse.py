@@ -13,7 +13,7 @@ from werkzeug.datastructures import FileStorage
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/"scripts"))
 from test_buero_belege import Portal, pdf_bytes
-from werkstatt_buero_analyse import AI_FIELDS_SCHEMA, FIELDS, analyse_document
+from werkstatt_buero_analyse import AI_FIELDS_SCHEMA, FIELDS, PAYMENT_FIELDS, analyse_document
 from werkstatt_buero_lexware import register_office_lexware
 from werkstatt_buero_belege import RevisionConflict
 
@@ -36,6 +36,17 @@ def answer(**values):
         value,evidence,*confidence=item
         fields[name]={"value":value,"evidence":evidence,"confidence":confidence[0] if confidence else "hoch"}
     return {"data":{"fields":fields,"warnings":[]},"visual_evidence":False}
+
+
+def synthetic_iban(account=0):
+    # Reserved-looking all-zero bank code, generated checksum, no real account.
+    bban=f"{account:018d}"
+    return "DE"+f"{98-int(bban+'131400')%97:02d}"+bban
+
+
+def payment_source(account=0):
+    return ("Kontoinhaber: Synthetische Transfer GmbH\nIBAN: "+synthetic_iban(account)+
+            "\nBIC: ZZZZDE00\nVerwendungszweck: TEST-RE-2026-001")
 
 
 class PureAnalysisTests(unittest.TestCase):
@@ -97,8 +108,8 @@ class PureAnalysisTests(unittest.TestCase):
         def failed(**kwargs):raise RuntimeError("secret-value-that-must-not-appear")
         value=analyse_document(INVOICE,ai_enabled=True,ai_hook=failed)
         self.assertEqual(value["source"],"local");self.assertNotIn("secret-value",str(value))
-    def test_unknown_bank_fields_and_malformed_shapes_are_rejected(self):
-        invalid=answer();invalid["data"]["fields"]["iban"]={"value":"DE00","evidence":"DE00","confidence":"hoch"}
+    def test_unknown_fields_and_malformed_shapes_are_rejected(self):
+        invalid=answer();invalid["data"]["fields"]["bank_token"]={"value":"not-permitted","evidence":"not-permitted","confidence":"hoch"}
         for response in (invalid,{"data":{"fields":[],"warnings":[]}},{"data":answer()["data"],"visual_evidence":"true","extra":"unsafe"}):
             result=analyse_document(INVOICE,ai_enabled=True,ai_hook=lambda **k:response)
             self.assertEqual(result["analysis_status"],"local_ai_failed")
@@ -220,6 +231,105 @@ class PureAnalysisTests(unittest.TestCase):
         response=answer(betrag_brutto=("100.00","Gesamtbetrag netto: 100,00 EUR"))
         self.assertNotIn("betrag_brutto",analyse_document("Gesamtbetrag netto: 100,00 EUR",ai_enabled=True,ai_hook=lambda **k:response)["fields"])
 
+    def test_payment_fields_need_explicit_labels_and_normalize_only_valid_bank_values(self):
+        iban=synthetic_iban()
+        spaced=" ".join(iban[i:i+4] for i in range(0,len(iban),4)).lower()
+        result=analyse_document("Rechnung\nKontoinhaber: Synthetische Transfer GmbH\nIBAN: "+spaced+
+                                " BIC: zzzzde00\nVerwendungszweck: TEST-RE-2026-001")
+        self.assertEqual({k:result["fields"][k] for k in PAYMENT_FIELDS},
+            dict(zahlungsempfaenger="Synthetische Transfer GmbH",iban=iban,bic="ZZZZDE00",verwendungszweck="TEST-RE-2026-001"))
+        self.assertTrue(all(result["field_sources"][k]["evidence"] for k in PAYMENT_FIELDS))
+        self.assertFalse(result["identity_verified"])
+
+    def test_payment_recipient_and_reference_are_never_inferred_from_invoice_fields(self):
+        result=analyse_document("Lieferant: Synthetische Rechnung GmbH\nRechnungsempfänger: Andere GmbH\n"
+                                "Empfänger: Andere GmbH\nRechnungsnummer: TEST-001\nIBAN: "+synthetic_iban())
+        self.assertNotIn("zahlungsempfaenger",result["fields"])
+        self.assertNotIn("verwendungszweck",result["fields"])
+        self.assertNotIn("bic",result["fields"])
+        wrong=synthetic_iban()[:-1]+"1"
+        invalid=analyse_document("IBAN: "+wrong+"\nBIC: INVALID\nKontoinhaber: Synthetische Transfer GmbH")
+        self.assertNotIn("iban",invalid["fields"]);self.assertNotIn("bic",invalid["fields"])
+
+    def test_labelled_next_line_recipient_and_full_reference_are_preserved(self):
+        purpose="TEST-"+"X"*295
+        result=analyse_document("Zahlungsempfänger:\nSynthetische Transfer GmbH\nVerwendungszweck:\n"+purpose)
+        self.assertEqual(result["fields"]["zahlungsempfaenger"],"Synthetische Transfer GmbH")
+        self.assertEqual(result["fields"]["verwendungszweck"],purpose)
+        self.assertNotIn("verwendungszweck",analyse_document("Verwendungszweck: "+purpose+"X")["fields"])
+        literal="TEST-001 / Projekt-A;"
+        self.assertEqual(analyse_document("Verwendungszweck: "+literal)["fields"]["verwendungszweck"],literal)
+
+    def test_multiple_bank_connections_or_owners_remain_empty_even_with_visual_ai_selection(self):
+        cases=[payment_source()+"\nIBAN: "+synthetic_iban(1),
+               payment_source()+"\n"+synthetic_iban(1),
+               payment_source()+"\nIBAN: invalid-second-account",
+               payment_source()+"\nBIC: YYYYDE00",
+               payment_source()+"\nKontoinhaber: Andere synthetische GmbH"]
+        for text in cases:
+            reply=answer(iban=(synthetic_iban(),"IBAN: "+synthetic_iban()),
+                         zahlungsempfaenger=("Synthetische Transfer GmbH","Kontoinhaber: Synthetische Transfer GmbH"))
+            reply["visual_evidence"]=True
+            result=analyse_document(text,ai_enabled=True,ai_hook=lambda **k:reply)
+            self.assertFalse(set(PAYMENT_FIELDS)&result["fields"].keys())
+            self.assertTrue(set(PAYMENT_FIELDS)<=set(result["ambiguous_fields"]))
+        repeated=analyse_document(payment_source()+"\nIBAN: "+synthetic_iban())
+        self.assertEqual(repeated["fields"]["iban"],synthetic_iban())
+
+    def test_direct_debit_is_not_reinterpreted_and_invoice_classification_stays_unchanged(self):
+        for context in ("Zahlung per SEPA-Lastschrift", "SEPA-Mandat", "Mandatsreferenz: TEST-1", "Betrag wird abgebucht"):
+            text="Rechnung\n"+payment_source()+"\n"+context
+            reply=answer(iban=(synthetic_iban(),"IBAN: "+synthetic_iban()))
+            result=analyse_document(text,ai_enabled=True,ai_hook=lambda **k:reply)
+            self.assertFalse(set(PAYMENT_FIELDS)&result["fields"].keys())
+            self.assertEqual(result["suggested_kind"],"rechnung")
+            self.assertFalse(result["blocked_auto"])
+
+    def test_visual_ai_payment_fields_require_their_own_labelled_source_quotes(self):
+        reply=answer(zahlungsempfaenger=("Synthetische Transfer GmbH","Kontoinhaber: Synthetische Transfer GmbH"),
+                     iban=(synthetic_iban(),"IBAN: "+synthetic_iban()),bic=("ZZZZDE00","BIC: ZZZZDE00"),
+                     verwendungszweck=("TEST-RE-2026-001","Verwendungszweck: TEST-RE-2026-001"))
+        reply["visual_evidence"]=True
+        result=analyse_document("",ai_enabled=True,ai_hook=lambda **k:reply)
+        self.assertEqual(set(result["fields"]),set(PAYMENT_FIELDS))
+        self.assertTrue(all(result["field_sources"][name]["source"]=="ai_visual" for name in PAYMENT_FIELDS))
+        for name,item in reply["data"]["fields"].items():
+            if name in PAYMENT_FIELDS:item["evidence"]=item["value"]
+        rejected=analyse_document("",ai_enabled=True,ai_hook=lambda **k:reply)
+        self.assertFalse(set(PAYMENT_FIELDS)&rejected["fields"].keys())
+
+    def test_ai_cannot_replace_payment_recipient_or_invent_bic_from_supplier_or_iban(self):
+        reply=answer(zahlungsempfaenger=("Synthetische Transfer GmbH","Lieferant: Synthetische Transfer GmbH"),
+                     bic=("ZZZZDE00","IBAN: "+synthetic_iban()),
+                     verwendungszweck=("TEST-001","Rechnungsnummer: TEST-001"))
+        reply["visual_evidence"]=True
+        result=analyse_document("",ai_enabled=True,ai_hook=lambda **k:reply)
+        self.assertFalse(set(PAYMENT_FIELDS)&result["fields"].keys())
+
+    def test_ai_bank_uncertainty_or_mandate_evidence_blocks_payment_proposals(self):
+        for warnings,evidence in ((["Mehrere Bankverbindungen sind nicht eindeutig zugeordnet."],"IBAN: "+synthetic_iban()),
+                                  ([],"IBAN: "+synthetic_iban()+"\nIBAN: "+synthetic_iban(1)),
+                                  ([],"SEPA-Mandat\nIBAN: "+synthetic_iban())):
+            reply=answer(iban=(synthetic_iban(),evidence));reply["visual_evidence"]=True
+            reply["data"]["warnings"]=warnings
+            result=analyse_document(payment_source(),ai_enabled=True,ai_hook=lambda **k:reply)
+            self.assertFalse(set(PAYMENT_FIELDS)&result["fields"].keys())
+
+    def test_two_different_payment_references_are_not_partially_selected(self):
+        result=analyse_document(payment_source()+"\nVerwendungszweck: TEST-SECOND")
+        self.assertNotIn("verwendungszweck",result["fields"])
+        self.assertEqual(result["fields"]["iban"],synthetic_iban())
+
+    def test_ai_cannot_reinsert_a_truncated_prefix_of_an_overlong_source_reference(self):
+        prefix="TEST-"+"X"*295
+        text="Verwendungszweck: "+prefix+"-MORE"
+        reply=answer(verwendungszweck=(prefix,"Verwendungszweck: "+prefix))
+        for visual in (False,True):
+            reply["visual_evidence"]=visual
+            result=analyse_document(text,ai_enabled=True,ai_hook=lambda **k:reply)
+            self.assertNotIn("verwendungszweck",result["fields"])
+            self.assertIn("verwendungszweck",result["ambiguous_fields"])
+
 
 class AnalysisIntegrationTests(unittest.TestCase):
     def setUp(self):
@@ -298,6 +408,20 @@ class AnalysisIntegrationTests(unittest.TestCase):
         self.assertEqual(detail["belegnummer"],"RE-2026-4711")
         self.assertEqual((detail["status"],detail["payable"],detail["business_confirmed"]),("eingereicht",0,0))
         self.assertEqual(result["source"],"local")
+
+    def test_payment_suggestions_fill_only_empty_draft_fields_without_approving_or_changing_original(self):
+        checked="MANUELL-GEPRUEFTER-TESTZWECK"
+        key=self.create(verwendungszweck=checked)
+        before=self.detail(key)
+        self.p.extract_document_text_local.return_value="Rechnung\n"+payment_source()
+        self.service.analyse_scan(key)
+        after=self.detail(key)
+        self.assertEqual(after["iban"],synthetic_iban())
+        self.assertEqual(after["bic"],"ZZZZDE00")
+        self.assertEqual(after["zahlungsempfaenger"],"Synthetische Transfer GmbH")
+        self.assertEqual(after["verwendungszweck"],checked)
+        self.assertEqual(after["sha256"],before["sha256"])
+        self.assertEqual((after["status"],after["payable"],after["business_confirmed"]),("entwurf",0,0))
 
 
 if __name__=="__main__":unittest.main()

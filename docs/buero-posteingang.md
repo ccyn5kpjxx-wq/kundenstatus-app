@@ -141,7 +141,10 @@ keinen weiteren KI-Provider, keine neuen Zugangsdaten und keinen eigenen
 KI-Transport ein.
 
 Belegte Lieferanten-/Absenderangaben, Belegnummer, Belegdatum, Fälligkeit und
-Bruttogesamtbetrag können leere Felder eigener Intakebelege vorbelegen. Belegart
+Bruttogesamtbetrag sowie ausdrücklich belegte Zahlungsempfänger, IBAN, BIC und
+Verwendungszweck können leere Felder eigener Intakebelege vorbelegen. Bankdaten
+werden lokal auf Format/Prüfziffer geprüft, nie ergänzt oder aus anderen Werten
+abgeleitet. Bestehende manuelle Kontoverbindungen bleiben zusammenhängend erhalten. Belegart
 und Ordner bleiben Vorschläge, unsichere Angaben bleiben offen. Die Quellen-
 und Prüfhinweise werden mitgespeichert; der Rückgabewert ist niemals eine
 verifizierte Belegidentität. Extraktion ersetzt deshalb weder einen vollständigen
