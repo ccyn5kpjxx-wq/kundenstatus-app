@@ -1,18 +1,140 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lohnläufe · Büro</title><link rel="stylesheet" href="{{ url_for('static', filename='buero_lohn.css') }}"></head>
-<body>{% include 'buero_nav.html' ignore missing %}<main class="payroll"><header><p class="eyebrow">{{ 'Werkstattleitung' if admin_view else 'Büro · freigegebene Zahlungsaufgaben' }}</p><h1>Monatliche Lohnläufe</h1><p>Lohnauswertungen prüfen, Zahlungsaufgaben dokumentieren und einzelne Lohnzettel persönlich bereitstellen.</p></header>
-{% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
-{% macro hidden(action,key='',version='') %}<input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ action }}"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="version" value="{{ version }}">{% endmacro %}
-{% if admin_view %}<section class="panel"><h2>Neue Monatsauswertung</h2><form method="post" enctype="multipart/form-data" class="form-grid">{{ hidden('create') }}<label>Abrechnungsmonat<input type="month" name="period" required></label><label>Quelle / Ansprechpartner<input name="source_label" value="Katharina Seber" maxlength="160"></label><label class="full">Original-Auswertung als PDF<input type="file" name="original" accept="application/pdf" required></label><label class="full">Prüfnotiz<textarea name="note" maxlength="2000" rows="2"></textarea></label><button>Zur Chefprüfung erfassen</button></form><p class="muted">Die Quellenbezeichnung bestätigt keine E-Mail-Adresse. Es wird kein Lohn berechnet und keine Zahlung ausgelöst.</p></section>{% endif %}
-{% for run in data.runs %}<section class="panel"><header class="run-head"><div><p class="eyebrow">{{ run.quellenlabel }}</p><h2>{{ run.periode }}</h2></div><strong class="status">{{ states[run.status] }}</strong></header>
-<a class="button secondary" href="{{ url_for('office_payroll.admin_original' if admin_view else 'office_payroll.office_original',key=run.id) }}">Original-Auswertung öffnen</a>
-{% if run.notiz %}<p class="pre-line">{{ run.notiz }}</p>{% endif %}
-{% if admin_view and run.status == 'zur_pruefung' %}<form method="post" class="stack">{{ hidden('note',run.id,run.version) }}<label>Prüfnotiz bearbeiten<textarea name="note" rows="2" maxlength="2000">{{ run.notiz }}</textarea></label><button class="secondary">Notiz speichern</button></form>
-<form method="post" class="approval">{{ hidden('approve',run.id,run.version) }}<label class="check"><input type="checkbox" name="confirmed" value="1" required> Monat und Original-Auswertung sind geprüft. Ich gebe die Zahlungsaufgabe für den berechtigten Bürozugang frei.</label><button>Lohnlauf freigeben</button></form>{% endif %}
-{% if run.status in ('freigegeben','zahlung_in_bearbeitung') %}<form method="post" class="stack">{{ hidden('payment',run.id,run.version) }}<h3>{{ 'Überweisung vorbereiten' if run.status == 'freigegeben' else 'Extern ausgeführte Zahlung dokumentieren' }}</h3><input type="hidden" name="target" value="{{ 'zahlung_in_bearbeitung' if run.status == 'freigegeben' else 'dokumentiert' }}">
-{% if run.status == 'zahlung_in_bearbeitung' %}<label>Ausführungsdatum<input type="date" name="paid_date" required></label><label>Zahlungsnachweis / Referenz<input name="reference" maxlength="200" required></label>{% endif %}
-<label class="check"><input type="checkbox" name="confirmed" value="1" required> {{ 'Ich übernehme die freigegebene Zahlungsaufgabe zur externen Bearbeitung.' if run.status == 'freigegeben' else 'Die Überweisung wurde außerhalb dieses Portals ausgeführt; Datum und Nachweis sind geprüft.' }}</label><button>{{ 'In Bearbeitung nehmen' if run.status == 'freigegeben' else 'Zahlung dokumentieren' }}</button><p class="muted">Diese Aktion bedient keine Bank und führt keine Überweisung aus.</p></form>{% elif run.status == 'dokumentiert' %}<p>Zahlung dokumentiert am {{ run.paid_date }} · {{ run.payment_reference }}</p>{% endif %}
-{% if admin_view %}<details class="single-panel" open><summary>Einzellohnzettel für persönliche Mitarbeiterkonten</summary><p>Jede PDF einzeln öffnen und die stabile Mitarbeiter-ID sowie den Monat prüfen. Die Gesamtauswertung wird nicht auf Mitarbeiterkonten verteilt.</p>
-<form method="post" enctype="multipart/form-data" class="stack">{{ hidden('add',run.id,run.version) }}<label>Einzel-PDF<input type="file" name="original" accept="application/pdf" required></label><label class="check"><input type="checkbox" name="confirmed" value="1" required> Dieses PDF betrifft ausschließlich einen Mitarbeiter und ist keine Gesamtauswertung.</label><button>Einzelbeleg zur Zuordnung aufnehmen</button></form>
-{% for item in run['items'] %}<article class="payslip"><h3>{{ item.filename }}</h3><a href="{{ url_for('office_payroll.single_original',key=run.id,item=item.id) }}">Einzeloriginal prüfen</a>
-{% if item.publikation == 'vorbereitet' %}<form method="post" class="stack">{{ hidden('assign',run.id,item.version) }}<input type="hidden" name="item" value="{{ item.id }}"><label>Mitarbeiter<select name="employee_id" required><option value="">Bewusst auswählen</option>{% for employee in data.employees %}<option value="{{ employee.id }}" {% if employee.id == item.mitarbeiter_id %}selected{% endif %}>{{ employee.name }} · ID {{ employee.id }}</option>{% endfor %}</select></label><label class="check"><input type="checkbox" name="confirmed" value="1" required> Mitarbeiter und Abrechnungsmonat {{ run.periode }} am Einzeloriginal geprüft.</label><button class="secondary">Zuordnung speichern</button></form>{% endif %}
-{% if item.portal_lohnzettel_id %}<p class="notice">Im persönlichen Konto von Mitarbeiter-ID {{ item.mitarbeiter_id }} bereitgestellt.</p>{% elif item.zuordnung_bestaetigt and run.status != 'zur_pruefung' %}<form method="post" class="approval">{{ hidden('publish',run.id,item.version) }}<input type="hidden" name="item" value="{{ item.id }}"><p>Geprüfte Zuordnung: Mitarbeiter-ID {{ item.mitarbeiter_id }} · {{ run.periode }}</p><label class="check"><input type="checkbox" name="confirmed" value="1" required> Ich gebe genau diesen Einzelbeleg für dieses persönliche Mitarbeiterkonto frei.</label><button>{{ 'Bereitstellung fortsetzen' if item.publikation == 'in_bereitstellung' else 'Persönlich bereitstellen' }}</button></form>{% else %}<p class="muted">Vor Bereitstellung sind Chef-Freigabe und geprüfte Zuordnung erforderlich.</p>{% endif %}</article>{% else %}<p>Noch keine Einzellohnzettel aufgenommen.</p>{% endfor %}</details>{% endif %}</section>{% else %}<section class="panel"><p>{{ 'Noch keine Monatsauswertung erfasst.' if admin_view else 'Noch keine freigegebene Lohn-Zahlungsaufgabe vorhanden.' }}</p></section>{% endfor %}</main></body></html>
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{{ 'Löhne freigeben' if admin_view else 'Löhne überweisen' }} · Büro</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='buero_lohn.css') }}">
+</head>
+<body class="buero-page">
+{% from 'buero_icons.html' import icon %}
+{% include 'buero_nav.html' ignore missing %}
+{% set months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'] %}
+{% set labels = {'zur_pruefung':'Bitte freigeben','freigegeben':'Zur Überweisung','zahlung_in_bearbeitung':'In Bearbeitung','dokumentiert':'Erledigt'} %}
+{% macro month(period) %}{{ months[(period[5:7]|int)-1] }} {{ period[:4] }}{% endmacro %}
+{% macro hidden(action,key='',version='') %}
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="action" value="{{ action }}"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="version" value="{{ version }}">
+{% endmacro %}
+{% macro employee_name(employee_id) %}
+  {% set names = data.employees|selectattr('id','equalto',employee_id)|map(attribute='name')|list %}
+  {{ names[0] if names else 'Mitarbeiter' }} · Nr. {{ employee_id }}
+{% endmacro %}
+{% macro run_card(run) %}
+<section class="panel run-card">
+  <header class="run-head"><div><h2>{{ month(run.periode) }}</h2><p class="muted source">{{ run.quellenlabel }}</p></div><span class="status status-{{ run.status }}">{{ labels[run.status] }}</span></header>
+  <a class="button secondary pdf-link" href="{{ url_for('office_payroll.admin_original' if admin_view else 'office_payroll.office_original',key=run.id) }}">{{ icon('receipt') }} PDF ansehen</a>
+
+  {% if admin_view and run.status == 'zur_pruefung' %}
+  <form method="post" class="approval">
+    {{ hidden('approve',run.id,run.version) }}
+    <label class="check"><input type="checkbox" name="confirmed" value="1" required> Ich habe den Monat und die Original-Auswertung geprüft.</label>
+    <button>Löhne für das Büro freigeben</button>
+  </form>
+  {% endif %}
+
+  {% if run.status in ('freigegeben','zahlung_in_bearbeitung') %}
+  <form method="post" class="payment-form stack">
+    {{ hidden('payment',run.id,run.version) }}
+    <input type="hidden" name="target" value="{{ 'zahlung_in_bearbeitung' if run.status == 'freigegeben' else 'dokumentiert' }}">
+    {% if run.status == 'freigegeben' %}
+      <label class="check"><input type="checkbox" name="confirmed" value="1" required> Ich kümmere mich um diese Überweisungen.</label>
+      <button>Überweisung bearbeiten</button>
+    {% else %}
+      <h3>Zahlung merken</h3>
+      <div class="form-grid"><label>Wann überwiesen?<input type="date" name="paid_date" required></label><label>Zahlungsnachweis / Referenz<input name="reference" maxlength="200" required></label></div>
+      <label class="check"><input type="checkbox" name="confirmed" value="1" required> Die Überweisung ist erledigt. Datum und Zahlungsnachweis sind geprüft.</label>
+      <button>Zahlung als erledigt merken</button>
+    {% endif %}
+    <p class="muted payment-hint">Überweisen bitte in Lexware oder bei der Bank. Hier wird die Zahlung nur festgehalten.</p>
+  </form>
+  {% elif run.status == 'dokumentiert' %}
+    <p class="paid-note">Zahlung am {{ run.paid_date[8:10] }}.{{ run.paid_date[5:7] }}.{{ run.paid_date[:4] }} festgehalten · {{ run.payment_reference }}</p>
+  {% endif %}
+
+  {% if admin_view and run.status == 'zur_pruefung' or run.notiz %}
+  <details class="extra-panel"><summary>Notiz{% if run.notiz %} vorhanden{% endif %}</summary>
+    {% if admin_view and run.status == 'zur_pruefung' %}
+    <form method="post" class="stack">{{ hidden('note',run.id,run.version) }}<label>Notiz<textarea name="note" rows="2" maxlength="2000">{{ run.notiz }}</textarea></label><button class="secondary">Notiz speichern</button></form>
+    {% else %}<p class="pre-line">{{ run.notiz }}</p>{% endif %}
+  </details>
+  {% endif %}
+
+  {% if admin_view %}
+  <details class="extra-panel single-panel">
+    <summary>{{ icon('users') }} Lohnzettel für Mitarbeiter{% if run['items'] %}<span class="item-count">{{ run['items']|length }}</span>{% endif %}</summary>
+    <p class="muted">Jeden Lohnzettel einzeln ansehen und den richtigen Mitarbeiter sowie den Monat prüfen. Die Gesamtauswertung bleibt im Chefbereich und im berechtigten Büro.</p>
+    <details class="upload-single"><summary>Lohnzettel hinzufügen</summary>
+      <form method="post" enctype="multipart/form-data" class="stack">
+        {{ hidden('add',run.id,run.version) }}
+        <label>Lohnzettel als PDF<input type="file" name="original" accept="application/pdf" required></label>
+        <label class="check"><input type="checkbox" name="confirmed" value="1" required> Dieses PDF gehört nur zu einem Mitarbeiter und ist keine Gesamtauswertung.</label>
+        <button class="secondary">Lohnzettel hinzufügen</button>
+      </form>
+    </details>
+    {% for item in run['items'] %}
+    <article class="payslip">
+      <h3>{{ item.filename }}</h3>
+      <a href="{{ url_for('office_payroll.single_original',key=run.id,item=item.id) }}">PDF ansehen</a>
+      {% if item.publikation == 'vorbereitet' %}
+      <form method="post" class="stack">
+        {{ hidden('assign',run.id,item.version) }}<input type="hidden" name="item" value="{{ item.id }}">
+        <label>Für welchen Mitarbeiter?<select name="employee_id" required><option value="">Mitarbeiter auswählen</option>{% for employee in data.employees %}<option value="{{ employee.id }}" {% if employee.id == item.mitarbeiter_id %}selected{% endif %}>{{ employee.name }} · Nr. {{ employee.id }}</option>{% endfor %}</select></label>
+        <p class="muted field-hint">Bei gleichen Namen auch die Nummer abgleichen.</p>
+        <label class="check"><input type="checkbox" name="confirmed" value="1" required> Mitarbeiter und Abrechnungsmonat {{ month(run.periode) }} am Original geprüft.</label>
+        <button class="secondary">Mitarbeiter zuordnen</button>
+      </form>
+      {% endif %}
+      {% if item.portal_lohnzettel_id %}
+        <p class="notice">Für {{ employee_name(item.mitarbeiter_id) }} im persönlichen Konto zum Herunterladen bereit.</p>
+      {% elif item.zuordnung_bestaetigt and run.status != 'zur_pruefung' %}
+      <form method="post" class="approval">
+        {{ hidden('publish',run.id,item.version) }}<input type="hidden" name="item" value="{{ item.id }}">
+        <p>Für {{ employee_name(item.mitarbeiter_id) }} · {{ month(run.periode) }}</p>
+        <label class="check"><input type="checkbox" name="confirmed" value="1" required> Ich gebe diesen Lohnzettel für genau diesen Mitarbeiter frei.</label>
+        <button>{{ 'Bereitstellung fortsetzen' if item.publikation == 'in_bereitstellung' else 'Im Mitarbeiterkonto bereitstellen' }}</button>
+      </form>
+      {% else %}<p class="muted">Zuerst den Monat freigeben und den Mitarbeiter am Original prüfen.</p>{% endif %}
+    </article>
+    {% else %}<p class="muted">Noch keine Lohnzettel hinzugefügt.</p>{% endfor %}
+  </details>
+  {% endif %}
+</section>
+{% endmacro %}
+
+<main class="payroll">
+  <header class="page-heading"><p class="eyebrow">{{ 'CHEFBEREICH' if admin_view else 'BÜRO' }}</p><h1>{{ 'Löhne freigeben' if admin_view else 'Löhne überweisen' }}</h1><p>{{ 'Auswertung ansehen und den Monat für das Büro freigeben.' if admin_view else 'Freigegebene Löhne überweisen und die Zahlung hier festhalten.' }}</p></header>
+  {% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+  {% if admin_view %}
+    {% set current = data.runs|selectattr('status','equalto','zur_pruefung')|list %}
+    {% set history = data.runs|rejectattr('status','equalto','zur_pruefung')|list %}
+  {% else %}
+    {% set current = data.runs|rejectattr('status','equalto','dokumentiert')|list %}
+    {% set history = data.runs|selectattr('status','equalto','dokumentiert')|list %}
+    <ol class="payment-steps" aria-label="So geht es"><li>PDF ansehen</li><li>Überweisung bearbeiten</li><li>Zahlung merken</li></ol>
+  {% endif %}
+
+  <div class="section-heading"><h2>{{ 'Offene Freigaben' if admin_view else 'Noch zu erledigen' }}</h2><span class="item-count">{{ current|length }}</span></div>
+  {% for run in current %}{{ run_card(run) }}{% else %}<section class="panel empty-state"><span class="empty-icon">{{ icon('wallet') }}</span><p>{{ 'Alles geprüft. Aktuell ist kein Monat zur Freigabe offen.' if admin_view else 'Aktuell ist keine Lohnüberweisung offen.' }}</p></section>{% endfor %}
+
+  {% if admin_view %}
+  <details class="panel new-run">
+    <summary>{{ icon('plus') }} Neue Auswertung hochladen</summary>
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+      {{ hidden('create') }}
+      <label>Für welchen Monat?<input type="month" name="period" required></label>
+      <label>Von wem?<input name="source_label" value="Katharina Seber" maxlength="160"></label>
+      <label class="full">Original-Auswertung als PDF<input type="file" name="original" accept="application/pdf" required></label>
+      <details class="full upload-note"><summary>Notiz ergänzen</summary><label class="stack">Notiz<textarea name="note" maxlength="2000" rows="2"></textarea></label></details>
+      <button>Zur Freigabe hinzufügen</button>
+    </form>
+  </details>
+  {% endif %}
+
+  {% if history %}
+  <details class="history">
+    <summary>{{ 'Freigegebene Monate' if admin_view else 'Erledigte Monate' }} <span class="item-count">{{ history|length }}</span></summary>
+    {% for run in history %}{{ run_card(run) }}{% endfor %}
+  </details>
+  {% endif %}
+</main>
+</body></html>

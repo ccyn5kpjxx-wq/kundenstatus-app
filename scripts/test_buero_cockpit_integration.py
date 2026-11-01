@@ -594,7 +594,7 @@ class OfficeCockpitIntegration(unittest.TestCase):
         # its actual blank optional controls and both injected CSRF copies.
         self.assertTrue(all(not value for name, value in form['data'].items(multi=True) if name != 'csrf_token'))
         html = initial.get_data(as_text=True)
-        self.assertLess(html.index('>Beleg analysieren</button>'), html.index('<summary>Manuell erfassen</summary>'))
+        self.assertLess(html.index('>Hochladen &amp; analysieren</button>'), html.index('<summary>Selbst Angaben eintragen</summary>'))
         local_text = '\n'.join([
             'Rechnung', 'Lieferant: Musterlieferant Integration GmbH',
             'Rechnungsnummer: AUTO-HTML-2026-001', 'Rechnungsdatum: 01.11.2026',
@@ -790,7 +790,7 @@ class OfficeCockpitIntegration(unittest.TestCase):
         self.assertIn('Deine Freigabe', html)
         self.assertNotIn('Zur Cheffreigabe einreichen', html)
         self.assertNotIn('action="' + chief_path + '/einreichen"', html)
-        self.assertIn('Rechnung zur Zahlung freigeben', html)
+        self.assertIn('data-review-button>Zahlung freigeben</button>', html)
         form = self.rendered_form(chief, form_action=chief_path + '/freigeben')
         self.assertEqual((form['data']['typ'], form['data']['kategorie']), ('rechnung', 'rechnung'))
         # The office keeps its own submission form and cannot approve as chief.

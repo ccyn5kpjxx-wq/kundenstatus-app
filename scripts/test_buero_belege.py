@@ -294,7 +294,7 @@ class OfficeDocumentTests(unittest.TestCase):
     def test_file_first_upload_analysis_and_short_confirmed_review(self):
         initial = self.office.get("/werkstatt/buero/belege").get_data(as_text=True)
         self.assertIn('<details class="bb-manual">', initial)
-        self.assertLess(initial.index('>Beleg analysieren</button>'), initial.index('<summary>Manuell erfassen</summary>'))
+        self.assertLess(initial.index('>Hochladen &amp; analysieren</button>'), initial.index('<summary>Selbst Angaben eintragen</summary>'))
         self.assertEqual(initial.count(" required"), 1)
         raw = pdf_bytes("file-first-analysis")
 

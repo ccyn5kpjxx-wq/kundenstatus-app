@@ -17,12 +17,11 @@ document.querySelectorAll('.bb-chef-review').forEach((form) => {
     payment.required = kind.value === 'zahlungsauftrag';
     if (!specialPayment) payment.checked = false;
     const payingNotice = kind.value === 'bescheid' && payment.checked;
-    confirmation.textContent = kind.value === 'rechnung' || payingNotice
-      ? 'Original, Belegart, Betrag und Zuordnung geprüft. Zahlung durch das Büro freigeben.'
-      : 'Original, Belegart, Angaben und Zuordnung geprüft. Diesen Beleg als geprüft kennzeichnen.';
-    button.textContent = kind.value === 'rechnung' ? 'Rechnung zur Zahlung freigeben'
-      : payingNotice ? 'Bescheid zur Zahlung freigeben'
-      : kind.value === 'zahlungsauftrag' ? 'Zahlungsauftrag freigeben' : 'Prüfung bestätigen';
+    const paying = kind.value === 'rechnung' || kind.value === 'zahlungsauftrag' || payingNotice;
+    confirmation.textContent = paying
+      ? 'Original, Betrag und Zuordnung geprüft. Das Büro darf die Überweisung ausführen.'
+      : 'Original, Angaben und Zuordnung geprüft. Diesen Beleg als geprüft kennzeichnen.';
+    button.textContent = paying ? 'Zahlung freigeben' : 'Prüfung bestätigen';
   };
 
   kind.addEventListener('change', () => {
