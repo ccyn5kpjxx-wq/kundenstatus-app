@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if lead['ist_reifenanfrage'] %}Reifenportal · Buchung{% else %}Lead{% endif %} #{{ lead['id'] }}{% endblock %}
+{% block title %}{% if lead['ist_reifenangebot'] %}Reifenangebot{% elif lead['ist_reifenanfrage'] %}Reifenportal · Buchung{% else %}Lead{% endif %} #{{ lead['id'] }}{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -97,7 +97,7 @@
       <span class="badge-soft">{{ lead['reference'] }}</span>
       <span class="badge text-bg-{{ lead['website_meta']['farbe'] }}">{{ lead['website_meta']['label'] }}</span>
     </div>
-    {% if lead['ist_reifenanfrage'] %}<div class="fw-bold mb-2">Reifenportal · Reifenbuchung</div>{% endif %}
+    {% if lead['ist_reifenangebot'] %}<div class="fw-bold mb-2">Reifenportal · Angebotsanfrage</div>{% elif lead['ist_reifenanfrage'] %}<div class="fw-bold mb-2">Reifenportal · Reifenbuchung</div>{% endif %}
     <h1 class="mb-2">{{ lead['kunde_name'] or 'Neue Anfrage' }}</h1>
     <p>{{ lead['fahrzeug'] or 'Projekt/Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %} · {{ lead['website_meta']['domain'] }}</p>
   </div>
@@ -111,6 +111,22 @@
 
 <div class="row g-4">
   <div class="col-xl-8">
+    {% if lead['ist_reifenangebot'] %}
+    {% set reifen = lead['reifenangebot_daten'] %}
+    <section class="page-card p-4 mb-4" aria-label="Reifenanfrage">
+      <div class="d-flex justify-content-between gap-3 flex-wrap mb-3"><h2 class="h4 mb-0">Gewünschte Reifen</h2><span class="badge text-bg-{{ 'danger' if lead['reifenangebot_ueberfaellig'] or lead['reifenangebot_email_status'] in ['fehlgeschlagen', 'unklar'] else 'light text-dark border' }}">{% if lead['reifenangebot_email_status'] == 'gesendet' %}Angebot per E-Mail versendet{% elif lead['reifenangebot_email_status'] == 'fehlgeschlagen' %}E-Mail-Versand fehlgeschlagen{% elif lead['reifenangebot_email_status'] == 'unklar' %}E-Mail-Versand unklar{% elif lead['reifenangebot_ueberfaellig'] %}24-Stunden-Frist überschritten{% elif lead['angebot_text'] %}Angebots-E-Mail ausstehend{% else %}Angebot innerhalb von 24 Stunden{% endif %}</span></div>
+      <dl class="row mb-0">
+        <dt class="col-sm-4">Saison</dt><dd class="col-sm-8">{{ reifen['saison_label'] }}</dd>
+        <dt class="col-sm-4">Anzahl</dt><dd class="col-sm-8">{{ reifen['anzahl'] }} Reifen</dd>
+        <dt class="col-sm-4">Größe</dt><dd class="col-sm-8">{{ reifen['groesse_vorne'] or 'Laut Kundenfoto prüfen' }}{% if reifen['groesse_hinten'] %}<br>Hinterachse: {{ reifen['groesse_hinten'] }}{% endif %}</dd>
+        <dt class="col-sm-4">Preis-/Qualitätswunsch</dt><dd class="col-sm-8">{{ reifen['qualitaet_label'] }}</dd>
+        <dt class="col-sm-4">Montage</dt><dd class="col-sm-8">{{ reifen['montage_label'] }}</dd>
+        <dt class="col-sm-4">Angebotsfrist</dt><dd class="col-sm-8 {{ 'text-danger fw-bold' if lead['reifenangebot_ueberfaellig'] else '' }}">{{ lead['reifenangebot_frist_label'] }} (Ortszeit Mosbach)</dd>
+      </dl>
+      {% if lead['reifenangebot_email_status'] == 'unklar' %}<p class="alert alert-warning mt-3 mb-0">Der Versandstatus ist unklar. Vor einem erneuten Versand das Gesendet-Postfach prüfen, um doppelte Angebote zu vermeiden.</p>{% elif lead['reifenangebot_email_status'] == 'fehlgeschlagen' %}<p class="alert alert-danger mt-3 mb-0">Die Angebots-E-Mail konnte nicht versendet werden. Den Fehler unter den Benachrichtigungen prüfen und den Versand nach der Korrektur erneut auslösen.</p>{% elif lead['angebot_text'] and lead['reifenangebot_email_status'] != 'gesendet' %}<p class="alert alert-warning mt-3 mb-0">Das aktuelle Angebot ist hinterlegt, aber noch nicht per E-Mail versendet. Die Angebotsfrist läuft weiter.</p>{% endif %}
+      <p class="text-muted small mb-0 mt-2">Reifen und Indizes auf Eignung prüfen. Diese Anfrage reserviert keinen Montagetermin.</p>
+    </section>
+    {% endif %}
     <div class="page-card p-4 mb-4">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
         <div>
@@ -358,7 +374,7 @@
     <div class="page-card p-4 mb-4">
       <h2 class="h4 mb-3">Nächste Aktion</h2>
       <div class="{{ 'text-danger fw-bold' if lead['is_due'] else 'text-muted' }} mb-2">
-        {{ lead['naechster_kontakt_am'] or 'Kein Datum gesetzt' }}
+        {% if lead['ist_reifenangebot'] and lead['reifenangebot_email_status'] != 'gesendet' %}Angebots-E-Mail bis {{ lead['reifenangebot_frist_label'] }}{% else %}{{ lead['naechster_kontakt_am'] or 'Kein Datum gesetzt' }}{% endif %}
       </div>
       <div class="mb-3">{{ lead['naechste_aktion'] or 'Noch keine konkrete Aktion festgelegt.' }}</div>
       <div class="d-grid gap-2">
@@ -366,7 +382,7 @@
         <a href="{{ lead['whatsapp_url'] }}" target="_blank" rel="noopener" class="btn btn-success">Per WhatsApp antworten</a>
         {% endif %}
         {% if lead['can_email'] %}
-        <a href="#ki-antwort" class="btn btn-brand">Per E-Mail antworten</a>
+        <a href="{{ '#reifenangebot-form' if lead['ist_reifenangebot'] else '#ki-antwort' }}" class="btn btn-brand">{{ 'Reifenangebot erstellen' if lead['ist_reifenangebot'] else 'Per E-Mail antworten' }}</a>
         {% endif %}
         {% if not lead['whatsapp_url'] and not lead['can_email'] %}
         <div class="text-muted small">Handynummer oder E-Mail eintragen, dann kann direkt aus dem Lead kommuniziert werden.</div>
@@ -408,10 +424,12 @@
         {% if lead_notifications %}<section class="my-3"><h3 class="h5">Benachrichtigungen</h3><p class="small text-muted">Vom Anbieter angenommen bedeutet noch nicht beim Empfänger zugestellt.</p>{% for item in lead_notifications %}<p>{{ item['channel'] }} · {{ item['event'].split(' · ')[0] }}: <strong>{{ {'accepted':'Vom Anbieter angenommen','failed':'Nicht gesendet – Konfiguration prüfen','sending':'Versand begonnen – Ausgang noch unklar','unknown':'Ausgang unklar – vor erneutem Versand Anbieter prüfen'}.get(item['status'],item['status']) }}</strong></p>{% endfor %}</section>{% endif %}
       {% if not lead['auftrag_id'] %}<span class="badge text-bg-light text-dark border">Noch kein Auftrag</span>{% endif %}
       </div>
-      <p class="text-muted small">Der Lead bleibt bis zur Angebotsannahme ein Lead. Über diesen geschützten Link kann der Kunde Bilder, Nachrichten und Terminwünsche senden sowie das Angebot annehmen. Erst dann entsteht automatisch der Auftrag in der Werkstatttafel.</p>
+      <p class="text-muted small">{% if lead['ist_reifenangebot'] %}Das Reifenangebot wird vollständig per E-Mail gesendet. Über den ergänzenden Kundenlink kann der Kunde Bilder und Nachrichten nachreichen. Annahme, Abholung und gewünschte Montage werden persönlich abgestimmt.{% else %}Der Lead bleibt bis zur Angebotsannahme ein Lead. Über diesen geschützten Link kann der Kunde Bilder, Nachrichten und Terminwünsche senden sowie das Angebot annehmen. Erst dann entsteht automatisch der Auftrag in der Werkstatttafel.{% endif %}</p>
+      {% if not lead['ist_reifenangebot'] %}
       <div class="text-center mb-3">
         <img src="{{ url_for('kunden_status_qr', token=lead['kunden_status_token'], target='local') if lead['kunden_status_public_warning'] else url_for('kunden_status_qr', token=lead['kunden_status_token']) }}" alt="QR-Code zum Kundenportal" style="width:132px;height:132px;background:#fff;border:1px solid #e4d6c3;border-radius:12px;padding:8px;">
       </div>
+      {% endif %}
       <code class="d-block small mb-3" style="overflow-wrap:anywhere;">{{ lead['kunden_status_local_url'] if lead['kunden_status_public_warning'] else lead['kunden_status_url'] }}</code>
       <div class="d-grid gap-2">
         <a href="{{ lead['kunden_status_local_url'] }}" target="_blank" rel="noopener" class="btn btn-soft">Kundenportal öffnen</a>
@@ -422,13 +440,14 @@
 
       {% if not lead['auftrag_id'] %}
       <hr class="my-4">
-      <h3 class="h5 mb-3">Angebot im Lead bereitstellen</h3>
-      <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin_lead_angebot_senden', lead_id=lead['id']) }}" class="vstack gap-3">
+      <h3 class="h5 mb-3">{% if lead['ist_reifenangebot'] %}Reifenangebot erstellen und senden{% else %}Angebot im Lead bereitstellen{% endif %}</h3>
+      {% if lead['ist_reifenangebot'] %}<p class="text-muted small">Reifenhersteller, Modell, Größe, Indizes, Stückzahl, Einzelpreise und gewünschte Montage angeben. Gesamtpreis inklusive Mehrwertsteuer, Verfügbarkeit und Gültigkeit vor dem Versand prüfen.</p>{% endif %}
+      <form id="reifenangebot-form" method="POST" enctype="multipart/form-data" action="{{ url_for('admin_lead_angebot_senden', lead_id=lead['id']) }}" class="vstack gap-3">
         {{ csrf_field()|safe }}
         <div><label class="form-label">Leistung / Angebotsumfang</label><textarea name="angebot_text" rows="5" class="form-control" required>{{ lead['angebot_text'] or lead['beschreibung'] }}</textarea></div>
-        <div><label class="form-label">Preis</label><input type="text" name="angebot_preis" value="{{ lead['angebot_preis'] }}" class="form-control" placeholder="z. B. 1.250,00 € brutto" required></div>
+        <div><label class="form-label">{% if lead['ist_reifenangebot'] %}Gesamtpreis inklusive Mehrwertsteuer{% else %}Preis{% endif %}</label><input type="text" name="angebot_preis" value="{{ lead['angebot_preis'] }}" class="form-control" placeholder="z. B. 1.250,00 € brutto" required></div>
         <div><label class="form-label">Hinweis / Vorbehalt</label><textarea name="angebot_notiz" rows="3" class="form-control">{{ lead['angebot_notiz'] }}</textarea></div>
-        {% if lead['kunde_email'] %}<label class="form-check"><input class="form-check-input" type="checkbox" name="email_senden" value="1" checked><span class="form-check-label">Kunden zusätzlich per E-Mail über das Angebot informieren</span></label>{% endif %}
+        {% if lead['kunde_email'] %}<label class="form-check"><input class="form-check-input" type="checkbox" name="email_senden" value="1" checked><span class="form-check-label">{% if lead['ist_reifenangebot'] %}Vollständiges Angebot per E-Mail an {{ lead['kunde_email'] }} senden{% else %}Kunden zusätzlich per E-Mail über das Angebot informieren{% endif %}</span></label>{% endif %}
         <div><label for="angebot_pdf" class="form-label">Kostenvoranschlag als PDF (optional, bis 12 MB)</label><input id="angebot_pdf" type="file" name="angebot_pdf" accept="application/pdf,.pdf" class="form-control"></div>
         <label class="form-check"><input class="form-check-input" type="checkbox" name="whatsapp_senden" value="1"><span class="form-check-label">Kunden per WhatsApp informieren</span></label>
         <label class="form-check"><input class="form-check-input" type="checkbox" name="whatsapp_einwilligung" value="1"><span class="form-check-label">Der Kunde hat WhatsApp-Mitteilungen an seine hinterlegte Mobilnummer zugestimmt.</span></label>

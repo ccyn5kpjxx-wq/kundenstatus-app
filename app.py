@@ -61,6 +61,8 @@ from portal_request_timing import start_request_timing, timed_database_call, ser
 from portal_navigation_snapshot import NAVIGATION_SQL_COUNT_KEYS, load_navigation_sql_counts
 import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
+from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
+    reifenangebot_summary, reifenangebot_deadline, reifenangebot_frist, reifenangebot_mail, reifenangebot_preis)
 from auftragsarten import (AUFTRAGSARTEN, OFFENE_AUFTRAGSART, normalize_leistungsart,
                           leistungsart_aus_anfrage, auftrag_leistungsart,
                           auftragsart_anzeige, hat_reifenbuchung, verwendet_lackierablauf)
@@ -8474,6 +8476,7 @@ BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2"
 BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
 BACKUP_SCHEMA_FEATURES += (servicezugang.SCHEMA_FEATURE, serviceprozess.SCHEMA_FEATURE, serviceerinnerungen.SCHEMA_FEATURE)
 BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
+BACKUP_SCHEMA_FEATURES += ("reifen_angebote_v1",)
 BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
     "kundenflotten_belege": {
@@ -10691,6 +10694,14 @@ def init_db():
     ensure_column(db, "leads", "angebot_notiz", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "angebot_am", "TEXT DEFAULT ''")
     ensure_column(db, "leads", "angebot_angenommen_am", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "reifen_angebot_faellig_am", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "reifen_angebot_request_id", "TEXT")
+    ensure_column(db, "leads", "reifen_angebot_pdf_id", "INTEGER DEFAULT 0")
+    ensure_column(db, "leads", "reifen_angebot_revision", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "reifen_angebot_gesendet_am", "TEXT DEFAULT ''")
+    ensure_column(db, "leads", "reifen_angebot_email_status", "TEXT DEFAULT 'offen'")
+    ensure_column(db, "leads", "reifen_angebot_request_hash", "TEXT DEFAULT ''")
+    db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_reifen_angebot_request ON leads(reifen_angebot_request_id)")
     ensure_index(db, "idx_leads_website_status", "leads", ("website", "status", "id"))
     ensure_index(db, "idx_leads_herkunft", "leads", ("herkunft_typ", "herkunft_id"))
     ensure_index(db, "idx_leads_kunden_status_token", "leads", ("kunden_status_token",))
@@ -12825,6 +12836,20 @@ def hydrate_lead(row):
     )
     lead["is_closed"] = lead["status"] in {"gewonnen", "verloren"}
     lead["is_due"] = bool(lead["naechster_kontakt_obj"] and lead["naechster_kontakt_obj"] <= date.today() and not lead["is_closed"])
+    lead["ist_reifenangebot"] = lead["portal_data"].get("anliegen") == "reifenangebot"
+    lead["reifenangebot_daten"] = lead["portal_data"].get("reifenangebot", {}) if lead["ist_reifenangebot"] else {}
+    if not isinstance(lead["reifenangebot_daten"], dict):
+        lead["reifenangebot_daten"] = {}
+    if lead["ist_reifenangebot"]:
+        lead["reifenangebot_daten"] = {**lead["reifenangebot_daten"],
+            "saison_label": REIFEN_SAISONS.get(lead["reifenangebot_daten"].get("saison"), ""),
+            "qualitaet_label": REIFEN_QUALITAETEN.get(lead["reifenangebot_daten"].get("qualitaet"), ""),
+            "montage_label": "Mit Montage" if lead["reifenangebot_daten"].get("montage") else "Ohne Montage"}
+    lead["reifenangebot_email_status"] = clean_text(lead.get("reifen_angebot_email_status")) or "offen"
+    lead.update(reifenangebot_frist(lead.get("reifen_angebot_faellig_am"),
+                erledigt=lead["is_closed"] or bool(lead.get("reifen_angebot_gesendet_am")
+                    and lead["reifenangebot_email_status"] == "gesendet")))
+    lead["is_due"] = lead["is_due"] or lead["reifenangebot_ueberfaellig"] or lead["reifenangebot_bald_faellig"]
     # Der Link bereitet nur einen persönlichen Entwurf vor; gesendet wird erst
     # nach der bewussten Bestätigung durch die Werkstatt in WhatsApp.
     lead["whatsapp_url"] = lead_whatsapp_url(lead)
@@ -12878,7 +12903,9 @@ def list_leads(status_filter="aktiv", quelle_filter="", website_filter="alle", l
         key=lambda item: (
             1 if item["is_closed"] else 0,
             0 if item["is_due"] else 1,
-            item["naechster_kontakt_obj"] or far_future,
+            min(datetime.combine(item["naechster_kontakt_obj"] or far_future,
+                datetime.min.time(), tzinfo=ZoneInfo("Europe/Berlin")).timestamp(),
+                item["reifenangebot_frist_sort"] if item.get("ist_reifenangebot") else float("inf")),
             status_rank.get(item["status"], 99),
             -int(item.get("id") or 0),
         )
@@ -13083,7 +13110,7 @@ def kunden_auftragsdokument(token, datei_id):
     return response
 
 
-def lead_notice(lead_id, event, channel, recipient, message):
+def lead_notice(lead_id, event, channel, recipient, message, *, attachments=None):
     """Persist attempts before provider calls; never silently resend uncertain attempts."""
     lead = get_lead(lead_id)
     if not lead or not recipient:
@@ -13101,12 +13128,23 @@ def lead_notice(lead_id, event, channel, recipient, message):
         claimed = cursor.rowcount
         db.close()
         if not claimed:
+            db = get_db()
+            previous = db.execute("SELECT status FROM lead_notifications WHERE fingerprint=?", (key,)).fetchone()
+            if previous:
+                aktualisiere_reifenangebot_versandstatus(db, lead_id, event, channel, previous["status"])
+                db.commit()
+            db.close()
             return False
+    db = get_db()
+    aktualisiere_reifenangebot_versandstatus(db, lead_id, event, channel, "sending")
+    db.commit()
+    db.close()
     error = ""
     uncertain = False
     try:
         if channel == "E-Mail":
-            send_lead_email(lead, recipient, event + " · Gärtner GmbH Karosserie + Lack", message)
+            mail_args = {"attachments": attachments} if attachments else {}
+            send_lead_email(lead, recipient, event + " · Gärtner GmbH Karosserie + Lack", message, **mail_args)
             ok = True
         else:
             if whatsapp_bridge_config_errors():
@@ -13120,9 +13158,21 @@ def lead_notice(lead_id, event, channel, recipient, message):
         app.logger.warning("Lead notification failed: lead=%s channel=%s", lead_id, channel)
     db = get_db()
     db.execute("UPDATE lead_notifications SET status=?, error=? WHERE fingerprint=?", ("accepted" if ok else "unknown" if uncertain else "failed", clean_text(error)[:300], key))
+    aktualisiere_reifenangebot_versandstatus(db, lead_id, event, channel,
+        "accepted" if ok else "unknown" if uncertain else "failed")
     db.commit()
     db.close()
     return ok
+
+
+def aktualisiere_reifenangebot_versandstatus(db, lead_id, event, channel, status):
+    match = re.fullmatch(r"Angebot bereitgestellt ([0-9a-f]{12})", event or "")
+    if channel != "E-Mail" or not match:
+        return
+    email_status = {"accepted": "gesendet", "failed": "fehlgeschlagen"}.get(status, "unklar")
+    db.execute("""UPDATE leads SET reifen_angebot_email_status=?, reifen_angebot_gesendet_am=?
+                  WHERE id=? AND reifen_angebot_revision=?""",
+               (email_status, now_str() if status == "accepted" else "", lead_id, match[1]))
 
 
 def notify_lead_workshop(lead_id, title, event_key=""):
@@ -13148,6 +13198,11 @@ def lead_notification_context():
 
 class ReifenSlotBelegt(ValueError):
     pass
+
+
+class ReifenAnfrageBereitsVorhanden(ValueError):
+    def __init__(self, lead_id):
+        self.lead_id = int(lead_id)
 
 
 def create_lead(payload, attachments=None):
@@ -13192,6 +13247,17 @@ def create_lead(payload, attachments=None):
         ),
     )
     lead_id = cursor.lastrowid
+    if payload.get("reifen_angebot_request_id"):
+        try:
+            db.execute("UPDATE leads SET reifen_angebot_request_id=?, reifen_angebot_request_hash=?, reifen_angebot_faellig_am=? WHERE id=?",
+                       (payload["reifen_angebot_request_id"], payload.get("reifen_angebot_request_hash", ""), reifenangebot_deadline(), lead_id))
+        except Exception:
+            db.rollback()
+            row = db.execute("SELECT id FROM leads WHERE reifen_angebot_request_id=?", (payload["reifen_angebot_request_id"],)).fetchone()
+            db.close()
+            if row:
+                raise ReifenAnfrageBereitsVorhanden(row["id"])
+            raise
     db.execute(
         """
         UPDATE leads
@@ -28081,7 +28147,7 @@ def append_lead_message_to_sent(config, message, require_tls=False):
                 pass
 
 
-def send_lead_email(lead, empfaenger, betreff, nachricht):
+def send_lead_email(lead, empfaenger, betreff, nachricht, *, attachments=None):
     recipients = parse_email_recipients(empfaenger)
     if len(recipients) != 1:
         raise ValueError("Bitte genau eine gültige Empfängeradresse eintragen.")
@@ -28099,6 +28165,13 @@ def send_lead_email(lead, empfaenger, betreff, nachricht):
     message["Reply-To"] = config["address"]
     message["X-Gaertner-Lead-ID"] = str(int((lead or {}).get("id") or 0))
     message.set_content(nachricht)
+    for attachment in attachments or []:
+        # Only the reviewed quotation PDF is passed by the tire-offer route.
+        payload = attachment.get("payload", b"")
+        if not isinstance(payload, bytes) or not payload.startswith(b"%PDF-") or len(payload) > 12 * 1024 * 1024:
+            raise ValueError("Das Angebots-PDF ist ungültig oder zu groß.")
+        message.add_attachment(payload, maintype="application", subtype="pdf",
+                               filename=secure_filename(attachment.get("filename") or "Reifenangebot.pdf"))
     add_standard_mail_headers(message, werkstatt_footer=config["website"] in {"auto-lackierzentrum", "autovermietung-mos"})
     try:
         if config["ssl"]:
@@ -45207,6 +45280,7 @@ WEBSITE_ANLIEGEN = {
     "reparaturanfrage": "Reparaturanfrage",
     "mechanikanfrage": "Mechanik & Wartung",
     "reifenservice": "Reifenservice & Einlagerung",
+    "reifenangebot": "Reifenangebot anfragen",
     "bremsenservice": "Bremsen anfragen",
     "fahrzeugpflege": "Fahrzeugpflege & Aufbereitung",
     "mietwagenanfrage": "Mietwagenanfrage",
@@ -45225,6 +45299,8 @@ BREMSEN_ACHSEN = {"vorne": "Vorderachse", "hinten": "Hinterachse", "beide": "Vor
 TEILE_QUALITAETEN = {"preisbewusst": "Preisbewusst", "marke": "Markenqualität", "premium": "Premium"}
 
 WEBSITE_KURZANFRAGEN = {
+    "reifenangebot": {"label": "Reifenangebot anfragen", "kurz": "Neue Reifen mit oder ohne Montage",
+        "frage": "Weitere Hinweise", "placeholder": "z. B. bevorzugter Hersteller oder Hinweise zur Bereifung (optional)"},
     "bremsenservice": {"label": "Bremsen anfragen", "kurz": "Bremsen prüfen oder instandsetzen lassen",
         "frage": "Weitere Hinweise", "placeholder": "z. B. Geräusche, Warnanzeige oder weitere Hinweise (optional)"},
     "reifenservice": {
@@ -45613,6 +45689,11 @@ def reifen_buchung_termin(lead_id):
 def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
     formdata = formdata or {}
     ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
+    if ausgewaehltes_anliegen == "reifenangebot":
+        posted_token = clean_text(formdata.get("reifenangebot_token")) if request.method == "POST" else ""
+        token = posted_token if posted_token in session.get("reifenangebot_tokens", []) else secrets.token_urlsafe(24)
+        session["reifenangebot_token"] = token
+        session["reifenangebot_tokens"] = list(dict.fromkeys(session.get("reifenangebot_tokens", []) + [token]))[-8:]
     pflege_auswahl = (
         [clean_text(value) for value in formdata.getlist("pflege_kategorie")]
         if hasattr(formdata, "getlist")
@@ -45639,6 +45720,10 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             bremsen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "bremsenservice"),
             bremsen_achsen=BREMSEN_ACHSEN,
             teile_qualitaeten=TEILE_QUALITAETEN,
+            reifen_saisons=REIFEN_SAISONS,
+            reifen_qualitaeten=REIFEN_QUALITAETEN,
+            reifenangebot_token=session.get("reifenangebot_token", ""),
+            reifenangebot_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenangebot"),
             reifen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenservice"),
             gebuchter_reifentermin=session.get("website_reifentermin", ""),
             reifen_slots=freie_reifen_slots(clean_text(formdata.get("wunschdatum"))) if ausgewaehltes_anliegen == "reifenservice" else [],
@@ -45693,6 +45778,11 @@ def website_anfrage():
             return redirect(url_for("website_anfrage"))
 
         anliegen = clean_text(request.form.get("anliegen"))
+        ist_reifenangebot = anliegen == "reifenangebot"
+        anfrage_token = clean_text(request.form.get("reifenangebot_token")) if ist_reifenangebot else ""
+        if ist_reifenangebot and (not anfrage_token or anfrage_token not in session.get("reifenangebot_tokens", [])):
+            return render_website_anfrage(formdata=request.form,
+                errors=["Bitte das Reifenformular neu öffnen und die Anfrage erneut senden."], status_code=400)
         ist_fahrzeugcheck = anliegen in {"kaufberatung", "leasingrueckgabe"}
         besichtigungsart = (
             clean_text(request.form.get("besichtigungsart")) or "werkstatt"
@@ -45703,7 +45793,7 @@ def website_anfrage():
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
-        kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen in {"reifenservice","bremsenservice"} else ""
+        kennzeichen = clean_text(request.form.get("kennzeichen"))[:30].upper() if anliegen in {"reifenservice","reifenangebot","bremsenservice"} else ""
         if service_context:
             fahrzeug = service_context['vehicle']['modell']
             kennzeichen = service_context['vehicle']['kennzeichen']
@@ -45713,6 +45803,8 @@ def website_anfrage():
             clean_text(request.form.get("fin"))[:80],
         ).upper()
         wunschdatum = clean_text(request.form.get("wunschdatum"))[:100 if anliegen == "reifenservice" else 10]
+        if ist_reifenangebot:
+            wunschdatum = ""  # A quote request must never reserve or imply a time.
         fahrzeug_link = (
             clean_text(request.form.get("fahrzeug_link"))[:1000]
             if anliegen == "kaufberatung"
@@ -45772,7 +45864,7 @@ def website_anfrage():
             )
         if anliegen in {"kaufberatung", "leasingrueckgabe", "bremsenservice"} and len(fahrzeug) < 2:
             errors.append("Bitte Marke und Modell des Fahrzeugs angeben.")
-        if anliegen in WEBSITE_KURZANFRAGEN and anliegen not in {"reifenservice","bremsenservice"} and len(nachricht) < 5:
+        if anliegen in WEBSITE_KURZANFRAGEN and anliegen not in {"reifenservice","reifenangebot","bremsenservice"} and len(nachricht) < 5:
             errors.append("Bitte Ihr Anliegen kurz beschreiben.")
         if anliegen == "fahrzeugpflege":
             if any(value not in WEBSITE_PFLEGE_KATEGORIEN for value in pflege_kategorien):
@@ -45850,12 +45942,37 @@ def website_anfrage():
             max_total_mb=WEBSITE_ANFRAGE_MAX_GESAMT_MB,
         )
         errors.extend(bilder_errors)
+        reifenangebot_daten = {}
+        if ist_reifenangebot:
+            if not email:
+                errors.append("Bitte Ihre E-Mail-Adresse für das Reifenangebot angeben.")
+            reifenangebot_daten, reifen_errors = parse_reifenangebot(request.form, has_photo=bool(valid_bilder))
+            errors.extend(reifen_errors)
         if errors:
             return render_website_anfrage(formdata=request.form, errors=errors, status_code=400)
+        anfrage_hash = ""
+        if ist_reifenangebot:
+            photo_hashes = []
+            for bild in valid_bilder:
+                payload = bild.read()
+                bild.stream.seek(0)
+                photo_hashes.append(hashlib.sha256(payload).hexdigest())
+            anfrage_hash = hashlib.sha256(json.dumps([name, telefon, email, fahrzeug, kennzeichen,
+                nachricht, reifenangebot_daten, photo_hashes], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+            db = get_db()
+            existing = db.execute("SELECT id,reifen_angebot_request_hash FROM leads WHERE reifen_angebot_request_id=?", (anfrage_token,)).fetchone()
+            db.close()
+            if existing:
+                if not hmac.compare_digest(existing["reifen_angebot_request_hash"] or "", anfrage_hash):
+                    return render_website_anfrage(formdata=request.form, errors=[
+                        "Dieses Formular wurde bereits mit anderen Angaben gesendet. Bitte für eine weitere Anfrage ein neues Reifenformular öffnen."], status_code=409)
+                return bestaetige_reifenangebot_anfrage(existing["id"])
 
         anliegen_label = WEBSITE_ANLIEGEN[anliegen]
         besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
+        if ist_reifenangebot:
+            beschreibungsteile.append(reifenangebot_summary(reifenangebot_daten))
         if anliegen == "reifenservice":
             beschreibungsteile.append("Reifenservice: " + ", ".join(WEBSITE_REIFEN_LEISTUNGEN[value] for value in reifen_leistungen))
         if wunschzeit:
@@ -45924,6 +46041,7 @@ def website_anfrage():
             "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
             "mechanikanfrage": "Mechanik- oder Wartungsbedarf prüfen und Kunden zurückrufen",
             "reifenservice": "Reifenservice / Einlagerung prüfen und Termin persönlich abstimmen",
+            "reifenangebot": "Reifenangebot prüfen und innerhalb von 24 Stunden per E-Mail senden",
             "bremsenservice": "Passende Bremsenteile anhand FIN prüfen, Angebot vorbereiten und Termin persönlich abstimmen",
             "fahrzeugpflege": "Aufbereitungsumfang prüfen und Kunden zurückrufen",
             "mietwagenanfrage": "Mietwagen-Verfügbarkeit prüfen und Kunden kontaktieren",
@@ -45949,8 +46067,11 @@ def website_anfrage():
                 "fahrzeug": fahrzeug,
                 "kennzeichen": kennzeichen,
                 "reifen_slot": (wunschdatum, wunschzeit) if anliegen == "reifenservice" else None,
+                "reifen_angebot_request_id": anfrage_token or None,
+                "reifen_angebot_request_hash": anfrage_hash,
                 "portal_data": {
                     "anliegen": anliegen,
+                    "reifenangebot": reifenangebot_daten if ist_reifenangebot else {},
                     "fin": fin if anliegen == "bremsenservice" else "",
                     "bremsen_achse": bremsen_achse if anliegen == "bremsenservice" else "",
                     "teile_qualitaet": teile_qualitaet if anliegen == "bremsenservice" else "",
@@ -45976,6 +46097,12 @@ def website_anfrage():
         )
         try:
             lead_id = create_lead(lead_payload)
+        except ReifenAnfrageBereitsVorhanden as exc:
+            existing = get_lead(exc.lead_id)
+            if not hmac.compare_digest(existing.get("reifen_angebot_request_hash") or "", anfrage_hash):
+                return render_website_anfrage(formdata=request.form, errors=[
+                    "Dieses Formular wurde bereits mit anderen Angaben gesendet. Bitte ein neues Reifenformular öffnen."], status_code=409)
+            return bestaetige_reifenangebot_anfrage(exc.lead_id)
         except ReifenSlotBelegt as exc:
             return render_website_anfrage(formdata=request.form, errors=[str(exc)], status_code=409)
         try:
@@ -46023,7 +46150,11 @@ def website_anfrage():
         )
         session["website_anfrage_kundenlink"] = kunden_buchungs_url
         if email:
-            if anliegen == "reifenservice":
+            if ist_reifenangebot:
+                lead_notice(lead_id, "Ihre Reifenanfrage ist eingegangen", "E-Mail", email,
+                    "Vielen Dank für Ihre Reifenanfrage. Wir prüfen die passenden Reifen und senden Ihnen innerhalb von 24 Stunden Ihr persönliches Angebot per E-Mail. "
+                    "Ein Montagetermin ist noch nicht reserviert. Ihre Angaben und Unterlagen finden Sie hier: " + kunden_buchungs_url)
+            elif anliegen == "reifenservice":
                 lead_notice(
                     lead_id, "Ihr Reifen-Termin ist reserviert", "E-Mail", email,
                     f"Ihr Reifen-Termin ist reserviert: {format_date(wunschdatum)} · {wunschzeit} Uhr. "
@@ -46037,6 +46168,8 @@ def website_anfrage():
                 lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email,
                     ("Ihre Meldung ist angekommen. Den Stand finden Sie in Ihrem geschützten Servicebereich: " if service_context else "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: ") + kunden_buchungs_url)
         notify_lead_workshop(lead_id, "Neue Anfrage")
+        if ist_reifenangebot:
+            return bestaetige_reifenangebot_anfrage(lead_id)
         session["website_anfrage_gesendet"] = int(lead_id)
         session["website_anfrage_art"] = anliegen
         session["website_reifentermin"] = f"{format_date(wunschdatum)} · {wunschzeit} Uhr" if anliegen == "reifenservice" else ""
@@ -46053,6 +46186,8 @@ def website_anfrage():
     bestaetigt = bool(request.args.get("gesendet")) and bool(
         session.pop("website_anfrage_gesendet", 0)
     )
+    if bestaetigt and session.get("website_anfrage_art") == "reifenangebot":
+        vorauswahl = "reifenangebot"
     mechanik_vorauswahl = list(dict.fromkeys(
         value for value in request.args.getlist("mechanik_kategorie")
         if vorauswahl == "mechanikanfrage" and value in WEBSITE_MECHANIK_KATEGORIEN
@@ -46063,6 +46198,18 @@ def website_anfrage():
                   "leistungsart": clean_text(request.args.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.args.get("leistungsart")), {}).get("anliegen") == vorauswahl else ""},
         gesendet=bestaetigt,
     )
+
+
+def bestaetige_reifenangebot_anfrage(lead_id):
+    """PRG confirmation is session-bound; repeated POSTs reuse the same lead."""
+    lead = get_lead(lead_id)
+    if not lead or not lead.get("ist_reifenangebot"):
+        abort(404)
+    session["website_anfrage_kundenlink"] = lead["kunden_status_url"]
+    session["website_anfrage_gesendet"] = int(lead_id)
+    session["website_anfrage_art"] = "reifenangebot"
+    session.pop("reifenangebot_token", None)
+    return redirect(url_for("website_anfrage", anliegen="reifenangebot", gesendet=1))
 
 
 @app.route("/healthz")
@@ -52345,13 +52492,35 @@ def admin_lead_angebot_senden(lead_id):
     if not angebot_text or not angebot_preis:
         flash("Bitte Angebotsleistung und Preis eintragen.", "warning")
         return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+    if lead.get("ist_reifenangebot"):
+        try:
+            angebot_preis = reifenangebot_preis(angebot_preis)
+        except ValueError as exc:
+            flash(str(exc), "warning")
+            return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+    same_offer = (angebot_text, angebot_preis, angebot_notiz) == (lead["angebot_text"], lead["angebot_preis"], lead["angebot_notiz"])
+    reifen_pdf_id = int(lead.get("reifen_angebot_pdf_id") or 0) if same_offer else 0
     pdf = request.files.get("angebot_pdf")
     if pdf and pdf.filename:
         files, errors = validate_schadenaufnahme_uploads([pdf])
         if pathlib.Path(pdf.filename).suffix.lower() != ".pdf" or errors:
             flash("Bitte einen gültigen PDF-Kostenvoranschlag bis 12 MB auswählen.", "warning")
             return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
-        save_lead_upload_file(lead_id, pdf, quelle="werkstatt_angebot")
+        uploaded_pdf_id = save_lead_upload_file(lead_id, pdf, quelle="werkstatt_angebot")
+        if lead.get("ist_reifenangebot"):
+            reifen_pdf_id = uploaded_pdf_id
+    attachments = []
+    if lead.get("ist_reifenangebot") and reifen_pdf_id:
+        try:
+            attachments = reifenangebot_pdf_anhaenge(lead_id, reifen_pdf_id)
+        except (ValueError, OSError) as exc:
+            flash("Angebots-PDF konnte nicht gelesen werden. Bitte das PDF erneut hochladen.", "warning")
+            return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+    revision_data = (angebot_text + angebot_preis + angebot_notiz).encode()
+    if lead.get("ist_reifenangebot"):
+        revision_data = json.dumps([angebot_text, angebot_preis, angebot_notiz], ensure_ascii=False).encode()
+        revision_data += b"".join(hashlib.sha256(a["payload"]).digest() for a in attachments)
+    revision = hashlib.sha256(revision_data).hexdigest()[:12]
     jetzt = now_str()
     db = get_db()
     db.execute(
@@ -52364,19 +52533,27 @@ def admin_lead_angebot_senden(lead_id):
         """,
         (angebot_text, angebot_preis, angebot_notiz, jetzt, jetzt, int(lead_id)),
     )
+    if lead.get("ist_reifenangebot"):
+        db.execute("UPDATE leads SET reifen_angebot_pdf_id=? WHERE id=?", (reifen_pdf_id, lead_id))
+        db.execute("""UPDATE leads SET reifen_angebot_revision=?, reifen_angebot_gesendet_am='',
+                      reifen_angebot_email_status='offen' WHERE id=? AND COALESCE(reifen_angebot_revision,'')!=?""",
+                   (revision, lead_id, revision))
     db.commit()
     db.close()
     add_lead_portal_event(
         lead_id,
         "Werkstatt-Angebot bereitgestellt",
-        "Ihr persönliches Angebot liegt zur Prüfung bereit. Sie können es im Portal annehmen und Ihre Terminwünsche angeben.",
+        ("Ihr Reifenangebot liegt zur Prüfung bereit. Bitte antworten Sie zur Annahme auf die Angebots-E-Mail. Einen Montagetermin stimmen wir persönlich ab."
+         if lead.get("ist_reifenangebot") else "Ihr persönliches Angebot liegt zur Prüfung bereit. Sie können es im Portal annehmen und Ihre Terminwünsche angeben."),
         quelle="werkstatt",
     )
     lead = get_lead(lead_id)
     message = "Ihr Werkstatt-Angebot liegt vor. Sie können es prüfen, annehmen und einen Terminwunsch angeben: " + lead["kunden_status_url"]
-    revision = hashlib.sha256((angebot_text + angebot_preis + angebot_notiz).encode()).hexdigest()[:12]
+    if lead.get("ist_reifenangebot"):
+        message = reifenangebot_mail(lead)
     if strict_bool(request.form.get("email_senden")) and lead["kunde_email"]:
-        lead_notice(lead_id, "Angebot bereitgestellt " + revision, "E-Mail", lead["kunde_email"], message)
+        mail_args = {"attachments": attachments} if attachments else {}
+        lead_notice(lead_id, "Angebot bereitgestellt " + revision, "E-Mail", lead["kunde_email"], message, **mail_args)
     if strict_bool(request.form.get("whatsapp_senden")):
         if strict_bool(request.form.get("whatsapp_einwilligung")) and is_probable_mobile_number(lead["kontakt_telefon"]):
             add_lead_portal_event(lead_id, "WhatsApp-Freigabe dokumentiert", "Admin bestätigt Zustimmung für die hinterlegte Mobilnummer: " + normalize_whatsapp_number(lead["kontakt_telefon"]), quelle="werkstatt", kunden_sichtbar=False)
@@ -52387,6 +52564,21 @@ def admin_lead_angebot_senden(lead_id):
     flash("Angebot ist im Kundenportal bereitgestellt.", "success")
     flash("Den Versandstatus finden Sie unter Benachrichtigungen. Anbieterannahme ist keine Zustellbestätigung.", "info")
     return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
+
+
+def reifenangebot_pdf_anhaenge(lead_id, pdf_id):
+    """Resolve only the PDF explicitly associated with this reviewed offer."""
+    item = next((item for item in list_lead_dateien(lead_id)
+                 if int(item["id"]) == int(pdf_id) and item.get("quelle") == "werkstatt_angebot"), None)
+    if not item or pathlib.Path(item["original_name"]).suffix.lower() != ".pdf":
+        raise ValueError("Angebots-PDF nicht gefunden.")
+    path = (UPLOAD_DIR / item["stored_name"]).resolve()
+    if path.parent != UPLOAD_DIR.resolve() or path.stat().st_size > 12 * 1024 * 1024:
+        raise ValueError("Ungültiger PDF-Pfad oder Dateigröße.")
+    payload = path.read_bytes()
+    if not payload.startswith(b"%PDF-"):
+        raise ValueError("Ungültiges Angebots-PDF.")
+    return [{"filename": item["original_name"], "payload": payload}]
 
 
 @app.route("/admin/leads/<int:lead_id>/portal-nachricht", methods=["POST"])
@@ -54239,6 +54431,9 @@ def kunden_status_terminwunsch(token):
 
 
 def accept_lead_offer_from_portal(token, lead):
+    if lead.get("ist_reifenangebot"):
+        flash("Bitte antworten Sie zur Annahme auf die Angebots-E-Mail. Einen Montagetermin stimmen wir persönlich ab.", "info")
+        return redirect(url_for("kunden_status", token=token) + "#angebot")
     if lead.get("ist_reifenanfrage"):
         flash("Ihre Reifenbuchung liegt bereits vor. Eine zusätzliche Angebotsannahme ist nicht erforderlich.","info")
         return redirect(url_for("kunden_status",token=token))
