@@ -116,7 +116,13 @@
     <details><summary><span>{{ label }}<small>{{ sub }}</small></span><strong>{{ cockpit[key]|length }}</strong></summary><div class="cockpit-day-list">{% for item in cockpit[key] %}<a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}"><strong>{{ item['kennzeichen'] or item['fahrzeug'] }}</strong> {% if item['auftragsart_label'] %}<span class="badge-soft" style="background:{{ item['auftragsart_bg'] }}; color:{{ item['auftragsart_farbe'] }};">{{ item['auftragsart_label'] }}</span>{% endif %}<br>{{ item['fahrzeug'] }}{% if key == 'heute_bringen' and item['annahme_uhrzeit'] %} · {{ item['annahme_uhrzeit'] }} Uhr{% elif key == 'heute_abholen' and item['abhol_uhrzeit'] %} · {{ item['abhol_uhrzeit'] }} Uhr{% endif %}</a>{% else %}<span class="text-muted">Heute kein Eintrag.</span>{% endfor %}</div></details>
     {% endfor %}
   </section>
+  <a class="cockpit-card" href="{{ url_for('buero_belege.admin_index') }}" style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;text-decoration:none;color:inherit" aria-label="Rechnungen und Belege zur Freigabe öffnen">
+    <span><strong>Rechnungen zur Freigabe</strong><small style="display:block;color:var(--muted)">Rechnungen, Gebühren und private Belege prüfen</small></span>
+    <span>{% if belegfreigabe.neue_anzahl %}<strong class="badge-soft">{{ belegfreigabe.neue_anzahl }} neu</strong> · {% endif %}{{ belegfreigabe.offen_anzahl }} offen →</span>
+  </a>
+  <p class="small text-muted"><a href="{{ url_for('office_inbox_bindings.admin') }}">Chef-Posteingang abgleichen</a> · <a href="/werkstatt/buero">Büro-Cockpit ansehen</a></p>
   {% include "_cockpit_aktionen.html" %}
+  <a class="cockpit-card" href="{{ url_for('office_payroll.admin') }}" style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;text-decoration:none;color:inherit"><span><strong>Löhne zur Freigabe</strong><small style="display:block;color:var(--muted)">Lohnauswertung prüfen und persönliche Lohnzettel bereitstellen</small></span><strong>{{ lohnfreigabe_count }} offen →</strong></a>
   <details class="cockpit-card" data-cockpit-eingang>
     <summary class="cockpit-section-summary"><span class="cockpit-section-title">Eingang</span><span class="cockpit-counts"><span>Fahrzeuge <strong>{{ start_inbox['fahrzeuge_count'] or 0 }}</strong></span><span>Anfragen <strong>{{ start_inbox['anfragen_count'] or 0 }}</strong></span><span>Aufgaben <strong>{{ start_inbox['aufgaben_count'] or 0 }}</strong></span></span></summary>
     <div class="cockpit-detail-body"><div class="cockpit-detail-head"><span>Neue Fahrzeuge, Anfragen und Rückmeldungen.</span><a href="{{ url_for('admin_postfach') }}">Vollständiges Postfach →</a></div>

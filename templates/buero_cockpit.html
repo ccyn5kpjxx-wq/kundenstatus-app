@@ -1,0 +1,14 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Büro-Cockpit · Gärtner</title></head>
+<body class="buero-page">{% include 'buero_nav.html' %}<main class="buero-main">
+<div class="buero-heading"><div><p class="buero-eyebrow">DEIN ARBEITSTAG</p><h1>Das Wichtigste fürs Büro.</h1><p>Termine, Fahrzeuge und die nächsten Aufgaben an einem Ort.</p></div>{% if day.datum_text %}<time>{{ day.datum_text }}</time>{% endif %}</div>
+{% if buero_preview %}<p class="buero-preview">Chef-Vorschau · <a href="/admin/buero-zugaenge">Persönliche Bürozugänge verwalten</a> · <a href="/admin/buero/posteingang-abgleich">Chef-Posteingang abgleichen</a></p>{% endif %}
+<section class="buero-priorities" aria-label="Heute erledigen">
+{% if payroll_payment_count is not none %}<a class="buero-priority" href="{{ '/admin/buero/loehne' if buero_preview else '/werkstatt/buero/loehne' }}"><span>Freigegebene Löhne</span><strong>{{ payroll_payment_count }}</strong><small>zur Überweisung bearbeiten</small></a>{% endif %}
+{% if document_counts is not none %}<a class="buero-priority" href="{{ '/admin/buero/belege' if buero_preview else '/werkstatt/buero/belege' }}"><span>Belege & Freigaben</span><strong>{{ document_counts.zahlung_offen }}</strong><small>zur Zahlung bearbeiten{% if document_counts.neue_anzahl %} · <b>{{ document_counts.neue_anzahl }} neu</b>{% endif %}</small></a>{% endif %}
+{% if daily_time_count is not none %}<a class="buero-priority" href="/werkstatt/buero/arbeitszeiten"><span>Arbeitszeiten kontrollieren</span><strong>{{ daily_time_count }}</strong><small>heute noch zu prüfen</small></a>{% endif %}
+{% if 'hol_bring' in (office_identity.office_categories or []) or buero_preview %}<a class="buero-priority" href="/werkstatt/buero/planung"><span>Fahrzeuge holen / bringen</span><strong>{{ day.anzahl_fahrten }}</strong><small>heute geplant</small></a>{% endif %}
+{% if 'termine' in (office_identity.office_categories or []) or buero_preview %}<a class="buero-priority" href="/werkstatt/buero/kalender"><span>Bürotermine</span><strong>{{ day.anzahl_termine }}</strong><small>heute im Kalender</small></a>{% endif %}
+</section>
+{% if day.offene_hinweise %}<section class="buero-attention"><h2>Vor der Fahrt klären</h2>{% for item in day.offene_hinweise %}<p><strong>{{ item.kennzeichen }}</strong> · {{ item.hinweis }}</p>{% endfor %}</section>{% endif %}
+<section class="buero-areas" aria-label="Alle Bürobereiche">{% for item in office_cards if item.path != '/werkstatt/buero' %}<a class="buero-area" href="{{ item.path }}"><h2>{{ item.title }} <span aria-hidden="true">↗</span></h2><p>{{ item.hint }}</p></a>{% endfor %}</section>
+</main></body></html>

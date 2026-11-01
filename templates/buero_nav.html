@@ -1,0 +1,8 @@
+<link rel="stylesheet" href="{{ url_for('static', filename='buero.css') }}">
+<header class="buero-header">
+  <a class="buero-brand" href="/werkstatt/buero">GÄRTNER <span>Büro-Cockpit</span></a>
+  <div class="buero-account">{% if buero_preview %}<a href="/admin/cockpit">Zur Chef-Ansicht</a>{% else %}<span>{{ (buero_current_user or {}).get('mitarbeiter_name', '') }}</span>{% endif %}</div>
+</header>
+{% if buero_nav_items %}<nav class="buero-navigation" aria-label="Bürobereiche">
+{% for item in buero_nav_items %}<a href="{{ item.path }}"{% if request.path == item.path %} aria-current="page"{% endif %}>{{ item.title }}</a>{% endfor %}
+</nav>{% endif %}

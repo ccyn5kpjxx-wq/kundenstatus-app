@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ title }} · Büro</title><link rel="stylesheet" href="{{ url_for('static', filename='buero_bereiche.css') }}"></head>
+<body>{% include 'buero_nav.html' ignore missing %}<main class="office-section">
+<header><p class="eyebrow">Büro{% if office_preview %} · Chef-Vorschau{% endif %}</p><h1>{{ title }}</h1></header>
+{% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+{% if section == 'arbeitszeiten' %}
+<section class="panel"><h2>Tägliche Arbeitszeitprüfung</h2>
+<form class="filters" method="get"><label>Prüftag<input type="date" name="tag" value="{{ data.get('review_day','') }}" required></label><button>Tag anzeigen</button></form>
+<p>Zeiten kontrollieren und den Tag bestätigen oder eine Rückfrage notieren. Zeitstempel werden dabei nicht geändert.</p>
+{% for review in data.get('daily_reviews',[]) %}<article class="review-row"><h3>{{ review.name }} · {{ review.datum }}</h3>
+<p class="review-status">{{ 'Geprüft' if review.status == 'geprueft' else ('Rückfrage offen' if review.status == 'rueckfrage' else 'Noch offen') }}</p>
+{% if review.source_changed %}<p class="notice">Die Zeitstempel haben sich seit der letzten Prüfung geändert. Erneute Prüfung erforderlich.</p>{% endif %}
+{% if review.error %}<p class="notice error">{{ review.error }}</p>{% endif %}
+{% for shift in review.shifts %}<p>{{ shift.berechneter_beginn or shift.beginn }} – {{ shift.berechnetes_ende or shift.ende or 'noch offen' }} · {{ shift.berechnete_arbeitszeit or shift.arbeitszeit }}{% if shift.pruefen %} · Auffällig{% endif %}</p>{% endfor %}
+{% if review.events %}<details><summary>Originalstempel anzeigen</summary><ul>{% for event in review.events %}<li>{{ event.action }}: {{ event.time }}</li>{% endfor %}</ul></details>{% else %}<p>Keine Arbeitszeitstempel für diesen Tag erfasst.</p>{% endif %}
+<form method="post" action="{{ url_for('office_sections.arbeitszeit_pruefen') }}" class="draft-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="mitarbeiter_id" value="{{ review.mitarbeiter_id }}">
+<input type="hidden" name="datum" value="{{ review.datum }}"><input type="hidden" name="fingerprint" value="{{ review.fingerprint }}"><input type="hidden" name="version" value="{{ review.version }}">
+<label>Notiz zur Zeitprüfung<textarea name="notiz" maxlength="2000" rows="2">{{ review.notiz }}</textarea></label>
+<div><button name="status" value="geprueft">Geprüft</button> <button name="status" value="rueckfrage">Rückfrage / Abweichung</button></div></form></article>{% else %}<p>Keine aktiven Mitarbeiter vorhanden.</p>{% endfor %}</section>
+<form class="filters" method="get"><label>Mitarbeiter<select name="mitarbeiter">{% for person in data.get('employees',[]) %}<option value="{{ person.id }}" {% if person.id == data.selected_employee %}selected{% endif %}>{{ person.name }}{% if not person.aktiv %} (inaktiv){% endif %}</option>{% endfor %}</select></label>
+<label>Monat<input name="monat" type="month" value="{{ data.get('month','') }}" required></label><button>Anzeigen</button></form>
+<div class="cards">{% for person in data.get('employees',[]) %}<article><h2>{{ person.name }}</h2><p>{{ person.zeitstatus.label }}</p><small>{{ person.zeitstatus.detail_berechnet }}</small></article>{% endfor %}</div>
+{% if data.get('report') %}{% set report=data.report %}<section class="panel"><h2>Monatsübersicht</h2><p>Berechnete abgeschlossene Arbeitszeit: <strong>{{ report.berechnete_abgeschlossene_arbeitszeit }}</strong> · Pausenabzug: {{ report.pausenabzug }}</p>
+{% if report.berechnung_pruefen or report.pruefen %}<p class="notice">Auffällige oder offene Zeiten müssen geprüft werden.</p>{% endif %}
+<div class="table-scroll"><table><thead><tr><th>Beginn</th><th>Ende</th><th>Arbeitszeit</th><th>Status</th></tr></thead><tbody>{% for shift in report.schichten %}<tr><td>{{ shift.berechneter_beginn or shift.beginn }}</td><td>{{ shift.berechnetes_ende or shift.ende or 'offen' }}</td><td>{{ shift.berechnete_arbeitszeit or shift.arbeitszeit }}</td><td>{{ 'Offen' if shift.offen else ('Prüfen' if shift.pruefen else 'Abgeschlossen') }}</td></tr>{% else %}<tr><td colspan="4">Keine Zeiten für diesen Monat.</td></tr>{% endfor %}</tbody></table></div><p class="muted">{{ report.hinweis }}</p></section>{% endif %}
+{% elif section == 'abwesenheit' %}
+<p>Erfasste Urlaubstermine. Persönliche Notizen und medizinische Unterlagen werden hier nicht angezeigt.</p>
+<div class="table-scroll"><table><thead><tr><th>Name</th><th>Von</th><th>Bis</th></tr></thead><tbody>{% for item in data.get('items',[]) %}<tr><td>{{ item.name }}</td><td>{{ item.start_datum }}</td><td>{{ item.end_datum or item.start_datum }}</td></tr>{% else %}<tr><td colspan="3">Keine Urlaubstermine erfasst.</td></tr>{% endfor %}</tbody></table></div>
+{% elif section == 'mahnungen' %}
+<p>Übersicht zur Prüfung. Das Öffnen dieser Seite versendet keine Mahnungen.</p>
+{% for heading,items in [('Zur Prüfung fällig',data.get('due',[])),('Weitere offene Vorgänge',data.get('later',[]))] %}<section class="panel"><h2>{{ heading }}</h2><div class="table-scroll"><table><thead><tr><th>Rechnung</th><th>Kunde</th><th>Offen</th><th>Fällig seit</th><th>Stufe</th></tr></thead><tbody>{% for item in items %}<tr><td>{{ item.nummer }}</td><td>{{ item.kontakt }}</td><td>{{ item.betrag_label }}</td><td>{{ item.faellig_label }} ({{ item.tage_ueber }} Tage)</td><td>{{ item.stufe_name or item.bereits_name or item.naechste_name }}</td></tr>{% else %}<tr><td colspan="5">Keine Vorgänge.</td></tr>{% endfor %}</tbody></table></div></section>{% endfor %}
+{% elif section == 'news' %}
+<div class="cards">{% for item in data.get('items',[]) %}<article><small>{{ item.zeitraum_text }} · {{ item.kategorie }}</small><h2>{{ item.titel }}</h2><p class="pre-line">{{ item.nachricht }}</p></article>{% else %}<p>Keine aktuellen News.</p>{% endfor %}</div>
+{% elif section == 'bewerbungen' %}
+<div class="table-scroll"><table><thead><tr><th>Name</th><th>Telefon</th><th>Bereiche</th><th>Status</th><th>Rückrufwunsch</th></tr></thead><tbody>{% for item in data.get('items',[]) %}<tr><td>{{ item.name }}</td><td>{{ item.telefon }}</td><td>{{ item.bereiche }}</td><td>{{ item.status }}</td><td>{{ item.rueckrufwunsch }}</td></tr>{% else %}<tr><td colspan="5">Keine Bewerbungen vorhanden.</td></tr>{% endfor %}</tbody></table></div>
+<section class="panel"><h2>Einladung vorbereiten</h2><p>Empfängeradresse selbst erfassen und prüfen. Anschließend lässt sich der Entwurf im eigenen E-Mail-Programm öffnen.</p>
+<form method="post" class="draft-form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Empfänger-E-Mail<input type="email" name="recipient" maxlength="254" required></label><label>Termin (deutsche Ortszeit)<input type="datetime-local" name="appointment" required></label><label>Einladungstext<textarea name="message" maxlength="4000" rows="7" required></textarea></label><label class="check"><input type="checkbox" name="confirmed" value="1" required> Empfänger, Termin und Text sind geprüft.</label><button>Einladungsentwurf erstellen</button></form>
+{% if draft %}<div class="notice"><h3>Entwurf erstellt – noch nicht versendet</h3><p>An: {{ draft.recipient }}</p><p class="pre-line">{{ draft.message }}</p><a class="button" href="{{ draft.mailto_url }}">Im E-Mail-Programm öffnen</a></div>{% endif %}</section>
+{% elif section == 'lieferanten' %}
+<div class="cards">{% for item in data.get('items',[]) %}<article><h2>{{ item.name }}</h2><p>{{ item.kategorie }}</p><p>{{ item.email }}<br>{{ item.telefon }}</p><p>{{ item.adresse }}<br>{{ item.ort }}</p></article>{% else %}<p>Keine aktiven Lieferanten vorhanden.</p>{% endfor %}</div>
+{% elif section in ('zugaenge','autohausportale') %}
+{% if section == 'zugaenge' %}<p>Vorhandene Autohauszugänge. Lieferanten-Logins sind in der Lieferantenverwaltung nicht hinterlegt.</p>{% endif %}
+<div class="cards">{% for item in data.get('items',[]) %}<article><h2>{{ item.name }}</h2>{% if item.portal_url %}<a class="button" href="{{ item.portal_url }}" target="_blank" rel="noopener noreferrer">Autohausportal öffnen</a>{% else %}<p>Kein gültiger Portalpfad hinterlegt.</p>{% endif %}{% if section == 'zugaenge' %}<p>Zugangscode: {% if item.zugangscode %}<code>{{ item.zugangscode }}</code>{% else %}Kein Klartextcode hinterlegt{% endif %}</p>{% endif %}</article>{% else %}<p>Keine Autohausportale vorhanden.</p>{% endfor %}</div>
+{% elif section == 'postfach' %}
+<section class="panel"><h2>E-Mails</h2><a class="button" href="{{ data.get('mail_url','/admin/mail') }}">E-Mail-Postfach öffnen</a></section>
+<section><h2>Ungelesene Nachrichten der Autohäuser</h2><div class="cards">{% for item in data.get('items',[]) %}<article><small>{{ item.erstellt_am }}</small><h3>{{ item.autohaus_name }} · {{ item.kennzeichen }}</h3><p>{{ item.fahrzeug }}</p><p class="pre-line">{{ item.nachricht }}</p></article>{% else %}<p>Keine ungelesenen Autohausnachrichten.</p>{% endfor %}</div></section>
+{% endif %}</main></body></html>

@@ -414,6 +414,7 @@
   </div>
 </div>
 {% block navbar %}
+{% if office_mode %}{% include 'buero_nav.html' %}{% else %}
 {% set current_endpoint = request.endpoint or '' %}
 {% macro nav_class(endpoints) -%}nav-link{% if current_endpoint in endpoints %} is-active{% endif %}{%- endmacro %}
 {% macro nav_current(endpoints) -%}{% if current_endpoint in endpoints %} aria-current="page"{% endif %}{%- endmacro %}
@@ -458,6 +459,7 @@
     </div>
   </div>
 </nav>
+{% endif %}
 {% endblock %}
 <script src="{{ static_asset_url('admin-sidebar.js') }}" defer></script>
 

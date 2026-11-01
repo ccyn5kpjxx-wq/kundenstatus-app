@@ -17,7 +17,7 @@ import smtplib
 import uuid
 import mimetypes
 from contextlib import contextmanager
-from flask import Blueprint, render_template, request, jsonify, send_file, abort, current_app
+from flask import Blueprint, render_template, request, jsonify, send_file, abort, current_app, g
 
 MAX_MESSAGE = 25 * 1024 * 1024
 
@@ -169,7 +169,13 @@ def register_mailbox(app, admin_required, imap_config, smtp_config, get_db):
     def network_error(exc):return jsonify(error='Mailserver momentan nicht erreichbar. Bitte erneut versuchen.'),502
     @bp.get('/admin/mail')
     @admin_required
-    def index():return render_template('mailbox.html',mail_address=imap_config().get('user',''),mail_write=enabled(),mail_send=send_enabled(),mail_move=move_enabled(),mail_flags=flags_enabled())
+    def index():
+        office_readonly = bool(getattr(g, 'office_identity', None))
+        return render_template('mailbox.html',mail_address=imap_config().get('user',''),
+                               mail_write=enabled() and not office_readonly,
+                               mail_send=send_enabled() and not office_readonly,
+                               mail_move=move_enabled() and not office_readonly,
+                               mail_flags=flags_enabled() and not office_readonly)
     @bp.get('/admin/mail/messages')
     @admin_required
     def listing():return jsonify(service.listing(request.args.get('folder','INBOX'),request.args.get('page',1,type=int),request.args.get('q','')[:200]))

@@ -708,6 +708,13 @@ def main():
     captured_lexware_payload = {}
     original_ensure_lexware_contact = portal.ensure_lexware_contact
     original_lexware_request = portal.lexware_request
+    # Use an order from init_db's isolated synthetic fixtures so the unchanged
+    # service-process approval guard can inspect its actual database state.
+    smoke_invoice_db = portal.get_db()
+    try:
+        smoke_invoice_id = smoke_invoice_db.execute("SELECT id FROM auftraege ORDER BY id LIMIT 1").fetchone()["id"]
+    finally:
+        smoke_invoice_db.close()
 
     def capture_lexware_request(method, path, payload=None, query=""):
         captured_lexware_payload.update({"method": method, "path": path, "payload": payload, "query": query})
@@ -717,7 +724,7 @@ def main():
         portal.ensure_lexware_contact = lambda kunde: ("smoke-contact", False, True)
         portal.lexware_request = capture_lexware_request
         portal.create_lexware_invoice_draft(
-            {"abholtermin": "20.05.2026"},
+            {"id": smoke_invoice_id, "abholtermin": "20.05.2026"},
             {
                 "kunde": {"name": "Smoke Kunde"},
                 "positionen": [{"bezeichnung": long_lexware_name}],

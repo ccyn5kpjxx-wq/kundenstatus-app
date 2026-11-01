@@ -619,8 +619,9 @@ def register_assistant(p):
     @bp.post("/login")
     def login():
         login_next = request.form.get('next')
-        personal_form = login_next in {'/werkstatt/materialbestellung', '/werkstatt/mein-konto'}
-        login_page = '/werkstatt/materialbestellung?next=profil' if login_next == '/werkstatt/mein-konto' else '/werkstatt/materialbestellung'
+        personal_form = login_next in {'/werkstatt/materialbestellung', '/werkstatt/mein-konto', '/werkstatt/buero'}
+        login_page = ('/werkstatt/buero/login' if login_next == '/werkstatt/buero' else
+                      '/werkstatt/materialbestellung?next=profil' if login_next == '/werkstatt/mein-konto' else '/werkstatt/materialbestellung')
         def failed_login(message, status):
             if personal_form:
                 flash(message, 'error')

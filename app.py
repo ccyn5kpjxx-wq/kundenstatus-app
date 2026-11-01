@@ -38988,6 +38988,11 @@ def admin_required(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not session.get("admin"):
+            office = globals().get("office_access")
+            if office is not None and office.identity() is not None:
+                if office.allows(request.endpoint, request.method):
+                    return func(*args, **kwargs)
+                abort(403, description="Dieser Bereich gehört nicht zum Bürozugang.")
             if request.endpoint == "admin_mitarbeiter" and request.method == "GET":
                 return redirect(url_for("login", return_to="chef"))
             return redirect(url_for("login"))
@@ -39749,6 +39754,8 @@ def betriebs_cockpit():
         ki_assistent_chat_url=url_for("admin_ki_chat"),
         ki_assistent_clear_url=url_for("admin_ki_chat_loeschen"),
         ki_assistent_subtitle="Fragen zu Auftrag, Upload oder Portal.",
+        belegfreigabe=office_documents.counters(admin=True),
+        lohnfreigabe_count=office_payroll.pending_review_count(),
     )
 
 
@@ -49172,6 +49179,17 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         # Employment contracts postdate the initial private employee portal.
         "mitarbeiter_arbeitsvertraege",
     }
+    required_tables.difference_update(OFFICE_BACKUP_TABLES)
+    for feature, office_tables in (
+        (OFFICE_ACCESS_FEATURE, OFFICE_ACCESS_TABLES),
+        (OFFICE_SECTION_FEATURE, OFFICE_SECTION_TABLES),
+        ('office_documents_v1', OFFICE_DOCUMENT_TABLES),
+        ('office_lexware_v1', OFFICE_LEXWARE_TABLES),
+        (OFFICE_INBOX_FEATURE, OFFICE_INBOX_TABLES),
+        (OFFICE_PAYROLL_FEATURE, OFFICE_PAYROLL_TABLES),
+    ):
+        if feature in schema_features:
+            required_tables.update(office_tables)
     if "reifen_terminslots_v1" in schema_features:
         required_tables.add("reifen_termin_slots")
     if "kunden_termin_mail_versand" in schema_features:
@@ -49487,6 +49505,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
     target = get_db()
     try:
         ensure_no_database_only_originals_for_import(target)
+        ensure_office_state_for_import(sys.modules[__name__], export=export, target=target)
         ensure_kundenflotten_state_for_import(export=export, target=target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], export=export, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], export=export, target=target, archive=archive, names=names)
@@ -49575,6 +49594,7 @@ def import_sqlite_rows_into_current_database(imported_db):
             ).fetchall()
         }
         ensure_no_database_only_originals_for_import(target)
+        ensure_office_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_kundenflotten_state_for_import(imported_db=imported_db, target=target)
         ensure_employee_invitation_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
         ensure_employee_private_state_for_import(sys.modules[__name__], imported_db=imported_db, target=target)
@@ -49862,6 +49882,7 @@ def admin_daten_import():
                 with portal_originals_operation_lock():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
+                    ensure_office_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_kundenflotten_state_for_import(export=backup_export, imported_db=imported_db)
                     ensure_employee_invitation_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)
                     ensure_employee_private_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db, archive=archive, names=names)
@@ -49915,7 +49936,7 @@ def admin_daten_import():
                     intake_schema = globals().get("workshop_intake_init_schema")
                     if callable(intake_schema):
                         intake_schema()
-                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "employee_school_init_schema", "employee_illness_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema", "order_delivery_init_schema"):
+                    for hook in ("employee_invitations_init_schema", "employee_portal_init_schema", "employee_school_init_schema", "employee_illness_init_schema", "workshop_progress_init_schema", "workshop_orders_init_schema", "workshop_purchase_monitor_init_schema", "material_channel_init_schema", "material_dialog_init_schema", "order_price_comparison_init_schema", "order_delivery_init_schema", "office_access_init_schema", "office_sections_init_schema", "office_documents_init_schema", "office_lexware_init_schema", "office_inbox_init_schema", "office_payroll_init_schema"):
                         schema = globals().get(hook)
                         if callable(schema):
                             schema()
@@ -59726,6 +59747,46 @@ from werkstatt_mitarbeiter_auftraege import register_employee_orders, ensure_emp
 # and the shared workshop login remain independent.
 app.config["EMPLOYEE_ORDER_OPERATIONS_ENABLED"] = env_flag("EMPLOYEE_ORDER_OPERATIONS_ENABLED", True)
 employee_orders = register_employee_orders(sys.modules[__name__])
+from werkstatt_buero_zugang import register_office_access, BACKUP_TABLES as OFFICE_ACCESS_TABLES, SCHEMA_FEATURE as OFFICE_ACCESS_FEATURE
+from werkstatt_buero_bereiche import register_office_sections, BACKUP_TABLES as OFFICE_SECTION_TABLES, SCHEMA_FEATURE as OFFICE_SECTION_FEATURE
+from werkstatt_buero_belege import register_office_documents, TABLES as OFFICE_DOCUMENT_TABLES
+from werkstatt_buero_planung import register_office_planning
+from werkstatt_buero_lexware import register_office_lexware, TABLES as OFFICE_LEXWARE_TABLES
+from werkstatt_buero_posteingang import register_office_inbox, BACKUP_TABLES as OFFICE_INBOX_TABLES, SCHEMA_FEATURE as OFFICE_INBOX_FEATURE
+from werkstatt_buero_anbindung import register_office_inbox_bindings
+from werkstatt_buero_lohn import register_office_payroll, BACKUP_TABLES as OFFICE_PAYROLL_TABLES, SCHEMA_FEATURE as OFFICE_PAYROLL_FEATURE
+from werkstatt_buero_sicherung import ensure_office_state_for_import
+from werkstatt_buero import register_office_cockpit
+
+office_access = register_office_access(sys.modules[__name__])
+office_access.init_schema()
+office_sections = register_office_sections(sys.modules[__name__])
+office_sections_init_schema = office_sections.init_schema
+office_sections.init_schema()
+office_documents = register_office_documents(sys.modules[__name__])
+office_planning = register_office_planning(sys.modules[__name__])
+office_lexware = register_office_lexware(sys.modules[__name__])
+office_lexware.init_schema()
+app.config['OFFICE_LEXWARE_UPLOAD_ENABLED'] = env_flag('OFFICE_LEXWARE_UPLOAD_ENABLED', True)
+app.config['OFFICE_CEO_MAIL_ADDRESS'] = os.environ.get('OFFICE_CEO_MAIL_ADDRESS', 'geschaeftsfuehrung@auto-lackierzentrum.de')
+office_inbox = register_office_inbox(sys.modules[__name__])
+office_inbox_init_schema = office_inbox.init_schema
+office_inbox.init_schema()
+office_inbox_bindings = register_office_inbox_bindings(sys.modules[__name__])
+office_payroll = register_office_payroll(sys.modules[__name__])
+office_payroll_init_schema = office_payroll.init_schema
+office_payroll.init_schema()
+register_office_cockpit(sys.modules[__name__])
+office_access_init_schema = office_access.init_schema
+OFFICE_BACKUP_TABLES = (*OFFICE_ACCESS_TABLES, *OFFICE_SECTION_TABLES, *OFFICE_DOCUMENT_TABLES, *OFFICE_LEXWARE_TABLES, *OFFICE_INBOX_TABLES, *OFFICE_PAYROLL_TABLES)
+BACKUP_TABLES += OFFICE_BACKUP_TABLES
+BACKUP_SCHEMA_FEATURES += (OFFICE_ACCESS_FEATURE, OFFICE_SECTION_FEATURE, 'office_documents_v1', 'office_lexware_v1', OFFICE_INBOX_FEATURE, OFFICE_PAYROLL_FEATURE)
+office_document_uploaded = office_lexware.analyse_scan
+
+def office_document_approved(key):
+    item = office_documents.detail(key, admin=True)
+    return office_lexware.send_approved(key, item['revision'])
+
 from werkstatt_bestellvergleich import OrderPriceComparison
 order_price_comparison = OrderPriceComparison(sys.modules[__name__])
 order_price_comparison_init_schema = order_price_comparison.init_schema
