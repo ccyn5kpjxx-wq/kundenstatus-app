@@ -15,6 +15,7 @@ from io import BytesIO
 from pathlib import Path
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -893,6 +894,65 @@ class OfficeCockpitIntegration(unittest.TestCase):
         with self.assertRaises(ValueError):p.ensure_office_state_for_import(p, export=changed)
         with closing(p.get_db()) as db:
             self.assertEqual(dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone()), approved)
+
+    def test_16_private_order_can_be_approved_with_visible_missing_transfer_details(self):
+        base = '/admin/buero/belege'
+        upload = self.rendered_form(self.get(base, self.admin), form_action=base + '/erfassen')
+        writer = PdfWriter(); writer.add_blank_page(width=200, height=250)
+        stream = BytesIO(); writer.write(stream)
+        with patch.object(p, 'extract_document_text_local', return_value=''):
+            response = self.submit_rendered(upload, base, client=self.admin, typ='post', kategorie='privat',
+                lieferant='Synthetic private booking', betrag_brutto='90.00',
+                notiz='Synthetic original and user-confirmed private one-off payment.',
+                original=(BytesIO(stream.getvalue()), 'synthetic-private-booking.pdf'))
+        self.assertEqual(response.status_code, 303)
+        detail_path = response.headers['Location']
+        key = detail_path.rsplit('/', 1)[-1]
+        shown = self.get(detail_path, self.admin)
+        html = shown.get_data(as_text=True)
+        summary = re.search(r'<section class="bb-transfer-readonly".*?</section>', html, re.S).group()
+        for label in ('Zahlungsempfänger', 'IBAN', 'BIC', 'Verwendungszweck', 'Fälligkeit'):
+            self.assertIn('<dt>' + label + '</dt>', summary)
+        self.assertEqual(summary.count('Nicht angegeben'), 5)
+        self.assertNotIn('<details', summary)
+        form = self.rendered_form(shown, form_action=detail_path + '/freigeben')
+        for name in ('zahlungsempfaenger', 'iban', 'bic', 'verwendungszweck', 'faelligkeit'):
+            self.assertEqual(form['data'][name], '')
+        checked = self.submit_rendered(form, detail_path, client=self.admin,
+            typ='post', kategorie='sonstige', bereich='privat', confirmed='ja')
+        self.assertEqual(checked.status_code, 303)
+        followup = self.get(detail_path, self.admin)
+        form = self.rendered_form(followup, form_action=detail_path + '/freigeben')
+        self.assertEqual((form['data']['typ'], form['data']['kategorie'], form['data']['bereich'], form['data']['zahlungsmodus']),
+                         ('zahlungsauftrag', 'privat', 'privat', 'einzelzahlung'))
+        with closing(p.get_db()) as db:
+            before = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        invalid = self.submit_rendered(form, detail_path, client=self.admin,
+            iban='DE89370400440532013001', confirmed='ja', zahlungspflichtig='ja')
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn('IBAN-Prüfziffer ist ungültig', invalid.get_data(as_text=True))
+        corrected = next(f for f in RenderedForms(invalid.get_data(as_text=True)).forms
+                         if f['action'] == detail_path + '/freigeben')
+        self.assertEqual(corrected['data']['iban'], 'DE89370400440532013001')
+        with closing(p.get_db()) as db:
+            self.assertEqual(dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone()), before)
+        with patch.object(p.office_lexware, 'send_approved', side_effect=AssertionError('Private order must never upload to company Lexware')) as lexware:
+            approved = self.submit_rendered(corrected, detail_path, client=self.admin,
+                iban='', confirmed='ja', zahlungspflichtig='ja')
+        self.assertEqual(approved.status_code, 303, approved.get_data(as_text=True))
+        lexware.assert_not_called()
+        with closing(p.get_db()) as db:
+            row = dict(db.execute('SELECT * FROM buero_belege WHERE id=?', (key,)).fetchone())
+        self.assertEqual((row['status'], row['bereich'], row['payable'], row['quelle_geprueft']),
+                         ('freigegeben', 'privat', 1, 1))
+        self.assertEqual((row['business_confirmed'], row['paid_date'], row['payment_reference']), (0, '', ''))
+        office = self.get('/werkstatt/buero/belege/' + key)
+        self.assert_limited_page(office)
+        text = office.get_data(as_text=True)
+        self.assertIn('Zahlung vorbereiten', text)
+        self.assertIn('Bearbeitung übernehmen', text)
+        self.assertIn('Fehlende Zahlungsangaben vor der Überweisung klären.', text)
+        self.assertNotIn('<h3>Jetzt überweisen</h3>', text)
 
 if __name__ == '__main__':
     unittest.main()

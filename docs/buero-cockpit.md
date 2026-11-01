@@ -74,15 +74,20 @@ Im Chef-Cockpit führt **Rechnungen zur Freigabe** nach
 Das Öffnen eines Belegs entfernt nur dessen Neu-Markierung für diese Person.
 Es erteilt keine Freigabe und bestätigt keine Zahlung.
 
-Miete und Kaution sind eigene Zahlungsaufträge auf Basis einer geprüften
-Originalunterlage. Betrag, Zahlungsempfänger, gültige IBAN, Fälligkeit und
-Verwendungszweck sind erforderlich. Fehlende Angaben werden konkret benannt.
-BIC bleibt optional und wird ausschließlich aus einer belegten Quelle übernommen;
+Miete, Kaution und private Einzelzahlungen sind eigene Zahlungsaufträge auf
+Basis einer geprüften Originalunterlage und ausdrücklichen Zahlungsabsicht.
+Der positive Betrag und die Chefprüfung bleiben erforderlich. Alle fünf
+Überweisungsangaben stehen bei jedem Beleg sichtbar, auch wenn sie fehlen.
+„Nicht angegeben“ verhindert die Freigabe nicht; die Angaben können außerhalb
+des Portals vor der tatsächlichen Überweisung geklärt werden. Vorhandene IBAN/BIC
+werden weiterhin validiert und ausschließlich aus belegten Quellen übernommen;
 es gibt keine Ableitung aus der IBAN. Die Chefansicht kann Überweisungsdaten und
 Freigabe atomar mit derselben Revision speichern. Leere Rechnungsnummer und
 Belegdatum sind bei Zahlungsaufträgen keine offenen Pflichtangaben.
-IBAN/BIC werden auch bei Rechnungen und Bescheiden geschützt angezeigt und
-bearbeitet; für deren bestehende Lexware-Übergabe bleiben sie optional. Dieselbe Mietunterlage darf beide unterschiedlichen Aufträge
+Private Zahlungsaufträge bleiben privat und dürfen keine monatliche Mietvorlage
+sein. Die Freigabe öffnet die Büro-Bearbeitungsaufgabe auch bei fehlenden
+Überweisungsdaten; eine tatsächliche Zahlung erfordert weiterhin eine separate
+Bestätigung mit Datum und Referenz. Dieselbe Mietunterlage darf beide unterschiedlichen Aufträge
 belegen. Eine monatliche Mietvorlage erzeugt keine automatischen Folgezahlungen.
 Private Belege und Kautionen werden nicht automatisch als GmbH-Rechnung gebucht.
 

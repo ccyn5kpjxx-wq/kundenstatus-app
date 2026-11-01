@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 import sqlite3
 import sys
@@ -868,19 +869,23 @@ class OfficeDocumentTests(unittest.TestCase):
         self.assertEqual(self.row(key)["betrag_cent"], 150000)
         self.assertEqual(len(self.rows()), 1)  # No automatic next-month task.
 
-    def test_missing_rent_fields_remain_gaps_and_cannot_be_released(self):
-        for field in ("betrag_brutto", "zahlungsempfaenger", "faelligkeit", "verwendungszweck", "zahlungsmodus"):
-            values = self.order_fields(**{field: ""})
-            key = self.create(raw=pdf_bytes("gap-" + field), **values)
+    def test_order_amount_and_source_mode_still_required_while_transfer_gaps_are_optional(self):
+        for field in ("betrag_brutto", "zahlungsmodus"):
+            key = self.create(raw=pdf_bytes("required-review-" + field), **self.order_fields(**{field:""}))
             self.assertEqual(self.action(key, "einreichen").status_code, 400)
-            self.assertEqual((self.row(key)["status"], self.row(key)["payable"]), ("entwurf", 0))
+            self.assertEqual((self.row(key)["status"], self.row(key)["payable"]), ("entwurf",0))
+        for field in ("zahlungsempfaenger", "iban", "bic", "faelligkeit", "verwendungszweck"):
+            key = self.create(raw=pdf_bytes("optional-transfer-" + field), **self.order_fields(**{field:""}))
+            self.submit(key)
+            self.approve(key, zahlungspflichtig="ja")
+            row = self.row(key)
+            self.assertEqual((row["status"],row["payable"],row[field]), ("freigegeben",1,""))
+            self.assertEqual((row["paid_date"],row["payment_reference"]), ("",""))
         with self.p.app.app_context():
-            values = self.order_fields(betrag_brutto="")
-            key, _ = self.p.documents.create_from_intake(values, FileStorage(stream=io.BytesIO(pdf_bytes("intake-missing-rent")), filename="synthetic.pdf"),
-                                                       source_ref="synthetic-rent-source")
-        self.assertEqual(self.row(key)["betrag_cent"], None)
-        self.assertEqual(self.action(key, "freigeben", admin=True, zahlungspflichtig="ja").status_code, 400)
-        self.assertEqual(self.row(key)["payable"], 0)
+            key, _ = self.p.documents.create_from_intake(self.order_fields(betrag_brutto=""),
+                FileStorage(stream=io.BytesIO(pdf_bytes("intake-no-amount")),filename="synthetic.pdf"),source_ref="synthetic-no-amount")
+        self.assertEqual(self.action(key,"freigeben",admin=True,zahlungspflichtig="ja").status_code,400)
+        self.assertEqual(self.row(key)["payable"],0)
 
     def test_same_contract_can_support_rent_and_deposit_without_duplicate_invoice(self):
         raw = pdf_bytes("shared-synthetic-contract")
@@ -1018,24 +1023,25 @@ class OfficeDocumentTests(unittest.TestCase):
             self.assertEqual(self.anon.get("/admin/buero/belege/" + key).status_code, 403)
             self.assertEqual((row["status"], row["payable"], row["business_confirmed"]), ("entwurf", 0, 0))
 
-    def test_payment_order_missing_names_are_concrete_and_bic_is_optional(self):
+    def test_all_transfer_gaps_remain_visible_but_allow_source_checked_order_approval(self):
         approved = Mock(); self.p.office_document_approved = approved
-        key = self.create(raw=pdf_bytes("missing-transfer"), **self.order_fields(zahlungsempfaenger="", iban="", faelligkeit="", verwendungszweck=""))
+        empty = dict(zahlungsempfaenger="",iban="",bic="",faelligkeit="",verwendungszweck="")
+        key = self.create(raw=pdf_bytes("optional-all-transfer"), **self.order_fields(**empty))
         before = self.row(key)
-        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("Für den Zahlungsauftrag fehlen: Zahlungsempfänger, IBAN, Fälligkeit, Verwendungszweck.", response.get_data(as_text=True))
-        self.assertEqual(self.row(key), before)
-        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="miete", zahlungspflichtig="ja",
-            zahlungsempfaenger="Synthetic reviewed landlord", iban="DE89 3704 0044 0532 0130 00", bic="",
-            faelligkeit="2026-11-03", verwendungszweck="Synthetic rent due November")
-        self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+        response = self.action(key,"freigeben",admin=True,typ="zahlungsauftrag",kategorie="miete",zahlungspflichtig="ja")
+        self.assertEqual(response.status_code,303,response.get_data(as_text=True))
         row = self.row(key)
-        self.assertEqual((row["status"], row["revision"], row["payable"], row["quelle_geprueft"]), ("freigegeben", before["revision"] + 1, 1, 1))
-        self.assertEqual((row["iban"], row["bic"], row["paid_date"], row["payment_reference"]), ("DE89370400440532013000", "", "", ""))
-        approved.assert_not_called()  # No Lexware invoice upload for an order.
-        shown = self.office.get("/werkstatt/buero/belege/" + key).get_data(as_text=True)
-        self.assertIn(row["iban"], shown); self.assertIn("Nicht angegeben", shown)
+        self.assertEqual((row["status"],row["revision"],row["payable"],row["quelle_geprueft"]), ("freigegeben",before["revision"]+1,1,1))
+        self.assertTrue(all(row[name]=="" for name in empty))
+        self.assertEqual((row["paid_date"],row["payment_reference"]), ("",""))
+        with self.p.app.test_request_context():
+            session["office_mid"]=1
+            view=self.p.documents.detail(key)
+        self.assertTrue(view["payment_allowed"])
+        self.assertTrue(view["payment_data_pending"])
+        self.assertEqual(set(view["transfer_missing"]),{"Zahlungsempfänger","IBAN","BIC","Fälligkeit","Verwendungszweck"})
+        self.assertTrue(view["transfer_warning"].startswith("Nicht angegeben:"))
+        approved.assert_not_called()
 
     def test_invalid_atomic_transfer_approval_rolls_back_and_keeps_user_input(self):
         key = self.create(raw=pdf_bytes("invalid-transfer"), **self.order_fields(zahlungsempfaenger="", iban=""))
@@ -1104,6 +1110,246 @@ class OfficeDocumentTests(unittest.TestCase):
         row = self.row(key)
         self.assertEqual((row["typ"],row["zahlungsmodus"],row["payable"],row["quelle_geprueft"]), ("post","",0,0))
         self.assertEqual(row["iban"], "DE89370400440532013000")
+
+
+    def test_transfer_warnings_cover_every_kind_and_bic_only_is_informational(self):
+        empty=dict(zahlungsempfaenger="",iban="",bic="",faelligkeit="",verwendungszweck="")
+        for kind in ("rechnung","bescheid","lieferschein","post"):
+            key=self.create(raw=pdf_bytes("all-kinds-transfer-"+kind),typ=kind,**empty)
+            with self.p.app.test_request_context():
+                session["office_mid"]=1
+                view=self.p.documents.detail(key)
+            self.assertEqual(len(view["transfer_missing"]),5)
+            self.assertTrue(view["payment_data_pending"])
+            self.assertFalse(view["payment_allowed"])
+        key=self.create(raw=pdf_bytes("only-bic-absent"),zahlungsempfaenger="Synthetic payee",iban="DE89370400440532013000",
+                        bic="",verwendungszweck="Synthetic payment reference")
+        with self.p.app.test_request_context():
+            session["office_mid"]=1
+            view=self.p.documents.detail(key)
+        self.assertEqual(view["transfer_missing"],["BIC"])
+        self.assertFalse(view["payment_data_pending"])
+
+    def test_private_single_order_without_bank_data_is_local_work_then_explicit_external_record(self):
+        original=pdf_bytes("synthetic-private-travel-source")
+        empty=dict(zahlungsempfaenger="",iban="",bic="",faelligkeit="",verwendungszweck="")
+        payload=self.order_fields(kategorie="privat",zahlungsmodus="einzelzahlung",
+            notiz="Synthetic user-confirmed private payment intent and checked source total",**empty)
+        approved=Mock();self.p.office_document_approved=approved
+        key=self.create(raw=original,**payload);before=self.row(key)
+        # Wrong area, no source confirmation, missing amount and bad bank input
+        # remain failures even though the five transfer gaps are permitted.
+        bad_area=self.action(key,"freigeben",admin=True,typ="zahlungsauftrag",kategorie="privat",bereich="geschaeftlich",zahlungspflichtig="ja")
+        self.assertEqual(bad_area.status_code,400);self.assertEqual(self.row(key),before)
+        for changes in ({"zahlungspflichtig":""},{"iban":"DE89370400440532013001"},{"bic":"BAD!DEFF"}):
+            args=dict(typ="zahlungsauftrag",kategorie="privat",bereich="privat",zahlungspflichtig="ja");args.update(changes)
+            self.assertEqual(self.action(key,"freigeben",admin=True,**args).status_code,400)
+            self.assertEqual(self.row(key),before)
+        response=self.action(key,"freigeben",admin=True,typ="zahlungsauftrag",kategorie="privat",bereich="privat",zahlungspflichtig="ja")
+        self.assertEqual(response.status_code,303,response.get_data(as_text=True))
+        row=self.row(key)
+        self.assertEqual((row["typ"],row["kategorie"],row["bereich"],row["status"],row["payable"],row["business_confirmed"],row["quelle_geprueft"]),
+                         ("zahlungsauftrag","privat","privat","freigegeben",1,0,1))
+        self.assertEqual(row["sha256"],hashlib.sha256(original).hexdigest())
+        self.assertTrue(all(row[name]=="" for name in empty))
+        self.assertEqual((row["paid_date"],row["payment_reference"],row["lexware_beleg_id"]),("","",""))
+        self.assertEqual(self.action(key,"ueberweisung",version=str(before["revision"])).status_code,409)
+        self.assertEqual(self.action(key,"ueberweisung",confirmed="").status_code,400)
+        self.assertEqual(self.action(key,"ueberweisung").status_code,303)
+        working=self.row(key)
+        self.assertEqual((working["status"],working["paid_date"],working["payment_reference"]),("zahlung_in_bearbeitung","",""))
+        self.assertEqual(self.action(key,"bezahlt",zahlungsdatum="2026-01-05",zahlungsreferenz="").status_code,400)
+        self.assertEqual(self.action(key,"bezahlt",confirmed="",zahlungsdatum="2026-01-05",zahlungsreferenz="Synthetic external proof").status_code,400)
+        self.assertEqual(self.row(key),working)
+        self.assertEqual(self.action(key,"bezahlt",zahlungsdatum="2026-01-05",zahlungsreferenz="Synthetic external proof").status_code,303)
+        paid=self.row(key)
+        self.assertEqual((paid["status"],paid["paid_date"],paid["payment_reference"]),("bezahlt","2026-01-05","Synthetic external proof"))
+        self.assertTrue(all(paid[name]=="" for name in empty))
+        self.assertEqual(paid["lexware_beleg_id"],"")
+        actions=[a["aktion"] for a in self.rows(TABLES[1]) if a["beleg_id"]==key]
+        self.assertIn("ueberweisung_extern_in_bearbeitung",actions)
+        self.assertIn("zahlung_dokumentiert",actions)
+        approved.assert_not_called()  # The host's Lexware callback is not invoked.
+
+    def test_private_order_requires_positive_source_amount_reason_and_original_integrity(self):
+        for invalid in ({"betrag_brutto":""},{"notiz":""}):
+            payload=self.order_fields(kategorie="privat",zahlungsmodus="einzelzahlung",iban="",**invalid)
+            key=self.create(raw=pdf_bytes("bad-private-"+next(iter(invalid))),**payload)
+            before=self.row(key)
+            response=self.action(key,"freigeben",admin=True,typ="zahlungsauftrag",kategorie="privat",bereich="privat",zahlungspflichtig="ja")
+            self.assertEqual(response.status_code,400);self.assertEqual(self.row(key),before)
+        self.assertEqual(self.upload(raw=pdf_bytes("private-monthly"),**self.order_fields(kategorie="privat")).status_code,400)
+        key=self.create(raw=pdf_bytes("private-original-integrity"),**self.order_fields(kategorie="privat",zahlungsmodus="einzelzahlung",iban=""))
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_belege SET original_base64=? WHERE id=?",(base64.b64encode(pdf_bytes("different-original")).decode(),key));db.commit()
+        before=self.row(key)
+        self.assertEqual(self.action(key,"freigeben",admin=True,typ="zahlungsauftrag",kategorie="privat",bereich="privat",zahlungspflichtig="ja").status_code,400)
+        self.assertEqual(self.row(key),before)
+        self.assertEqual(self.action(key,"freigeben",admin=True,client=self.office,typ="zahlungsauftrag",kategorie="privat",bereich="privat",zahlungspflichtig="ja").status_code,403)
+
+    def test_private_single_order_same_source_cannot_duplicate_when_transfer_values_change(self):
+        raw=pdf_bytes("one-private-source")
+        payload=self.order_fields(kategorie="privat",zahlungsmodus="einzelzahlung",iban="",zahlungsempfaenger="",faelligkeit="",verwendungszweck="")
+        key=self.create(raw=raw,**payload)
+        response=self.upload(raw=raw,**dict(payload,zahlungsempfaenger="New synthetic payee",iban="DE89370400440532013000",
+                                          faelligkeit="2026-11-04",verwendungszweck="New reference"))
+        self.assertEqual(response.status_code,303)
+        self.assertTrue(response.headers["Location"].endswith(key))
+        self.assertEqual(len(self.rows()),1)
+        self.assertEqual((self.row(key)["zahlungsempfaenger"],self.row(key)["iban"],self.row(key)["faelligkeit"]),("","",""))
+
+    def test_reviewed_private_post_can_become_one_source_checked_private_payment_on_same_original(self):
+        raw = pdf_bytes("reviewed-private-post-payment")
+        key = self.create(raw=raw, typ="post", kategorie="privat", zahlungsempfaenger="", iban="", bic="", faelligkeit="", verwendungszweck="")
+        hook = Mock(); self.p.office_document_approved = hook
+        self.approve(key, typ="post", kategorie="privat", bereich="privat", chef_notiz="Synthetic original reviewed")
+        before, history = self.row(key), self.rows(TABLES[1])
+        response = self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="privat", bereich="privat",
+                               zahlungsmodus="einzelzahlung", zahlungspflichtig="ja", chef_notiz="Synthetic source total and private payment intent checked")
+        self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+        row = self.row(key)
+        self.assertEqual((row["id"], row["sha256"], row["original_base64"], row["size_bytes"]),
+                         (before["id"], hashlib.sha256(raw).hexdigest(), before["original_base64"], before["size_bytes"]))
+        self.assertEqual((row["typ"], row["kategorie"], row["bereich"], row["status"], row["payable"], row["quelle_geprueft"], row["business_confirmed"]),
+                         ("zahlungsauftrag", "privat", "privat", "freigegeben", 1, 1, 0))
+        self.assertEqual(row["revision"], before["revision"] + 1)
+        self.assertEqual((row["paid_date"], row["payment_reference"], row["lexware_beleg_id"]), ("", "", ""))
+        self.assertTrue(all(row[name] == "" for name in ("zahlungsempfaenger", "iban", "bic", "faelligkeit", "verwendungszweck")))
+        after_history = self.rows(TABLES[1])
+        self.assertTrue(all(entry in after_history for entry in history))
+        followups = [json.loads(entry["details_json"]) for entry in after_history if json.loads(entry["details_json"]).get("private_post_zahlungsfreigabe")]
+        self.assertEqual(len(followups), 1)
+        self.assertEqual((followups[0]["vorher_status"], followups[0]["original_sha256"]), ("freigegeben", row["sha256"]))
+        self.assertEqual(len(self.rows()), 1)
+        with self.p.app.test_request_context():
+            session["office_mid"] = 1
+            view = self.p.documents.detail(key)
+        self.assertTrue(view["payment_allowed"])
+        self.assertTrue(view["payment_data_pending"])
+        self.assertEqual(self.action(key, "freigeben", admin=True, typ="zahlungsauftrag", kategorie="privat", bereich="privat",
+                                     zahlungsmodus="einzelzahlung", zahlungspflichtig="ja").status_code, 409)
+        self.assertEqual(self.row(key), row)
+        hook.assert_not_called()
+
+    def test_reviewed_private_post_payment_requires_exact_transition_and_fresh_explicit_confirmation(self):
+        key = self.create(raw=pdf_bytes("private-post-guard-matrix"), typ="post", kategorie="privat")
+        old_revision = self.row(key)["revision"]
+        self.approve(key, typ="post", kategorie="privat", bereich="privat")
+        before, history = self.row(key), self.rows(TABLES[1])
+        exact = dict(typ="zahlungsauftrag", kategorie="privat", bereich="privat", zahlungsmodus="einzelzahlung", zahlungspflichtig="ja")
+        for change in ({"typ":"post"}, {"typ":"rechnung"}, {"typ":"bescheid"}, {"kategorie":"miete"},
+                       {"bereich":"geschaeftlich"}, {"zahlungsmodus":"monatliche_miete"}, {"zahlungsmodus":""}):
+            with self.subTest(change=change):
+                self.assertEqual(self.action(key, "freigeben", admin=True, **dict(exact, **change)).status_code, 409)
+                self.assertEqual(self.row(key), before)
+                self.assertEqual(self.rows(TABLES[1]), history)
+        for change in ({"zahlungspflichtig":""}, {"confirmed":""}, {"iban":"DE89370400440532013001"}, {"bic":"BAD!DEFF"}):
+            self.assertEqual(self.action(key, "freigeben", admin=True, **dict(exact, **change)).status_code, 400)
+            self.assertEqual(self.row(key), before)
+        self.assertEqual(self.action(key, "freigeben", admin=True, version=str(old_revision), **exact).status_code, 409)
+        self.assertEqual(self.action(key, "freigeben", admin=True, client=self.office, **exact).status_code, 403)
+        self.assertEqual(self.action(key, "zurueckweisen", admin=True, chef_notiz="No general reopening").status_code, 409)
+        self.assertEqual(self.row(key), before)
+        self.assertEqual(self.rows(TABLES[1]), history)
+        with closing(self.p.get_db()) as db:
+            db.execute("UPDATE buero_belege SET original_base64=? WHERE id=?", (base64.b64encode(pdf_bytes("tampered-private-original")).decode(), key)); db.commit()
+        corrupt = self.row(key)
+        self.assertEqual(self.action(key, "freigeben", admin=True, **exact).status_code, 400)
+        self.assertEqual(self.row(key), corrupt)
+        self.assertEqual(self.rows(TABLES[1]), history)
+
+    def test_private_post_followup_cannot_reopen_other_approved_kinds_areas_or_payment_states(self):
+        exact = dict(typ="zahlungsauftrag", kategorie="privat", bereich="privat", zahlungsmodus="einzelzahlung", zahlungspflichtig="ja")
+        for kind, area in (("post", "geschaeftlich"), ("lieferschein", "privat"), ("bescheid", "privat"), ("rechnung", "privat")):
+            key = self.create(raw=pdf_bytes("not-private-post-" + kind + area), typ=kind, kategorie="privat" if area == "privat" else "sonstige")
+            self.approve(key, typ=kind, kategorie="privat" if area == "privat" else "sonstige", bereich=area)
+            before, history = self.row(key), self.rows(TABLES[1])
+            self.assertEqual(self.action(key, "freigeben", admin=True, **exact).status_code, 409)
+            self.assertEqual(self.row(key), before)
+            self.assertEqual(self.rows(TABLES[1]), history)
+        key = self.create(raw=pdf_bytes("approved-private-order-is-closed"), **self.order_fields(kategorie="privat", zahlungsmodus="einzelzahlung"))
+        self.approve(key, **exact)
+        for state in ("freigegeben", "zahlung_in_bearbeitung", "bezahlt"):
+            if state == "zahlung_in_bearbeitung":
+                self.assertEqual(self.action(key, "ueberweisung").status_code, 303)
+            elif state == "bezahlt":
+                self.assertEqual(self.action(key, "bezahlt", zahlungsdatum="2026-01-05", zahlungsreferenz="Synthetic external payment").status_code, 303)
+            before, history = self.row(key), self.rows(TABLES[1])
+            self.assertEqual(before["status"], state)
+            self.assertEqual(self.action(key, "freigeben", admin=True, **exact).status_code, 409)
+            self.assertEqual(self.row(key), before)
+            self.assertEqual(self.rows(TABLES[1]), history)
+
+    def test_private_post_followup_competing_requests_keep_one_revision_and_one_payment_approval(self):
+        key = self.create(raw=pdf_bytes("private-post-competing-followup"), typ="post", kategorie="privat")
+        self.approve(key, typ="post", kategorie="privat", bereich="privat")
+        before = self.row(key)
+        def review(kind):
+            client = self.p.app.test_client(); self.login(client, admin=True)
+            return self.action(key, "freigeben", admin=True, client=client, version=str(before["revision"]), typ=kind,
+                               kategorie="privat", bereich="privat", zahlungsmodus="einzelzahlung", zahlungspflichtig="ja").status_code
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(sorted(pool.map(review, ("zahlungsauftrag", "zahlungsauftrag"))), [303, 409])
+        self.assertEqual(self.row(key)["revision"], before["revision"] + 1)
+        self.assertEqual((self.row(key)["typ"], self.row(key)["payable"]), ("zahlungsauftrag", 1))
+        key = self.create(raw=pdf_bytes("private-post-conflicting-normal-approval"), typ="post", kategorie="privat")
+        self.approve(key, typ="post", kategorie="privat", bereich="privat")
+        before = self.row(key)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            self.assertEqual(list(pool.map(review, ("post", "zahlungsauftrag"))), [409, 303])
+        self.assertEqual(self.row(key)["revision"], before["revision"] + 1)
+
+    def test_private_post_followup_html_keeps_failed_transfer_entries_and_can_correct_same_record(self):
+        class ReviewForm(HTMLParser):
+            def __init__(self, html):
+                super().__init__(); self.active = False; self.action = ""; self.fields = {}; self.select = ""; self.textarea = ""
+                self.feed(html)
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if tag == "form":
+                    self.active = "bb-chef-review" in attrs.get("class", "").split()
+                    if self.active: self.action = attrs["action"]
+                if not self.active: return
+                if tag == "input" and attrs.get("name") and attrs.get("type") != "checkbox":
+                    self.fields[attrs["name"]] = attrs.get("value", "")
+                elif tag == "select":
+                    self.select = attrs["name"]; self.fields[self.select] = ""
+                elif tag == "option" and self.select and "selected" in attrs:
+                    self.fields[self.select] = attrs.get("value", "")
+                elif tag == "textarea":
+                    self.textarea = attrs["name"]; self.fields[self.textarea] = ""
+            def handle_endtag(self, tag):
+                if tag == "form": self.active = False
+                elif tag == "select": self.select = ""
+                elif tag == "textarea": self.textarea = ""
+            def handle_data(self, data):
+                if self.active and self.textarea: self.fields[self.textarea] += data
+        key = self.create(raw=pdf_bytes("private-followup-html-correction"), typ="post", kategorie="privat")
+        self.approve(key, typ="post", kategorie="privat", bereich="privat")
+        before, history = self.row(key), self.rows(TABLES[1])
+        url = "/admin/buero/belege/" + key
+        initial = ReviewForm(self.admin.get(url).get_data(as_text=True))
+        self.assertEqual(initial.action, url + "/freigeben")
+        self.assertEqual((initial.fields["typ"], initial.fields["kategorie"], initial.fields["zahlungsmodus"]),
+                         ("zahlungsauftrag", "privat", "einzelzahlung"))
+        self.assertIn(initial.fields["bereich"], ("", "privat"))
+        invalid = dict(initial.fields, bereich="privat", confirmed="ja", zahlungspflichtig="ja", iban="DE89370400440532013001",
+                       zahlungsempfaenger="Synthetic payee & source", verwendungszweck="Synthetic private reference")
+        response = self.admin.post(initial.action, data=invalid)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.row(key), before)
+        self.assertEqual(self.rows(TABLES[1]), history)
+        correction = ReviewForm(response.get_data(as_text=True))
+        self.assertEqual(correction.action, initial.action)
+        self.assertEqual(correction.fields["revision"], str(before["revision"]))
+        for field in ("iban", "zahlungsempfaenger", "verwendungszweck"):
+            self.assertEqual(correction.fields[field], invalid[field])
+        correction.fields.update(confirmed="ja", zahlungspflichtig="ja", iban="DE89370400440532013000")
+        self.assertEqual(self.admin.post(correction.action, data=correction.fields).status_code, 303)
+        row = self.row(key)
+        self.assertEqual((row["id"], row["sha256"], row["revision"]), (key, before["sha256"], before["revision"] + 1))
+        self.assertEqual((row["status"], row["typ"], row["payable"], row["iban"]), ("freigegeben", "zahlungsauftrag", 1, "DE89370400440532013000"))
+        self.assertEqual((row["paid_date"], row["payment_reference"], row["lexware_beleg_id"]), ("", "", ""))
 
 if __name__ == "__main__":
     unittest.main()

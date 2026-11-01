@@ -14,9 +14,11 @@ document.querySelectorAll('.bb-chef-review').forEach((form) => {
   const update = () => {
     const specialPayment = ['bescheid', 'zahlungsauftrag'].includes(kind.value);
     if (transfer) {
-      const showTransfer = ['rechnung', 'bescheid', 'zahlungsauftrag'].includes(kind.value);
-      transfer.hidden = !showTransfer;
-      transfer.querySelectorAll('input, select').forEach((field) => { field.disabled = !showTransfer; });
+      transfer.hidden = false;
+      transfer.querySelectorAll('input, select').forEach((field) => {
+        field.disabled = false;
+        field.required = false;
+      });
       const orderMode = transfer.querySelector('[data-order-mode]');
       if (orderMode) {
         orderMode.hidden = kind.value !== 'zahlungsauftrag';

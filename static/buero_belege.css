@@ -16,3 +16,4 @@
 .bb-transfer-fields{min-width:0;margin:0;padding:14px;border:1px solid #d6e2e2;border-radius:8px}.bb-transfer-fields legend,.bb-transfer-fields summary{font-size:.95rem;font-weight:650}.bb-transfer-fields>label{margin-top:12px}.bb-transfer-fields .bb-muted{font-size:.8rem;margin:10px 0 0}.bb-transfer-warning{padding:10px 13px;background:#fff5df;border-left:3px solid #b17b26;font-size:.88rem}.bb-bank-value{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.bb-transfer-readonly h3{font-size:1rem;margin-bottom:0}.bb-transfer-fields[hidden]{display:none!important}
 
 .bb-transfer-fields [data-order-mode][hidden]{display:none!important}
+.buero-belege .bb-transfer-readonly{margin:8px 0 16px;padding:15px;border:1px solid #d6e2e2;border-radius:8px;background:#f8fbfb}.bb-transfer-readonly .bb-facts{padding:12px 0 0}.bb-transfer-fields[open]>summary{margin-bottom:12px}

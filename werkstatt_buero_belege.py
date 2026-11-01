@@ -276,6 +276,10 @@ def _fields(payload):
 def _dedup_key(digest, fields):
     if fields["typ"] != "zahlungsauftrag":
         return "datei:" + digest
+    if fields["kategorie"] == "privat":
+        # A private single payment is not a recurring contract template.
+        # Completing missing bank/reference data must not create another task.
+        return "privatauftrag:" + digest
     # A deposit and a monthly rent may cite the very same contract. They are
     # distinct payment instructions, never newly fabricated invoices. Exclude
     # amount from identity: correcting it must not create a second payment task.
@@ -284,29 +288,27 @@ def _dedup_key(digest, fields):
     return "auftrag:" + hashlib.sha256(json.dumps(normalised, ensure_ascii=False).encode()).hexdigest()
 
 
-def _payment_order_missing(row):
-    missing = [label for column, label in (("betrag_cent", "Zahlbetrag"), ("zahlungsempfaenger", "Zahlungsempfänger"),
-               ("iban", "IBAN"), ("faelligkeit", "Fälligkeit"), ("verwendungszweck", "Verwendungszweck"))
-               if row.get(column) in (None, "")]
-    if row.get("zahlungsmodus") not in ("einzelzahlung", "monatliche_miete"):
-        missing.append("Auftragsart")
-    if row.get("zahlungsmodus") == "einzelzahlung" and not row.get("notiz"):
-        missing.append("Begründung der Einzelzahlung in der Notiz")
-    return missing
+def _transfer_missing(row):
+    """Informational gaps for every document, never approval requirements."""
+    return [label for column, label in (("zahlungsempfaenger", "Zahlungsempfänger"), ("iban", "IBAN"),
+            ("bic", "BIC"), ("faelligkeit", "Fälligkeit"), ("verwendungszweck", "Verwendungszweck"))
+            if row.get(column) in (None, "")]
 
 
 def _payment_order_ready(row):
-    if row["kategorie"] not in ("miete", "kaution"):
-        raise ValueError("Zahlungsauftrag als Miete oder Kaution einordnen.")
-    missing = _payment_order_missing(row)
-    if missing:
-        raise ValueError("Für den Zahlungsauftrag fehlen: " + ", ".join(missing) + ".")
-    normalize_iban(row.get("iban", ""), required=True)
+    """Check the source-backed task; bank details may legitimately be absent."""
+    if row["kategorie"] not in ("miete", "kaution", "privat"):
+        raise ValueError("Zahlungsauftrag als Miete, Kaution oder Privat einordnen.")
+    if row["betrag_cent"] is None or row["betrag_cent"] <= 0:
+        raise ValueError("Für den Zahlungsauftrag ist ein geprüfter positiver Zahlbetrag erforderlich.")
+    normalize_iban(row.get("iban", ""))
     normalize_bic(row.get("bic", ""))
     if row["zahlungsmodus"] not in ("einzelzahlung", "monatliche_miete"):
         raise ValueError("Begründete Einzelzahlung oder monatliche Mietvorlage ausdrücklich auswählen.")
     if row["zahlungsmodus"] == "monatliche_miete" and row["kategorie"] != "miete":
         raise ValueError("Eine monatliche Mietvorlage nur im Ordner Miete verwenden.")
+    if row["kategorie"] == "privat" and row["zahlungsmodus"] != "einzelzahlung":
+        raise ValueError("Privaten Zahlungsauftrag als begründete Einzelzahlung vorbereiten.")
     if row["zahlungsmodus"] == "einzelzahlung" and not row["notiz"]:
         raise ValueError("Einzelzahlung anhand der vorliegenden Quelle in der Notiz begründen.")
 
@@ -416,7 +418,7 @@ class OfficeDocuments:
     @staticmethod
     def _view(row, *, admin=False):
         value = dict(row)
-        transfer_missing = _payment_order_missing(value) if value["typ"] == "zahlungsauftrag" else []
+        transfer_missing = _transfer_missing(value)
         category = "privat" if value["bereich"] == "privat" else value["kategorie"] or value["kategorie_vorschlag"] or "sonstige"
         recipient = value["status"] in ("entwurf", "eingereicht") if admin else value["status"] in ("freigegeben", "zurueckgewiesen", "zahlung_in_bearbeitung")
         value.update(typ_label=KINDS[value["typ"]], status_label=STATES[value["status"]],
@@ -428,11 +430,14 @@ class OfficeDocuments:
                      betrag_label=_display_amount(value["betrag_cent"]),
                      betrag_input="" if value["betrag_cent"] is None else f"{value['betrag_cent'] // 100}.{value['betrag_cent'] % 100:02d}",
                      transfer_missing=transfer_missing,
-                     transfer_warning="Es fehlen: " + ", ".join(transfer_missing) + "." if transfer_missing else "",
+                     transfer_warning="Nicht angegeben: " + ", ".join(transfer_missing) + "." if transfer_missing else "",
+                     payment_data_pending=any(label != "BIC" for label in transfer_missing),
+                     private_payment_followup=bool(value["status"] == "freigegeben" and value["typ"] == "post"
+                                                   and value["bereich"] == "privat" and not value["payable"]),
                      editable=value["status"] in ("entwurf", "zurueckgewiesen"),
                      payment_allowed=bool(value["payable"] and (value["business_confirmed"] or value["bereich"] == "privat")
                                           and value["typ"] in ("rechnung", "bescheid", "zahlungsauftrag")
-                                          and (value["typ"] != "zahlungsauftrag" or value["quelle_geprueft"] and not transfer_missing)
+                                          and (value["typ"] != "zahlungsauftrag" or value["quelle_geprueft"])
                                           and value["status"] in ("freigegeben", "zahlung_in_bearbeitung")))
         return value
 
@@ -832,7 +837,18 @@ class OfficeDocuments:
             raise ValueError("Für die Rückgabe bitte den Korrekturgrund angeben.")
         with self.p.portal_originals_operation_lock(), self.db() as db:
             who = self.identity(admin=True, db=db, lock=True)
-            row = self._current(db, key, version, {"eingereicht", "entwurf", "zurueckgewiesen"} if approve else {"eingereicht"})
+            row = self._current(db, key, version, {"eingereicht", "entwurf", "zurueckgewiesen", "freigegeben"} if approve else {"eingereicht"})
+            # A reviewed private letter may subsequently become a source-backed
+            # single payment task. This is not a general reopening of approvals:
+            # inspect the stored classification before applying any form fields.
+            private_post_payment = (
+                approve is True and row["status"] == "freigegeben" and row["typ"] == "post"
+                and row["bereich"] == "privat" and not row["payable"]
+                and kind == "zahlungsauftrag" and category == "privat" and bereich == "privat"
+                and isinstance(transfer_fields, dict) and transfer_fields.get("zahlungsmodus") == "einzelzahlung"
+            )
+            if row["status"] == "freigegeben" and not private_post_payment:
+                raise RevisionConflict("Der Beleg wurde bereits freigegeben. Nur geprüfte private Post kann ausdrücklich als private Einzelzahlung freigegeben werden.")
             direct = approve and row["status"] in ("entwurf", "zurueckgewiesen")
             if direct and (not isinstance(kind, str) or kind not in KINDS or not isinstance(category, str) or category not in CATEGORIES):
                 raise ValueError("Belegart und Ordner vor der direkten Chef-Freigabe ausdrücklich prüfen.")
@@ -873,8 +889,10 @@ class OfficeDocuments:
                 raise ValueError("Eine besondere Zahlungsfreigabe ist nur für Bescheide oder Zahlungsaufträge vorgesehen.")
             if approve and row["typ"] == "zahlungsauftrag":
                 _payment_order_ready(row)
+                if row["kategorie"] == "privat" and bereich != "privat":
+                    raise ValueError("Privaten Zahlungsauftrag ausdrücklich dem privaten Bereich zuordnen.")
                 if not payment_release or source_confirmed is not True:
-                    raise ValueError("Original-Zahlungsgrundlage, Betrag, Empfänger, IBAN, Fälligkeit und Verwendungszweck ausdrücklich prüfen und die Zahlung freigeben.")
+                    raise ValueError("Original-Zahlungsgrundlage, Zahlbetrag und Zahlungsabsicht ausdrücklich prüfen und die Zahlung freigeben. Fehlende Überweisungsdaten bleiben offen.")
             payable = approve and (row["typ"] == "rechnung" or (row["typ"] in ("bescheid", "zahlungsauftrag") and payment_release))
             if payable and bereich == "geschaeftlich" and business_confirmed is not True:
                 raise ValueError("Die betriebliche Zuordnung vor der Zahlungsfreigabe ausdrücklich bestätigen.")
@@ -897,6 +915,7 @@ class OfficeDocuments:
                 raise RevisionConflict("Beleg wurde gleichzeitig entschieden. Bitte neu laden.")
             self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"],
                         extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed,
+                               "private_post_zahlungsfreigabe": private_post_payment,
                                "transferdaten_geaendert": transfer_changed})
         self._backup()
 
@@ -1010,9 +1029,10 @@ def register_office_documents(p):
                     selected["kategorie"] = request.form["kategorie"]
                 if request.form.get("bereich") in AREAS:
                     selected["review_bereich"] = request.form["bereich"]
-                if selected["typ"] == "zahlungsauftrag":
-                    missing = _payment_order_missing(selected)
-                    selected["transfer_warning"] = "Es fehlen: " + ", ".join(missing) + "." if missing else ""
+                missing = _transfer_missing(selected)
+                selected["transfer_missing"] = missing
+                selected["transfer_warning"] = "Nicht angegeben: " + ", ".join(missing) + "." if missing else ""
+                selected["payment_data_pending"] = any(label != "BIC" for label in missing)
             listing = service.list(admin=admin, status=status, category=category, group=group)
             counts = service.counters(admin=admin)
         except PermissionError:

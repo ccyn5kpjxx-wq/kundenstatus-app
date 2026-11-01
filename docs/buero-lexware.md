@@ -28,14 +28,22 @@ vorhandenen IBAN/BIC/Empfängerin gehörende Bankvorschläge werden gemeinsam
 übersprungen. Ein Quellenname oder die Adresse eines Steuerberaters ersetzt
 keinen Original-Steuerbescheid und begründet keine Zahlungsfreigabe.
 
-Zahlungsaufträge verlangen vor Freigabe geprüften Empfänger, gültige IBAN,
-Betrag, Fälligkeit, Zweck und Auftragsart; Einzelzahlungen behalten die
-Begründungspflicht. Fehlendes wird konkret angezeigt. Chefprüfung und
-Transferkorrektur verwenden eine gemeinsame CAS-Revision und Transaktion.
-Ungültige Werte oder veraltete Revisionen speichern keine Teilfreigabe.
-Rechnungen/Bescheide bleiben nach ihrem bisherigen Prüf-/Lexware-Workflow
-freigebbar, auch wenn ihre Bankfelder noch leer sind. Eine Freigabe erzeugt
-nur eine Büroaufgabe, keine tatsächliche Überweisung und kein „bezahlt“.
+Bei jedem Beleg stehen alle fünf Überweisungsangaben direkt sichtbar;
+fehlende Werte heißen „Nicht angegeben“. Auf ausdrücklichen Nutzerwunsch
+verhindern fehlende Empfänger-/Bankdaten, Fälligkeit oder Verwendungszweck
+die Chef-Freigabe nicht. Eingegebene ungültige IBAN/BIC bleiben zu korrigieren.
+Zahlungsaufträge benötigen weiterhin Originalgrundlage, positiven geprüften
+Betrag, Auftragsart und ausdrückliche Chef-Zahlungsfreigabe; Einzelzahlungen
+behalten die Begründungspflicht. Private Aufträge sind ausschließlich
+begründete Einzelzahlungen mit bestätigter privater Zuordnung. Miete/Kaution
+bleiben getrennt, monatliche Mietvorlagen sind nur im Ordner Miete zulässig.
+Chefprüfung und Transferkorrektur verwenden eine gemeinsame CAS-Revision und
+Transaktion. Ungültige Werte oder veraltete Revisionen speichern keine
+Teilfreigabe. Fehlende Zahlungsdaten bleiben auch nach der Freigabe sichtbar.
+Das Büro kann die Bearbeitung übernehmen; das ist keine Bankausführung.
+„Zahlung dokumentieren“ verlangt weiterhin die ausdrückliche Bestätigung
+einer extern ausgeführten Zahlung mit Datum und Referenz. Keine Freigabe
+oder Bearbeitungsübernahme erzeugt selbst eine Überweisung oder „bezahlt“.
 
 ## Integration
 
