@@ -41,16 +41,38 @@ def main():
         def __init__(self):
             super().__init__()
             self.cards, self.controls, self.choices = [], [], []
+            self.card_links, self.article_stack = [], []
         def handle_starttag(self, tag, attrs):
             data = dict(attrs)
             if "data-current-card" in data:
                 self.cards.append(data)
+                self.card_links.append([])
+            if tag == "article":
+                index = len(self.cards) - 1 if "data-current-card" in data else (
+                    self.article_stack[-1] if self.article_stack else None)
+                self.article_stack.append(index)
+            if (tag == "a" and self.article_stack and self.article_stack[-1] is not None
+                    and "current-booking" in data.get("class", "").split()):
+                self.card_links[self.article_stack[-1]].append(data.get("href", ""))
             if "data-deck-prev" in data or "data-deck-next" in data:
                 self.controls.append((tag, data))
             if "data-deck-index" in data:
                 self.choices.append((tag, data))
+        def handle_endtag(self, tag):
+            if tag == "article" and self.article_stack:
+                self.article_stack.pop()
     deck = DeckMarkup()
     deck.feed(hero_html)
+    def card_link_reachable(href):
+        target = urlparse(href)
+        allowed_hosts = {"", urlparse(portal.PORTAL_BASE_URL or "").netloc}
+        if (target.scheme not in ("", "http", "https") or target.netloc not in allowed_hosts
+                or not target.path.startswith("/")):
+            return False
+        path = target.path + ("?" + target.query if target.query else "")
+        return client.get(path).status_code == 200
+    tire_links = deck.card_links[0] if deck.cards and deck.cards[0].get("data-card-title") == "Reifen" else []
+    tire_destinations = {parse_qs(urlparse(href).query).get("anliegen", [""])[0] for href in tire_links}
     deck_script = client.get("/static/homepage/aktuelles-karten.js")
     checks = {
         "Status 200": response.status_code == 200,
@@ -75,7 +97,8 @@ def main():
         "Passendes saisonales Titelbild vorhanden": image_path(saison["hero_bild"]) in html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
         "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
         "Sieben Themen mit eigenen Schaden- und Lackkarten": [card.get("data-card-title") for card in deck.cards] == ["Reifen", "Versicherungsschaden", "Lackierarbeiten", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
-        "Alle Karten ohne JavaScript lesbar und verlinkt": all("hidden" not in card and "inert" not in card for card in deck.cards) and hero_html.count('class="button current-booking"') == 7,
+        "Alle Karten ohne JavaScript lesbar und verlinkt": bool(deck.cards) and all("hidden" not in card and "inert" not in card for card in deck.cards) and all(links and all(card_link_reachable(href) for href in links) for links in deck.card_links),
+        "Reifenkarte bietet Reifenauswahl und Werkstatttermin": {"reifenangebot", "reifenservice"} <= tire_destinations,
         "Kartenpfeile und Themen sind beschriftete native Buttons": len(deck.controls) == 2 and all(tag == "button" and data.get("type") == "button" and data.get("aria-label") and data.get("aria-controls") == "aktuelle-karten" for tag, data in deck.controls) and len(deck.choices) == 7 and all(tag == "button" and data.get("aria-pressed") in ("true", "false") for tag, data in deck.choices),
         "Leasingkarte bietet Check vor Rueckgabe und Smart Repair": all(x in hero_html for x in ('Leasing-Check &amp; Smart Repair','Unnötige Rückgabekosten vermeiden.','Dellen und kleine Lackschäden vorab prüfen.','?anliegen=leasingrueckgabe#kurzanfrage')) and client.get('/static/homepage/karte-leasing-v2-20261021.webp').status_code == 200,
         "Kartenwechsel erreichbar und Status barrierearm": deck_script.status_code == 200 and '/static/homepage/aktuelles-karten.js' in html and 'aria-live="polite" aria-atomic="true" data-deck-status' in hero_html,

@@ -1,0 +1,9 @@
+{% extends "reifen_vertrag_basis.html" %}
+{% block title %}Widerruf eingegangen{% endblock %}
+{% block content %}
+<h1>Widerruf eingegangen</h1>
+<p>Ihre Erklärung wurde am <strong>{{ received.strftime('%d.%m.%Y um %H:%M:%S Uhr') }}</strong> (Europe/Berlin) übermittelt.</p>
+<dl><dt>Name</dt><dd>{{ data.name }}</dd><dt>Bestellung</dt><dd>{{ data.bestellnummer }}</dd><dt>Umfang</dt><dd>{{ 'Gesamter Vertrag' if data.umfang == 'alles' else 'Angegebener Teil' }}</dd>{% if data.teil %}<dt>Angaben</dt><dd>{{ data.teil }}</dd>{% endif %}<dt>E-Mail</dt><dd>{{ data.email }}</dd><dt>Eingangsreferenz</dt><dd>{{ identifier }}</dd></dl>
+<p>Eine Eingangsbestätigung ist für die angegebene E-Mail-Adresse vorgemerkt. Die Zuordnung zur Bestellung und gegebenenfalls weitere Schritte werden gesondert bearbeitet.</p>
+<p><a href="/homepage">Zur Homepage</a></p>
+{% endblock %}

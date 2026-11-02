@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Reifen · Widerrufseingänge{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Widerrufseingänge</h1><p>Unveränderte Erklärungen und Versandstatus der Eingangsbestätigung.</p></div><a class="btn btn-soft" href="{{ url_for('admin_reifenbestellungen') }}">← Reifenbestellungen</a></div>
+<p class="text-muted">Zuordnung, Rückgabe und gegebenenfalls Erstattung prüfen. Ein Eingang löst keine automatische Zahlung oder Lieferantenstornierung aus.</p>
+{% set mail_labels={'queued':'Vorgemerkt','sending':'Versand läuft','sent':'An Mailserver übergeben','failed':'Fehlgeschlagen','unknown':'Versand unklar – prüfen'} %}
+{% for e in erklaerungen %}<article class="card p-3 mb-3"><h2 class="h5">{{ e.data.name }}</h2><p><strong>Bestellung/Vertragsangaben:</strong> {{ e.data.bestellnummer }}<br><strong>Eingang (Mosbach):</strong> {{ e.received }}<br><strong>E-Mail:</strong> {{ e.data.email }}<br><strong>Umfang:</strong> {{ 'Gesamter Vertrag' if e.data.umfang == 'alles' else 'Teilweise' }}</p>{% if e.data.teil %}<p style="white-space:pre-wrap">{{ e.data.teil }}</p>{% endif %}<p>Bestätigungsmail: <strong>{{ mail_labels.get(e.mail_state,'Prüfen') }}</strong></p><small>Vorgang {{ e.id }}</small></article>{% else %}<p>Noch keine bestätigten Widerrufseingänge.</p>{% endfor %}
+{% endblock %}

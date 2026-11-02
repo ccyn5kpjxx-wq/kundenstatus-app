@@ -244,7 +244,7 @@
       </thead>
       <tbody>
         {% for lead in leads %}
-        <tr class="{% if lead['is_due'] %}lead-row-due{% endif %}">
+        <tr class="{% if lead['is_due'] or lead['reifenangebot_ueberfaellig'] %}lead-row-due{% endif %}">
           <td>
             <div class="fw-bold">{{ lead['kunde_name'] or 'Unbekannter Kunde' }}</div>
             <div class="text-muted small">{{ lead['fahrzeug'] or 'Fahrzeug offen' }}{% if lead['kennzeichen'] %} · {{ lead['kennzeichen'] }}{% endif %}</div>
@@ -253,6 +253,7 @@
               <span class="badge text-bg-{{ lead['quelle_meta']['farbe'] }}">{{ lead['quelle_meta']['label'] }}</span>
               {% if lead['autohaus_name'] %}<span class="badge text-bg-light text-dark border">{{ lead['autohaus_name'] }}</span>{% endif %}
               {% if lead['source_email_id'] %}<span class="badge text-bg-success">E-Mail #{{ lead['source_email_id'] }}</span>{% endif %}
+              {% if lead['ist_reifenangebot'] %}<span class="badge text-bg-{{ 'danger' if lead['reifenangebot_ueberfaellig'] else 'info' }}">Reifenangebot{% if lead['reifenangebot_ueberfaellig'] %} · überfällig{% endif %}</span>{% endif %}
             </div>
           </td>
           <td><span class="badge text-bg-{{ lead['status_meta']['farbe'] }}">{{ lead['status_meta']['label'] }}</span></td>
@@ -263,6 +264,7 @@
           <td>
             <div>{{ lead['naechste_aktion'] or 'Nachfassen festlegen' }}</div>
             <div class="{{ 'text-danger fw-bold' if lead['is_due'] else 'text-muted' }} small">{{ lead['naechster_kontakt_am'] or 'kein Datum' }}</div>
+            {% if lead['ist_reifenangebot'] and lead['reifenangebot_email_status'] != 'gesendet' and not lead['is_closed'] %}<div class="small {{ 'text-danger fw-bold' if lead['reifenangebot_ueberfaellig'] else 'text-muted' }}">Angebots-E-Mail bis {{ lead['reifenangebot_frist_label'] }}{% if lead['reifenangebot_email_status'] in ['fehlgeschlagen','unklar'] %} · Versand {{ lead['reifenangebot_email_status'] }}{% endif %}</div>{% endif %}
           </td>
           <td>{{ lead['geschaetzter_wert_label'] or 'offen' }}</td>
           <td class="text-end">

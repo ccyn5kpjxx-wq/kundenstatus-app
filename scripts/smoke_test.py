@@ -13,6 +13,10 @@ sys.path.insert(0, str(ROOT))
 
 # Configure isolation before app import: no real database, uploads or providers.
 TEMP_DIR = Path(tempfile.mkdtemp(prefix="cockpit-regression-"))
+# Real tire gateways, SMS budgets and mail workers must never leak into tests.
+for tire_setting in tuple(os.environ):
+    if tire_setting.startswith("REIFEN_"):
+        os.environ.pop(tire_setting, None)
 os.environ.update({
     "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",
     "DATA_DIR": str(TEMP_DIR), "SQLITE_DB_PATH": str(TEMP_DIR / "test.db"),

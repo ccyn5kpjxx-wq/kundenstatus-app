@@ -1,0 +1,8 @@
+{% extends "reifen_vertrag_basis.html" %}
+{% block content %}
+<h1>Widerruf prüfen</h1>
+<p>Hiermit widerrufe ich den bezeichneten Vertrag im folgenden Umfang:</p>
+<dl><dt>Name</dt><dd>{{ data.name }}</dd><dt>Bestellung</dt><dd>{{ data.bestellnummer }}</dd><dt>E-Mail</dt><dd>{{ data.email }}</dd><dt>Umfang</dt><dd>{{ 'Gesamter Vertrag' if data.umfang == 'alles' else 'Angegebener Teil' }}</dd>{% if data.teil %}<dt>Angaben</dt><dd>{{ data.teil }}</dd>{% endif %}</dl>
+<form method="post" action="{{ url_for('reifen_vertrag.bestaetigen', identifier=identifier) }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"><button type="submit">Widerruf bestätigen</button></form>
+<p><a href="{{ url_for('reifen_vertrag.start') }}">Angaben neu eingeben</a></p>
+{% endblock %}
