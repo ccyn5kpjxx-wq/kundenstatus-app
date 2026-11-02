@@ -18,6 +18,8 @@ ACCOUNT = "AC" + "a" * 32
 SERVICE = "VA" + "b" * 32
 VERIFICATION = "VE" + "c" * 32
 TOKEN = "synthetic-not-a-real-auth-token"
+API_KEY = "SK" + "d" * 32
+API_SECRET = "synthetic-not-a-real-key-secret"
 PHONE = "+4915100000011"
 REFERENCE = "synthetic-order-000001"
 
@@ -84,6 +86,12 @@ class TwilioSMS(unittest.TestCase):
         return TwilioVerifySMS(ACCOUNT, TOKEN, SERVICE, self.db, http=self.http,
                                authorize=authorize, clock=lambda: self.now)
 
+    def key_adapter(self, **credentials):
+        settings = {"api_key_sid": API_KEY, "api_key_secret": API_SECRET, **credentials}
+        return TwilioVerifySMS(ACCOUNT, "", SERVICE, self.db, http=self.http,
+                               authorize=lambda operation, reference: True,
+                               clock=lambda: self.now, **settings)
+
     def start(self):
         self.http.responses.append(Response(payload(), status=201))
         return self.sms.start(PHONE, REFERENCE)
@@ -93,12 +101,41 @@ class TwilioSMS(unittest.TestCase):
             return dict(db.execute("SELECT * FROM reifen_sms_challenges ORDER BY created_at DESC LIMIT 1").fetchone())
 
     def test_configuration_never_sends_or_initializes_database(self):
-        adapter = TwilioVerifySMS.from_env(self.db, environment={
-            "REIFEN_TWILIO_ACCOUNT_SID": ACCOUNT, "REIFEN_TWILIO_AUTH_TOKEN": TOKEN,
-            "REIFEN_TWILIO_VERIFY_SERVICE_SID": SERVICE,
-        }, http=self.http)
-        with self.assertRaises(ReifenSMSUnavailable):
-            adapter.start(PHONE, REFERENCE)
+        for credentials in ({"REIFEN_TWILIO_AUTH_TOKEN": TOKEN},
+                            {"REIFEN_TWILIO_API_KEY_SID": API_KEY,
+                             "REIFEN_TWILIO_API_KEY_SECRET": API_SECRET}):
+            with self.subTest(mode=list(credentials)), patch.object(self, "db") as db:
+                adapter = TwilioVerifySMS.from_env(db, environment={
+                    "REIFEN_TWILIO_ACCOUNT_SID": ACCOUNT,
+                    "REIFEN_TWILIO_VERIFY_SERVICE_SID": SERVICE, **credentials,
+                }, http=self.http)
+                with self.assertRaises(ReifenSMSUnavailable):
+                    adapter.start(PHONE, REFERENCE)
+                db.assert_not_called()
+        self.assertEqual(self.http.calls, [])
+
+    def test_partial_mixed_or_invalid_credentials_fail_before_io(self):
+        for credentials in (
+                {}, {"REIFEN_TWILIO_API_KEY_SID": API_KEY},
+                {"REIFEN_TWILIO_API_KEY_SECRET": API_SECRET},
+                {"REIFEN_TWILIO_AUTH_TOKEN": TOKEN, "REIFEN_TWILIO_API_KEY_SID": API_KEY},
+                {"REIFEN_TWILIO_AUTH_TOKEN": TOKEN, "REIFEN_TWILIO_API_KEY_SECRET": API_SECRET},
+                {"REIFEN_TWILIO_AUTH_TOKEN": TOKEN, "REIFEN_TWILIO_API_KEY_SID": API_KEY,
+                 "REIFEN_TWILIO_API_KEY_SECRET": API_SECRET},
+                *({"REIFEN_TWILIO_API_KEY_SID": key, "REIFEN_TWILIO_API_KEY_SECRET": secret}
+                  for key, secret in ((ACCOUNT, API_SECRET), (API_KEY + "\n", API_SECRET),
+                                      (None, API_SECRET), (API_KEY, None), (API_KEY, "short"),
+                                      (API_KEY, API_SECRET + "\n"), (API_KEY, "é" * 32))),
+                {"REIFEN_TWILIO_ACCOUNT_SID": API_KEY, "REIFEN_TWILIO_API_KEY_SID": API_KEY,
+                 "REIFEN_TWILIO_API_KEY_SECRET": API_SECRET}):
+            with self.subTest(fields=list(credentials)), patch.object(self, "db") as db:
+                with self.assertRaises(ReifenSMSUnavailable) as result:
+                    TwilioVerifySMS.from_env(db, environment={
+                        "REIFEN_TWILIO_ACCOUNT_SID": ACCOUNT,
+                        "REIFEN_TWILIO_VERIFY_SERVICE_SID": SERVICE, **credentials,
+                    }, http=self.http)
+                self.assertEqual(str(result.exception), "SMS-Zugang ist nicht vollständig eingerichtet.")
+                db.assert_not_called()
         self.assertEqual(self.http.calls, [])
 
     def test_missing_configuration_is_generic(self):
@@ -134,6 +171,59 @@ class TwilioSMS(unittest.TestCase):
         self.assertEqual(options["timeout"], (3.05, 8))
         self.assertTrue(options["stream"])
         self.assertEqual(options["data"], {"To": PHONE, "Channel": "sms", "Locale": "de"})
+        self.assertEqual(options["auth"], (ACCOUNT, TOKEN))
+
+    def test_key_authenticates_both_operations_and_keeps_account_order_bindings(self):
+        self.sms = self.key_adapter()
+        self.start()
+        self.assertFalse(self.sms.check(PHONE, "123456", "another-order-000002"))
+        self.assertFalse(self.sms.check("+4915100000022", "123456", REFERENCE))
+        self.assertEqual(len(self.http.calls), 1)
+        self.http.responses.append(Response(payload("approved")))
+        self.assertTrue(self.key_adapter().check(PHONE, "123456", REFERENCE))
+        self.assertEqual(self.http.calls[-1][1]["data"],
+                         {"VerificationSid": VERIFICATION, "Code": "123456"})
+        self.assertEqual([options["auth"] for _, options in self.http.calls],
+                         [(API_KEY, API_SECRET), (API_KEY, API_SECRET)])
+        self.assertEqual(self.row()["state"], "approved")
+        for secret in (API_KEY, API_SECRET, TOKEN):
+            self.assertNotIn(secret, json.dumps(self.row()))
+
+    def test_key_response_identity_still_requires_ac_account_and_service(self):
+        for field, wrong in (("account_sid", API_KEY), ("account_sid", "AC" + "e" * 32),
+                             ("service_sid", "VA" + "e" * 32), ("sid", "VE" + "e" * 32),
+                             ("to", "+4915100000022"), ("channel", "call")):
+            with self.subTest(field=field, wrong=wrong):
+                with closing(self.db()) as db, db:
+                    db.execute("DELETE FROM reifen_sms_challenges")
+                self.sms = self.key_adapter()
+                self.start()
+                response = payload("approved")
+                response[field] = wrong
+                self.http.responses.append(Response(response))
+                self.assertFalse(self.sms.check(PHONE, "123456", REFERENCE))
+                self.assertEqual(self.row()["state"], "failed")
+
+    def test_bad_key_authentication_is_never_retried_with_account_token(self):
+        self.sms = self.key_adapter()
+        self.http.responses.append(Response({"message": API_SECRET}, status=401))
+        with self.assertRaises(ReifenSMSUnavailable) as result:
+            self.sms.start(PHONE, REFERENCE)
+        self.assertNotIn(API_SECRET, str(result.exception))
+        with self.assertRaises(ReifenSMSUnavailable):
+            self.sms.start(PHONE, REFERENCE)
+        self.assertEqual(len(self.http.calls), 1)
+        self.assertEqual(self.http.calls[0][1]["auth"], (API_KEY, API_SECRET))
+
+    def test_key_secret_rotation_does_not_approve_existing_challenge(self):
+        self.sms = self.key_adapter()
+        self.start()
+        self.assertFalse(self.key_adapter(api_key_secret="rotated-synthetic-key-secret").check(
+            PHONE, "123456", REFERENCE))
+        self.assertFalse(self.adapter().check(PHONE, "123456", REFERENCE))
+        self.assertEqual(len(self.http.calls), 1)
+        self.http.responses.append(Response(payload("approved")))
+        self.assertTrue(self.key_adapter().check(PHONE, "123456", REFERENCE))
 
     def test_no_plain_phone_reference_or_otp_is_persisted(self):
         self.start()
@@ -174,6 +264,8 @@ class TwilioSMS(unittest.TestCase):
         self.assertTrue(self.sms.check(PHONE, "123456", REFERENCE))
         self.assertEqual(self.http.calls[-1][1]["data"], {"VerificationSid": VERIFICATION, "Code": "123456"})
         self.assertEqual(self.row()["state"], "approved")
+        self.assertEqual([options["auth"] for _, options in self.http.calls],
+                         [(ACCOUNT, TOKEN), (ACCOUNT, TOKEN)])
         self.assertTrue(self.sms.check(PHONE, "123456", REFERENCE))
         self.assertEqual(len(self.http.calls), 2)
 

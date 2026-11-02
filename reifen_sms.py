@@ -25,7 +25,7 @@ _ERROR = "SMS-Prüfung derzeit nicht verfügbar. Bitte später erneut versuchen.
 _E164 = re.compile(r"\+[1-9][0-9]{7,14}\Z", re.ASCII)
 _REFERENCE = re.compile(r"[A-Za-z0-9_:.\-]{8,200}\Z", re.ASCII)
 _SID = {prefix: re.compile(prefix + r"[0-9a-fA-F]{32}\Z", re.ASCII)
-        for prefix in ("AC", "VA", "VE")}
+        for prefix in ("AC", "VA", "VE", "SK")}
 
 
 class ReifenSMSUnavailable(ValueError):
@@ -61,6 +61,11 @@ def _reference(value):
     return value
 
 
+def _credential_secret(value):
+    return (isinstance(value, str) and 16 <= len(value) <= 256
+            and all(33 <= ord(char) <= 126 for char in value))
+
+
 class TwilioVerifySMS:
     """Official Verify v2, with durable portal bindings and no automatic retries.
 
@@ -71,18 +76,26 @@ class TwilioVerifySMS:
     demo_only = False
 
     def __init__(self, account_sid, auth_token, service_sid, get_db, *,
-                 authorize=None, http=None, clock=time.time):
+                 api_key_sid="", api_key_secret="", authorize=None, http=None, clock=time.time):
         if (not isinstance(account_sid, str) or not _SID["AC"].fullmatch(account_sid)
                 or not isinstance(service_sid, str) or not _SID["VA"].fullmatch(service_sid)
-                or not isinstance(auth_token, str) or not 16 <= len(auth_token) <= 256
-                or auth_token != auth_token.strip()
-                or any(ord(char) < 33 or ord(char) > 126 for char in auth_token)
                 or not callable(get_db) or not callable(clock)):
             raise ReifenSMSUnavailable("SMS-Zugang ist nicht vollständig eingerichtet.")
-        self._account, self._token, self._service = account_sid, auth_token, service_sid
+        if api_key_sid != "" or api_key_secret != "":
+            if (auth_token != "" or not isinstance(api_key_sid, str)
+                    or not _SID["SK"].fullmatch(api_key_sid)
+                    or not _credential_secret(api_key_secret)):
+                raise ReifenSMSUnavailable("SMS-Zugang ist nicht vollständig eingerichtet.")
+            auth_sid, auth_secret = api_key_sid, api_key_secret
+        else:
+            if not _credential_secret(auth_token):
+                raise ReifenSMSUnavailable("SMS-Zugang ist nicht vollständig eingerichtet.")
+            auth_sid, auth_secret = account_sid, auth_token
+        self._account, self._service = account_sid, service_sid
+        self._auth = (auth_sid, auth_secret)
         self._get_db, self._authorize, self._clock = get_db, authorize, clock
         self._base = VERIFY_ORIGIN + "/v2/Services/" + service_sid
-        self._binding_key = hashlib.sha256(("reifen-sms-binding-v1:" + auth_token).encode()).digest()
+        self._binding_key = hashlib.sha256(("reifen-sms-binding-v1:" + auth_secret).encode()).digest()
         self._service_hash = self._digest("service", account_sid + ":" + service_sid)
         self._http = http
 
@@ -92,7 +105,8 @@ class TwilioVerifySMS:
         return cls(values.get("REIFEN_TWILIO_ACCOUNT_SID", ""),
                    values.get("REIFEN_TWILIO_AUTH_TOKEN", ""),
                    values.get("REIFEN_TWILIO_VERIFY_SERVICE_SID", ""),
-                   get_db, **kwargs)
+                   get_db, api_key_sid=values.get("REIFEN_TWILIO_API_KEY_SID", ""),
+                   api_key_secret=values.get("REIFEN_TWILIO_API_KEY_SECRET", ""), **kwargs)
 
     def _digest(self, domain, value):
         return hmac.new(self._binding_key, (domain + ":" + value).encode(), hashlib.sha256).hexdigest()
@@ -111,7 +125,7 @@ class TwilioVerifySMS:
         response = None
         try:
             response = self._http.post(self._base + "/" + resource,
-                data=fields, auth=(self._account, self._token),
+                data=fields, auth=self._auth,
                 headers={"Accept": "application/json"}, timeout=(3.05, 8),
                 allow_redirects=False, stream=True)
             if response.status_code not in (200, 201):

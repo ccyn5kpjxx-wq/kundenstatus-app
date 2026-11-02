@@ -94,7 +94,9 @@ class ReifenAnbindungTest(unittest.TestCase):
 
     def test_default_off_does_not_reuse_other_business_credentials(self):
         env={"STRIPE_SECRET_KEY":"sk_live_unrelated","MOS_STRIPE_SECRET_KEY":"sk_live_rental",
-            "TWILIO_AUTH_TOKEN":"unrelated","SMTP_HOST":"smtp.other.invalid","SMTP_USER":"other",
+            "TWILIO_AUTH_TOKEN":"unrelated","TWILIO_API_KEY_SID":"SK"+"d"*32,
+            "TWILIO_API_KEY_SECRET":"synthetic-unrelated-secret",
+            "SMTP_HOST":"smtp.other.invalid","SMTP_USER":"other",
             "SMTP_PASSWORD":"other", "MOS_SMTP_PASSWORD":"rental", "SCHADEN_SMTP_PASSWORD":"insurance"}
         with patch("reifen_sms.TwilioVerifySMS.from_env") as sms,patch("reifen_zahlung.StripeReifenGateway") as gateway:
             self.assertEqual(wiring.configure_integrations(self.portal,environment=env),[])
@@ -106,6 +108,40 @@ class ReifenAnbindungTest(unittest.TestCase):
             self.assertNotIn(key,self.app.config)
         sms.assert_not_called()
         gateway.assert_not_called()
+
+    def test_sms_key_configuration_constructs_without_database_or_provider_io(self):
+        from reifen_sms import TwilioVerifySMS
+        env={"REIFEN_KAUF_MODE":"test","REIFEN_TWILIO_ACCOUNT_SID":"AC"+"a"*32,
+            "REIFEN_TWILIO_API_KEY_SID":"SK"+"d"*32,
+            "REIFEN_TWILIO_API_KEY_SECRET":"synthetic-unusable-key-secret",
+            "REIFEN_TWILIO_VERIFY_SERVICE_SID":"VA"+"b"*32,
+            "TWILIO_AUTH_TOKEN":"unrelated-token-must-not-be-inherited"}
+        with patch.object(self.portal,"get_db") as db,patch("reifen_sms.requests.Session") as http:
+            self.assertEqual(wiring.configure_integrations(self.portal,environment=env),[])
+            self.assertIsInstance(self.app.config["REIFEN_KAUF_SMS"],TwilioVerifySMS)
+            self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+            self.assertFalse(self.app.config["REIFEN_SMS_KOSTEN_FREIGEGEBEN"])
+            self.assertEqual(self.app.config["REIFEN_SMS_MAX_STARTS_PRO_TAG"],0)
+            db.assert_not_called()
+            http.assert_not_called()
+
+    def test_sms_invalid_or_removed_credentials_never_retain_previous_adapter(self):
+        for invalid in ({"REIFEN_TWILIO_API_KEY_SID":"SK"+"d"*32},
+                        {"REIFEN_TWILIO_API_KEY_SECRET":"synthetic-secret-only"},
+                        {"REIFEN_TWILIO_ACCOUNT_SID":"AC"+"a"*32,
+                         "REIFEN_TWILIO_VERIFY_SERVICE_SID":"VA"+"b"*32,
+                         "REIFEN_TWILIO_AUTH_TOKEN":"synthetic-token",
+                         "REIFEN_TWILIO_API_KEY_SID":"SK"+"d"*32,
+                         "REIFEN_TWILIO_API_KEY_SECRET":"synthetic-key-secret"}, {}):
+            with self.subTest(fields=list(invalid)):
+                self.configure_sms()
+                self.assertIn("REIFEN_KAUF_SMS",self.app.config)
+                with patch.object(self.portal,"get_db") as db,patch("reifen_sms.requests.Session") as http:
+                    errors=wiring.configure_integrations(self.portal,environment=invalid)
+                self.assertEqual(errors,["SMS-Zugang unvollständig"] if invalid else [])
+                self.assertNotIn("REIFEN_KAUF_SMS",self.app.config)
+                db.assert_not_called()
+                http.assert_not_called()
 
     def test_sms_callback_requires_exact_operation_route_post_and_current_owner(self):
         captured=self.configure_sms()

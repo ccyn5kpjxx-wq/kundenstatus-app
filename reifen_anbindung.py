@@ -81,7 +81,11 @@ def configure_integrations(portal, *, environment=None):
             return False
         return row["mode"] == "live" or row["telefon"] in sms_test_numbers
 
-    if any(env.get(key) for key in ("REIFEN_TWILIO_ACCOUNT_SID","REIFEN_TWILIO_AUTH_TOKEN","REIFEN_TWILIO_VERIFY_SERVICE_SID")):
+    # Reconfiguration must not retain an adapter after credentials are removed
+    # or replaced with an incomplete/mixed auth configuration.
+    cfg.pop("REIFEN_KAUF_SMS", None)
+    if any(env.get(key) for key in ("REIFEN_TWILIO_ACCOUNT_SID","REIFEN_TWILIO_AUTH_TOKEN",
+            "REIFEN_TWILIO_API_KEY_SID","REIFEN_TWILIO_API_KEY_SECRET","REIFEN_TWILIO_VERIFY_SERVICE_SID")):
         try:
             from reifen_sms import TwilioVerifySMS
             cfg["REIFEN_KAUF_SMS"] = TwilioVerifySMS.from_env(portal.get_db, environment=env, authorize=sms_authorized)
