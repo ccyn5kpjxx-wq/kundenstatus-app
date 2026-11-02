@@ -57,7 +57,27 @@
         </form>
       {% else %}
         <section class="card"><p class="eyebrow">Ihre Angaben</p><h2>{{ b.kunde.name }}</h2><p>{{ b.kunde.strasse }}<br>{{ b.kunde.plz }} {{ b.kunde.ort }}<br>{{ b.kunde.email }}</p><p><strong>Zahlungsart:</strong> {{ 'Sofort online bezahlen' if b.zahlungsart == 'online' else 'Zahlung bei Abholung oder Montage vor Ort' }}</p>{% if b.montage_datum %}<p><strong>Montage:</strong> {{ b.montage_datum }} um {{ b.montage_uhrzeit }} Uhr<br><small>{% if termine_nur_vorschau %}Bis zum Abschluss eine Terminvorschau.{% endif %}</small></p>{% endif %}{% if b.aenderbar %}<a href="{{ url_for(checkout_endpoint ~ '.start', token=auswahl_token) }}">Angaben ändern</a>{% endif %}</section>
-        <section class="card"><p class="eyebrow">Telefonprüfung</p><h2>{% if b.telefon_bestaetigt %}Nummer bestätigt.{% else %}Ein Code. Ihre Nummer.{% endif %}</h2><p>{{ b.kunde.telefon }}</p>{% if b.telefon_bestaetigt %}<p class="tag">✓ Telefonnummer bestätigt</p>{% else %}<p class="muted">Fordern Sie den Code an und geben Sie ihn hier ein.</p><form method="post" action="{{ url_for(checkout_endpoint ~ '.telefon_code', bestell_id=b.id) }}">{{ csrf_field()|safe }}<button class="secondary" type="submit">Bestätigungscode senden</button></form><form method="post" action="{{ url_for(checkout_endpoint ~ '.telefon_pruefen', bestell_id=b.id) }}">{{ csrf_field()|safe }}<label>Bestätigungscode<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required></label><button class="button" type="submit">Telefonnummer bestätigen</button></form>{% endif %}</section>
+        <section class="card">
+          {% set sms_status = b.get('sms_status') %}
+          <p class="eyebrow">Telefonprüfung</p><h2>{% if b.telefon_bestaetigt %}Nummer bestätigt.{% else %}Ein Code. Ihre Nummer.{% endif %}</h2><p>{{ b.kunde.telefon }}</p>
+          {% if b.telefon_bestaetigt %}
+            <p class="tag">✓ Telefonnummer bestätigt</p>
+          {% elif sms_status == 'pending' %}
+            <p class="muted" role="status">SMS angefordert. Bitte geben Sie den erhaltenen Code ein.</p>
+          {% elif sms_status in ('sending', 'checking') %}
+            <p class="muted" role="status">{{ 'Die SMS-Anfrage wird geprüft.' if sms_status == 'sending' else 'Ihr Code wird geprüft.' }} Bitte warten Sie und laden Sie anschließend den Status neu.</p>
+          {% elif sms_status == 'limit' %}
+            <p class="muted" role="status">Die Telefonprüfung ist vorerst gesperrt. Bitte wenden Sie sich an uns.</p>
+          {% elif sms_status in ('unknown', 'approved') %}
+            <p class="muted" role="status">Der Stand der Telefonprüfung ist noch unklar. Bitte fordern Sie keinen weiteren Code an und wenden Sie sich an uns.</p>
+          {% else %}
+            <p class="muted">Fordern Sie den Code an und geben Sie ihn hier ein.</p>
+            <form method="post" action="{{ url_for(checkout_endpoint ~ '.telefon_code', bestell_id=b.id) }}">{{ csrf_field()|safe }}<button class="secondary" type="submit">Bestätigungscode senden</button></form>
+          {% endif %}
+          {% if not b.telefon_bestaetigt and sms_status not in ('sending', 'checking', 'unknown', 'limit', 'approved') %}
+            <form method="post" action="{{ url_for(checkout_endpoint ~ '.telefon_pruefen', bestell_id=b.id) }}">{{ csrf_field()|safe }}<label>Bestätigungscode<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{4,10}" maxlength="10" required></label><button class="button" type="submit">Telefonnummer bestätigen</button></form>
+          {% endif %}
+        </section>
         {% if b.status == 'zahlung_offen' %}
           <section class="card"><h2>Zahlung abschließen</h2><p class="muted">Die Bestellung ist noch nicht als bezahlt bestätigt.</p>{% if b.get('zahlung_url') %}<a class="button" href="{{ b.zahlung_url }}">Zur sicheren Zahlung</a>{% endif %}<form method="post" action="{{ url_for(checkout_endpoint ~ '.zahlung_pruefen', bestell_id=b.id) }}">{{ csrf_field()|safe }}<button class="secondary">Zahlungsstatus prüfen</button></form></section>
         {% elif not b.aenderbar %}

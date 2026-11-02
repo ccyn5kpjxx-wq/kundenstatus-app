@@ -269,6 +269,66 @@ class ReifenKaufTest(unittest.TestCase):
         foreign.get("/anfrage")
         self.assertEqual(self.post(order,"telefon-code",client=foreign).status_code,404)
 
+    def test_sms_pending_overview_requests_only_the_received_code(self):
+        order=self.draft()
+        self.change(order,sms_state="pending")
+        response=self.client.get(order["url"])
+        self.assertEqual(response.status_code,200)
+        html=response.get_data(as_text=True)
+        self.assertIn("SMS angefordert. Bitte geben Sie den erhaltenen Code ein.",html)
+        self.assertNotIn('action="'+order["url"]+'/telefon-code"',html)
+        self.assertIn('action="'+order["url"]+'/telefon-pruefen"',html)
+        self.assertNotIn("Bestätigungscode senden",html)
+        self.assertEqual(self.service.order(self.read(order))["sms_status"],"pending")
+        self.assertFalse(self.sms.starts or self.sms.checks or self.gateway.creates)
+
+    def test_sms_processing_and_uncertain_states_do_not_offer_another_send(self):
+        order=self.draft()
+        for status,message in (("sending","Die SMS-Anfrage wird geprüft."),("checking","Ihr Code wird geprüft."),
+                ("unknown","Der Stand der Telefonprüfung ist noch unklar."),("limit","Die Telefonprüfung ist vorerst gesperrt."),
+                ("PRIVATE-UNEXPECTED-STATUS","Der Stand der Telefonprüfung ist noch unklar.")):
+            with self.subTest(status=status):
+                self.change(order,sms_state=status)
+                response=self.client.get(order["url"])
+                self.assertEqual(response.status_code,200)
+                html=response.get_data(as_text=True)
+                self.assertIn(message,html)
+                self.assertNotIn('action="'+order["url"]+'/telefon-code"',html)
+                self.assertNotIn('action="'+order["url"]+'/telefon-pruefen"',html)
+                self.assertNotIn("PRIVATE-UNEXPECTED-STATUS",html)
+                public=self.service.order(self.read(order))
+                self.assertEqual(public["sms_status"],status if status!="PRIVATE-UNEXPECTED-STATUS" else "unknown")
+        self.assertFalse(self.sms.starts or self.sms.checks or self.gateway.creates)
+
+    def test_sms_approved_overview_keeps_the_existing_confirmation(self):
+        order=self.draft()
+        self.change(order,sms_state="approved",telefon_bestaetigt_am=self.clock().isoformat(),state="telefon_bestaetigt")
+        response=self.client.get(order["url"])
+        self.assertEqual(response.status_code,200)
+        html=response.get_data(as_text=True)
+        self.assertIn("✓ Telefonnummer bestätigt",html)
+        self.assertNotIn('action="'+order["url"]+'/telefon-code"',html)
+        self.assertNotIn('action="'+order["url"]+'/telefon-pruefen"',html)
+        self.assertFalse(self.sms.starts or self.sms.checks or self.gateway.creates)
+
+    def test_sms_empty_status_and_legacy_demo_model_keep_initial_controls(self):
+        order=self.draft()
+        public=self.service.order(self.read(order))
+        self.assertEqual(public["sms_status"],"")
+        for missing in (False,True):
+            with self.subTest(legacy_demo_model=missing):
+                model=dict(public)
+                if missing:
+                    model.pop("sms_status")
+                with patch.object(self.service,"order",return_value=model):
+                    response=self.client.get(order["url"])
+                self.assertEqual(response.status_code,200)
+                html=response.get_data(as_text=True)
+                self.assertIn("Fordern Sie den Code an und geben Sie ihn hier ein.",html)
+                self.assertIn('action="'+order["url"]+'/telefon-code"',html)
+                self.assertIn('action="'+order["url"]+'/telefon-pruefen"',html)
+        self.assertFalse(self.sms.starts or self.sms.checks or self.gateway.creates)
+
     def test_phone_and_final_consents_are_required_for_both_payment_choices(self):
         for method in ("online","vor_ort"):
             with self.subTest(method=method):

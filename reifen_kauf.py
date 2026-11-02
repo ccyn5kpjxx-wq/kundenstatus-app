@@ -222,9 +222,11 @@ class ReifenKauf:
     def order(self, row):
         product, query, customer, terms, reservation = (json.loads(row[k]) for k in
             ("produkt_json","query_json","kunde_json","rechtstexte_json","reservierung_json"))
+        sms_status = row["sms_state"] if row["sms_state"] in {
+            "", "sending", "pending", "checking", "unknown", "limit", "approved"} else "unknown"
         return {"id":row["id"], "status":row["state"], "kunde":customer, "produkt":product, "query":query,
             "demo":row["mode"] != "live", "mode":row["mode"], "quote_hash":row["quote_hash"],
-            "telefon_bestaetigt":bool(row["telefon_bestaetigt_am"]), "zahlungsart":row["zahlungsart"],
+            "telefon_bestaetigt":bool(row["telefon_bestaetigt_am"]), "sms_status":sms_status, "zahlungsart":row["zahlungsart"],
             "montage_datum":row["montage_datum"], "montage_uhrzeit":row["montage_uhrzeit"],
             "lieferdatum":row["lieferdatum"], "zahlung_status":row["payment_status"],
             "zahlung_url":row["payment_url"], "bestaetigt":row["state"] in FINAL,
