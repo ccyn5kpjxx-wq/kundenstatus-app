@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 
 REIFEN_SAISONS = {"sommer": "Sommerreifen", "winter": "Winterreifen", "ganzjahr": "Ganzjahresreifen"}
-REIFEN_QUALITAETEN = {"preisbewusst": "Preisbewusst", "mittelklasse": "Mittelklasse",
+REIFEN_QUALITAETEN = {"alle": "Alle Marken", "preisbewusst": "Preisbewusst", "mittelklasse": "Mittelklasse",
                       "markenqualitaet": "Markenqualität", "premium": "Premium"}
 
 

@@ -109,6 +109,79 @@ class ReifenAnbindungTest(unittest.TestCase):
         sms.assert_not_called()
         gateway.assert_not_called()
 
+    def catalog_environment(self):
+        root=Path(self.temp.name)
+        policy={"currency":"EUR","price_basis":"net_unit","single_tyre_shipping_net":"6.00",
+                "free_shipping_from":2,"delivery_text":"Standardlieferung 1–4 Werktage; keine Reservierung.",
+                "verified_on":"2026-11-02","sources":{"price":"https://www.tyresystem.de/agb",
+                "shipping":"https://www.tyresystem.de/lieferbedingungen","delivery":"https://www.tyresystem.de/leistungen"}}
+        path=root/"policy.json"
+        path.write_text(json.dumps(policy),encoding="utf-8")
+        return {"TYRESYSTEM_PRIVATE_ROOT":str(root),"TYRESYSTEM_CATALOG_DIR":str(root/"catalog"),
+                "TYRESYSTEM_CATALOG_POLICY_FILE":str(path),"TYRESYSTEM_CATALOG_PUBLICATION_APPROVED":"1",
+                "TYRESYSTEM_CATALOG_PUBLICATION_REFERENCE":"synthetic-release-only"}
+
+    def test_catalog_wiring_is_explicit_without_cache_network_database_or_worker_io(self):
+        from tyresystem_provider import TyreSystemCatalogProvider
+        env=self.catalog_environment()
+        with patch("tyresystem_provider.TyreSystemCatalogCache.load") as load,patch.object(self.portal,"get_db") as db:
+            self.assertEqual(wiring.configure_integrations(self.portal,environment=env),[])
+        self.assertIsInstance(self.app.config["REIFENANGEBOT_PROVIDER"],TyreSystemCatalogProvider)
+        self.assertTrue(self.app.config["REIFENANGEBOT_PROVIDER"].publication_ready)
+        load.assert_not_called()
+        db.assert_not_called()
+        self.assertFalse((Path(self.temp.name)/"catalog").exists())
+        self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+
+    def test_catalog_revocation_or_invalid_reconfiguration_removes_old_provider(self):
+        env=self.catalog_environment()
+        for change in ({"TYRESYSTEM_CATALOG_PUBLICATION_APPROVED":"0"},
+                       {"TYRESYSTEM_CATALOG_PUBLICATION_REFERENCE":""},
+                       {"TYRESYSTEM_CATALOG_POLICY_FILE":str(Path(self.temp.name)/"missing.json")},None):
+            with self.subTest(change=change):
+                self.assertEqual(wiring.configure_integrations(self.portal,environment=env),[])
+                self.assertIn("REIFENANGEBOT_PROVIDER",self.app.config)
+                current={} if change is None else {**env,**change}
+                errors=wiring.configure_integrations(self.portal,environment=current)
+                self.assertNotIn("REIFENANGEBOT_PROVIDER",self.app.config)
+                self.assertNotIn("reifen_tyresystem_catalog_provider",self.app.extensions)
+                self.assertEqual(bool(errors),change is not None and "TYRESYSTEM_CATALOG_PUBLICATION_APPROVED" not in change)
+
+    def test_unapproved_catalog_never_reads_config_and_absent_settings_preserve_injected_provider(self):
+        injected=Mock()
+        self.app.config["REIFENANGEBOT_PROVIDER"]=injected
+        wiring.configure_integrations(self.portal,environment={})
+        self.assertIs(self.app.config["REIFENANGEBOT_PROVIDER"],injected)
+        with patch("reifen_anbindung._private_catalog_json") as read:
+            wiring.configure_integrations(self.portal,environment={"TYRESYSTEM_CATALOG_DIR":"not-a-private-path"})
+        read.assert_not_called()
+        self.assertNotIn("REIFENANGEBOT_PROVIDER",self.app.config)
+
+    def test_private_catalog_config_rejects_duplicate_keys_public_path_and_oversize(self):
+        root=Path(self.temp.name)
+        path=root/"policy.json"
+        for raw in (b'{"a":1,"a":2}',b'[]',b'x'*17):
+            path.write_bytes(raw)
+            with self.assertRaises(ValueError):
+                wiring._private_catalog_json(str(path),str(root),max_bytes=16)
+        public=root/"static"
+        public.mkdir()
+        path=public/"policy.json"
+        path.write_text("{}",encoding="utf-8")
+        with self.assertRaises(ValueError):
+            wiring._private_catalog_json(str(path),str(root),max_bytes=16)
+
+    def test_catalog_unc_is_rejected_before_resolution_and_deep_json_fails_closed(self):
+        with patch("reifen_anbindung.Path.resolve") as resolve:
+            with self.assertRaises(ValueError):
+                wiring._private_catalog_json("//synthetic.invalid/private/policy.json",self.temp.name,max_bytes=16)
+        resolve.assert_not_called()
+        env=self.catalog_environment()
+        Path(env["TYRESYSTEM_CATALOG_POLICY_FILE"]).write_text("["*2000+"0"+"]"*2000,encoding="utf-8")
+        errors=wiring.configure_integrations(self.portal,environment=env)
+        self.assertEqual(errors,["Reifenkatalog-Konfiguration oder Datenfreigabe unvollständig"])
+        self.assertNotIn("REIFENANGEBOT_PROVIDER",self.app.config)
+
     def test_sms_key_configuration_constructs_without_database_or_provider_io(self):
         from reifen_sms import TwilioVerifySMS
         env={"REIFEN_KAUF_MODE":"test","REIFEN_TWILIO_ACCOUNT_SID":"AC"+"a"*32,

@@ -1,0 +1,49 @@
+<!doctype html>
+{% from "_homepage_images.html" import image_attrs %}
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Reifen finden &amp; kaufen | {{ werkstatt_oeffentlich.name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-shop.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-suche.css') }}">
+  <script src="{{ url_for('static', filename='homepage-reifen-suche.js') }}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#reifensuche">Zur Reifensuche</a>
+  <header class="shop-header"><nav class="wrap" aria-label="Hauptnavigation">
+    <a class="shop-brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='190px') }} alt="{{ werkstatt_oeffentlich.name }}" width="190" height="56"></a>
+    <a href="{{ url_for('oeffentliche_homepage') }}">Zur Startseite</a>
+    <a class="shop-phone" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
+  </nav></header>
+  <main class="wrap">
+    <section class="shop-intro" aria-labelledby="shop-title">
+      <div><span class="eyebrow">Ihr Reifenservice in Mosbach</span><h1 id="shop-title">Die passenden Reifen.<br><em>Der komplette Preis.</em></h1><p>Sommer, Winter oder Ganzjahr: Reifen auswählen und auf Wunsch direkt mit Montage in unserer Werkstatt kombinieren.</p></div>
+      <img {{ image_attrs('homepage/karte-reifen-v2-20261021.webp', sizes='(max-width:760px) 260px, 340px') }} alt="Reifen mit silberner Felge" width="340" height="227">
+    </section>
+    {% if not shop_ready %}<p class="shop-notice" role="status"><strong>Onlinebestellungen starten in Kürze.</strong> Der Bestellabschluss ist noch geschlossen. Für Ihren aktuellen Reifenbedarf können Sie uns eine <a href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}#kurzanfrage">persönliche Anfrage</a> senden.</p>{% endif %}
+    <ol class="shop-steps" aria-label="So funktioniert der Reifenkauf"><li><span>1</span> Größe &amp; Reifen wählen</li><li><span>2</span> Abholung oder Montage</li><li><span>3</span> Bestellung &amp; Zahlung prüfen</li></ol>
+    <form id="reifensuche" class="shop-search" action="{{ url_for('oeffentlicher_reifenshop') }}" method="get" aria-label="Reifensuche">
+      <section class="shop-filters" aria-labelledby="filter-title">
+        <h2 id="filter-title">Welche Reifen brauchen Sie?</h2>
+        <div class="field"><label for="reifen-groesse">Reifengröße</label><input id="reifen-groesse" name="reifen_groesse_vorne" placeholder="z. B. 225/40 R18 92V" maxlength="40" autocomplete="off" required aria-describedby="groesse-hilfe"><p class="hint" id="groesse-hilfe">Steht auf der Reifenflanke oder im Fahrzeugschein. Last- und Geschwindigkeitsindex können Sie mit eingeben.</p></div>
+        <div class="field"><label for="reifen-saison">Saison</label><select id="reifen-saison" name="reifen_saison" required><option value="">Bitte wählen</option>{% for key,label in reifen_saisons.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="reifen-qualitaet">Marken- und Preiswahl</label><select id="reifen-qualitaet" name="reifen_qualitaet">{% for key,label in reifen_qualitaeten.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="reifen-anzahl">Anzahl</label><select id="reifen-anzahl" name="reifen_anzahl">{% for n in range(1,9) %}<option value="{{ n }}" {% if n == 4 %}selected{% endif %}>{{ n }} Reifen</option>{% endfor %}</select></div>
+        <fieldset><legend>Abholung oder Montage?</legend><label class="choice"><input type="radio" name="reifen_montage" value="nein" checked><span>Reifen bei uns abholen</span></label><label class="choice"><input type="radio" name="reifen_montage" value="ja"><span>Mit Montage &amp; Auswuchten</span></label><p class="hint">Bei Montage ist der Radwechsel enthalten. Der Zuschlag für Querschnitt 40 und kleiner wird automatisch eingerechnet. Einen Termin wählen Sie im Bestellablauf.</p></fieldset>
+        <p class="hint">Die Größe allein bestätigt noch keine Fahrzeugfreigabe. Bitte prüfen Sie die Zulässigkeit für Ihr Fahrzeug.</p>
+      </section>
+      <section class="shop-results" aria-labelledby="results-title" data-tire-search data-search-url="{{ url_for('reifenangebote_suche') }}" data-standalone-shop data-order-enabled="{{ 'true' if shop_ready else 'false' }}" hidden>
+        <h2 id="results-title">Ihre Reifen &amp; Preise</h2>
+        <div class="tire-search-controls"><button class="button" type="button" data-tire-search-button>Reifenpreise anzeigen</button></div>
+        <p class="tire-search-status" data-tire-search-status role="status" aria-live="polite">Größe und Saison auswählen. Für die Preissuche benötigen wir keine Kontaktdaten.</p>
+        <div class="tire-search-results" data-tire-search-results></div>
+      </section>
+      <noscript><p>Bitte aktivieren Sie JavaScript für die Reifensuche oder <a href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}">fragen Sie Ihre Reifen persönlich an</a>.</p></noscript>
+    </form>
+    <section class="shop-help"><div><h2>Noch Fragen zu Ihren Reifen?</h2><p>Bei verschiedenen Größen vorne und hinten, Felgen oder Kompletträdern helfen wir persönlich weiter.</p></div><a href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}#kurzanfrage">Beratung &amp; persönliche Anfrage →</a></section>
+  </main>
+  <footer class="wrap shop-footer"><span>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.ort }}</span><a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
+</body>
+</html>

@@ -175,6 +175,74 @@ class ReifenSucheTest(unittest.TestCase):
         self.assertEqual(Decimal(price["montage_brutto"]), Decimal("90.00"))
         self.assertEqual(Decimal(price["gesamt_brutto"]), Decimal("625.50"))
 
+    def test_low_profile_surcharge_at_40_and_below_only_with_mounting(self):
+        for ratio, mounting, expected in ((35,"ja","120.00"),(40,"ja","120.00"),
+                                           (45,"ja","100.00"),(40,"nein","0.00")):
+            with self.subTest(ratio=ratio,mounting=mounting):
+                self.clear_rate()
+                self.provider([article(breite=225,querschnitt=ratio,zoll=18,lastindex=92,runflat=False)])
+                price=self.price(self.search({"groesse":f"225/{ratio} R18 92V","montage":mounting}))
+                self.assertEqual(price["montage_brutto"],expected)
+
+    def test_all_brands_does_not_invent_quality_and_class_filter_still_applies(self):
+        self.provider([article(qualitaet=None,ean=None)])
+        response=self.search({"qualitaet":"alle","groesse":"205/55 R16"})
+        self.price(response)
+        self.assertIsNone(response.json["produkte"][0]["qualitaet"])
+        self.assertEqual(response.json["produkte"][0]["ean"],"")
+        self.assert_no_offer(self.search())
+        self.provider([article(qualitaet="alle")])
+        self.assert_no_offer(self.search({"qualitaet":"alle"}))
+
+    def test_optional_eu_label_has_only_validated_eprel_metadata(self):
+        labels={"eprel_url":"https://eprel.ec.europa.eu/qr/123456", "label_kraftstoff":"B",
+                "label_nass":"A","label_geraeusch_db":"71","label_geraeuschklasse":"B"}
+        self.provider([article(**labels)])
+        response=self.search()
+        self.price(response)
+        self.assertEqual(response.json["produkte"][0]["eu_label"],{
+            "eprel_url":labels["eprel_url"],"kraftstoffeffizienz":"B","nasshaftung":"A",
+            "rollgeraeusch_db":71,"rollgeraeuschklasse":"B"})
+        for invalid in ({"eprel_url":"https://eprel.ec.europa.eu.evil.invalid/qr/123"},
+                        {"eprel_url":"https://user:private@eprel.ec.europa.eu/qr/123"},
+                        {"eprel_url":"https://eprel.ec.europa.eu/qr/123?secret=private"},
+                        {"eprel_url":"https://eprel.ec.europa.eu:444/qr/123"},
+                        {"eprel_url":"https://eprel.ec.europa.eu/qr/123#secret"},
+                        {"eprel_url":"javascript:alert(1)"}, {"label_kraftstoff":"F"},
+                        {"label_geraeusch_db":True}, {"label_geraeusch_db":"131"}):
+            with self.subTest(invalid=invalid):
+                self.clear_rate()
+                self.provider([article(**{**labels,**invalid})])
+                response=self.search()
+                self.price(response)
+                self.assertNotIn("eu_label",response.json["produkte"][0])
+
+    def test_dedicated_shop_has_search_without_contact_form_or_enabled_purchase(self):
+        with patch.dict(portal.app.config,{"REIFEN_KAUF_MODE":"off","REIFEN_KAUF_ENABLED":False}):
+            response=self.client.get("/reifen")
+        self.assertEqual(response.status_code,200)
+        self.assertIn('data-standalone-shop',response.text)
+        self.assertIn('data-order-enabled="false"',response.text)
+        self.assertIn('name="reifen_qualitaet"',response.text)
+        self.assertNotIn('name="email"',response.text)
+        self.assertNotIn('name="telefon"',response.text)
+        self.assertIn('Onlinebestellungen starten in Kürze',response.text)
+        self.assertEqual(response.headers["Cache-Control"],"no-store")
+
+    def test_shop_and_read_only_search_are_available_on_public_homepage_host(self):
+        self.provider()
+        with patch.object(portal,"PUBLIC_HOSTS",{"auto-lackierzentrum.de"}):
+            response=self.client.get("/reifen",base_url="https://auto-lackierzentrum.de")
+            self.assertEqual(response.status_code,200)
+            self.price(self.search(base_url="https://auto-lackierzentrum.de"))
+            self.assertEqual(self.client.get("/admin/reifenportal",base_url="https://auto-lackierzentrum.de").status_code,404)
+
+    def test_stateless_shop_redirects_to_central_portal_and_never_accepts_checkout(self):
+        with patch.object(portal,"PUBLIC_SITE_ONLY",True),patch.object(portal,"PORTAL_BASE_URL","https://portal.synthetic.invalid"):
+            response=self.client.get("/reifen")
+        self.assertEqual(response.status_code,302)
+        self.assertEqual(response.headers["Location"],"https://portal.synthetic.invalid/reifen")
+
     def test_public_response_is_a_strict_whitelist_without_purchase_prices_or_raw_provider_data(self):
         item = article(api_key="SECRET-MARKER-KEY", credentials={"password": "SECRET-MARKER-PASSWORD"},
                        raw={"wholesale": "SECRET-MARKER-RAW"}, internal_margin="SECRET-MARKER-MARGIN",

@@ -90,10 +90,12 @@ Beschreibungen sind gewöhnlicher untrusted Text, kein freigegebenes HTML.
 `Einkaufspreis` wird verlustfrei als `Decimal` gelesen. Die CSV bestätigt keine
 Währung, Steuerbasis, Mengenkondition, Fracht oder bindende Lieferzeit. Diese
 Felder bleiben ausdrücklich `None`; es wird insbesondere keine Fracht von null
-angenommen. Der tatsächlich erhaltene Feed hat bei mehreren heute verglichenen
-Artikeln andere EK als die geöffneten Shop-Viererquotes. Diese Abweichung muss
-RSU erklären, bevor der Feed als veröffentlichte Verkaufspreisquelle verwendet
-wird. Die bestehende 10-Prozent-Kalkulation wird hier deshalb nicht aufgerufen.
+angenommen. Der spätere Abgleich vom 02.11.2026 um 14:55 Uhr erklärt die zuvor
+beobachtete EK-Abweichung durch unterschiedliche Zeitstände: Artikel 9411309
+kostete im aktuellen Portal und Export übereinstimmend 93,06 EUR je Stück bzw.
+372,24 EUR für vier. Ein aktueller Feed-/Portalwiderspruch wurde damit nicht
+nachgewiesen. Dieser reine Parser ruft weiterhin keine Verkaufskalkulation auf;
+die getrennte explizite Preis-/Frachtpolicy ist in `tyresystem-provider.md` beschrieben.
 
 XL, Runflat und 3PMSF kommen zwar teilweise im freien Profiltext vor, sind aber
 keine eigenen strukturierten CSV-Felder. Sie werden nicht als bestätigte Merkmale

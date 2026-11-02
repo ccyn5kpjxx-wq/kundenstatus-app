@@ -167,7 +167,8 @@ class ReifenBestellung:
 
     def fresh(self, token):
         selected = lade_auswahl_token(self.app.secret_key, token)
-        result, status = suche_reifenangebote(selected["query"], self.app.config.get("REIFENANGEBOT_PROVIDER"), now=self.now())
+        result, status = suche_reifenangebote(selected["query"], self.app.config.get("REIFENANGEBOT_PROVIDER"),
+                                            now=self.now(), artikel_id=selected["artikel_id"])
         product = next((p for p in result["produkte"] if p["artikel_id"] == selected["artikel_id"]), None)
         if status != 200 or not product:
             raise ValueError("Der ausgewählte Reifen ist nicht mehr zu diesem aktuellen Onlinepreis verfügbar. Bitte neu suchen.")

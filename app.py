@@ -3174,6 +3174,8 @@ def restrict_public_site_service():
     allowed_endpoints = {
         "static",
         "oeffentliche_homepage",
+        "oeffentlicher_reifenshop",
+        "reifenangebote_suche",
         "public_root",
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
@@ -45065,6 +45067,7 @@ def homepage_portal_links():
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
         "anfrage": link("website_anfrage", "/anfrage"),
+        "reifen": link("oeffentlicher_reifenshop", "/reifen"),
         "fahrer_demo": link("oeffentliche_kundenapp_demo", "/kunden-app/demo"),
         "partner": link("partner_login", "/partner"),
         "flotte": link("flottenportal.login", "/flotte/anmelden"),
@@ -45539,6 +45542,25 @@ def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
 def reifenservice_termine():
     response = jsonify({"zeiten": freie_reifen_slots(clean_text(request.args.get("datum")))})
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/reifen")
+def oeffentlicher_reifenshop():
+    if PUBLIC_SITE_ONLY:
+        if PORTAL_BASE_URL:
+            target = urlsplit(PORTAL_BASE_URL)
+            if target.scheme == "https" and target.netloc and target.netloc != request.host:
+                return redirect(PORTAL_BASE_URL + "/reifen", code=302)
+        abort(503, description="Bitte öffnen Sie den zentralen Werkstattzugang.")
+    service = app.extensions.get("reifen_kauf")
+    ready = (service is not None and app.config.get("REIFEN_KAUF_MODE") == "live"
+             and service.readiness()["ready"] is True)
+    response = make_response(render_template("homepage_reifenshop.html",
+        reifen_saisons=REIFEN_SAISONS, reifen_qualitaeten=REIFEN_QUALITAETEN,
+        shop_ready=ready))
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
 

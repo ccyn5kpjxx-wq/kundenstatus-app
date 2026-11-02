@@ -1,0 +1,50 @@
+:root { --ink:#252624; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#d72920; --line:#ded5c8; --teal:#0b6b67; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--cream); color:var(--ink); font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif; }
+a { color:inherit; text-underline-offset:4px; }
+:focus-visible { outline:3px solid var(--red); outline-offset:4px; }
+.wrap { width:min(1160px,calc(100% - 40px)); margin:auto; }
+.skip-link { position:absolute; top:-100px; padding:14px; background:white; z-index:5; }
+.skip-link:focus { top:0; }
+.shop-header { border-bottom:1px solid var(--line); background:var(--paper); }
+.shop-header nav { display:flex; align-items:center; gap:26px; min-height:84px; font-size:13px; font-weight:700; }
+.shop-brand { margin-right:auto; }
+.shop-brand img { display:block; width:190px; height:auto; }
+.shop-phone { padding:12px 18px; border:1px solid var(--line); border-radius:999px; text-decoration:none; }
+.shop-intro { display:flex; justify-content:space-between; align-items:center; gap:30px; padding:55px 0 30px; }
+.eyebrow { color:var(--red); text-transform:uppercase; letter-spacing:.12em; font-weight:800; font-size:11px; }
+h1 { margin:15px 0 18px; font-size:clamp(32px,4.2vw,52px); line-height:1.08; letter-spacing:-.045em; }
+h1 em { color:var(--red); font-style:normal; }
+.shop-intro p { max-width:630px; margin:0; color:var(--muted); font-size:16px; line-height:1.6; }
+.shop-intro img { width:280px; height:190px; object-fit:cover; border-radius:22px; }
+.shop-notice { padding:17px 21px; border:1px solid #cbbf9c; border-radius:12px; background:#fff9e7; font-size:13px; line-height:1.6; }
+.shop-steps { display:flex; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:16px 0 25px; margin:0; list-style:none; font-size:13px; font-weight:700; }
+.shop-steps li { display:flex; align-items:center; gap:10px; }
+.shop-steps span { display:grid; place-items:center; width:27px; height:27px; background:var(--ink); color:white; border-radius:50%; font-size:12px; }
+.shop-search { display:grid; grid-template-columns:330px minmax(0,1fr); gap:24px; align-items:start; scroll-margin-top:20px; }
+.shop-filters,.shop-results { padding:27px; background:var(--paper); border:1px solid var(--line); border-radius:20px; }
+h2 { margin:0 0 23px; font-size:22px; line-height:1.25; letter-spacing:-.025em; }
+.field { display:grid; gap:8px; margin-bottom:21px; }
+label,legend { font-size:13px; font-weight:750; }
+input,select { width:100%; min-height:47px; padding:11px 12px; border:1px solid #cfc5b8; border-radius:9px; background:white; color:var(--ink); font:inherit; font-size:14px; }
+.hint { margin:0; color:var(--muted); font-size:12px; line-height:1.55; }
+fieldset { margin:0 0 20px; padding:0; border:0; }
+legend { margin-bottom:10px; }
+.choice { display:flex; align-items:center; gap:10px; padding:12px 0; font-weight:500; cursor:pointer; }
+.choice input { width:18px; min-height:18px; margin:0; accent-color:var(--red); }
+.shop-results { min-height:300px; }
+.button { width:100%; min-height:49px; padding:12px 22px; background:var(--red); color:white; border:0; border-radius:999px; font:inherit; font-size:14px; font-weight:800; cursor:pointer; }
+.shop-results .tire-search-status { margin:17px 0 22px; }
+.shop-results .tire-search-results { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.shop-help { display:flex; justify-content:space-between; align-items:center; gap:25px; margin:35px 0; padding:27px; background:#e8e3da; border-radius:16px; }
+.shop-help h2 { margin-bottom:8px; font-size:20px; }
+.shop-help p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; }
+.shop-help a { flex-shrink:0; font-size:13px; font-weight:800; }
+.shop-footer { display:flex; flex-wrap:wrap; gap:20px; padding:24px 0; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+.shop-footer span { margin-right:auto; }
+.tire-result-label { font-size:12px; line-height:1.6; color:var(--muted); }
+.tire-result-label-link { display:inline-block; margin:0 0 15px; font-size:12px; font-weight:700; }
+.tire-result-closed { color:var(--muted); font-size:12px; }
+@media(max-width:1050px) { .shop-results .tire-search-results { grid-template-columns:1fr; } }
+@media(max-width:760px) { .shop-intro { padding-top:30px; } .shop-intro img { display:none; } .shop-search { grid-template-columns:1fr; } .shop-help { display:block; } .shop-help a { display:inline-block; margin-top:17px; } .shop-steps { font-size:11px; gap:12px; } .shop-header nav { gap:15px; } .shop-header .shop-phone { display:none; } }
+@media(max-width:420px) { .wrap { width:calc(100% - 28px); } .shop-filters,.shop-results { padding:21px; } .shop-brand img { width:155px; } .shop-header nav { font-size:11px; } }

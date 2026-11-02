@@ -1,7 +1,9 @@
 """Explicit configuration of tire integrations; no provider calls on import.
 
-Credentials are read only from REIFEN_* settings. No rental or insurance-mail
-credential is copied. The supplier object is deliberately not invented here.
+Credentials use explicit REIFEN_* settings. The private catalog uses only
+TYRESYSTEM_CATALOG_* settings and TYRESYSTEM_PRIVATE_ROOT; this module never
+reads an export credential. No rental or insurance-mail credential is copied.
+The supplier order object is deliberately not invented here.
 """
 from email.utils import parseaddr
 import hashlib
@@ -17,6 +19,68 @@ from reifen_rechtstexte import reifen_rechtstexte
 
 def flag(value):
     return str(value).strip().lower() in {"1","true","yes","ja"}
+
+
+def _private_catalog_json(path, private_root, *, max_bytes):
+    """Load bounded private configuration, never credentials or executable code."""
+    for value in (path, private_root):
+        text = str(value).replace("\\", "/")
+        if text.startswith("//") or "://" in text or not Path(value).is_absolute():
+            raise ValueError()
+    root, source = Path(private_root).resolve(), Path(path).resolve()
+    if (not Path(path).is_absolute() or source == root or not source.is_relative_to(root)
+            or Path(path).is_symlink()
+            or any(part.lower() in {"static", "public", "templates", "outputs", "wwwroot"} for part in source.parts)):
+        raise ValueError()
+    with source.open("rb") as stream:
+        raw = stream.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError()
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+    result = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
+    if not isinstance(result, dict):
+        raise ValueError()
+    return result
+
+
+def configure_catalog(portal, env):
+    """Wire a released local snapshot; configuration performs no export/network IO."""
+    cfg = portal.app.config
+    previous = portal.app.extensions.pop("reifen_tyresystem_catalog_provider", None)
+    if previous is not None and cfg.get("REIFENANGEBOT_PROVIDER") is previous:
+        cfg.pop("REIFENANGEBOT_PROVIDER", None)
+    keys = ("TYRESYSTEM_CATALOG_DIR", "TYRESYSTEM_PRIVATE_ROOT", "TYRESYSTEM_CATALOG_POLICY_FILE",
+            "TYRESYSTEM_CATALOG_METADATA_FILE", "TYRESYSTEM_CATALOG_PUBLICATION_APPROVED",
+            "TYRESYSTEM_CATALOG_PUBLICATION_REFERENCE")
+    if not any(env.get(key) for key in keys):
+        return []
+    # Explicit configuration replaces an old catalog even when subsequently invalid.
+    cfg.pop("REIFENANGEBOT_PROVIDER", None)
+    if not flag(env.get("TYRESYSTEM_CATALOG_PUBLICATION_APPROVED", "0")):
+        return []
+    try:
+        from tyresystem_provider import TyreSystemCatalogCache, TyreSystemCatalogProvider
+        root = env["TYRESYSTEM_PRIVATE_ROOT"]
+        cache = TyreSystemCatalogCache(env["TYRESYSTEM_CATALOG_DIR"], private_root=root)
+        policy = _private_catalog_json(env["TYRESYSTEM_CATALOG_POLICY_FILE"], root, max_bytes=16384)
+        metadata_path = env.get("TYRESYSTEM_CATALOG_METADATA_FILE", "")
+        metadata = _private_catalog_json(metadata_path, root, max_bytes=16*1024*1024) if metadata_path else None
+        provider = TyreSystemCatalogProvider(cache, publication_approved=True,
+            publication_reference=env.get("TYRESYSTEM_CATALOG_PUBLICATION_REFERENCE", ""),
+            policy=policy, article_metadata=metadata)
+        if not provider.publication_ready:
+            raise ValueError()
+        cfg["REIFENANGEBOT_PROVIDER"] = provider
+        portal.app.extensions["reifen_tyresystem_catalog_provider"] = provider
+        return []
+    except (KeyError, ValueError, OSError, TypeError, RecursionError):
+        return ["Reifenkatalog-Konfiguration oder Datenfreigabe unvollständig"]
 
 
 def read_terms(path):
@@ -46,7 +110,7 @@ def read_terms(path):
 def configure_integrations(portal, *, environment=None):
     env = os.environ if environment is None else environment
     cfg = portal.app.config
-    errors = []
+    errors = configure_catalog(portal, env)
     mode = env.get("REIFEN_KAUF_MODE", "off")
     cfg["REIFEN_KAUF_MODE"] = mode
     cfg["REIFEN_KAUF_ENABLED"] = flag(env.get("REIFEN_KAUF_ENABLED", "0"))
@@ -138,8 +202,8 @@ def configure_integrations(portal, *, environment=None):
     elif mail_requested:
         errors.append("Vertragsmail-Zugang fehlt")
     cfg["REIFEN_ANBINDUNG_ERRORS"] = errors
-    # A supplier and its real catalog/stock/order protocol must be wired after
-    # TYREsystem supplies authorized current documentation. No placeholder.
+    # Catalog display is separate from the supplier's binding order protocol.
+    # A cache refresh never supplies a reservation or invents an order adapter.
     return errors
 
 

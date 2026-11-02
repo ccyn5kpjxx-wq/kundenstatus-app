@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 TEMP_DIR = Path(tempfile.mkdtemp(prefix="cockpit-regression-"))
 # Real tire gateways, SMS budgets and mail workers must never leak into tests.
 for tire_setting in tuple(os.environ):
-    if tire_setting.startswith("REIFEN_"):
+    if tire_setting.startswith(("REIFEN_", "TYRESYSTEM_")):
         os.environ.pop(tire_setting, None)
 os.environ.update({
     "RENDER": "isolated-regression-test", "DATABASE_URL": "", "REQUIRE_POSTGRES_ON_RENDER": "0",

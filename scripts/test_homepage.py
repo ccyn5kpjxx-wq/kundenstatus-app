@@ -72,7 +72,8 @@ def main():
         path = target.path + ("?" + target.query if target.query else "")
         return client.get(path).status_code == 200
     tire_links = deck.card_links[0] if deck.cards and deck.cards[0].get("data-card-title") == "Reifen" else []
-    tire_destinations = {parse_qs(urlparse(href).query).get("anliegen", [""])[0] for href in tire_links}
+    tire_destinations = {"reifenshop" if urlparse(href).path == "/reifen" else
+                         parse_qs(urlparse(href).query).get("anliegen", [""])[0] for href in tire_links}
     deck_script = client.get("/static/homepage/aktuelles-karten.js")
     checks = {
         "Status 200": response.status_code == 200,
@@ -98,7 +99,7 @@ def main():
         "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
         "Sieben Themen mit eigenen Schaden- und Lackkarten": [card.get("data-card-title") for card in deck.cards] == ["Reifen", "Versicherungsschaden", "Lackierarbeiten", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
         "Alle Karten ohne JavaScript lesbar und verlinkt": bool(deck.cards) and all("hidden" not in card and "inert" not in card for card in deck.cards) and all(links and all(card_link_reachable(href) for href in links) for links in deck.card_links),
-        "Reifenkarte bietet Reifenauswahl und Werkstatttermin": {"reifenangebot", "reifenservice"} <= tire_destinations,
+        "Reifenkarte bietet eigenen Reifenshop und Werkstatttermin": {"reifenshop", "reifenservice"} <= tire_destinations,
         "Kartenpfeile und Themen sind beschriftete native Buttons": len(deck.controls) == 2 and all(tag == "button" and data.get("type") == "button" and data.get("aria-label") and data.get("aria-controls") == "aktuelle-karten" for tag, data in deck.controls) and len(deck.choices) == 7 and all(tag == "button" and data.get("aria-pressed") in ("true", "false") for tag, data in deck.choices),
         "Leasingkarte bietet Check vor Rueckgabe und Smart Repair": all(x in hero_html for x in ('Leasing-Check &amp; Smart Repair','Unnötige Rückgabekosten vermeiden.','Dellen und kleine Lackschäden vorab prüfen.','?anliegen=leasingrueckgabe#kurzanfrage')) and client.get('/static/homepage/karte-leasing-v2-20261021.webp').status_code == 200,
         "Kartenwechsel erreichbar und Status barrierearm": deck_script.status_code == 200 and '/static/homepage/aktuelles-karten.js' in html and 'aria-live="polite" aria-atomic="true" data-deck-status' in hero_html,

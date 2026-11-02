@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
+from urllib.parse import urlsplit
 
 from reifenangebote import REIFEN_SAISONS, REIFEN_QUALITAETEN
 from reifenpreis_kalkulation import berechne_reifenpreis
@@ -17,11 +18,13 @@ from reifenservice import berechne_reifenservice
 
 MAX_PREISALTER = timedelta(minutes=15)
 MAX_PRODUKTE = 12
+# Workshop decision, 02.11.2026: the existing EUR 5 surcharge applies at 40 or below.
+NIEDERQUERSCHNITT_BIS = 40
 _FELDER = {"groesse", "saison", "qualitaet", "anzahl", "montage"}
 # Nominal km/h, not alphabetic order. Conservative search: no automatic winter
 # exceptions or special >300 km/h approvals. Source: Michelin's published table:
 # https://www.michelin.de/auto/tipps/grundlagen-reifen/lastindex-geschwindigkeitsindex
-_TEMPO = {"L": 120, "M": 130, "N": 140, "Q": 160, "R": 170, "S": 180,
+_TEMPO = {"L": 120, "M": 130, "N": 140, "P": 150, "Q": 160, "R": 170, "S": 180,
           "T": 190, "U": 200, "H": 210, "V": 240, "W": 270, "Y": 300}
 
 
@@ -96,7 +99,38 @@ def _montage(query):
     if query["anzahl"] > 4 or rim < 13 or rim > 20:
         raise ValueError("Für diesen Montageumfang ist ein individuelles Angebot erforderlich.")
     price_id = "montage_13_16" if rim <= 16 else "montage_17_18" if rim <= 18 else "montage_19_20"
-    return berechne_reifenservice([{"preis_id": price_id, "menge": query["anzahl"]}])
+    services = [{"preis_id": price_id, "menge": query["anzahl"]}]
+    if query["querschnitt"] <= NIEDERQUERSCHNITT_BIS:
+        services.append({"preis_id": "runflat", "menge": query["anzahl"]})
+    return berechne_reifenservice(services)
+
+
+def _reifenlabel(item):
+    """A bounded public label summary; no provider URL is fetched or embedded."""
+    value = item.get("eprel_url")
+    if (not isinstance(value, str) or not value or len(value) > 300
+            or any(ord(char) <= 32 or ord(char) == 127 for char in value)):
+        return None
+    try:
+        link = urlsplit(value)
+        if (link.scheme != "https" or link.hostname != "eprel.ec.europa.eu"
+                or link.username or link.password or link.port not in (None, 443)
+                or link.query or link.fragment
+                or not re.fullmatch(r"/(?:qr/[0-9]{1,12}|screen/product/tyres/[0-9]{1,12})/?", link.path)):
+            return None
+        fuel, wet, noise_class = (item.get(k) for k in
+            ("label_kraftstoff", "label_nass", "label_geraeuschklasse"))
+        noise = item.get("label_geraeusch_db")
+        if isinstance(noise, str) and re.fullmatch(r"[0-9]{2,3}", noise):
+            noise = int(noise)
+        if (fuel not in ("A", "B", "C", "D", "E") or wet not in ("A", "B", "C", "D", "E")
+                or noise_class not in ("A", "B", "C") or type(noise) is not int or not 40 <= noise <= 130):
+            return None
+    except ValueError:
+        return None
+    return {"kraftstoffeffizienz": fuel, "nasshaftung": wet,
+            "rollgeraeusch_db": noise, "rollgeraeuschklasse": noise_class,
+            "eprel_url": value}
 
 
 def _produkt(item, query, mounting, now):
@@ -113,7 +147,11 @@ def _produkt(item, query, mounting, now):
         raise ValueError("Lastindex zu niedrig.")
     if query["geschwindigkeitsindex"] and _TEMPO[speed] < _TEMPO[query["geschwindigkeitsindex"]]:
         raise ValueError("Geschwindigkeitsindex zu niedrig.")
-    if item.get("saison") != query["saison"] or item.get("qualitaet") != query["qualitaet"]:
+    quality = item.get("qualitaet")
+    if quality is not None and quality not in ("preisbewusst", "mittelklasse", "markenqualitaet", "premium"):
+        raise ValueError("Unbestätigte Qualitätsklasse.")
+    if (item.get("saison") != query["saison"]
+            or (query["qualitaet"] != "alle" and quality != query["qualitaet"])):
         raise ValueError("Andere Saison oder Qualitätsklasse.")
     stock = _integer(item.get("bestand"), 0, 1000000)
     if stock < query["anzahl"] or item.get("waehrung") != "EUR" or item.get("preis_bestaetigt") is not True:
@@ -130,14 +168,16 @@ def _produkt(item, query, mounting, now):
     name = _text(item.get("bezeichnung"), maximum=200)
     delivery = _text(item.get("lieferzeit"), maximum=120)
     ean = item.get("ean", "")
-    if not isinstance(ean, str) or (ean and not re.fullmatch(r"[0-9]{13}", ean)):
+    if ean is None:
+        ean = ""
+    if not isinstance(ean, str) or (ean and not re.fullmatch(r"(?:[0-9]{8}|[0-9]{12,14})", ean)):
         raise ValueError("Ungültige EAN.")
     calculation = berechne_reifenpreis(einkauf_netto=item.get("netto_einkauf"),
         menge=query["anzahl"], bezugskosten_netto=item.get("fracht_netto"),
         preise_bestaetigt=True, montage_kalkulation=mounting)
-    return {"artikel_id": sku, "ean": ean, "bezeichnung": name,
+    product = {"artikel_id": sku, "ean": ean, "bezeichnung": name,
         "groesse": f"{query['breite']}/{query['querschnitt']} R{query['zoll']} {load}{speed}",
-        "saison": query["saison"], "qualitaet": query["qualitaet"],
+        "saison": query["saison"], "qualitaet": quality,
         "bestand": stock, "lieferzeit": delivery,
         "preisstand": retrieved.isoformat(),
         "gueltig_bis": min(valid_until, retrieved + MAX_PREISALTER).isoformat(),
@@ -146,9 +186,13 @@ def _produkt(item, query, mounting, now):
                   "versand_brutto": calculation["versand_brutto"],
                   "montage_brutto": calculation["montage_brutto"],
                   "gesamt_brutto": calculation["gesamt_brutto"], "waehrung": "EUR"}}
+    label = _reifenlabel(item)
+    if label is not None:
+        product["eu_label"] = label
+    return product
 
 
-def suche_reifenangebote(args, provider=None, *, now=None):
+def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
     """Return (public payload, HTTP status); calls a server-side callable only.
 
     Provider contract: provider(query_dict) -> {"angebote": [item, ...]}.
@@ -160,8 +204,15 @@ def suche_reifenangebote(args, provider=None, *, now=None):
     tire construction against workshop pricing; runflat=True cannot qualify.
     No ratings are translated into quality classes.
     Missing, mismatched, stale or insufficient offers are discarded. No ordering.
+    Internal selection revalidation may pass artikel_id. An optional provider
+    lookup(query, artikel_id) avoids search ranking limits; legacy callables
+    remain supported by selecting the exact SKU before the public result cap.
+    This selector is never accepted as a public search query parameter.
     """
     query = parse_reifen_suche(args)
+    if artikel_id is not None and (not isinstance(artikel_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,100}", artikel_id)):
+        raise ReifenSucheEingabefehler("Ungültige Artikelauswahl.")
     unavailable = {"status": "nicht_verfuegbar", "verfuegbar": False, "produkte": [],
                    "nachricht": "Onlinepreise sind derzeit nicht verfügbar. Bitte senden Sie uns eine Reifenanfrage."}
     if provider is None:
@@ -173,7 +224,8 @@ def suche_reifenangebote(args, provider=None, *, now=None):
     except ValueError:
         return {**unavailable, "nachricht": "Für diesen Montageumfang erstellen wir Ihnen gerne ein individuelles Angebot."}, 200
     try:
-        raw = provider(dict(query))
+        lookup = getattr(provider, "lookup", None) if artikel_id is not None else None
+        raw = lookup(dict(query), artikel_id) if callable(lookup) else provider(dict(query))
         if not isinstance(raw, Mapping) or not isinstance(raw.get("angebote"), list) or len(raw["angebote"]) > 100:
             raise ValueError("Ungültige Anbieterantwort.")
     except Exception:
@@ -183,6 +235,8 @@ def suche_reifenangebote(args, provider=None, *, now=None):
     current = now or datetime.now(timezone.utc)
     products, seen = [], set()
     for item in raw["angebote"]:
+        if artikel_id is not None and (not isinstance(item, Mapping) or item.get("artikel_id") != artikel_id):
+            continue
         try:
             product = _produkt(item, query, mounting, current)
             if product["artikel_id"] not in seen:
