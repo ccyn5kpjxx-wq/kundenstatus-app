@@ -8233,7 +8233,8 @@ class PostgresConnection:
         # A synthetic RETURNING id makes an otherwise valid INSERT fail on PG.
         inserts_with_id = bool(insert_table and insert_table not in {
             "app_settings", "miet_checkout_contracts", "miet_checkout_review_refunds",
-            "kundenflotten_fahrer", "kundenflotten_reifen"
+            "kundenflotten_fahrer", "kundenflotten_reifen",
+            "reifen_kauf_sms_budget", "reifen_kauf_events", "reifen_vertrag_anhaenge"
         }
                                and " returning " not in lowered)
         if inserts_with_id:
