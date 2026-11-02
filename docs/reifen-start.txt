@@ -27,6 +27,9 @@ Einrichtung auf dem ZENTRALEN PORTAL mit dauerhafter Datenbank:
 6. Nach TYREsystem-Freigabe den dokumentierten echten Lieferantenadapter
    verbindlich einrichten. Kein Endpunkt wird geraten. Er muss für jeden
    Artikel Paketversandfähigkeit, Preis, Bestand und Bereitstellung bestätigen.
+   Ein lesender Inquiry-Client für bekannte Artikelnummern ist in tyresystem_api.py
+   vorhanden; Anleitung docs/tyresystem-inquiry.md. Er bleibt von Suche/Kauf getrennt,
+   bis Zugang, Katalog, Preis-/Frachtbasis und Lieferablauf verbindlich geklärt sind.
 
 Lieferantenprotokoll REIFEN_KAUF_SUPPLIER:
 Adapter.livemode muss exakt zur Zahlungsumgebung passen; Sandboxzahlung darf
