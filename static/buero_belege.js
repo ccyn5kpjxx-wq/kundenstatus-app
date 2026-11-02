@@ -1,5 +1,25 @@
 'use strict';
 
+document.querySelectorAll('.bb-copy').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const status = button.closest('.bb-transfer-readonly').querySelector('[data-copy-status]');
+    status.hidden = false;
+    status.textContent = '';
+    button.disabled = true;
+    try {
+      if (!window.isSecureContext || !navigator.clipboard || !navigator.clipboard.writeText) {
+        throw new Error('Clipboard unavailable');
+      }
+      await navigator.clipboard.writeText(button.dataset.copyValue);
+      status.textContent = `${button.dataset.copyLabel} kopiert.`;
+    } catch {
+      status.textContent = 'Kopieren nicht möglich. Bitte den angezeigten Wert markieren und manuell kopieren.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+});
+
 document.querySelectorAll('.bb-chef-review').forEach((form) => {
   const kind = form.querySelector('[name="typ"]');
   const category = form.querySelector('[name="kategorie"]');
