@@ -948,7 +948,7 @@ class OfficeDocuments:
                                "transferdaten_geaendert": transfer_changed})
         self._backup()
 
-    def payment(self, key, version, *, paid=False, paid_date="", reference=""):
+    def payment(self, key, version, *, paid=False, paid_date="", reference="", admin=False):
         if paid:
             paid_date = _day(paid_date, "Zahlungsdatum", required=True)
             if date.fromisoformat(paid_date) > datetime.now(ZoneInfo("Europe/Berlin")).date():
@@ -957,9 +957,9 @@ class OfficeDocuments:
             if not reference:
                 raise ValueError("Referenz der außerhalb des Portals ausgeführten Zahlung angeben.")
         with self.p.portal_originals_operation_lock(), self.db() as db:
-            who = self.identity(db=db, lock=True)
+            who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"freigegeben", "zahlung_in_bearbeitung"} if paid else {"freigegeben"})
-            self._visibility(row, who)
+            self._visibility(row, who, admin=admin)
             if (not row["payable"] or not (row["business_confirmed"] or row["bereich"] == "privat") or row["typ"] not in ("rechnung", "bescheid", "zahlungsauftrag")
                     or (row["typ"] == "zahlungsauftrag" and not row["quelle_geprueft"])):
                 raise ValueError("Dieser Beleg hat keine Chef-Zahlungsfreigabe. Lieferscheine und sonstige Post sind nicht zahlbar.")
@@ -1225,12 +1225,14 @@ def register_office_documents(p):
         return mutate(lambda: service.payment(key, request.form.get("revision")), key)
 
     @bp.post("/werkstatt/buero/belege/<key>/bezahlt")
+    @bp.post("/admin/buero/belege/<key>/bezahlt")
     def paid(key):
         csrf_and_fields({"revision", "confirmed", "zahlungsdatum", "zahlungsreferenz"})
         if request.form.get("confirmed") != "ja":
             abort(400)
         return mutate(lambda: service.payment(key, request.form.get("revision"), paid=True,
-                                             paid_date=request.form.get("zahlungsdatum", ""), reference=request.form.get("zahlungsreferenz", "")), key)
+                                             paid_date=request.form.get("zahlungsdatum", ""), reference=request.form.get("zahlungsreferenz", ""),
+                                             admin=admin_route()), key)
 
     p.app.register_blueprint(bp)
     return service

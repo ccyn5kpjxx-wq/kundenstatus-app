@@ -455,6 +455,126 @@ class OfficeDocumentTests(unittest.TestCase):
         self.assertEqual(self.rows()[0]["original_base64"], base64.b64encode(raw).decode("ascii"))
         self.assertTrue(self.p.backups)
 
+    def test_admin_documents_existing_external_payment_once_without_changing_original_or_approval(self):
+        raw = pdf_bytes("admin-external-payment-proof")
+        key = self.create(raw=raw)
+        self.approve(key, typ="rechnung", kategorie="rechnung")
+        before = self.row(key)
+        history = self.rows(TABLES[1])
+        backups = len(self.p.backups)
+        hook = Mock()
+        self.p.office_document_approved = hook
+        base = "/admin/buero/belege/" + key
+        html = self.admin.get(base).get_data(as_text=True)
+        self.assertIn('action="' + base + '/bezahlt"', html)
+        self.assertIn("Zahlung als erledigt dokumentieren", html)
+        self.assertIn("Ausführung anhand des Zahlungsnachweises geprüft", html)
+        self.assertNotIn('action="' + base + '/ueberweisung"', html)
+        self.assertNotIn("Ich habe die Überweisung außerhalb dieses Portals ausgeführt.", html)
+        response = self.action(key, "bezahlt", admin=True, zahlungsdatum="2026-01-05", zahlungsreferenz="Synthetic checked bank execution")
+        self.assertEqual(response.status_code, 303, response.get_data(as_text=True))
+        self.assertEqual(response.headers["Location"], base)
+        paid = self.row(key)
+        self.assertEqual((paid["status"], paid["paid_date"], paid["payment_reference"], paid["revision"]),
+                         ("bezahlt", "2026-01-05", "Synthetic checked bank execution", before["revision"] + 1))
+        changed = {name for name in before if before[name] != paid[name]}
+        self.assertLessEqual(changed, {"status", "paid_date", "payment_reference", "revision", "updated_at"})
+        self.assertEqual(self.admin.get(base + "/original").data, raw)
+        payment_audits = [row for row in self.rows(TABLES[1]) if row["aktion"] == "zahlung_dokumentiert"]
+        self.assertEqual(len(payment_audits), 1)
+        self.assertEqual(payment_audits[0]["actor"], "admin")
+        details = json.loads(payment_audits[0]["details_json"])
+        self.assertEqual((details["vorher_status"], details["paid_date"], details["payment_reference"], details["original_sha256"]),
+                         ("freigegeben", "2026-01-05", "Synthetic checked bank execution", before["sha256"]))
+        self.assertEqual(len(self.rows(TABLES[1])), len(history) + 1)
+        self.assertEqual(len(self.p.backups), backups + 1)
+        paid_history = self.rows(TABLES[1])
+        self.assertEqual(self.action(key, "bezahlt", admin=True, zahlungsdatum="2026-01-05", zahlungsreferenz="Duplicate proof").status_code, 409)
+        self.assertEqual(self.row(key), paid)
+        self.assertEqual(self.rows(TABLES[1]), paid_history)
+        self.assertEqual(len(self.p.backups), backups + 1)
+        paid_html = self.admin.get(base).get_data(as_text=True)
+        self.assertIn("Zahlung dokumentiert", paid_html)
+        self.assertNotIn('action="' + base + '/bezahlt"', paid_html)
+        hook.assert_not_called()
+
+    def test_admin_payment_uses_existing_order_eligibility_for_business_and_private_sources(self):
+        for category, area, working in (("miete", "geschaeftlich", False), ("kaution", "geschaeftlich", True), ("privat", "privat", False)):
+            with self.subTest(category=category):
+                key = self.create(raw=pdf_bytes("admin-order-" + category), **self.order_fields(
+                    kategorie=category, zahlungsempfaenger="", iban="", faelligkeit="", verwendungszweck="", zahlungsmodus="einzelzahlung"))
+                self.approve(key, typ="zahlungsauftrag", kategorie=category, zahlungspflichtig="ja", bereich=area)
+                if working:
+                    self.assertEqual(self.action(key, "ueberweisung").status_code, 303)
+                before = self.row(key)
+                with self.p.app.test_request_context():
+                    session["admin"] = True
+                    self.assertTrue(self.p.documents.detail(key, admin=True)["payment_allowed"])
+                base = "/admin/buero/belege/" + key
+                self.assertIn('action="' + base + '/bezahlt"', self.admin.get(base).get_data(as_text=True))
+                self.assertEqual(self.action(key, "bezahlt", admin=True, zahlungsdatum="2026-01-05", zahlungsreferenz="Synthetic checked " + category).status_code, 303)
+                paid = self.row(key)
+                self.assertEqual((paid["status"], paid["business_confirmed"], paid["quelle_geprueft"]),
+                                 ("bezahlt", int(area == "geschaeftlich"), 1))
+                for column in ("typ", "kategorie", "betrag_cent", "original_base64", "sha256", "decided_at", "decided_by", "lexware_beleg_id"):
+                    self.assertEqual(paid[column], before[column])
+
+    def test_admin_payment_requires_existing_payment_approval_and_never_offers_it_for_nonpayable_documents(self):
+        for stage in ("entwurf", "eingereicht", "post", "lieferschein", "bescheid"):
+            with self.subTest(stage=stage):
+                kind = stage if stage in ("post", "lieferschein", "bescheid") else "rechnung"
+                key = self.create(raw=pdf_bytes("admin-unpayable-" + stage), typ=kind)
+                if stage == "eingereicht":
+                    self.submit(key)
+                elif kind != "rechnung":
+                    self.approve(key, typ=kind, kategorie="gebuehren" if kind == "bescheid" else "sonstige")
+                before, history, backups = self.row(key), self.rows(TABLES[1]), len(self.p.backups)
+                base = "/admin/buero/belege/" + key
+                self.assertNotIn('action="' + base + '/bezahlt"', self.admin.get(base).get_data(as_text=True))
+                response = self.action(key, "bezahlt", admin=True, zahlungsdatum="2026-01-05", zahlungsreferenz="No payment release")
+                self.assertEqual(response.status_code, 409 if stage in ("entwurf", "eingereicht") else 400)
+                self.assertEqual(self.row(key), before)
+                self.assertEqual(self.rows(TABLES[1]), history)
+                self.assertEqual(len(self.p.backups), backups)
+
+    def test_admin_payment_rejects_invalid_confirmation_csrf_and_stale_revision_without_partial_writes(self):
+        key = self.create(raw=pdf_bytes("admin-payment-validation"))
+        stale = self.row(key)["revision"]
+        self.approve(key, typ="rechnung", kategorie="rechnung")
+        before, history, backups = self.row(key), self.rows(TABLES[1]), len(self.p.backups)
+        invalids = (({"csrf_token": "wrong"}, 400), ({"confirmed": ""}, 400), ({"zahlungsdatum": ""}, 400),
+                    ({"zahlungsdatum": (date.today() + timedelta(days=2)).isoformat()}, 400),
+                    ({"zahlungsreferenz": ""}, 400), ({"version": stale}, 409))
+        for changes, expected in invalids:
+            with self.subTest(changes=changes):
+                values = dict(zahlungsdatum="2026-01-05", zahlungsreferenz="Synthetic checked proof")
+                values.update(changes)
+                self.assertEqual(self.action(key, "bezahlt", admin=True, **values).status_code, expected)
+                self.assertEqual(self.row(key), before)
+                self.assertEqual(self.rows(TABLES[1]), history)
+                self.assertEqual(len(self.p.backups), backups)
+
+    def test_admin_payment_never_borrows_an_employee_identity_or_grants_the_employee_admin_access(self):
+        key = self.create(raw=pdf_bytes("admin-payment-role-boundary"))
+        self.approve(key, typ="rechnung", kategorie="rechnung")
+        before, history = self.row(key), self.rows(TABLES[1])
+        other = self.p.app.test_client()
+        self.login(other, mid=2)
+        for client in (self.office, other, self.anon):
+            self.assertEqual(self.action(key, "bezahlt", admin=True, client=client, zahlungsdatum="2026-01-05", zahlungsreferenz="Wrong role").status_code, 403)
+        self.assertEqual(self.action(key, "bezahlt", client=self.admin, zahlungsdatum="2026-01-05", zahlungsreferenz="Wrong route").status_code, 403)
+        self.assertEqual(self.action(key, "ueberweisung", admin=True).status_code, 404)
+        with self.p.app.test_request_context():
+            session["office_mid"] = 1
+            with self.assertRaises(PermissionError):
+                self.p.documents.payment(key, str(before["revision"]), paid=True, paid_date="2026-01-05", reference="Wrong service role", admin=True)
+        with self.p.app.test_request_context():
+            session["admin"] = True
+            with self.assertRaises(PermissionError):
+                self.p.documents.payment(key, str(before["revision"]), paid=True, paid_date="2026-01-05", reference="Default remains office-only")
+        self.assertEqual(self.row(key), before)
+        self.assertEqual(self.rows(TABLES[1]), history)
+
     def test_office_cannot_approve_reject_or_read_admin_routes(self):
         key = self.create()
         self.submit(key)

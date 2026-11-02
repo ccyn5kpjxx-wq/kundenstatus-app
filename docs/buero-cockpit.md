@@ -70,6 +70,16 @@ Im Chef-Cockpit führt **Rechnungen zur Freigabe** nach
 5. Eine tatsächlich extern ausgeführte Zahlung wird mit Datum und Referenz
    dokumentiert. Ein Lexware-Status allein schließt diese Aufgabe nicht.
 
+Der Chef kann in `/admin/buero/belege/<id>` eine bereits freigegebene Zahlung
+über **Zahlung als erledigt dokumentieren** nachtragen. Dafür prüft er die
+tatsächliche Ausführung anhand eines Zahlungsnachweises und bestätigt Datum
+und Referenz. Der Nachtrag ist direkt nach der Freigabe oder nach einer
+Büro-Bearbeitungsübernahme möglich; eine erneute Freigabe ist nicht nötig.
+Bereits dokumentierte Zahlungen bieten kein weiteres Zahlungsformular.
+Der Änderungsverlauf erfasst den Chef als handelnde Person. Original,
+Freigabe und Lexware-Verknüpfung bleiben erhalten; es wird keine Überweisung
+ausgelöst. Der persönliche Bürozugang behält seinen eigenen Nachtragsweg.
+
 **Neu**, **zur Freigabe offen** und **zur Zahlung offen** sind getrennt.
 Das Öffnen eines Belegs entfernt nur dessen Neu-Markierung für diese Person.
 Es erteilt keine Freigabe und bestätigt keine Zahlung.
