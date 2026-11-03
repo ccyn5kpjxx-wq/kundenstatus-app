@@ -73,6 +73,17 @@
       && (!speed || ['L','M','N','P','Q','R','S','T','U','H','V','W','Y'].includes(speed));
     return valid ? [Number(width), Number(ratio), Number(rim), load ? Number(load) : null, speed || null] : null;
   };
+  const sizeMessage = (text, key='groesse') => {
+    if (parseSize(text)) return messages[key];
+    if (/^\d{3}\s*(?:\/|\s)\s*\d{2}\s*$/i.test(text))
+      return 'Die Zollgröße fehlt. Bitte ergänzen Sie zum Beispiel R18: 225/40 R18.';
+    if (/^\d{3}\s*(?:\/|\s)\s*\d{2}\s*Z?R\s*\d?$/i.test(text))
+      return 'Die Zollgröße ist unvollständig. Bitte zwei Ziffern angeben, zum Beispiel R18.';
+    const base = text.match(/^(\d{3}(?:\s*\/\s*|\s+)\d{2}(?:\s*Z?R\s*|\s+)\d{2})(.+)$/i);
+    if (base && parseSize(base[1]))
+      return 'Die Angabe nach der Reifengröße ist ungültig. Last- und Geschwindigkeitsindex sehen zum Beispiel so aus: 92V. Bitte Ihre tatsächlichen Fahrzeugangaben übernehmen.';
+    return messages[key];
+  };
   const focusField = key => {
     const field = form.querySelector(`[name="${names[key] || names.groesse}"]`);
     if (field) field.focus();
@@ -252,7 +263,7 @@
     if (!/^[1-8]$/.test(query.anzahl)) missing.push('anzahl');
     if (!['ja','nein'].includes(query.montage)) missing.push('montage');
     if (missing.length) {
-      missing.forEach(key => fieldError(key, messages[key]));
+      missing.forEach(key => fieldError(key, key === 'groesse' ? sizeMessage(query.groesse) : key === 'groesse_hinten' ? sizeMessage(rear,key) : messages[key]));
       say(missing.length === 1 ? 'Bitte das markierte Feld prüfen.' : `Bitte die ${missing.length} markierten Felder prüfen.`, true);
       focusField(missing[0]); return;
     }
@@ -277,7 +288,7 @@
       if (current !== generation) return;
       if (response.status === 400) {
         const key = payload && Object.prototype.hasOwnProperty.call(names, payload.feld) ? payload.feld : null;
-        if (key) { fieldError(key, messages[key]); focusField(key); say('Bitte das markierte Feld prüfen.', true); }
+        if (key) { fieldError(key, key === 'groesse' ? sizeMessage(query.groesse) : messages[key]); focusField(key); say('Bitte das markierte Feld prüfen.', true); }
         else { say('Bitte Ihre Sucheingaben prüfen.', true); feedback('Die Sucheingaben konnten nicht verarbeitet werden', 'Bitte prüfen Sie Größe, Saison und Anzahl und starten Sie die Suche erneut.', [{label:'Eingaben prüfen',run:() => focusField('groesse')}]); }
         return;
       }

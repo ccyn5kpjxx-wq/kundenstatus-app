@@ -232,13 +232,15 @@ const cases = [
     }
   }],
   ['incomplete dimensions and invalid rim or speed index are rejected locally', async () => {
-    for (const size of ['225/40', '225/40 R1', '225/40 R18 92Z', '225/40 R18 Z8']) {
+    for (const [size, message] of [['225/40',/Zollgröße fehlt/], ['225/40 R1',/Zollgröße ist unvollständig/],
+                                 ['225/40 R18 92Z',/Last- und Geschwindigkeitsindex/], ['225/40 R18 Z8',/Last- und Geschwindigkeitsindex/]]) {
       const h = createHarness({reifen_groesse_vorne: size});
       await h.search();
       assert.equal(h.requests.length, 0, `Invalid size must not use the search budget: ${size}`);
       assert.equal(h.field('reifen_groesse_vorne').getAttribute('aria-invalid'), 'true');
       assert.equal(h.document.activeElement.name, 'reifen_groesse_vorne');
       assert.equal(h.field('reifen_saison').getAttribute('aria-invalid'), null);
+      assert.match(h.form.querySelector('#tire-error-reifen_groesse_vorne').textContent,message);
     }
   }],
   ['both unambiguous size shortcuts each start one search', async () => {
