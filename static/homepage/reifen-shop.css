@@ -18,6 +18,11 @@ h1 em { color:var(--red); font-style:normal; }
 .shop-intro p { max-width:630px; margin:0; color:var(--muted); font-size:16px; line-height:1.6; }
 .shop-intro img { width:280px; height:190px; object-fit:cover; border-radius:22px; }
 .shop-notice { padding:17px 21px; border:1px solid #cbbf9c; border-radius:12px; background:#fff9e7; font-size:13px; line-height:1.6; }
+.shop-preview { padding:22px; margin:0 0 20px; border:1px solid #a7c4c0; border-radius:14px; background:#eaf4f2; font-size:14px; }
+.shop-preview p { margin:9px 0; line-height:1.6; }
+.shop-preview-sizes { display:flex; flex-wrap:wrap; gap:9px; margin:13px 0; }
+.shop-preview-sizes button { padding:10px 14px; min-height:42px; border:1px solid #8eb7ae; border-radius:999px; background:white; color:#17554d; font:inherit; font-size:13px; font-weight:750; cursor:pointer; }
+.shop-preview-sizes button:hover { background:#d8ebe6; }
 .shop-steps { display:flex; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:16px 0 25px; margin:0; list-style:none; font-size:13px; font-weight:700; }
 .shop-steps li { display:flex; align-items:center; gap:10px; }
 .shop-steps span { display:grid; place-items:center; width:27px; height:27px; background:var(--ink); color:white; border-radius:50%; font-size:12px; }

@@ -250,7 +250,7 @@ class ReifenSucheTest(unittest.TestCase):
         self.provider([item], token="SECRET-MARKER-TOKEN")
         response = self.search()
         price = self.price(response)
-        self.assertLessEqual(set(response.json), {"status", "verfuegbar", "produkte", "nachricht"})
+        self.assertLessEqual(set(response.json), {"status", "code", "verfuegbar", "produkte", "nachricht"})
         product = response.json["produkte"][0]
         self.assertLessEqual(set(product), {"artikel_id", "ean", "bezeichnung", "groesse", "saison",
                                             "qualitaet", "bestand", "lieferzeit", "preisstand", "gueltig_bis", "preis", "bestell_url"})
@@ -379,6 +379,19 @@ class ReifenSucheTest(unittest.TestCase):
                 self.assert_no_offer(response, statuses=(400,))
         hook.assert_not_called()
 
+    def test_input_error_response_names_the_field_and_a_safe_code(self):
+        hook = self.provider()
+        for field, value in (("groesse", "invalid"), ("saison", ""), ("qualitaet", "unknown"),
+                             ("anzahl", "9"), ("montage", "unknown")):
+            with self.subTest(field=field):
+                self.clear_rate()
+                response = self.search({field: value})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json["feld"], field)
+                self.assertEqual(response.json["code"], field + "_ungueltig")
+                self.assertTrue(response.json["nachricht"])
+        hook.assert_not_called()
+
     def test_duplicate_unknown_or_client_provider_parameters_are_not_accepted(self):
         hook = self.provider()
         for extra in ("netto_einkauf", "montage_brutto", "provider", "api_key"):
@@ -412,12 +425,26 @@ class ReifenSucheTest(unittest.TestCase):
 
     def test_rate_limit_prevents_additional_supplier_calls(self):
         hook = self.provider()
-        with patch.object(portal, "PUBLIC_FORM_RATE_LIMIT_MAX", 3):
+        with patch.object(portal, "REIFEN_SUCHE_RATE_LIMIT_MAX", 3):
             for _ in range(3):
                 self.assertEqual(self.search().status_code, 200)
             response = self.search()
         self.assert_no_offer(response, statuses=(429,))
+        self.assertEqual(response.json["code"],"suche_rate_limit")
+        self.assertLessEqual(int(response.headers["Retry-After"]),61)
         self.assertEqual(hook.call_count, 3)
+
+    def test_normal_filter_searches_have_separate_budget_from_contact_forms(self):
+        self.provider()
+        with patch.object(portal,"PUBLIC_FORM_RATE_LIMIT_MAX",3),patch.object(portal,"REIFEN_SUCHE_RATE_LIMIT_MAX",20):
+            for _ in range(10):
+                self.assertEqual(self.search().status_code,200)
+            with portal.app.test_request_context("/anfrage",environ_base={"REMOTE_ADDR":"127.0.0.1"}):
+                self.assertEqual(portal.public_form_rate_limit_status("website-anfrage"),(False,0))
+                for _ in range(3):
+                    portal.record_public_form_attempt("website-anfrage")
+                self.assertTrue(portal.public_form_rate_limit_status("website-anfrage")[0])
+            self.assertEqual(self.search().status_code,200)
 
     def test_search_never_creates_a_lead_slot_order_or_sends_messages(self):
         before = {table: self.count(table) for table in ("leads", "reifen_termin_slots", "auftraege", "lead_notifications")}

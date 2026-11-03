@@ -175,6 +175,26 @@ Das Kaufgate und Veröffentlichungsrechte werden durch den CLI nicht geändert.
 
 ## Offlineprüfung
 
+Die Kundensuche liefert zusätzlich einen freigegebenen `code`, bei ungültigen
+Eingaben HTTP 400 und optional `feld`. Fehlender Katalog, veralteter Preisstand,
+vorübergehende Nichterreichbarkeit, echte Nichttreffer und nicht prüfbare
+Angebotsdaten bleiben unterscheidbar. Rohe Anbieterfehler werden nie ausgegeben.
+Die Oberfläche markiert Eingaben am Feld und bietet ausschließlich ausdrücklich
+ausgelöste Wiederholungen oder Filteränderungen an. Last-/Geschwindigkeitsindex
+bleiben auch bei Kurzschreibweisen erhalten.
+
+Die lesende Suche verwendet ein eigenes IP-Fenster mit standardmäßig 60 Abrufen
+pro 60 Sekunden (`REIFEN_SUCHE_RATE_LIMIT_MAX`,
+`REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS`); Kontaktformular-Grenzen bleiben
+unverändert. Ungültige Maße werden zusätzlich im Browser erkannt. Bei HTTP 429
+zeigt die Oberfläche die verbleibende Wartezeit aus `Retry-After` an.
+
+`node scripts/test_reifen_suche_ui.js` prüft die reale Such-JS offline, unter
+anderem Feldmeldungen/ARIA, getrennte Fehlerzustände, explizite Filteraktionen,
+veraltete Antworten, Wartezeit und sichere Links. `python
+scripts/test_reifen_suche_fehler.py` prüft den Fehlervertrag und eindeutige
+Größenformate ohne Änderung von Last- oder Geschwindigkeitsanforderungen.
+
 `python scripts/test_tyresystem_provider.py`: ausschließlich synthetische CSVs,
 Tempdateien und gesperrte Socket-/DNS-Verbindungen. Die Tests importieren keine
 Portal-App und keine dotenv-Datei. Geprüft werden unter anderem atomarer Wechsel,

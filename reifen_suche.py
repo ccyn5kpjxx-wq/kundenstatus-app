@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from reifenangebote import REIFEN_SAISONS, REIFEN_QUALITAETEN
 from reifenpreis_kalkulation import berechne_reifenpreis
 from reifenservice import berechne_reifenservice
+from tyresystem_provider import TyreSystemCatalogError
 
 
 MAX_PREISALTER = timedelta(minutes=15)
@@ -29,7 +30,11 @@ _TEMPO = {"L": 120, "M": 130, "N": 140, "P": 150, "Q": 160, "R": 170, "S": 180,
 
 
 class ReifenSucheEingabefehler(ValueError):
-    pass
+    def __init__(self, message, *, code="suchfelder_ungueltig", feld=None):
+        super().__init__(message)
+        allowed = {"suchfelder_ungueltig", "artikelauswahl_ungueltig"} | {key + "_ungueltig" for key in _FELDER}
+        self.code = code if code in allowed else "suchfelder_ungueltig"
+        self.feld = feld if feld in _FELDER else None
 
 
 def _text(value, *, maximum=200):
@@ -53,35 +58,48 @@ def parse_reifen_suche(args):
         raise ReifenSucheEingabefehler("Jedes Suchfeld darf nur einmal vorkommen.")
     try:
         size = _text(args.get("groesse"), maximum=40).upper()
-        match = re.fullmatch(r"([0-9]{3})\s*/\s*([0-9]{2})\s*R\s*([0-9]{2})(?:\s*([0-9]{2,3})?\s*([A-Z])?)?", size)
+        match = re.fullmatch(
+            r"([0-9]{3})(?:\s*/\s*|\s+)([0-9]{2})(?:\s*Z?R\s*|\s+)([0-9]{2})"
+            r"(?:\s*([0-9]{2,3})?\s*([A-Z])?)?", size)
+        if not match:
+            # Exactly seven digits unambiguously identify the three dimensions.
+            # Never infer or rewrite a missing load/speed requirement.
+            match = re.fullmatch(r"([0-9]{3})([0-9]{2})([0-9]{2})", size)
         if not match:
             raise ValueError("size")
         width, ratio, rim = (int(match[i]) for i in (1, 2, 3))
         _integer(width, 100, 500)
         _integer(ratio, 10, 95)
         _integer(rim, 10, 30)
-        load = int(match[4]) if match[4] else None
-        speed = match[5] or None
+        load = int(match[4]) if match.lastindex >= 4 and match[4] else None
+        speed = match[5] if match.lastindex >= 5 and match[5] else None
         if load is not None:
             _integer(load, 60, 150)
         if speed is not None and speed not in _TEMPO:
             raise ValueError("speed")
-        season, quality = args.get("saison"), args.get("qualitaet")
-        if season not in REIFEN_SAISONS or quality not in REIFEN_QUALITAETEN:
-            raise ValueError("selection")
-        quantity = args.get("anzahl")
-        if not isinstance(quantity, str) or not re.fullmatch(r"[1-8]", quantity):
-            raise ValueError("quantity")
-        mounting = args.get("montage")
-        if mounting not in {"ja", "nein"}:
-            raise ValueError("mounting")
-        return {"breite": width, "querschnitt": ratio, "zoll": rim,
-                "lastindex": load, "geschwindigkeitsindex": speed,
-                "saison": season, "qualitaet": quality, "anzahl": int(quantity),
-                "montage": mounting == "ja"}
     except (TypeError, ValueError) as exc:
         raise ReifenSucheEingabefehler(
-            "Bitte eine Größe wie 205/55 R16 91V, Saison, Qualität, 1 bis 8 Reifen und den Montagewunsch angeben.") from exc
+            "Bitte eine Reifengröße wie 225/40 R18 92V oder 225 40 18 eingeben. "
+            "Last- und Geschwindigkeitsindex unverändert übernehmen.", code="groesse_ungueltig", feld="groesse") from exc
+    season, quality = args.get("saison"), args.get("qualitaet")
+    if not isinstance(season, str) or season not in REIFEN_SAISONS:
+        raise ReifenSucheEingabefehler("Bitte Sommer-, Winter- oder Ganzjahresreifen auswählen.",
+                                      code="saison_ungueltig", feld="saison")
+    if not isinstance(quality, str) or quality not in REIFEN_QUALITAETEN:
+        raise ReifenSucheEingabefehler("Bitte eine Marken- und Preiswahl treffen, zum Beispiel Alle Marken.",
+                                      code="qualitaet_ungueltig", feld="qualitaet")
+    quantity = args.get("anzahl")
+    if not isinstance(quantity, str) or not re.fullmatch(r"[1-8]", quantity):
+        raise ReifenSucheEingabefehler("Bitte eine Anzahl von 1 bis 8 Reifen auswählen.",
+                                      code="anzahl_ungueltig", feld="anzahl")
+    mounting = args.get("montage")
+    if not isinstance(mounting, str) or mounting not in {"ja", "nein"}:
+        raise ReifenSucheEingabefehler("Bitte Abholung oder Montage auswählen.",
+                                      code="montage_ungueltig", feld="montage")
+    return {"breite": width, "querschnitt": ratio, "zoll": rim,
+            "lastindex": load, "geschwindigkeitsindex": speed,
+            "saison": season, "qualitaet": quality, "anzahl": int(quantity),
+            "montage": mounting == "ja"}
 
 
 def _zeit(value):
@@ -212,26 +230,39 @@ def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
     query = parse_reifen_suche(args)
     if artikel_id is not None and (not isinstance(artikel_id, str)
             or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,100}", artikel_id)):
-        raise ReifenSucheEingabefehler("Ungültige Artikelauswahl.")
+        raise ReifenSucheEingabefehler("Ungültige Artikelauswahl.", code="artikelauswahl_ungueltig")
     unavailable = {"status": "nicht_verfuegbar", "verfuegbar": False, "produkte": [],
-                   "nachricht": "Onlinepreise sind derzeit nicht verfügbar. Bitte senden Sie uns eine Reifenanfrage."}
+                   "code": "katalog_nicht_verfuegbar",
+                   "nachricht": "Die Reifenpreise können gerade nicht geladen werden. Bitte versuchen Sie es später erneut."}
     if provider is None:
-        return unavailable, 200
+        return {**unavailable, "code": "katalog_nicht_bereit",
+                "nachricht": "Der Reifenkatalog wird noch vorbereitet. Aktuell sind keine Onlinepreise verfügbar."}, 200
     if not callable(provider):
         return unavailable, 503
     try:
         mounting = _montage(query)
     except ValueError:
-        return {**unavailable, "nachricht": "Für diesen Montageumfang erstellen wir Ihnen gerne ein individuelles Angebot."}, 200
+        return {**unavailable, "code": "montage_nicht_online",
+                "nachricht": "Für diesen Montageumfang ist kein Onlinepreis verfügbar. Bitte wählen Sie Abholung oder fragen Sie die Montage persönlich an."}, 200
     try:
         lookup = getattr(provider, "lookup", None) if artikel_id is not None else None
         raw = lookup(dict(query), artikel_id) if callable(lookup) else provider(dict(query))
-        if not isinstance(raw, Mapping) or not isinstance(raw.get("angebote"), list) or len(raw["angebote"]) > 100:
-            raise ValueError("Ungültige Anbieterantwort.")
+    except TyreSystemCatalogError as exc:
+        if exc.code == "cache_stale":
+            return {**unavailable, "code": "katalog_veraltet",
+                    "nachricht": "Die gespeicherten Reifenpreise sind abgelaufen. Bitte versuchen Sie es später erneut."}, 503
+        if exc.code == "cache_missing":
+            return {**unavailable, "code": "katalog_nicht_bereit",
+                    "nachricht": "Der Reifenkatalog wurde noch nicht bereitgestellt. Aktuell sind keine Onlinepreise verfügbar."}, 503
+        # Only this explicit allowlist is public; never copy provider messages.
+        return unavailable, 503
     except Exception:
         # A provider error may contain credentials or purchase prices. Neither
         # its text nor raw structures may reach the customer response.
         return unavailable, 503
+    if not isinstance(raw, Mapping) or not isinstance(raw.get("angebote"), list) or len(raw["angebote"]) > 100:
+        return {**unavailable, "code": "angebote_nicht_pruefbar",
+                "nachricht": "Die Reifenangebote konnten nicht vollständig geprüft werden. Bitte versuchen Sie es später erneut."}, 503
     current = now or datetime.now(timezone.utc)
     products, seen = [], set()
     for item in raw["angebote"]:
@@ -245,6 +276,9 @@ def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
         except (ValueError, TypeError, ArithmeticError, OverflowError):
             continue
     products.sort(key=lambda product: Decimal(product["preis"]["gesamt_brutto"]))
-    return {"status": "ok" if products else "keine_treffer", "verfuegbar": bool(products),
+    if not products and raw["angebote"]:
+        return {**unavailable, "code": "angebote_nicht_pruefbar",
+                "nachricht": "Für die übermittelten Angebote sind Preis oder Verfügbarkeit nicht ausreichend bestätigt. Bitte versuchen Sie es später erneut."}, 200
+    return {"status": "ok" if products else "keine_treffer", "code": "ok" if products else "keine_treffer", "verfuegbar": bool(products),
             "produkte": products[:MAX_PRODUKTE],
             "nachricht": "" if products else "Für diese Auswahl sind gerade keine bestätigten Onlinepreise verfügbar."}, 200

@@ -573,6 +573,8 @@ PUBLIC_FORM_RATE_LIMIT_MAX = max(3, env_int("PUBLIC_FORM_RATE_LIMIT_MAX", 6))
 PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS = max(
     60, env_int("PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS", 15 * 60)
 )
+REIFEN_SUCHE_RATE_LIMIT_MAX = max(10, min(120, env_int("REIFEN_SUCHE_RATE_LIMIT_MAX", 60)))
+REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS = max(30, min(300, env_int("REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS", 60)))
 MIETVERTRAG_RECHTLICH_FREIGEGEBEN = env_flag(
     "MIETVERTRAG_RECHTLICH_FREIGEGEBEN", False
 )
@@ -3815,7 +3817,7 @@ def login_wait_label(seconds):
     return f"{minutes} Minute" if minutes == 1 else f"{minutes} Minuten"
 
 
-def public_form_rate_limit_status(scope):
+def public_form_rate_limit_status(scope, *, max_attempts=None, window_seconds=None):
     """Kleines, absichtlich personenbezogenes IP-Fenster gegen Formular-Spam.
 
     Es werden keine IP-Adressen dauerhaft gespeichert; der Schlüssel lebt nur
@@ -3824,25 +3826,28 @@ def public_form_rate_limit_status(scope):
     remote = clean_text(request.remote_addr) if has_request_context() else "unknown"
     key = f"{clean_text(scope)}:{remote}"
     now_ts = time.time()
+    maximum = PUBLIC_FORM_RATE_LIMIT_MAX if max_attempts is None else max_attempts
+    window = PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS if window_seconds is None else window_seconds
     with PUBLIC_FORM_ATTEMPTS_LOCK:
         state = PUBLIC_FORM_ATTEMPTS.get(key)
-        if not state or now_ts - float(state.get("started_at") or 0) >= PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS:
+        if not state or now_ts - float(state.get("started_at") or 0) >= window:
             if state:
                 PUBLIC_FORM_ATTEMPTS.pop(key, None)
             return False, 0
-        if int(state.get("count") or 0) < PUBLIC_FORM_RATE_LIMIT_MAX:
+        if int(state.get("count") or 0) < maximum:
             return False, 0
-        rest = PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS - (now_ts - float(state.get("started_at") or now_ts))
+        rest = window - (now_ts - float(state.get("started_at") or now_ts))
         return True, max(1, int(rest) + 1)
 
 
-def record_public_form_attempt(scope):
+def record_public_form_attempt(scope, *, window_seconds=None):
     remote = clean_text(request.remote_addr) if has_request_context() else "unknown"
     key = f"{clean_text(scope)}:{remote}"
     now_ts = time.time()
+    window = PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS if window_seconds is None else window_seconds
     with PUBLIC_FORM_ATTEMPTS_LOCK:
         state = PUBLIC_FORM_ATTEMPTS.get(key)
-        if not state or now_ts - float(state.get("started_at") or 0) >= PUBLIC_FORM_RATE_LIMIT_WINDOW_SECONDS:
+        if not state or now_ts - float(state.get("started_at") or 0) >= window:
             state = {"count": 0, "started_at": now_ts}
         state["count"] = int(state.get("count") or 0) + 1
         PUBLIC_FORM_ATTEMPTS[key] = state
@@ -45566,19 +45571,22 @@ def oeffentlicher_reifenshop():
 
 @app.get("/api/reifenangebote/suche")
 def reifenangebote_suche():
-    limited, wait_seconds = public_form_rate_limit_status("reifenangebot-suche")
+    limited, wait_seconds = public_form_rate_limit_status("reifenangebot-suche",
+        max_attempts=REIFEN_SUCHE_RATE_LIMIT_MAX, window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
     if limited:
-        response = jsonify(status="zu_viele_anfragen", verfuegbar=False, produkte=[],
+        response = jsonify(status="zu_viele_anfragen", code="suche_rate_limit", verfuegbar=False, produkte=[],
                            nachricht="Bitte warten Sie kurz und versuchen Sie die Reifensuche erneut.")
         response.status_code = 429
         response.headers["Retry-After"] = str(wait_seconds)
     else:
-        record_public_form_attempt("reifenangebot-suche")
+        record_public_form_attempt("reifenangebot-suche", window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
         try:
             payload, status = suche_reifenangebote(request.args, app.config.get("REIFENANGEBOT_PROVIDER"))
         except ReifenSucheEingabefehler as exc:
             payload, status = {"status": "ungueltige_suche", "verfuegbar": False,
-                               "produkte": [], "nachricht": str(exc)}, 400
+                               "produkte": [], "nachricht": str(exc), "code": exc.code}, 400
+            if exc.feld is not None:
+                payload["feld"] = exc.feld
         if status == 200 and payload.get("status") == "ok":
             for product in payload["produkte"]:
                 token = erstelle_auswahl_token(app.secret_key, request.args, product["artikel_id"])
