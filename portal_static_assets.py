@@ -8,7 +8,7 @@ from pathlib import Path
 PUBLIC_UI_ASSETS = frozenset({
     'admin-sidebar.css', 'admin-sidebar.js', 'werkstatt_theme.css',
     'inspektionscheckliste.css', 'logo-nav-192.webp',
-    'homepage-reifen-suche.js', 'homepage/reifen-shop.css', 'homepage/reifen-suche.css',
+    'homepage-reifen-suche.js', 'homepage-felgen-suche.js', 'homepage/reifen-shop.css', 'homepage/reifen-suche.css',
 })
 
 

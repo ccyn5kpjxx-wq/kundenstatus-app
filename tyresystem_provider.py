@@ -21,6 +21,7 @@ import unicodedata
 from types import MappingProxyType
 
 from tyresystem_feed import FeedArticle, FeedSnapshot, HEADERS, MAX_ROWS, parse_feed
+from reifen_bewertungen import public_test_rating
 
 
 MAX_CACHE_BYTES = 64 * 1024 * 1024
@@ -303,7 +304,8 @@ def _metadata(values):
 
 class TyreSystemCatalogProvider:
     def __init__(self, cache, *, publication_approved=False, publication_reference="",
-                 policy=None, article_metadata=None, clock=None, private_view_authorized=None, image_resolver=None):
+                 policy=None, article_metadata=None, clock=None, private_view_authorized=None, image_resolver=None,
+                 rating_resolver=None):
         self.cache = cache
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._approved = (publication_approved is True and isinstance(publication_reference, str)
@@ -314,6 +316,7 @@ class TyreSystemCatalogProvider:
         self._metadata = _metadata(article_metadata)
         self._private_view_authorized = private_view_authorized if callable(private_view_authorized) else None
         self._image_resolver = image_resolver if callable(image_resolver) else None
+        self._rating_resolver = rating_resolver if callable(rating_resolver) else None
 
     def __repr__(self):
         return "<TyreSystemCatalogProvider private_catalog=redacted>"
@@ -379,7 +382,7 @@ class TyreSystemCatalogProvider:
             required = {"breite", "querschnitt", "zoll", "lastindex", "geschwindigkeitsindex",
                         "saison", "qualitaet", "anzahl", "montage"}
             if (not isinstance(query, Mapping) or not required <= set(query)
-                    or set(query) - required - {"hersteller", "sortierung", "seite"}
+                    or set(query) - required - {"hersteller", "sortierung", "seite", "testnote"}
                     or any(type(query[k]) is not int for k in ("breite", "querschnitt", "zoll", "anzahl"))
                     or not 100 <= query["breite"] <= 500 or not 10 <= query["querschnitt"] <= 95
                     or not 10 <= query["zoll"] <= 30 or not 1 <= query["anzahl"] <= 8
@@ -387,7 +390,8 @@ class TyreSystemCatalogProvider:
                     or query["saison"] not in {"sommer", "winter", "ganzjahr"}
                     or query["qualitaet"] not in QUALITY_CLASSES | {"alle"}
                     or ("hersteller" in query and not valid_manufacturer(query["hersteller"]))
-                    or query.get("sortierung", "preis_auf") not in {"preis_auf", "preis_ab", "name"}
+                    or query.get("sortierung", "preis_auf") not in {"preis_auf", "preis_ab", "name", "testnote_auf"}
+                    or query.get("testnote", "alle") not in {"alle", "mit_note", "gut"}
                     or type(query.get("seite", 1)) is not int or not 1 <= query.get("seite", 1) <= 10000
                     or (query["lastindex"] is not None and (type(query["lastindex"]) is not int or not 60 <= query["lastindex"] <= 150))
                     or (query["geschwindigkeitsindex"] is not None and query["geschwindigkeitsindex"] not in _SPEED)):
@@ -410,11 +414,25 @@ class TyreSystemCatalogProvider:
                     or (query["montage"] and (meta.get("montage_standard_bestaetigt") is not True or meta.get("runflat") is not False))
                     or len(article.hersteller + " " + article.profil) > 200):
                 continue
-            candidates.append((article, meta))
+            rating = None
+            if self._rating_resolver is not None:
+                try:
+                    rating = public_test_rating(self._rating_resolver(article),
+                        groesse=f"{article.breite}/{article.querschnitt} R{int(article.zoll)} {article.lastindex}{article.speedindex}",
+                        saison=article.saison, current_year=self._clock().year)
+                except Exception:
+                    pass
+            selection = query.get("testnote", "alle")
+            if selection != "alle" and (rating is None or (selection == "gut" and Decimal(rating["note"]) > Decimal("2.5"))):
+                continue
+            candidates.append((article, meta, rating))
         if artikel_id is None:
             sort = query.get("sortierung", "preis_auf")
             if sort == "name":
                 candidates.sort(key=lambda pair: ((pair[0].hersteller + " " + pair[0].profil).casefold(), int(pair[0].artikel_id)))
+            elif sort == "testnote_auf":
+                candidates.sort(key=lambda pair: (pair[2] is None,
+                    Decimal(pair[2]["note"]) if pair[2] else Decimal("Infinity"), pair[0].einkaufspreis, int(pair[0].artikel_id)))
             else:
                 candidates.sort(key=lambda pair: (pair[0].einkaufspreis * (-1 if sort == "preis_ab" else 1), int(pair[0].artikel_id)))
             total = len(candidates)
@@ -422,7 +440,7 @@ class TyreSystemCatalogProvider:
             candidates = candidates[start:start + PAGE_SIZE]
         shipping = "0.00" if query["anzahl"] >= self._policy["free_shipping_from"] else self._policy["single_tyre_shipping_net"]
         offers = []
-        for article, meta in candidates:
+        for article, meta, rating in candidates:
             item = {"artikel_id": article.artikel_id, "ean": article.ean, "hersteller": article.hersteller,
                     "bezeichnung": article.hersteller + " " + article.profil,
                     "breite": article.breite, "querschnitt": article.querschnitt, "zoll": int(article.zoll),
@@ -440,5 +458,7 @@ class TyreSystemCatalogProvider:
                     item["artikel_bild"] = self._image_resolver(article)
                 except Exception:
                     pass
+            if rating is not None:
+                item["artikel_testbewertung"] = rating
             offers.append(item)
         return {"angebote": offers, "gesamt": total, "paginiert": True} if artikel_id is None else {"angebote": offers}

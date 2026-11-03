@@ -1,0 +1,5 @@
+<nav class="shop-categories" aria-label="Reifen, Felgen und Kompletträder">
+  <a href="{{ url_for('oeffentlicher_reifenshop') }}" {% if shop_kategorie|default('reifen') == 'reifen' %}aria-current="page"{% endif %}>Reifen</a>
+  <a href="{{ url_for('felgen_shop.catalog', anzeigen='1') }}" {% if shop_kategorie|default('reifen') == 'felgen' %}aria-current="page"{% endif %}>Felgen</a>
+  <a href="{{ url_for('felgen_shop.komplettraeder') }}" {% if shop_kategorie|default('reifen') == 'komplettraeder' %}aria-current="page"{% endif %}>Kompletträder</a>
+</nav>

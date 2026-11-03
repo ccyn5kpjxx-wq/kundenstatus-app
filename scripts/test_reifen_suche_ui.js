@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const SOURCE = path.join(__dirname, '../static/homepage-reifen-suche.js');
 const START = Date.parse('2026-11-03T10:00:00Z');
 
-function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = '', query = '', hiddenShopOptions = false} = {}) {
+function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = '', query = '', hiddenShopOptions = false, ratings = false} = {}) {
   let now = START, timerId = 0;
   const timers = new Map(), requests = [], fields = new Map(), groups = new Map();
   const document = {activeElement: null};
@@ -103,7 +103,7 @@ function createHarness(initial = {}, {standalone = false, filters = false, facet
   const form = new Element('form');
   function addField(name, value = '', type = 'text', checked = false) {
     const group = groups.get(name) || new Element(type === 'radio' ? 'fieldset' : 'div', {class: 'field'});
-    const tag = type !== 'hidden' && ['reifen_qualitaet', 'reifen_anzahl', 'reifen_hersteller', 'reifen_sortierung'].includes(name) ? 'select' : 'input';
+    const tag = type !== 'hidden' && ['reifen_qualitaet', 'reifen_anzahl', 'reifen_hersteller', 'reifen_sortierung', 'reifen_testnote'].includes(name) ? 'select' : 'input';
     const field = new Element(tag, {name, id: type === 'radio' ? `${name}_${value}` : name, type, value});
     field.checked = checked;
     group.append(field);
@@ -126,6 +126,10 @@ function createHarness(initial = {}, {standalone = false, filters = false, facet
   if (filters || facetsUrl) {
     addField('reifen_hersteller').setAttribute('data-tire-brand', '');
     addField('reifen_sortierung', 'preis_auf');
+  }
+  if (ratings) {
+    const grade = addField('reifen_testnote', 'alle');
+    ['alle', 'mit_note', 'gut'].forEach(value => grade.append(new Element('option', {value})));
   }
   fields.get('reifen_groesse_vorne')[0].setAttribute('aria-describedby', 'reifen-groesse-hinweis');
   const panel = new Element('section', {'data-tire-search': ''});
@@ -220,6 +224,10 @@ function syntheticProduct(changes = {}) {
     bestell_url: '/reifen/bestellen/offline-token',
     preis: {einzel_brutto: '100.00', gesamt_reifen_brutto: '400.00', versand_brutto: '0.00', montage_brutto: '80.00', gesamt_brutto: '480.00', waehrung: 'EUR'},
     ...changes};
+}
+function syntheticRating(changes = {}) {
+  return {quelle:'ADAC', note:'3.5', urteil:'befriedigend', jahr:2021, testgroesse:'195/65 R15 91T',
+    quelle_url:'https://www.adac.de/rund-ums-fahrzeug/ausstattung-technik-zubehoer/reifen/reifentest/winterreifen/195-65-r15/gt-radial-winterpro2-id-4570/', ...changes};
 }
 
 const noOffers = {status: 'keine_treffer', code: 'keine_treffer', verfuegbar: false, produkte: []};
@@ -441,6 +449,120 @@ const cases = [
     await reply(safe, safe.search(), offers(syntheticProduct({bezeichnung: text})));
     assert.equal(heading(safe), text);
     assert.equal(safe.results.querySelectorAll('img').length, 0);
+  }],
+  ['verified exact-size ADAC test grades show their original scale, year and primary source', async () => {
+    const rating = syntheticRating();
+    const h = createHarness({reifen_groesse_vorne:rating.testgroesse});
+    await reply(h, h.search(), offers(syntheticProduct({groesse:rating.testgroesse, testbewertung:rating})));
+    assert.equal(h.results.querySelector('.tire-result-testnote').textContent, 'Testnote ADAC 3,5 – befriedigend');
+    assert.match(h.results.querySelector('.tire-result-test-source').textContent, /ADAC · 2021 · Getestete Größe: 195\/65 R15 91T/);
+    const source = h.results.querySelector('.tire-result-test-link');
+    assert.equal(source.textContent, 'Test ansehen');
+    assert.equal(source.href, rating.quelle_url);
+    assert.equal(source.target, '_blank');
+    assert.match(source.rel, /noopener/);
+    assert.match(source.rel, /noreferrer/);
+    assert.doesNotMatch(h.results.querySelector('.tire-result-identity').textContent, /★|Kundenbewertung|Sterne/);
+    assert.ok(h.results.querySelector('.tire-result-select'));
+  }],
+  ['unknown or malformed test grades never remove prices or expose an unverified source link', async () => {
+    const grade = syntheticRating();
+    const source = grade.quelle_url;
+    const invalid = [undefined, null, {}, {...grade, extra:'untrusted'}, {...grade, quelle:'Other'},
+      {...grade, note:3.5}, {...grade, note:'3.55'}, {...grade, note:'0.5'}, {...grade, note:'5.6'},
+      {...grade, note:'3.5\n'}, {...grade, note:'3.5\r'},
+      {...grade, urteil:'<img onerror=x>'}, {...grade, urteil:'bad\u0000text'},
+      {...grade, jahr:'2021'}, {...grade, jahr:2027}, {...grade, testgroesse:'225/40 R18 92V'},
+      {...grade, testgroesse:'195/65 R15 92T'}, {...grade, testgroesse:'195/65 R15 91V'},
+      ...[source.replace('https:', 'http:'), source.replace('www.adac.de', 'www.adac.de.evil.invalid'),
+        source.replace('www.adac.de', 'evil.invalid'), source.replace('www.adac.de', 'adac.de'),
+        source.replace('www.adac.de', 'user@www.adac.de'), source.replace('www.adac.de', 'www.adac.de:444'),
+        source + '?', source + '#', source + '?secret=1', source + '#detail', source + '\n',
+        source.replace('winterreifen/', '../winterreifen/'), source.replace('winterreifen', '%77interreifen'),
+        'https://www.adac.de/rund-ums-fahrzeug/'].map(quelle_url => ({...grade, quelle_url}))];
+    for (const testbewertung of invalid) {
+      const h = createHarness({reifen_groesse_vorne:grade.testgroesse});
+      await reply(h, h.search(), offers(syntheticProduct({groesse:grade.testgroesse, testbewertung})));
+      assert.equal(h.results.querySelectorAll('article').length, 1);
+      assert.equal(h.results.querySelector('.tire-result-testnote').textContent, 'Testnote noch nicht hinterlegt');
+      assert.equal(h.results.querySelector('.tire-result-test-link'), null);
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.ok(h.results.querySelector('.tire-result-select'));
+      assert.equal(h.requests.length, 1);
+    }
+  }],
+  ['test-grade filters and sorting survive pagination and filter changes reset to page one', async () => {
+    const size = '225/40 R18 92V';
+    const h = createHarness({reifen_groesse_vorne:size, reifen_testnote:'gut', reifen_sortierung:'testnote_auf'}, {ratings:true, filters:true});
+    await reply(h, h.search(), page(syntheticProduct({groesse:size})));
+    assert.equal(h.requests[0].url.searchParams.get('testnote'), 'gut');
+    assert.equal(h.requests[0].url.searchParams.get('sortierung'), 'testnote_auf');
+    await action(h, 'Weitere Reifen →').click();
+    assert.equal(h.requests[1].url.searchParams.get('testnote'), 'gut');
+    assert.equal(h.requests[1].url.searchParams.get('sortierung'), 'testnote_auf');
+    assert.equal(h.requests[1].url.searchParams.get('groesse'), size);
+    assert.equal(h.requests[1].url.searchParams.get('seite'), '2');
+    await reply(h, Promise.resolve(), page(syntheticProduct({groesse:size}), 2));
+    h.set('reifen_testnote', 'mit_note');
+    await h.field('reifen_testnote').dispatch('input');
+    assert.equal(h.requests.length, 2);
+    await h.field('reifen_testnote').dispatch('change');
+    assert.equal(h.requests.length, 3);
+    assert.equal(h.requests[2].url.searchParams.get('testnote'), 'mit_note');
+    assert.equal(h.requests[2].url.searchParams.get('seite'), null);
+    await reply(h, Promise.resolve(), noOffers);
+    await h.change('reifen_testnote', 'alle');
+    assert.equal(h.requests.length, 4);
+    assert.equal(h.requests[3].url.searchParams.get('testnote'), null, 'The all-grades default is omitted');
+    assert.equal(h.requests[3].url.searchParams.get('sortierung'), 'testnote_auf');
+    await reply(h, Promise.resolve(), noOffers);
+  }],
+  ['an empty test-grade result offers an explicit retry changing only the grade filter', async () => {
+    const size = '225/40 R18 92V';
+    const h = createHarness({reifen_groesse_vorne:size, reifen_testnote:'gut', reifen_hersteller:'Michelin', reifen_sortierung:'testnote_auf'}, {ratings:true, filters:true});
+    await reply(h, h.search(), noOffers);
+    assert.match(heading(h), /Testnote/);
+    assert.match(h.results.textContent, /Ohne Testnotenfilter wird erneut gesucht/);
+    assert.equal(h.requests.length, 1, 'No automatic fallback may loosen the requested filter');
+    await action(h, 'Ohne Testnotenfilter anzeigen').click();
+    const query = h.requests[1].url.searchParams;
+    assert.equal(query.get('testnote'), null);
+    assert.equal(query.get('groesse'), size);
+    assert.equal(query.get('anzahl'), '4');
+    assert.equal(query.get('montage'), 'ja');
+    assert.equal(query.get('qualitaet'), 'premium');
+    assert.equal(query.get('hersteller'), 'Michelin');
+    assert.equal(query.get('sortierung'), 'testnote_auf');
+    await reply(h, Promise.resolve(), noOffers);
+  }],
+  ['invalid grade filters stay local and server grade errors mark the correct field', async () => {
+    for (const reifen_testnote of ['stars_5', '']) {
+      const invalid = createHarness({reifen_testnote}, {ratings:true});
+      const pending = invalid.search();
+      assert.equal(invalid.requests.length, 0);
+      await pending;
+      assert.equal(invalid.field('reifen_testnote').getAttribute('aria-invalid'), 'true');
+    }
+    const server = createHarness({reifen_testnote:'gut'}, {ratings:true});
+    await reply(server, server.search(), {feld:'testnote', code:'testnote_ungueltig', nachricht:'SECRET'}, 400);
+    assert.equal(server.field('reifen_testnote').getAttribute('aria-invalid'), 'true');
+    assert.doesNotMatch(server.form.textContent, /SECRET/);
+  }],
+  ['explicit grade-filter deep links require a valid offered control and reject duplicates', async () => {
+    const base = '?groesse=195%2F65%20R15%2091T&saison=winter&anzahl=4&anzeigen=1';
+    const valid = createHarness({}, {standalone:true, ratings:true, query:base + '&testnote=mit_note'});
+    await flush();
+    assert.equal(valid.requests.length, 1);
+    assert.equal(valid.requests[0].url.searchParams.get('testnote'), 'mit_note');
+    assert.equal(valid.requests[0].url.searchParams.get('groesse'), '195/65 R15 91T');
+    await reply(valid, Promise.resolve(), noOffers);
+    for (const [query, ratings] of [[base + '&testnote=gut', false], [base + '&testnote=bad', true],
+      [base + '&testnote=gut&testnote=gut', true]]) {
+      const h = createHarness({}, {standalone:true, ratings, query});
+      await flush();
+      assert.equal(h.requests.length, 0);
+      assert.equal(h.field('reifen_groesse_vorne').value, '205/55 R16 91V');
+    }
   }],
   ['invalid optional selection URLs keep valid prices without creating an actionable link', async () => {
     const base = '/reifen/bestellen/offline-token';

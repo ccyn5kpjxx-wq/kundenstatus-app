@@ -16,6 +16,7 @@ from reifenangebote import REIFEN_SAISONS, REIFEN_QUALITAETEN
 from reifenpreis_kalkulation import berechne_reifenpreis
 from reifenservice import berechne_reifenservice
 from reifen_bilder import public_image_metadata
+from reifen_bewertungen import public_test_rating
 from tyresystem_provider import TyreSystemCatalogError, valid_manufacturer
 from tyresystem_feed import MAX_ROWS
 
@@ -24,7 +25,7 @@ MAX_PREISALTER = timedelta(minutes=15)
 MAX_PRODUKTE = 12
 # Workshop decision, 02.11.2026: the existing EUR 5 surcharge applies at 40 or below.
 NIEDERQUERSCHNITT_BIS = 40
-_FELDER = {"groesse", "saison", "qualitaet", "anzahl", "montage", "hersteller", "sortierung", "seite"}
+_FELDER = {"groesse", "saison", "qualitaet", "anzahl", "montage", "hersteller", "sortierung", "seite", "testnote"}
 # Nominal km/h, not alphabetic order. Conservative search: no automatic winter
 # exceptions or special >300 km/h approvals. Source: Michelin's published table:
 # https://www.michelin.de/auto/tipps/grundlagen-reifen/lastindex-geschwindigkeitsindex
@@ -112,11 +113,17 @@ def parse_reifen_suche(args):
     if manufacturer.strip():
         result["hersteller"] = manufacturer.strip()
     sort = args.get("sortierung", "preis_auf")
-    if sort not in ("preis_auf", "preis_ab", "name"):
+    if sort not in ("preis_auf", "preis_ab", "name", "testnote_auf"):
         raise ReifenSucheEingabefehler("Bitte eine gültige Sortierung auswählen.",
                                       code="sortierung_ungueltig", feld="sortierung")
     if sort != "preis_auf":
         result["sortierung"] = sort
+    rating_filter = args.get("testnote", "alle")
+    if rating_filter not in ("alle", "mit_note", "gut"):
+        raise ReifenSucheEingabefehler("Bitte eine gültige Testnoten-Auswahl treffen.",
+                                      code="testnote_ungueltig", feld="testnote")
+    if rating_filter != "alle":
+        result["testnote"] = rating_filter
     page = args.get("seite", "1")
     if not isinstance(page, str) or not re.fullmatch(r"[1-9][0-9]{0,4}", page) or int(page) > 10000:
         raise ReifenSucheEingabefehler("Bitte eine gültige Ergebnisseite auswählen.",
@@ -244,6 +251,13 @@ def _produkt(item, query, mounting, now):
             product["bild"] = picture
     except Exception:
         pass
+    try:
+        rating = public_test_rating(item.get("artikel_testbewertung"), groesse=product["groesse"],
+                                    saison=query["saison"], current_year=now.year)
+        if rating is not None:
+            product["testbewertung"] = rating
+    except Exception:
+        pass
     return product
 
 
@@ -320,12 +334,25 @@ def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
                 products.append(product)
         except (ValueError, TypeError, ArithmeticError, OverflowError):
             continue
+    valid_before_rating_filter = bool(products)
+    rating_filter = query.get("testnote", "alle")
+    if rating_filter != "alle":
+        products = [product for product in products if product.get("testbewertung") is not None
+            and (rating_filter != "gut" or Decimal(product["testbewertung"]["note"]) <= Decimal("2.5"))]
+        if not paginated:
+            total = len(products)
+            pagination = {"treffer_gesamt": total, "seite": query.get("seite", 1),
+                          "seiten": (total + MAX_PRODUKTE - 1) // MAX_PRODUKTE}
     sort = query.get("sortierung", "preis_auf")
     if sort == "name":
         products.sort(key=lambda product: product["bezeichnung"].casefold())
+    elif sort == "testnote_auf":
+        products.sort(key=lambda product: (product.get("testbewertung") is None,
+            Decimal(product["testbewertung"]["note"]) if product.get("testbewertung") else Decimal("Infinity"),
+            Decimal(product["preis"]["gesamt_brutto"]), product["artikel_id"]))
     else:
         products.sort(key=lambda product: Decimal(product["preis"]["gesamt_brutto"]), reverse=sort == "preis_ab")
-    if not products and raw["angebote"]:
+    if not products and raw["angebote"] and not valid_before_rating_filter:
         return {**unavailable, "code": "angebote_nicht_pruefbar",
                 "nachricht": "Für die übermittelten Angebote sind Preis oder Verfügbarkeit nicht ausreichend bestätigt. Bitte versuchen Sie es später erneut."}, 200
     if not paginated and artikel_id is None:

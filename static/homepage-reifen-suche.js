@@ -7,12 +7,13 @@
   const button = panel.querySelector('[data-tire-search-button]');
   const status = panel.querySelector('[data-tire-search-status]');
   const results = panel.querySelector('[data-tire-search-results]');
-  const criteria = ['reifen_groesse_vorne', 'reifen_groesse_hinten', 'reifen_saison', 'reifen_qualitaet', 'reifen_anzahl', 'reifen_montage', 'reifen_hersteller', 'reifen_sortierung'];
+  const criteria = ['reifen_groesse_vorne', 'reifen_groesse_hinten', 'reifen_saison', 'reifen_qualitaet', 'reifen_anzahl', 'reifen_montage', 'reifen_hersteller', 'reifen_sortierung', 'reifen_testnote'];
   const money = new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'});
   const clock = new Intl.DateTimeFormat('de-DE', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin'});
   const seasons = {sommer:'Sommerreifen', winter:'Winterreifen', ganzjahr:'Ganzjahresreifen'};
   const qualities = {alle:'Alle Marken', preisbewusst:'Preisbewusst', mittelklasse:'Mittelklasse', markenqualitaet:'Markenqualität', premium:'Premium'};
   const productQualities = ['preisbewusst', 'mittelklasse', 'markenqualitaet', 'premium'];
+  const testnoteFilters = ['alle', 'mit_note', 'gut'];
   let controller = null;
   let generation = 0;
   let expiryTimer = null;
@@ -21,7 +22,7 @@
   let nextPage = 1;
   let refreshDimensions = null;
   let lastDimensionRefresh = 0;
-  const names = {groesse:'reifen_groesse_vorne', groesse_hinten:'reifen_groesse_hinten', saison:'reifen_saison', qualitaet:'reifen_qualitaet', anzahl:'reifen_anzahl', montage:'reifen_montage', hersteller:'reifen_hersteller', sortierung:'reifen_sortierung'};
+  const names = {groesse:'reifen_groesse_vorne', groesse_hinten:'reifen_groesse_hinten', saison:'reifen_saison', qualitaet:'reifen_qualitaet', anzahl:'reifen_anzahl', montage:'reifen_montage', hersteller:'reifen_hersteller', sortierung:'reifen_sortierung', testnote:'reifen_testnote'};
   const messages = {
     groesse:'Bitte die Reifengröße eingeben, zum Beispiel 225/40 R18 92V. Auch 2254018 ist möglich.',
     groesse_hinten:'Bitte die Größe der Hinterreifen prüfen, zum Beispiel 225/40 R18 92V, oder das optionale Feld leeren.',
@@ -30,7 +31,8 @@
     anzahl:'Bitte eine Anzahl zwischen 1 und 8 Reifen auswählen.',
     montage:'Bitte Abholung oder Montage auswählen.',
     hersteller:'Bitte eine Marke aus dem Katalog oder „Alle Marken“ auswählen.',
-    sortierung:'Bitte eine der angebotenen Sortierungen auswählen.'
+    sortierung:'Bitte eine der angebotenen Sortierungen auswählen.',
+    testnote:'Bitte alle Reifen, Reifen mit Testnote oder Reifen mit guter ADAC-Testnote auswählen.'
   };
 
   const value = name => String(new FormData(form).get(name) || '').trim();
@@ -137,6 +139,7 @@
   };
   const alternatives = query => {
     const actions = [];
+    if (query.testnote && query.testnote !== 'alle') actions.push({label:'Ohne Testnotenfilter anzeigen', run:() => searchWith({testnote:'alle'})});
     if (query.qualitaet !== 'alle' || query.hersteller) actions.push({label:'Alle Marken anzeigen', run:() => searchWith({qualitaet:'alle',hersteller:''})});
     if (query.montage === 'ja') actions.push({label:'Reifen ohne Montage anzeigen', run:() => searchWith({montage:'nein'})});
     actions.push({label:'Suche anpassen', run:() => focusField('groesse')});
@@ -148,7 +151,9 @@
     if (code === 'keine_treffer') {
       const selection = [query.groesse, seasons[query.saison], `${query.anzahl} Reifen`].join(' · ');
       say('Keine Treffer für diese Auswahl.');
-      feedback('Keine passenden Angebote gefunden', `${selection}. Für diese Auswahl sind aktuell keine bestätigten Onlineangebote vorhanden. Sie können die Filter anpassen.`, alternatives(query));
+      if (query.testnote && query.testnote !== 'alle')
+        feedback('Keine Angebote mit passender Testnote', `${selection}. Für diese Auswahl sind aktuell keine bestätigten Angebote mit der gewählten ADAC-Testnote vorhanden. Ohne Testnotenfilter wird erneut gesucht; dabei können auch Reifen ohne hinterlegte Testnote angezeigt werden.`, alternatives(query));
+      else feedback('Keine passenden Angebote gefunden', `${selection}. Für diese Auswahl sind aktuell keine bestätigten Onlineangebote vorhanden. Sie können die Filter anpassen.`, alternatives(query));
     } else if (code === 'montage_nicht_online') {
       feedback('Diesen Montageumfang stimmen wir persönlich ab', 'Online können Sie Montage für 1 bis 4 Reifen von 13 bis 20 Zoll auswählen. Sie können die Reifen zunächst ohne Montage suchen.', alternatives(query));
     } else if (code === 'katalog_veraltet') {
@@ -216,6 +221,28 @@
     if (!match || match[0] !== image.url || match[1] !== product.artikel_id) return null;
     return {url:image.url, alt:image.alt};
   };
+  const testRating = product => {
+    const rating = product.testbewertung;
+    if (!rating || typeof rating !== 'object' || Object.keys(rating).length !== 6
+        || !Object.keys(rating).every(key => ['quelle','note','urteil','jahr','testgroesse','quelle_url'].includes(key))
+        || rating.quelle !== 'ADAC' || typeof rating.note !== 'string' || rating.note.length !== 3 || !/^[0-5]\.[0-9]$/.test(rating.note)
+        || Number(rating.note) < 0.6 || Number(rating.note) > 5.5
+        || typeof rating.urteil !== 'string' || !rating.urteil.length || rating.urteil.length > 80
+        || rating.urteil !== rating.urteil.trim() || /[\p{C}<>]/u.test(rating.urteil)
+        || !Number.isInteger(rating.jahr) || rating.jahr < 1900 || rating.jahr > new Date().getUTCFullYear()
+        || typeof rating.testgroesse !== 'string' || !parseSize(rating.testgroesse)
+        || JSON.stringify(parseSize(rating.testgroesse)) !== JSON.stringify(parseSize(product.groesse))
+        || typeof rating.quelle_url !== 'string' || rating.quelle_url.length > 1000
+        || /[^\x21-\x7e]/.test(rating.quelle_url)
+        || !/^https:\/\/www\.adac\.de(?::443)?\/[a-z0-9/-]+$/.test(rating.quelle_url)) return null;
+    try {
+      const source = new URL(rating.quelle_url);
+      if (source.protocol !== 'https:' || source.hostname !== 'www.adac.de' || source.username || source.password
+          || (source.port && source.port !== '443') || source.search || source.hash
+          || !/^\/rund-ums-fahrzeug\/ausstattung-technik-zubehoer\/reifen\/reifentest\/(?:[a-z0-9-]+\/)+[a-z0-9-]+-id-[0-9]+\/$/.test(source.pathname)) return null;
+      return rating;
+    } catch (_) { return null; }
+  };
   const productFigure = product => {
     const figure = node('figure', 'tire-result-media');
     // Keep the shared inquiry usable even when only its existing search CSS is loaded.
@@ -257,6 +284,17 @@
       const details = [product.groesse, seasons[product.saison]];
       if (productQualities.includes(product.qualitaet)) details.push(qualities[product.qualitaet]);
       identity.append(node('p', 'tire-result-meta', details.join(' · ')));
+      const rating = testRating(product);
+      if (rating) {
+        const test = node('div', 'tire-result-test');
+        test.append(node('p', 'tire-result-testnote', `Testnote ADAC ${rating.note.replace('.', ',')} – ${rating.urteil}`));
+        test.append(node('p', 'tire-result-test-source', `ADAC · ${rating.jahr} · Getestete Größe: ${rating.testgroesse}`));
+        const source = node('a', 'tire-result-test-link', 'Test ansehen');
+        source.href = rating.quelle_url;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer nofollow';
+        test.append(source); identity.append(test);
+      } else identity.append(node('p', 'tire-result-testnote is-unrated', 'Testnote noch nicht hinterlegt'));
       if (Number.isInteger(product.bestand) && product.bestand >= Number(query.anzahl)) identity.append(node('p', 'tire-result-stock', 'Im Lieferantenkatalog verfügbar'));
       const label = product.eu_label;
       if (label && ['A','B','C','D','E'].includes(label.kraftstoffeffizienz)
@@ -318,6 +356,8 @@
     clear();
     resetErrors();
     const query = {groesse:value('reifen_groesse_vorne'), saison:value('reifen_saison'), qualitaet:value('reifen_qualitaet'), anzahl:value('reifen_anzahl'), montage:value('reifen_montage')};
+    const testnote = form.querySelector('[name="reifen_testnote"]') ? value('reifen_testnote') : 'alle';
+    if (testnote !== 'alle') query.testnote = testnote;
     if (value('reifen_hersteller')) query.hersteller = value('reifen_hersteller');
     if (value('reifen_sortierung') && value('reifen_sortierung') !== 'preis_auf') query.sortierung = value('reifen_sortierung');
     if (requestedPage > 1) query.seite = String(requestedPage);
@@ -329,6 +369,7 @@
     if (!Object.prototype.hasOwnProperty.call(qualities, query.qualitaet)) missing.push('qualitaet');
     if (!/^[1-8]$/.test(query.anzahl)) missing.push('anzahl');
     if (!['ja','nein'].includes(query.montage)) missing.push('montage');
+    if (!testnoteFilters.includes(testnote)) missing.push('testnote');
     if (missing.length) {
       missing.forEach(key => fieldError(key, key === 'groesse' ? sizeMessage(query.groesse) : key === 'groesse_hinten' ? sizeMessage(rear,key) : messages[key]));
       say(missing.length === 1 ? 'Bitte das markierte Feld prüfen.' : `Bitte die ${missing.length} markierten Felder prüfen.`, true);
@@ -410,7 +451,7 @@
         const key = Object.keys(names).find(key => names[key] === name);
         if (key) fieldError(key);
         nextPage = 1; clear(); say('Auswahl geändert. Bitte Preise erneut abrufen.');
-        if (automatic && ['reifen_hersteller','reifen_sortierung','reifen_saison'].includes(name)
+        if (automatic && ['reifen_hersteller','reifen_sortierung','reifen_saison','reifen_testnote'].includes(name)
             && parseSize(value('reifen_groesse_vorne'))) button.click();
       };
       field.addEventListener('input', () => changed(false));
@@ -509,18 +550,21 @@
     if (!standalone) return false;
     const params = new URLSearchParams(window.location.search || '');
     if (['anzeigen', 'groesse', 'saison', 'anzahl'].some(key => params.getAll(key).length !== 1)
-        || ['qualitaet', 'montage'].some(key => params.getAll(key).length > 1)
+        || ['qualitaet', 'montage', 'testnote'].some(key => params.getAll(key).length > 1)
         || params.get('anzeigen') !== '1') return false;
     const selection = {groesse:params.get('groesse').trim(), saison:params.get('saison'), anzahl:params.get('anzahl')};
     if (!parseSize(selection.groesse) || !Object.prototype.hasOwnProperty.call(seasons, selection.saison)
         || !/^[1-8]$/.test(selection.anzahl)) return false;
     const hiddenOption = field => field.type === 'hidden' || field.hidden || field.closest('[hidden]')
       || (typeof field.getClientRects === 'function' && !field.getClientRects().length);
-    for (const key of ['qualitaet', 'montage']) {
+    for (const key of ['qualitaet', 'montage', 'testnote']) {
       if (!params.has(key)) continue;
       const selected = params.get(key);
-      if (key === 'qualitaet' ? !Object.prototype.hasOwnProperty.call(qualities, selected) : !['ja', 'nein'].includes(selected)) return false;
+      const valid = key === 'qualitaet' ? Object.prototype.hasOwnProperty.call(qualities, selected)
+        : key === 'montage' ? ['ja', 'nein'].includes(selected) : testnoteFilters.includes(selected);
+      if (!valid) return false;
       const fields = Array.from(form.querySelectorAll(`[name="${names[key]}"]`));
+      if (!fields.length && key === 'testnote' && selected === 'alle') continue;
       if (!fields.length) return false;
       const hidden = fields.filter(hiddenOption);
       if (hidden.length) {

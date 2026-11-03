@@ -3178,6 +3178,11 @@ def restrict_public_site_service():
         "oeffentliche_homepage",
         "oeffentlicher_reifenshop",
         "reifen_auswahl",
+        "felgen_shop.catalog",
+        "felgen_shop.komplettraeder",
+        "felgen_shop.facets",
+        "felgen_shop.search",
+        "felgen_shop.auswahl",
         "reifenangebote_suche",
         "reifenkatalog_auswahl",
         "reifenkatalog_bild",
@@ -3298,7 +3303,7 @@ def csrf_recovery_response():
 
 @app.after_request
 def add_csrf_fields(response):
-    if request.endpoint == "reifen_auswahl":
+    if request.endpoint in {"reifen_auswahl", "felgen_shop.catalog", "felgen_shop.komplettraeder", "felgen_shop.auswahl"}:
         return response
     content_type = response.headers.get("Content-Type", "")
     if "text/html" not in content_type.lower() or response.direct_passthrough:
@@ -60226,6 +60231,8 @@ reifen_bestellungen = register_reifen_bestellung(sys.modules[__name__])
 BACKUP_TABLES += REIFEN_BESTELLUNG_TABLES
 BACKUP_SCHEMA_FEATURES += (REIFEN_BESTELLUNG_FEATURE,)
 reifen_kaeufe = register_reifen_kauf(sys.modules[__name__])
+from felgen_shop import register_felgen_shop
+felgen_shop_pages = register_felgen_shop(sys.modules[__name__])
 reifen_vertraege = register_reifen_vertrag(sys.modules[__name__])
 BACKUP_TABLES += REIFEN_ANBINDUNG_TABLES
 BACKUP_SCHEMA_FEATURES += (REIFEN_ANBINDUNG_FEATURE,)

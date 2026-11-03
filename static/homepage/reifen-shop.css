@@ -122,6 +122,30 @@ legend { margin-bottom:10px; }
 .selection-refresh { display:block; margin-top:17px; text-align:center; font-size:12px; font-weight:650; }
 .selection-notice { margin:25px 0 35px; }
 .selection-notice p { margin:7px 0 0; }
+.shop-categories { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:0 0 24px; }
+.shop-categories a { display:grid; gap:6px; padding:19px 22px; border:1px solid var(--line); border-radius:13px; background:var(--paper); text-decoration:none; font-size:15px; font-weight:800; }
+.shop-categories a span { color:var(--muted); font-size:11px; font-weight:500; }
+.shop-categories a[aria-current="page"] { border-color:var(--red); background:#fff0ed; color:#a91d18; box-shadow:inset 0 0 0 1px var(--red); }
+.shop-categories a:hover { border-color:var(--red); }
+.tire-result-test { display:grid; gap:5px; padding:11px 12px; margin:2px 0 14px; border:1px solid #b9cfc6; border-radius:8px; background:#edf6f0; color:#235641; font-size:11px; line-height:1.5; }
+.tire-result-testnote { font-size:14px; font-weight:800; }
+.tire-result-test-source { color:#496354; }
+.tire-result-test-link { font-weight:650; }
+.tire-result-test p { margin:0; }
+.tire-result-testnote.is-unrated { color:var(--muted); font-size:11px; font-weight:500; }
+.tire-result-test.is-unrated { border-color:var(--line); background:#f5f2ec; color:var(--muted); }
+.selection-product .tire-result-test { margin-top:22px; }
+.rim-search { margin-top:24px; }
+.product-identifiers { display:grid; grid-template-columns:auto minmax(0,1fr); gap:9px 20px; margin:22px 0; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.product-identifiers dt { color:var(--muted); }
+.product-identifiers dd { margin:0; }
+.set-requirements { margin:24px 0; }
+.set-parts { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:24px; margin:26px 0; }
+.set-parts b { color:var(--red); font-size:12px; }
+.set-parts h3 { font-size:16px; margin:10px 0; }
+.set-parts p { color:var(--muted); font-size:13px; line-height:1.65; }
+@media(max-width:760px) { .shop-categories a { padding:14px 11px; font-size:13px; } .set-parts { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:480px) { .shop-categories { gap:6px; } .shop-categories a { font-size:12px; padding:13px 9px; } .shop-categories a span { font-size:10px; } .set-parts { grid-template-columns:1fr; gap:12px; } }
 @media(max-width:760px) { .selection-layout { grid-template-columns:1fr; } .selection-intro { padding-top:30px; } }
 @media(max-width:480px) { .selection-product,.selection-summary { padding:20px; } .selection-product-main { grid-template-columns:90px minmax(0,1fr); gap:15px; } .selection-image-box,.selection-image-box img { height:145px; } .selection-product-main h2 { font-size:20px; } .selection-unit strong { font-size:25px; } }
 @media(max-width:1050px) { .shop-results .tire-search-results { grid-template-columns:1fr; } .shop-results .tire-result { grid-template-columns:96px minmax(0,1fr); gap:10px 14px; } .shop-results .tire-result-media { grid-row:1/span 2; } .shop-results .tire-result-pricing { grid-column:2; text-align:left; } .shop-results .tire-result-unit { justify-content:flex-start; } .shop-results .tire-result-total { justify-content:start; } }
