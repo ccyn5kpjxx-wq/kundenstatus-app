@@ -827,7 +827,7 @@ class ReifenKaufTest(unittest.TestCase):
 
     def test_owned_draft_can_confirm_after_entry_token_expiry_using_current_exact_sku(self):
         order = self.ready()
-        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(time.time())-901):
+        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(self.clock().timestamp())-1200):
             expired = self.token()
         self.change(order, auswahl_token=expired)
         self.assertEqual(self.client.get("/reifen/bestellen/"+expired+"/kauf").status_code, 409)
@@ -840,7 +840,7 @@ class ReifenKaufTest(unittest.TestCase):
 
     def test_owned_expired_link_still_requires_current_price_and_stock_confirmation(self):
         order = self.ready()
-        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(time.time())-901):
+        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(self.clock().timestamp())-1200):
             expired = self.token()
         self.change(order, auswahl_token=expired)
         self.article_change["netto_einkauf"] = "110.00"

@@ -96,6 +96,18 @@ class TyreSystemExportClient:
         return cls({"TYRESYSTEM_EXPORT_URL": values.get("TYRESYSTEM_EXPORT_URL")}, **kwargs)
 
     def fetch(self):
+        return self._fetch(lambda raw, received_at: parse_feed(raw, abgerufen_am=received_at))
+
+    def fetch_raw(self):
+        """Return bounded private bytes and their original local UTC receipt.
+
+        Intended for multiple internal parsers of one authorized export. This
+        does not assert CSV validity or publication permission; each consumer
+        must validate its entire snapshot before replacing a private cache.
+        """
+        return self._fetch(lambda raw, received_at: (raw, received_at))
+
+    def _fetch(self, parse):
         try:
             permitted = callable(self._authorize) and self._authorize() is True
         except Exception:
@@ -141,7 +153,10 @@ class TyreSystemExportClient:
             if self._monotonic() >= deadline:
                 raise TyreSystemExportError("unavailable")
             received_at = self._clock()
-            result = parse_feed(bytes(raw), abgerufen_am=received_at)
+            if (not isinstance(received_at, datetime) or received_at.tzinfo is None
+                    or received_at.utcoffset() is None):
+                raise FeedError("Ungültige Abrufzeit.")
+            result = parse(bytes(raw), received_at.astimezone(timezone.utc))
             if self._monotonic() >= deadline:
                 raise TyreSystemExportError("unavailable")
             return result

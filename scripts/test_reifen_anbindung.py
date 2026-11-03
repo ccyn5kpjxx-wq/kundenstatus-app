@@ -66,7 +66,8 @@ class ReifenAnbindungTest(unittest.TestCase):
         with closing(self.db()) as db, db:
             db.execute("CREATE TABLE reifen_kaeufe(id TEXT,state TEXT,erstellt_am TEXT)")
         self.addCleanup(patch.stopall)
-        patch("socket.socket.connect",side_effect=AssertionError("Real network forbidden")).start()
+        for target in ("socket.socket.connect", "socket.socket.connect_ex", "socket.create_connection", "socket.getaddrinfo"):
+            patch(target,side_effect=AssertionError("Real network forbidden")).start()
         patch("threading.Thread.start",side_effect=AssertionError("Real workers forbidden")).start()
 
     def db(self):
@@ -180,6 +181,115 @@ class ReifenAnbindungTest(unittest.TestCase):
             wiring.configure_integrations(self.portal,environment={"TYRESYSTEM_CATALOG_DIR":"not-a-private-path"})
         read.assert_not_called()
         self.assertNotIn("REIFENANGEBOT_PROVIDER",self.app.config)
+
+    def rim_environment(self):
+        from scripts.test_felgen_katalog import POLICY
+        root = Path(self.temp.name) / "rim-private"
+        root.mkdir(exist_ok=True)
+        policy = root / "rim-policy.json"
+        policy.write_text(json.dumps(deepcopy(POLICY)), encoding="utf-8")
+        return {"FELGEN_PRIVATE_ROOT":str(root), "FELGEN_CATALOG_DIR":str(root / "catalog"),
+                "FELGEN_CATALOG_POLICY_FILE":str(policy), "FELGEN_CATALOG_PUBLICATION_APPROVED":"1",
+                "FELGEN_CATALOG_PUBLICATION_REFERENCE":"synthetic-rim-data-release"}
+
+    def test_rim_wiring_installs_only_public_read_provider_without_cache_database_network_or_worker_io(self):
+        from felgen_katalog import FelgenCatalogProvider
+        env = self.rim_environment()
+        with patch("felgen_katalog.FelgenCatalogCache.load", side_effect=AssertionError("No cache read at configure")) as load, \
+                patch("felgen_katalog.FelgenCatalogCache.replace", side_effect=AssertionError("No cache write")) as replace, \
+                patch.object(self.portal,"get_db",side_effect=AssertionError("No database")) as db:
+            self.assertEqual(wiring.configure_integrations(self.portal, environment=env), [])
+        provider = self.app.config["FELGENANGEBOT_PROVIDER"]
+        self.assertIsInstance(provider, FelgenCatalogProvider)
+        self.assertTrue(provider.publication_ready)
+        self.assertIsNone(provider._authorize)
+        self.assertIsNone(provider._image_resolver)
+        self.assertIs(self.app.extensions["felgen_tyresystem_catalog_provider"], provider)
+        self.assertFalse(Path(env["FELGEN_CATALOG_DIR"]).exists())
+        load.assert_not_called()
+        replace.assert_not_called()
+        db.assert_not_called()
+        self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+        self.assertNotIn("REIFEN_KAUF_SUPPLIER", self.app.config)
+        self.assertNotIn("FELGEN_BILD_STORE", self.app.config)
+
+    def test_rim_revocation_removed_settings_and_invalid_reconfiguration_remove_managed_provider(self):
+        env = self.rim_environment()
+        for change in ({"FELGEN_CATALOG_PUBLICATION_APPROVED":"0"},
+                       {"FELGEN_CATALOG_PUBLICATION_REFERENCE":""},
+                       {"FELGEN_CATALOG_POLICY_FILE":str(Path(self.temp.name)/"PRIVATE-missing.json")}, None):
+            with self.subTest(change=change):
+                self.assertEqual(wiring.configure_integrations(self.portal,environment=env), [])
+                self.assertIn("FELGENANGEBOT_PROVIDER", self.app.config)
+                errors = wiring.configure_integrations(self.portal, environment={} if change is None else {**env, **change})
+                self.assertNotIn("FELGENANGEBOT_PROVIDER", self.app.config)
+                self.assertNotIn("felgen_tyresystem_catalog_provider", self.app.extensions)
+                self.assertEqual(bool(errors), change is not None and "FELGEN_CATALOG_PUBLICATION_APPROVED" not in change)
+                self.assertNotIn("PRIVATE", str(errors))
+
+    def test_rim_unapproved_or_missing_reference_is_denied_before_private_config_or_cache_construction(self):
+        injected = object()
+        self.app.config["FELGENANGEBOT_PROVIDER"] = injected
+        self.assertEqual(wiring.configure_felgen_catalog(self.portal, {}), [])
+        self.assertIs(self.app.config["FELGENANGEBOT_PROVIDER"], injected)
+        env = self.rim_environment()
+        with patch("reifen_anbindung._private_catalog_json") as read, patch("felgen_katalog.FelgenCatalogCache") as cache:
+            for changes in ({"FELGEN_CATALOG_PUBLICATION_APPROVED":"0"},
+                            {"FELGEN_CATALOG_PUBLICATION_REFERENCE":""},
+                            {"FELGEN_CATALOG_PUBLICATION_REFERENCE":" "},
+                            {"FELGEN_CATALOG_PUBLICATION_REFERENCE":"x"*201},
+                            {"FELGEN_CATALOG_PUBLICATION_REFERENCE":"bad\u200bref"}):
+                self.app.config["FELGENANGEBOT_PROVIDER"] = injected
+                wiring.configure_felgen_catalog(self.portal, {**env, **changes})
+                self.assertNotIn("FELGENANGEBOT_PROVIDER", self.app.config)
+            read.assert_not_called()
+            cache.assert_not_called()
+
+    def test_rim_private_policy_and_cache_paths_are_bounded_local_and_fail_closed(self):
+        env = self.rim_environment()
+        root = Path(env["FELGEN_PRIVATE_ROOT"])
+        public = root / "static"
+        public.mkdir()
+        (public / "policy.json").write_text("{}", encoding="utf-8")
+        for change in ({"FELGEN_CATALOG_DIR":str(root)},
+                       {"FELGEN_CATALOG_DIR":str(Path(self.temp.name)/"outside")},
+                       {"FELGEN_CATALOG_DIR":str(public/"catalog")},
+                       {"FELGEN_CATALOG_POLICY_FILE":str(public/"policy.json")},
+                       {"FELGEN_CATALOG_POLICY_FILE":str(Path(self.temp.name)/"outside-policy.json")},
+                       {"FELGEN_CATALOG_POLICY_FILE":"relative-policy.json"},
+                       {"FELGEN_CATALOG_POLICY_FILE":"https://PRIVATE.invalid/policy.json"}):
+            with self.subTest(change=change):
+                self.assertEqual(wiring.configure_felgen_catalog(self.portal, {**env, **change}),
+                                 ["Felgenkatalog-Konfiguration oder Datenfreigabe unvollständig"])
+                self.assertNotIn("FELGENANGEBOT_PROVIDER", self.app.config)
+        with patch("reifen_anbindung.Path.resolve") as resolve:
+            self.assertTrue(wiring.configure_felgen_catalog(self.portal, {**env, "FELGEN_PRIVATE_ROOT":"//PRIVATE/share"}))
+        resolve.assert_not_called()
+        path = Path(env["FELGEN_CATALOG_POLICY_FILE"])
+        for raw in ('{"currency":"EUR","currency":"PRIVATE"}', 'x'*16385, '['*2000+'0'+']'*2000):
+            path.write_text(raw, encoding="utf-8")
+            errors = wiring.configure_felgen_catalog(self.portal, env)
+            self.assertEqual(errors, ["Felgenkatalog-Konfiguration oder Datenfreigabe unvollständig"])
+            self.assertNotIn("FELGENANGEBOT_PROVIDER", self.app.config)
+        self.rim_environment()
+        original = Path.is_symlink
+        with patch.object(Path, "is_symlink", lambda value: value == path or original(value)):
+            self.assertTrue(wiring.configure_felgen_catalog(self.portal, env))
+
+    def test_tire_and_rim_catalog_configuration_are_independent_and_require_exact_own_policy(self):
+        env = {**self.catalog_environment(), **self.rim_environment()}
+        self.assertEqual(wiring.configure_integrations(self.portal, environment=env), [])
+        tire = self.app.config["REIFENANGEBOT_PROVIDER"]
+        self.assertTrue(self.app.config["FELGENANGEBOT_PROVIDER"].publication_ready)
+        self.assertEqual(wiring.configure_felgen_catalog(self.portal, {**env, "FELGEN_CATALOG_PUBLICATION_APPROVED":"0"}), [])
+        self.assertIs(self.app.config["REIFENANGEBOT_PROVIDER"], tire)
+        self.assertEqual(wiring.configure_felgen_catalog(self.portal, env), [])
+        rim = self.app.config["FELGENANGEBOT_PROVIDER"]
+        self.assertEqual(wiring.configure_catalog(self.portal, {**env, "TYRESYSTEM_CATALOG_PUBLICATION_APPROVED":"0"}), [])
+        self.assertIs(self.app.config["FELGENANGEBOT_PROVIDER"], rim)
+        Path(env["FELGEN_CATALOG_POLICY_FILE"]).write_text(Path(env["TYRESYSTEM_CATALOG_POLICY_FILE"]).read_text(encoding="utf-8"), encoding="utf-8")
+        self.assertTrue(wiring.configure_felgen_catalog(self.portal, env))
+        self.assertNotIn("FELGENANGEBOT_PROVIDER", self.app.config)
 
     def test_private_catalog_config_rejects_duplicate_keys_public_path_and_oversize(self):
         root=Path(self.temp.name)

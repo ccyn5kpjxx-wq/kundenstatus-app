@@ -107,6 +107,35 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(result.abgerufen_am, NOW)
         self.assertTrue(response.closed)
 
+    def test_raw_fetch_uses_same_bounded_authorized_transport_and_original_utc_receipt(self):
+        response=Response()
+        client=self.client(response)
+        with patch("tyresystem_export.parse_feed") as parser:
+            raw,received=client.fetch_raw()
+        parser.assert_not_called()
+        self.assertEqual(raw,csv_data())
+        self.assertEqual(received,NOW)
+        self.assertEqual(len(self.http.calls),1)
+        self.assertTrue(response.closed)
+        client=self.client(authorize=lambda:False)
+        with self.assertRaises(export.TyreSystemExportError) as failure:
+            client.fetch_raw()
+        self.assertEqual(failure.exception.code,"not_authorized")
+        self.assertFalse(self.http.calls)
+
+    def test_raw_fetch_rejects_bad_receipt_or_expired_transport_deadline_without_secret_output(self):
+        for bad_clock in (lambda:datetime(2026,11,2),lambda:"private "+TOKEN):
+            client=self.client()
+            client._clock=bad_clock
+            with self.assertRaises(export.TyreSystemExportError) as failure:
+                client.fetch_raw()
+            self.assertEqual(failure.exception.code,"invalid_response")
+            self.assertNotIn(TOKEN,str(failure.exception))
+        client=self.client(monotonic=iter((0,0,0,46)).__next__)
+        with self.assertRaises(export.TyreSystemExportError) as failure:
+            client.fetch_raw()
+        self.assertEqual(failure.exception.code,"unavailable")
+
     def test_construct_from_environment_is_inert_and_repr_redacts_url(self):
         with patch("tyresystem_export.requests.Session") as session:
             client = export.TyreSystemExportClient.from_env(environment=CONFIG)

@@ -27,6 +27,72 @@ Checkoutziel, `ready is True` und exakt `produktart == "felgen"`. Der alte
 Reifenstatus ist dafür kein Ersatz. SMS-Versand und Codeprüfung prüfen die
 Kategorie des eigenen gespeicherten Entwurfs ebenfalls.
 
+## Private Serverkataloge
+
+`configure_integrations()` richtet die nur lesenden Reifen- und Felgenprovider
+getrennt ein. Eine reine Konfiguration liest nur die ausdrücklich gewählte
+begrenzte private Policydatei; sie lädt keinen Produktcache, erzeugt keine
+Verzeichnisse, startet keinen Worker und ruft keinen Anbieter auf.
+
+Reifen verwenden die vorhandenen `TYRESYSTEM_PRIVATE_ROOT` und
+`TYRESYSTEM_CATALOG_*`-Einstellungen. Für Felgen gelten ausschließlich:
+
+```text
+FELGEN_PRIVATE_ROOT=/var/data
+FELGEN_CATALOG_DIR=/var/data/tyresystem-rim-catalog
+FELGEN_CATALOG_POLICY_FILE=/var/data/tyresystem/rim-policy.json
+FELGEN_CATALOG_PUBLICATION_APPROVED=0
+FELGEN_CATALOG_PUBLICATION_REFERENCE=
+```
+
+Ohne ausdrückliche Veröffentlichungsfreigabe und nichtleere, begrenzte
+Freigabereferenz wird keine Policy geöffnet. Diese Einstellungen dokumentieren
+keine tatsächlich erteilten Datenrechte. Freigaben für Reifen werden nicht auf
+Felgen übertragen. Ein eigener verwalteter Provider wird bei Widerruf,
+entfernten Einstellungen oder fehlerhafter Neukonfiguration entfernt.
+Fehlt jede Felgeneinstellung, bleibt ein unabhängig injizierter Provider
+unberührt; explizite neue Felgeneinstellungen ersetzen ihn auch im Fehlerfall.
+
+Die Felgenpolicy ist ein privates JSON-Objekt mit genau diesem Schema und dem
+am 03.11.2026 geprüften Preis-/Frachtstand für normale Pkw-Felgen:
+
+```json
+{
+  "currency": "EUR",
+  "price_basis": "net_unit",
+  "single_item_shipping_net": "6.00",
+  "free_shipping_from": 2,
+  "verified_on": "2026-11-03",
+  "sources": {
+    "price": "https://www.tyresystem.de/agb",
+    "shipping": "https://www.tyresystem.de/lieferbedingungen"
+  }
+}
+```
+
+Eine Reifenpolicy mit `single_tyre_shipping_net` ist keine Felgenpolicy. Der
+vorhandene gemeinsame Kalkulator berechnet weiter Netto-EK plus zehn Prozent
+und anschließend Umsatzsteuer. Der Provider begründet keine Fahrzeugpassung,
+Montageleistung oder Lieferreservierung. Bild- und Bewertungsresolver sowie
+private Ansichtscallbacks werden durch diesen Produktionsloader nicht gesetzt.
+
+Cache und Policy müssen außerhalb öffentlicher Pfade auf der privaten
+persistenten Webdisk liegen. Für beide Kataloge muss der ausdrücklich gestartete
+Refreshprozess dieselbe Webdisk erreichen; ein separater Dienst teilt sie nicht
+allein durch identische Pfadnamen. Beispiel für den gemeinsamen Refresh:
+
+```text
+python scripts/refresh_tyresystem_catalog.py --run --cache-dir /var/data/tyresystem-catalog --private-root /var/data --felgen-cache-dir /var/data/tyresystem-rim-catalog --felgen-private-root /var/data
+```
+
+Nur der Refreshprozess erhält `TYRESYSTEM_EXPORT_URL` aus dem privaten
+Secretstore. Beide Parser verwenden denselben wirklichen Abrufzeitpunkt;
+Schreiben jedes einzelnen Caches ist atomar. Die zwei Dateien bilden keine
+gemeinsame Dateisystemtransaktion: ein Fehler zwischen den Writes muss als
+fehlgeschlagener Refresh erkannt und geprüft werden. Das Lesen verlängert keine
+Frist; nach spätestens 15 Minuten liefern alte Daten keine Angebote mehr.
+Die Katalogkonfiguration installiert keinen automatischen Refreshzeitplan.
+
 ## Gemeinsame Bedingungen und Lieferant
 
 Die vorhandenen Einstellungen `REIFEN_KAUF_RECHTSTEXTE`,

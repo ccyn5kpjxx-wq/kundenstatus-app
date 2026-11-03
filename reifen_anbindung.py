@@ -1,8 +1,9 @@
 """Explicit configuration of tire integrations; no provider calls on import.
 
-Credentials use explicit REIFEN_* settings. The private catalog uses only
-TYRESYSTEM_CATALOG_* settings and TYRESYSTEM_PRIVATE_ROOT; this module never
-reads an export credential. No rental or insurance-mail credential is copied.
+Credentials use explicit REIFEN_* settings. Private catalogs use explicit
+TYRESYSTEM_CATALOG_*/TYRESYSTEM_PRIVATE_ROOT and FELGEN_CATALOG_*/FELGEN_PRIVATE_ROOT.
+This module never reads an export credential. No rental or insurance-mail
+credential is copied.
 The supplier order object is deliberately not invented here.
 """
 from email.utils import parseaddr
@@ -11,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import unicodedata
 
 from flask import has_request_context, request
 
@@ -83,6 +85,40 @@ def configure_catalog(portal, env):
         return ["Reifenkatalog-Konfiguration oder Datenfreigabe unvollständig"]
 
 
+def configure_felgen_catalog(portal, env):
+    """Wire an explicitly released rim snapshot, without loading or refreshing it."""
+    cfg = portal.app.config
+    previous = portal.app.extensions.pop("felgen_tyresystem_catalog_provider", None)
+    if previous is not None and cfg.get("FELGENANGEBOT_PROVIDER") is previous:
+        cfg.pop("FELGENANGEBOT_PROVIDER", None)
+    keys = ("FELGEN_PRIVATE_ROOT", "FELGEN_CATALOG_DIR", "FELGEN_CATALOG_POLICY_FILE",
+            "FELGEN_CATALOG_PUBLICATION_APPROVED", "FELGEN_CATALOG_PUBLICATION_REFERENCE")
+    if not any(env.get(key) for key in keys):
+        return []
+    # Explicit configuration or revocation supersedes even an injected provider.
+    cfg.pop("FELGENANGEBOT_PROVIDER", None)
+    if not flag(env.get("FELGEN_CATALOG_PUBLICATION_APPROVED", "0")):
+        return []
+    try:
+        reference = env.get("FELGEN_CATALOG_PUBLICATION_REFERENCE", "")
+        if (not isinstance(reference, str) or not 1 <= len(reference) <= 200 or not reference.strip()
+                or any(unicodedata.category(char).startswith("C") for char in reference)):
+            raise ValueError()
+        from felgen_katalog import FelgenCatalogCache, FelgenCatalogProvider
+        root = env["FELGEN_PRIVATE_ROOT"]
+        cache = FelgenCatalogCache(env["FELGEN_CATALOG_DIR"], private_root=root)
+        policy = _private_catalog_json(env["FELGEN_CATALOG_POLICY_FILE"], root, max_bytes=16384)
+        provider = FelgenCatalogProvider(cache, policy=policy, publication_approved=True,
+                                        publication_reference=reference)
+        if not provider.publication_ready:
+            raise ValueError()
+        cfg["FELGENANGEBOT_PROVIDER"] = provider
+        portal.app.extensions["felgen_tyresystem_catalog_provider"] = provider
+        return []
+    except (KeyError, ValueError, OSError, TypeError, RecursionError):
+        return ["Felgenkatalog-Konfiguration oder Datenfreigabe unvollständig"]
+
+
 def read_terms(path):
     """Read a reviewed immutable JSON snapshot, never execute a config file."""
     if not path:
@@ -111,6 +147,7 @@ def configure_integrations(portal, *, environment=None):
     env = os.environ if environment is None else environment
     cfg = portal.app.config
     errors = configure_catalog(portal, env)
+    errors.extend(configure_felgen_catalog(portal, env))
     mode = env.get("REIFEN_KAUF_MODE", "off")
     cfg["REIFEN_KAUF_MODE"] = mode
     cfg["REIFEN_KAUF_ENABLED"] = flag(env.get("REIFEN_KAUF_ENABLED", "0"))
