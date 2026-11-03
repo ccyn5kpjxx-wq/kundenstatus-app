@@ -282,6 +282,10 @@ class StripeReifenGateway:
     def _manual_key(self, operation, order, intent_id):
         frozen = "|".join((INTEGRATION, self.mode, order["id"], order["quote_hash"], order["payment_attempt"],
                            "manual", intent_id, str(order["amount_total"])))
+        if operation == "capture":
+            # The single-capture request omits the former multicapture parameter.
+            # Different request parameters must not reuse the former request key.
+            frozen += "|single_capture_v2"
         return "reifen-" + operation + "-" + hashlib.sha256(frozen.encode()).hexdigest()
 
     def capture(self, order):
@@ -293,8 +297,10 @@ class StripeReifenGateway:
         if current["status"] != "authorized":
             raise ReifenZahlungFehler("Ein sicher einziehbarer Kartenbetrag fehlt.")
         try:
+            # Single full capture uses Stripe's default finalization. Sending
+            # final_capture explicitly is rejected when multicapture is unavailable.
             raw = self.client.v1.payment_intents.capture(intent_id,
-                {"amount_to_capture": checked["amount_total"], "final_capture": True},
+                {"amount_to_capture": checked["amount_total"]},
                 options={"idempotency_key": self._manual_key("capture", checked, intent_id)})
         except Exception:
             raise ReifenZahlungFehler("Der Zahlungseinzug muss abgeglichen werden. Keine zweite Zahlung starten.") from None

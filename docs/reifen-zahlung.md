@@ -78,10 +78,20 @@ eingefrorene manuelle Zahlungsmodell enthalten.
 
 Vor dem POST wird derselbe PaymentIntent frisch gelesen und einschließlich
 tatsächlicher Autorisierungsfrist geprüft. Es wird genau der vereinbarte volle
-Centbetrag mit `final_capture=True` eingezogen, ohne Mehr-/Teilbeträge oder
-Multicapture. Der stabile eigene Capture-Schlüssel bindet Umgebung, Bestellung,
-Quote, Versuch, manuelles Modell, Intent und Betrag. Automatische SDK-Retries
-bleiben aus; Core und dauerhafter Versuch besitzen den Wiederholungsablauf.
+Centbetrag mit `amount_to_capture=Gesamtbetrag` eingezogen, ohne Mehr-/Teilbeträge
+oder Multicapture. Der optionale Parameter `final_capture` wird weggelassen:
+Stripe schließt den Einzelcapture standardmäßig ab und lehnt den expliziten
+Parameter bei einem PaymentIntent ohne Multicapture-Unterstützung ab, auch bei
+`True`. Der stabile eigene Capture-Schlüssel bindet Umgebung, Bestellung,
+Quote, Versuch, manuelles Modell, Intent und Betrag sowie die feste Requestfassung
+`single_capture_v2`. Diese neue Requestform erhält absichtlich einen anderen
+Schlüssel als die frühere Form mit explizitem `final_capture`; Cancel-Schlüssel
+bleiben unverändert. Ein offener früherer Capture-Versuch muss vor einem Wechsel
+auf die korrigierte Requestform anhand seiner tatsächlichen Antwort und eines
+frischen Providerstatus eindeutig als nicht vollzogen und nicht mehr laufend
+abgeglichen werden. Ein unbekannter Ausgang erlaubt keinen solchen Wechsel.
+Automatische SDK-Retries bleiben aus; Core und dauerhafter Versuch besitzen den
+Wiederholungsablauf.
 
 Bei bestätigtem Einzug lautet der Rückgabewert `id=PaymentIntent-ID`,
 `status='succeeded'`, `payment_status='paid'`, `amount_received=Gesamtbetrag`

@@ -73,6 +73,8 @@ class FakeIntents:
 
     def capture(self, intent, params, *, options):
         self.captures.append((intent, deepcopy(params), deepcopy(options)))
+        if "final_capture" in params:
+            raise ValueError("The PaymentIntent doesn't support multi-capture; final_capture must be omitted")
         if self.capture_error: raise self.capture_error
         self.saved[intent].update(status="succeeded", amount_capturable=0, amount_received=params["amount_to_capture"])
         if self.capture_response_lost: raise TimeoutError("PRIVATE capture response lost")
@@ -220,7 +222,7 @@ class StripeReifenGatewayTest(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(caught.exception))
         self.assertFalse(self.intents.captures)
 
-    def test_capture_uses_full_bound_amount_and_only_actual_received_funds_are_paid(self):
+    def test_single_capture_without_multicapture_uses_full_bound_amount_and_actual_received_funds(self):
         order = self.manual_order()
         result = self.gateway.capture(order)
         self.assertEqual((result["status"], result["payment_status"]), ("succeeded", "paid"))
@@ -228,7 +230,7 @@ class StripeReifenGatewayTest(unittest.TestCase):
         self.assertEqual(result["id"], order["payment_intent"])
         intent, params, options = self.intents.captures[0]
         self.assertEqual(intent, order["payment_intent"])
-        self.assertEqual(params, {"amount_to_capture":62550, "final_capture":True})
+        self.assertEqual(params, {"amount_to_capture":62550})
         self.assertNotIn(self.order["kunde"]["email"], options["idempotency_key"])
         self.assertEqual(self.gateway.capture(order), result)
         self.assertEqual(len(self.intents.captures), 1)
@@ -245,6 +247,31 @@ class StripeReifenGatewayTest(unittest.TestCase):
         recovered = self.gateway.retrieve(order["payment_id"], expected_order=order)
         self.assertEqual(recovered["status"], "succeeded")
         self.assertEqual(self.gateway.capture(order)["status"], "succeeded")
+        self.assertEqual(len(self.intents.captures), 1)
+        self.assertEqual(len(self.sessions.saved), 1)
+
+    def test_single_capture_key_versions_request_shape_preserves_scope_and_leaves_cancel_unchanged(self):
+        order = self.manual_order()
+        intent = order["payment_intent"]
+        previous_material = "|".join((payment.INTEGRATION, "test", order["id"], order["quote_hash"],
+            order["payment_attempt"], "manual", intent, str(order["amount_total"])))
+        previous_digest = hashlib.sha256(previous_material.encode()).hexdigest()
+        expected_key = "reifen-capture-" + hashlib.sha256(
+            (previous_material + "|single_capture_v2").encode()).hexdigest()
+        self.assertNotEqual(expected_key, "reifen-capture-" + previous_digest)
+        self.assertEqual(self.gateway._manual_key("cancel", order, intent), "reifen-cancel-" + previous_digest)
+        self.assertEqual(self.gateway._manual_key("capture", order, intent), expected_key)
+        for field, changed in (("id", "OtherOrder"), ("quote_hash", "c" * 64),
+                               ("payment_attempt", "2"), ("amount_total", 62551)):
+            with self.subTest(field=field):
+                self.assertNotEqual(self.gateway._manual_key("capture", {**order, field:changed}, intent), expected_key)
+        self.assertNotEqual(self.gateway._manual_key("capture", order, "pi_Other"), expected_key)
+        live = payment.StripeReifenGateway({**CONFIG, "REIFEN_STRIPE_MODE":"live",
+            "REIFEN_STRIPE_SECRET_KEY":"rk_live_synthetic_unusable_key"}, client=self.client)
+        self.assertNotEqual(live._manual_key("capture", order, intent), expected_key)
+        result = self.gateway.capture(order)
+        self.assertEqual(self.intents.captures[0][2]["idempotency_key"], expected_key)
+        self.assertEqual(self.gateway.capture(order), result)
         self.assertEqual(len(self.intents.captures), 1)
         self.assertEqual(len(self.sessions.saved), 1)
 
