@@ -138,10 +138,18 @@ def configure_integrations(portal, *, environment=None):
         if request.endpoint != {"start":"reifen_kauf.telefon_code", "check":"reifen_kauf.telefon_pruefen"}.get(operation):
             return False
         service = portal.app.extensions.get("reifen_kauf")
-        if service is None or not service.readiness()["ready"]:
+        if service is None:
             return False
         row = service.row(reference)
         if row["mode"] != cfg.get("REIFEN_KAUF_MODE"):
+            return False
+        try:
+            category = service.category(json.loads(row["query_json"]), json.loads(row["produkt_json"]))
+            readiness = service.readiness_for(category)
+            if (not isinstance(readiness, dict) or readiness.get("ready") is not True
+                    or readiness.get("produktart") != category):
+                return False
+        except (AttributeError, KeyError, TypeError, ValueError):
             return False
         return row["mode"] == "live" or row["telefon"] in sms_test_numbers
 

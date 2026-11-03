@@ -31,6 +31,7 @@ from felgen_bilder import FelgenBildStore
 from felgen_katalog import FelgenCatalogProvider, parse_felgen_feed
 from felgen_shop import register_felgen_shop
 from portal_static_assets import asset_version
+from raeder_auswahl import RaederAuswahlResolver
 from scripts.test_felgen_katalog import POLICY, raw_feed
 from scripts.test_reifen_bilder import synthetic_webp
 
@@ -72,7 +73,7 @@ class RimShopRoutesTest(unittest.TestCase):
             self.app.add_url_rule(route, endpoint, lambda: "offline placeholder")
         self.app.add_url_rule("/other-form", "other_form", lambda: "<form method='post'></form>", methods=["GET", "POST"])
         self.app.add_url_rule("/internal", "internal", lambda: "private route")
-        self.app.extensions["reifen_kauf"] = self.no_write
+        self.app.extensions["reifen_kauf"] = SimpleNamespace(readiness=self.no_write, owner=self.no_write)
         self.app.extensions["reifen_bestellung"] = self.no_write
         self.app.config.update(REIFEN_KAUF_MODE="off", REIFEN_KAUF_ENABLED=False,
                                REIFEN_KAUF_SUPPLIER=self.no_write, REIFEN_KAUF_SMS=self.no_write,
@@ -270,6 +271,76 @@ class RimShopRoutesTest(unittest.TestCase):
         self.assertEqual(parse_qs(urlsplit(back).query), {"suche": ["1"], "anzahl": ["4"], "anzeigen": ["1"]})
         for forbidden in ("owner_hash", "kunde", "telefon", "reservierung", "payment_id"):
             self.assertNotIn(forbidden, html)
+
+    def checkout_alias(self):
+        self.app.add_url_rule("/raeder/bestellen/<token>/kauf", "reifen_kauf.einstieg",
+                              lambda token: "Synthetic checkout boundary", methods=["GET"])
+
+    def test_category_ready_checkout_link_contains_only_signed_exact_rim_and_selected_quantity(self):
+        self.checkout_alias()
+        ready = Mock(return_value={"ready": True, "produktart": "felgen"})
+        self.app.extensions["reifen_kauf"] = SimpleNamespace(readiness_for=ready, readiness=self.no_write)
+        token = self.serializer.dumps({"artikel_id": "1", "anzahl": 1})
+        response = self.client.get("/felgen/auswahl/"+token)
+        self.assertEqual(response.status_code, 200)
+        self.assert_private(response)
+        ready.assert_called_once_with("felgen")
+        html = response.text
+        link = re.search(r'href="([^"]+)"[^>]*>Weiter zur Bestellung', html).group(1)
+        self.assertEqual(urlsplit(link).query, "")
+        path = urlsplit(link).path
+        self.assertTrue(path.startswith("/raeder/bestellen/felgen."))
+        purchase_token = path.removeprefix("/raeder/bestellen/").removesuffix("/kauf")
+        resolved = RaederAuswahlResolver(self.app.config, self.app.secret_key, clock=lambda: self.now).from_token(
+            purchase_token, produktart="felgen")
+        self.assertEqual(dict(resolved.core), {"produktart": "felgen", "artikel_id": "1", "anzahl": 1})
+        self.assertEqual(resolved.produkt["preis"]["gesamt_brutto"], "138.04")
+        self.assertIn("138,04 €", html)
+        self.assertIn("Fahrzeugpassung noch nicht geprüft", html)
+        self.assertIn("noch keine Bestellung", html)
+        self.assertNotIn("Der verbindliche Abschluss ist noch nicht freigeschaltet", html)
+        self.assertNotRegex(html, r"<(?:form|input|select)\b")
+
+    def test_missing_checkout_route_blocks_before_category_readiness_is_called(self):
+        ready = Mock(return_value={"ready": True, "produktart": "felgen"})
+        self.app.extensions["reifen_kauf"] = SimpleNamespace(readiness_for=ready)
+        missing_route = self.client.get(self.path)
+        self.assertEqual(missing_route.status_code, 200)
+        self.assert_private(missing_route)
+        self.assertNotIn("Weiter zur Bestellung", missing_route.text)
+        ready.assert_not_called()
+
+    def test_checkout_category_gate_is_exclusive_and_fail_closed_before_token_is_minted(self):
+        self.checkout_alias()
+        cases = [SimpleNamespace(readiness=self.no_write), SimpleNamespace(readiness_for=True),
+                 SimpleNamespace(readiness_for=Mock(return_value={"ready": False, "produktart": "felgen"})),
+                 SimpleNamespace(readiness_for=Mock(return_value={"ready": True, "produktart": "reifen"})),
+                 SimpleNamespace(readiness_for=Mock(return_value={"ready": True})),
+                 SimpleNamespace(readiness_for=Mock(return_value={"ready": 1, "produktart": "felgen"})),
+                 SimpleNamespace(readiness_for=Mock(return_value=True)),
+                 SimpleNamespace(readiness_for=Mock(side_effect=RuntimeError("SECRET-PROVIDER PRIVATE-MARKER")))]
+        with patch("felgen_shop.erstelle_felgen_auswahl_token", side_effect=AssertionError("No mint before category readiness")) as mint:
+            for service in cases:
+                self.app.extensions["reifen_kauf"] = service
+                response = self.client.get(self.path)
+                self.assertEqual(response.status_code, 200)
+                self.assert_private(response)
+                self.assertNotIn("Weiter zur Bestellung", response.text)
+                self.assertIn("Der verbindliche Abschluss ist noch nicht freigeschaltet", response.text)
+                self.assertNotRegex(response.text, r"<(?:form|input|select)\b")
+            mint.assert_not_called()
+
+    def test_ready_checkout_cannot_skip_current_sku_stock_or_catalogue_freshness(self):
+        self.checkout_alias()
+        ready = Mock(return_value={"ready": True, "produktart": "felgen"})
+        self.app.extensions["reifen_kauf"] = SimpleNamespace(readiness_for=ready)
+        for row, received in (({"Lagerbestand": "3"}, self.received),
+                              ({}, self.now-timedelta(minutes=16)), ({"Artikelnummer": "2"}, self.received)):
+            self.snapshot = parse_felgen_feed(raw_feed(row), abgerufen_am=received)
+            response = self.client.get(self.path)
+            self.assertEqual(response.status_code, 409)
+            self.assert_private(response)
+        ready.assert_not_called()
 
     def test_selection_rechecks_current_price_and_exact_sku_outside_search_page(self):
         self.assertEqual(self.client.get(self.path).status_code, 200)

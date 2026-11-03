@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from contextlib import closing
 import base64
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from email.message import EmailMessage
 from email.utils import format_datetime, formataddr, parseaddr
 import hashlib
@@ -181,13 +182,30 @@ def _order_body(order):
             or order.get("currency") not in {"eur", "EUR"}):
         raise ValueError("Der bestätigte Bestellpreis fehlt.")
     legal = _legal_texts(order.get("rechtstexte"))
+    category = order.get("produktart", "reifen")
+    if (not isinstance(category, str) or category not in {"reifen", "felgen"}
+            or product.get("produktart", category) != category):
+        raise ValueError("Die Produktart der Vertragskopie ist nicht eindeutig eingerichtet.")
+    scope = legal.get("produktarten")
+    if (scope is not None and (not isinstance(scope, list) or not scope
+            or any(not isinstance(item, str) or item not in {"reifen", "felgen", "komplettraeder"} for item in scope)
+            or len(set(scope)) != len(scope) or category not in scope)
+            or category == "felgen" and scope is None):
+        raise ValueError("Die Bedingungsfassung gilt nicht für diese Produktart.")
+    if category == "felgen" and (order.get("montage_datum") or order.get("montage_uhrzeit")):
+        raise ValueError("Eine Felgenmontage ist in diesem Kaufpfad nicht eingerichtet.")
+    product_keys = (("artikel_id", "bezeichnung", "groesse", "ean", "saison", "qualitaet")
+                    if category == "reifen" else
+                    ("artikel_id", "bezeichnung", "ean", "hersteller", "profil", "hersteller_artikelnummer", "material"))
+    title, product_label = (("Reifenbestellung", "Reifen") if category == "reifen"
+                            else ("Felgenbestellung", "Felgen"))
     snapshot = {
-        "id": _text(order.get("id"), 200), "anzahl": quantity,
+        "id": _text(order.get("id"), 200), "anzahl": quantity, "produktart": category,
         "amount_total": amount, "currency": "EUR", "rechtstexte": legal,
         "kunde": {key: _text(customer.get(key, ""), 300, required=False)
                   for key in ("name", "email", "telefon", "strasse", "hausnummer", "plz", "ort", "land")},
-        "produkt": {key: _text(product.get(key, ""), 400, required=False)
-                    for key in ("artikel_id", "bezeichnung", "groesse", "ean", "saison", "qualitaet")},
+        "produkt": {key: _text("" if product.get(key) is None else product[key], 400, required=False)
+                    for key in product_keys},
         "zahlungsart": _text(order.get("zahlungsart", ""), 100),
         "montage_datum": _text(order.get("montage_datum", ""), 100, required=False),
         "montage_uhrzeit": _text(order.get("montage_uhrzeit", ""), 100, required=False),
@@ -200,15 +218,29 @@ def _order_body(order):
     # Never copy arbitrary provider, purchase-price or browser payload fields.
     if not isinstance(snapshot["preis"], Mapping):
         raise ValueError("Preisaufteilung fehlt.")
-    snapshot["preis"] = {key: _text(snapshot["preis"].get(key, ""), 100, required=False)
-                         for key in ("einzel_brutto", "gesamt_reifen_brutto", "versand_brutto", "montage_brutto", "gesamt_brutto")}
+    price_keys = (("einzel_brutto", "gesamt_reifen_brutto", "versand_brutto", "montage_brutto", "gesamt_brutto")
+                  if category == "reifen" else
+                  ("einzel_brutto", "gesamt_felgen_brutto", "versand_brutto", "gesamt_brutto"))
+    snapshot["preis"] = {key: _text(snapshot["preis"].get(key, ""), 100, required=False) for key in price_keys}
+    if category == "felgen":
+        price = snapshot["preis"]
+        if (any(not re.fullmatch(r"(?:0|[1-9][0-9]{0,5})\.[0-9]{2}", price[key]) for key in price_keys)
+                or Decimal(price["einzel_brutto"]) <= 0
+                or Decimal(price["einzel_brutto"]) * quantity != Decimal(price["gesamt_felgen_brutto"])
+                or Decimal(price["gesamt_felgen_brutto"]) + Decimal(price["versand_brutto"]) != Decimal(price["gesamt_brutto"])
+                or Decimal(price["gesamt_brutto"]) * 100 != amount
+                or not snapshot["produkt"]["artikel_id"] or not snapshot["produkt"]["bezeichnung"]):
+            raise ValueError("Der Felgenartikel und seine bestätigte Preisaufteilung fehlen oder widersprechen sich.")
     recipient = _email(snapshot["kunde"]["email"])
-    lines = ["Ihre Reifenbestellung und Vertragsunterlagen", "",
+    lines = ["Ihre " + title + " und Vertragsunterlagen", "",
         ("DEMO – keine echte Bestellung. Wir simulieren die folgende Bestellannahme."
          if snapshot["demo"] else "Wir nehmen Ihre folgende Bestellung verbindlich an."), "",
         "Aufbewahrbare Kopie Ihrer Bestellung und der zugrunde gelegten Bedingungen.",
         "Bestellnummer: " + snapshot["id"], "Name: " + snapshot["kunde"]["name"],
-        "Reifen: " + snapshot["produkt"]["bezeichnung"], "Größe: " + snapshot["produkt"]["groesse"],
+        product_label + ": " + snapshot["produkt"]["bezeichnung"],
+        *( ["Größe: " + snapshot["produkt"]["groesse"]] if category == "reifen" else
+           ["Herstellerartikelnummer: " + (snapshot["produkt"]["hersteller_artikelnummer"] or "nicht angegeben"),
+            "Fahrzeugpassung: nicht geprüft; diese Bestellung enthält keine Passungsfreigabe."] ),
         "Artikel: " + snapshot["produkt"]["artikel_id"], "Menge: " + str(quantity),
         f"Gesamtpreis einschließlich Umsatzsteuer: {amount // 100},{amount % 100:02d} EUR",
         "Zahlungsart: " + snapshot["zahlungsart"],
@@ -228,7 +260,7 @@ def _order_body(order):
         if key != "version":
             lines.extend(["", key.upper(), value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)])
     lines.extend(["", FOOTER_TEXT])
-    subject = ("DEMO · " if snapshot["demo"] else "") + "Ihre Reifenbestellung " + snapshot["id"]
+    subject = ("DEMO · " if snapshot["demo"] else "") + "Ihre " + title + " " + snapshot["id"]
     return recipient, subject, "\n".join(lines), snapshot
 
 

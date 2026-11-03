@@ -17,8 +17,10 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, abort, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 
-from reifen_bestellung import lade_auswahl_token, _phone
-from reifen_suche import suche_reifenangebote
+from reifen_bestellung import _phone
+from felgen_katalog import FelgenCatalogProvider
+from raeder_auswahl import (FELGEN_TOKEN_PREFIX, RaederAuswahl, RaederAuswahlResolver,
+                           erstelle_felgen_auswahl_token)
 from reifen_rechtstexte import reifen_rechtstexte
 
 
@@ -90,23 +92,40 @@ class ReifenKauf:
         return provider()
 
     def readiness(self):
+        return self.readiness_for("reifen")
+
+    def readiness_for(self, produktart):
         cfg = self.app.config
         mode = cfg.get("REIFEN_KAUF_MODE", "off")
         terms = self.terms()
         problems = []
+        if produktart not in ("reifen", "felgen"):
+            problems.append("Diese Produktart ist nicht für Bestellungen eingerichtet")
+        scope = terms.get("produktarten")
+        valid_scope = (isinstance(scope, list) and bool(scope) and all(type(item) is str
+            and item in {"reifen", "felgen", "komplettraeder"} for item in scope) and len(scope) == len(set(scope)))
+        if (scope is not None and (not valid_scope or produktart not in scope)) or (produktart == "felgen" and not valid_scope):
+            problems.append("Bestellbedingungen gelten nicht für diese Produktart")
+        if produktart == "felgen" and (terms.get("freigegeben") is not True or terms.get("status") != "freigegeben"
+                or not isinstance(terms.get("version"), str) or not terms["version"]
+                or terms["version"].startswith(("entwurf:", "demo:")) or terms.get("offene_entscheidungen")):
+            problems.append("Freigegebene Felgenbedingungen fehlen")
         if getattr(self.p, "PUBLIC_SITE_ONLY", False):
             problems.append("Bestellungen benötigen die zentrale Portaldatenbank")
         if mode not in {"test", "live"} or cfg.get("REIFEN_KAUF_ENABLED") is not True:
             problems.append("Neubestellungen nicht aktiviert")
-        if cfg.get("REIFEN_TERMS_APPROVED_SHA256") != terms.get("sha256"):
+        if (not isinstance(terms.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", terms["sha256"])
+                or cfg.get("REIFEN_TERMS_APPROVED_SHA256") != terms["sha256"]):
             problems.append("Bestellbedingungen noch nicht freigegeben")
         supplier = cfg.get("REIFEN_KAUF_SUPPLIER")
         if not all(callable(getattr(supplier, name, None)) for name in ("inspect", "reserve", "commit")):
             problems.append("Lieferanten- und Lieferreservierung fehlen")
         elif getattr(supplier, "livemode", None) is not (mode == "live"):
             problems.append("Lieferantenumgebung stimmt nicht überein")
-        if not callable(cfg.get("REIFENANGEBOT_PROVIDER")):
+        if produktart == "reifen" and not callable(cfg.get("REIFENANGEBOT_PROVIDER")):
             problems.append("Bestätigte Reifenpreise fehlen")
+        if produktart == "felgen" and not isinstance(cfg.get("FELGENANGEBOT_PROVIDER"), FelgenCatalogProvider):
+            problems.append("Bestätigte Felgenpreise fehlen")
         if not all(callable(getattr(cfg.get("REIFEN_KAUF_SMS"), name, None)) for name in ("start", "check")):
             problems.append("SMS-Verbindung fehlt")
         gateway = cfg.get("REIFEN_KAUF_GATEWAY")
@@ -131,14 +150,14 @@ class ReifenKauf:
             stop = self.app.extensions.get("reifen_kauf_worker")
             if worker is None or not worker.is_alive() or stop is None or stop.is_set():
                 problems.append("Zahlungsabgleich und Vertragsversand laufen noch nicht")
-        return {"ready": not problems, "mode": mode, "problems": problems}
+        return {"ready": not problems, "produktart": produktart, "mode": mode, "problems": problems}
 
-    def require_ready(self):
-        if not self.readiness()["ready"]:
+    def require_ready(self, produktart="reifen"):
+        if not self.readiness_for(produktart)["ready"]:
             abort(503, description="Der Bestellabschluss wird noch eingerichtet.")
 
     def require_row_ready(self, row):
-        self.require_ready()
+        self.require_ready(self.category(json.loads(row["query_json"]), json.loads(row["produkt_json"])))
         if row["mode"] != self.app.config.get("REIFEN_KAUF_MODE"):
             abort(409, description="Diese Bestellung gehört zu einer anderen Zahlungsumgebung.")
 
@@ -183,18 +202,61 @@ class ReifenKauf:
         finally:
             db.close()
 
+    @staticmethod
+    def category(query, product=None):
+        kind = query.get("produktart", "reifen")
+        if kind == "reifen":
+            if (set(query) != {"groesse", "saison", "qualitaet", "anzahl", "montage"}
+                    or query.get("montage") not in {"ja", "nein"}
+                    or type(query.get("anzahl")) is not str or not re.fullmatch(r"[1-8]", query["anzahl"])):
+                raise ValueError("Die gespeicherte Artikelauswahl ist ungültig.")
+        elif kind == "felgen":
+            if set(query) != {"produktart", "anzahl"} or type(query.get("anzahl")) is not int or not 1 <= query["anzahl"] <= 8:
+                raise ValueError("Die gespeicherte Artikelauswahl ist ungültig.")
+            if product is not None and (any(key in product for key in ("groesse", "saison", "montage"))
+                    or any(key in product.get("preis", {}) for key in ("montage_brutto", "gesamt_reifen_brutto"))):
+                raise ValueError("Die gespeicherte Produktart stimmt nicht überein.")
+        else:
+            raise ValueError("Diese Produktart ist nicht für Bestellungen eingerichtet.")
+        if product is not None and product.get("produktart", kind) != kind:
+            raise ValueError("Die gespeicherte Produktart stimmt nicht überein.")
+        return kind
+
     def quote_hash(self, query, product):
-        return digest(encode({"query": query, "artikel_id": product["artikel_id"],
-            "bezeichnung": product["bezeichnung"], "groesse": product["groesse"], "preis": product["preis"]}))
+        kind = self.category(query, product)
+        # Preserve hashes of existing tire drafts; their strict five-field query
+        # can never be consumed as a rim selection.
+        if kind == "reifen":
+            return digest(encode({"query": query, "artikel_id": product["artikel_id"],
+                "bezeichnung": product["bezeichnung"], "groesse": product["groesse"], "preis": product["preis"]}))
+        selection = RaederAuswahl(kind, product["artikel_id"], query["anzahl"], None, query, product)
+        return digest(encode(self.resolver().quote_identity(selection)))
+
+    def resolver(self):
+        return RaederAuswahlResolver(self.app.config, self.app.secret_key, clock=self.now)
 
     def fresh(self, token):
-        selection = lade_auswahl_token(self.app.secret_key, token)
-        payload, status = suche_reifenangebote(selection["query"], self.app.config.get("REIFENANGEBOT_PROVIDER"),
-                                             now=self.now(), artikel_id=selection["artikel_id"])
-        product = next((p for p in payload["produkte"] if p["artikel_id"] == selection["artikel_id"]), None)
-        if status != 200 or not product:
-            raise ValueError("Dieser Reifen ist derzeit nicht mehr verfügbar. Bitte neu suchen.")
-        return selection["query"], product
+        kind = "felgen" if isinstance(token, str) and token.startswith(FELGEN_TOKEN_PREFIX) else "reifen"
+        selection = self.resolver().from_token(token, produktart=kind)
+        return self._selected(selection)
+
+    @staticmethod
+    def _selected(selection):
+        product = selection.mutable_product()
+        product["produktart"] = selection.produktart
+        return selection.mutable_query(), product
+
+    def _fresh_selection(self, query, artikel_id):
+        return self._selected(self.resolver().refresh_owned(query, artikel_id))
+
+    def fresh_order(self, row):
+        # An owned persisted draft is the authority after the entry-link TTL.
+        # Current SKU, stock and price still need the normal provider checks.
+        query = json.loads(row["query_json"])
+        product = json.loads(row["produkt_json"])
+        self.category(query, product)
+        artikel_id = product["artikel_id"]
+        return self._fresh_selection(query, artikel_id)
 
     def limit(self, action):
         key = "reifen-kauf:" + action
@@ -223,15 +285,23 @@ class ReifenKauf:
     def order(self, row):
         product, query, customer, terms, reservation = (json.loads(row[k]) for k in
             ("produkt_json","query_json","kunde_json","rechtstexte_json","reservierung_json"))
+        kind = self.category(query, product)
+        if kind == "felgen" and (row["montage_datum"] or row["montage_uhrzeit"]):
+            raise ValueError("Für diese Felgenbestellung ist keine Montage vereinbart.")
         sms_status = row["sms_state"] if row["sms_state"] in {
             "", "sending", "pending", "checking", "unknown", "limit", "approved"} else "unknown"
-        return {"id":row["id"], "status":row["state"], "kunde":customer, "produkt":product, "query":query,
+        if not row["telefon_bestaetigt_am"] and row["sms_checks"] >= 5:
+            sms_status = "limit"
+        edit_allowed = (row["state"] in EDITABLE and row["mode"] == self.app.config.get("REIFEN_KAUF_MODE")
+            and row["mode"] in {"test", "live"} and not row["payment_id"] and row["payment_status"] == "unbezahlt"
+            and not reservation and sms_status not in {"sending", "pending", "checking", "unknown", "limit"})
+        return {"id":row["id"], "produktart":kind, "status":row["state"], "kunde":customer, "produkt":product, "query":query,
             "demo":row["mode"] != "live", "mode":row["mode"], "quote_hash":row["quote_hash"],
             "telefon_bestaetigt":bool(row["telefon_bestaetigt_am"]), "sms_status":sms_status, "zahlungsart":row["zahlungsart"],
             "montage_datum":row["montage_datum"], "montage_uhrzeit":row["montage_uhrzeit"],
             "lieferdatum":row["lieferdatum"], "zahlung_status":row["payment_status"],
             "zahlung_url":row["payment_url"], "bestaetigt":row["state"] in FINAL,
-            "aenderbar":row["state"] in EDITABLE, "artikel_id":product["artikel_id"],
+            "aenderbar":row["state"] in EDITABLE, "bearbeitbar":edit_allowed, "artikel_id":product["artikel_id"],
             "anzahl":int(query["anzahl"]), "amount_total":int(Decimal(product["preis"]["gesamt_brutto"]) * 100),
             "currency":"eur", "payment_expires_at":row["payment_expires_at"],
             "payment_attempt":row["payment_attempt"], "rechtstexte":terms,
@@ -240,53 +310,103 @@ class ReifenKauf:
             "erklaerungen":json.loads(row["erklaerungen_json"]), "auftrag_id":row["auftrag_id"]}
 
     def inspect(self, query, product):
+        kind = self.category(query, product)
         source = self.supplier(self.app.config.get("REIFEN_KAUF_MODE"))
         if not callable(getattr(source, "inspect", None)):
             return None
         try:
-            proof = source.inspect({"query":query, "artikel_id":product["artikel_id"]})
+            proof = source.inspect({"query":query, "produktart":kind, "anzahl":int(query["anzahl"]), "artikel_id":product["artikel_id"]})
         except Exception:
             raise ValueError("Die Lieferfreigabe konnte gerade nicht geprüft werden.") from None
         if (not isinstance(proof, dict) or proof.get("artikel_id") != product["artikel_id"]
-                or proof.get("paketversandfaehig") is not True):
-            raise ValueError("Diese Reifenausführung ist noch nicht für die Onlinebestellung freigegeben.")
-        if date.fromisoformat(proof["lieferdatum"]) < self.now().astimezone(ZoneInfo("Europe/Berlin")).date():
+                or proof.get("paketversandfaehig") is not True or not self.proof_category(proof, kind)):
+            raise ValueError("Diese Artikelausführung ist noch nicht für die Onlinebestellung freigegeben.")
+        try:
+            delivery = proof.get("lieferdatum")
+            if not isinstance(delivery, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", delivery):
+                raise ValueError()
+            delivery_day = date.fromisoformat(delivery)
+        except (ValueError, TypeError):
+            raise ValueError("Die Lieferfreigabe enthält kein gültiges Bereitstellungsdatum.") from None
+        if delivery_day < self.now().astimezone(ZoneInfo("Europe/Berlin")).date():
             raise ValueError("Das bestätigte Lieferdatum ist nicht aktuell.")
         return proof
 
-    def render(self, *, token="", row=None, form=None, errors=None, status=200):
+    @staticmethod
+    def proof_category(proof, kind):
+        # Historical tire adapters may omit the category. Rims always require
+        # an explicit supplier acknowledgement and never a tire fallback.
+        return proof.get("produktart", "reifen") == kind
+
+    def early_mounting(self, row):
+        if not row or not row["montage_datum"]:
+            return False
+        # This is the separately agreed service, whose withdrawal starts at
+        # acceptance, not the goods' withdrawal period starting on receipt.
+        latest_acceptance = self.now() + timedelta(hours=1)
+        reservation = json.loads(row["reservierung_json"])
+        if reservation.get("gueltig_bis"):
+            latest_acceptance = max(latest_acceptance, aware(reservation["gueltig_bis"]))
+        end = latest_acceptance.astimezone(ZoneInfo("Europe/Berlin")).date() + timedelta(days=14)
+        while end.weekday() >= 5 or end in self.p.bw_feiertage(end.year):
+            end += timedelta(days=1)
+        return date.fromisoformat(row["montage_datum"]) <= end
+
+    def render(self, *, token="", row=None, form=None, errors=None, status=200, selected=None):
         if row:
             token, order = row["auswahl_token"], self.order(row)
             query, product, terms = order["query"], order["produkt"], order["rechtstexte"]
         else:
-            query, product = self.fresh(token)
+            query, product = selected if selected is not None else self.fresh(token)
             order, terms = None, self.terms()
-        state = self.readiness()
+        kind = self.category(query, product)
+        state = self.readiness_for(kind)
+        formdata = dict(form or {})
+        display_errors = [errors] if isinstance(errors, str) else list(errors or [])
+        montage_errors = {}
         first_day, slots = "", []
-        if query["montage"] == "ja" and state["ready"] and not row:
+        if query.get("montage") == "ja" and state["ready"] and not row:
             try:
                 proof = self.inspect(query, product)
-                candidate = date.fromisoformat(proof["lieferdatum"]) + timedelta(days=1)
-                for _ in range(14):
-                    slots = self.p.freie_reifen_slots(candidate.isoformat())
-                    if slots:
-                        first_day = candidate.isoformat()
-                        break
-                    candidate += timedelta(days=1)
+                minimum = date.fromisoformat(proof["lieferdatum"]) + timedelta(days=1)
+                first_day = minimum.isoformat()
+                if "montage_datum" in formdata:
+                    submitted = formdata["montage_datum"]
+                    if not isinstance(submitted, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", submitted):
+                        raise ValueError("Montagedatum ungültig")
+                    candidate = date.fromisoformat(submitted)
+                    if candidate < minimum:
+                        raise ValueError("Montagedatum vor Lieferung")
+                    slots = self.p.freie_reifen_slots(submitted)
+                    if not slots:
+                        montage_errors["montage_datum"] = "Am gewählten Tag sind keine freien Montageterminzeiten verfügbar. Bitte wählen Sie einen anderen Tag."
+                    elif formdata.get("montage_uhrzeit") and formdata["montage_uhrzeit"] not in slots:
+                        montage_errors["montage_uhrzeit"] = "Die gewählte Uhrzeit ist an diesem Tag nicht verfügbar. Bitte wählen Sie eine angebotene Uhrzeit."
+                else:
+                    candidate = minimum
+                    for _ in range(14):
+                        slots = self.p.freie_reifen_slots(candidate.isoformat())
+                        if slots:
+                            formdata["montage_datum"] = candidate.isoformat()
+                            break
+                        candidate += timedelta(days=1)
+            except (ValueError, TypeError):
+                slots = []
+                montage_errors["montage_datum"] = "Bitte ein gültiges Montagedatum nach der bestätigten Lieferung auswählen."
             except Exception:
                 slots = []
-        # Obtain both declarations for the chosen appointment. Draft dates are
-        # not a reliable end of the right (contract time, day-end, holidays).
-        early = bool(row and row["montage_datum"])
+                montage_errors["montage_datum"] = "Die Montagezeiten können gerade nicht geprüft werden. Bitte versuchen Sie es erneut."
+        early = self.early_mounting(row)
         return render_template("reifen_bestellen.html", auswahl_token=token, produkt=product, query=query,
+            produktart=kind,
             bestellung=order, checkout_endpoint="reifen_kauf", checkout={"demo":(row["mode"] if row else state["mode"]) != "live",
                 "zahlung_freigegeben":state["ready"], "grund":"Zahlung, SMS und Lieferantenverbindung werden noch eingerichtet."},
-            formdata=form or {}, fehler=errors or [], rechtstexte=terms, fruehe_montage=early,
+            formdata=formdata, fehler=display_errors, rechtstexte=terms, fruehe_montage=early, montage_fehler=montage_errors,
             fruehestes_montagedatum=first_day, freie_termine=slots, termine_nur_vorschau=True), status
 
     def start_sms(self, row):
         self.require_row_ready(row)
-        if row["state"] not in EDITABLE or row["sms_starts"] >= 3 or row["sms_state"] in {"unknown","sending","checking"}:
+        if row["state"] not in EDITABLE or row["sms_starts"] >= 3 or row["sms_checks"] >= 5 or row["sms_state"] in {"unknown","sending","checking","limit"}:
             abort(409)
         if not self.cas(row, sms_state="sending", sms_starts=row["sms_starts"]+1, telefon_bestaetigt_am="", state="entwurf"):
             return
@@ -330,13 +450,17 @@ class ReifenKauf:
             good = False
         current = self.row(row["id"])
         if current["state"] == row["state"] and current["sms_state"] == "checking":
-            self.cas(current, sms_state="approved" if good is True else "pending",
+            self.cas(current, sms_state="approved" if good is True else "limit" if current["sms_checks"] >= 5 else "pending",
                 telefon_bestaetigt_am=self.now().isoformat() if good is True else "",
                 state="telefon_bestaetigt" if good is True else "entwurf")
         if good is not True:
             raise ValueError("Der Code ist ungültig oder abgelaufen.")
 
     def hold_slot(self, row, reservation):
+        if self.category(json.loads(row["query_json"]), json.loads(row["produkt_json"])) == "felgen":
+            if row["montage_datum"] or row["montage_uhrzeit"]:
+                raise ValueError("Für Felgen ist keine Montage vereinbart.")
+            return
         if not row["montage_datum"]:
             return
         if date.fromisoformat(row["montage_datum"]) <= date.fromisoformat(reservation["lieferdatum"]):
@@ -373,10 +497,15 @@ class ReifenKauf:
             return
         try:
             order = self.order(row)
+            declarations = order["erklaerungen"]
+            if self.early_mounting(row) and any(declarations.get(key) is not True for key in
+                    ("frueher_montagebeginn", "kenntnis_montagewiderruf")):
+                raise ValueError("Die Erklärungen zum frühen Montagebeginn müssen erneut geprüft werden.")
             receipt = supplier.commit(order)
             if (not isinstance(receipt, dict) or receipt.get("bestaetigt") is not True
                     or not isinstance(receipt.get("bestellnummer"), str) or not receipt["bestellnummer"]
                     or receipt.get("reference") != row["id"] or receipt.get("artikel_id") != order["artikel_id"]
+                    or not self.proof_category(receipt, order["produktart"])
                     or type(receipt.get("anzahl")) is not int or receipt["anzahl"] != order["anzahl"]
                     or receipt.get("lieferdatum") != order["reservierung"].get("lieferdatum")
                     or receipt.get("reservierung_id") != order["reservierung"].get("reservierung_id")):
@@ -436,7 +565,7 @@ class ReifenKauf:
         terms = json.loads(row["rechtstexte_json"])
         if terms.get("sha256") != self.terms().get("sha256"):
             raise ValueError("Die Bestellbedingungen wurden geändert. Bitte die Bestellung neu vorbereiten.")
-        if row["montage_datum"]:
+        if self.early_mounting(row):
             if any(form.get(k) != "ja" for k in ("frueher_montagebeginn","kenntnis_montagewiderruf")):
                 raise ValueError("Bitte die Erklärungen zum frühen Montagebeginn bestätigen.")
         existing_reservation = json.loads(row["reservierung_json"])
@@ -447,7 +576,7 @@ class ReifenKauf:
         if known_hold:
             query, product = json.loads(row["query_json"]), json.loads(row["produkt_json"])
         else:
-            query, product = self.fresh(row["auswahl_token"])
+            query, product = self.fresh_order(row)
         current_hash = self.quote_hash(query, product)
         if form.get("quote_hash") != row["quote_hash"] or current_hash != row["quote_hash"]:
             self.cas(row, produkt_json=encode(product), quote_hash=current_hash, state="preis_geaendert")
@@ -468,6 +597,7 @@ class ReifenKauf:
             order = self.order(row)
             reservation = existing_reservation if known_hold else self.supplier(row["mode"]).reserve(order)
             if (not isinstance(reservation, dict) or reservation.get("artikel_id") != order["artikel_id"]
+                    or not self.proof_category(reservation, order["produktart"])
                     or type(reservation.get("anzahl")) is not int or reservation["anzahl"] != order["anzahl"]
                     or reservation.get("quote_hash") != row["quote_hash"]
                     or not isinstance(reservation.get("reservierung_id"), str) or not reservation["reservierung_id"]
@@ -478,10 +608,16 @@ class ReifenKauf:
                 raise ValueError("Das bestätigte Lieferdatum liegt in der Vergangenheit.")
             clean_reservation = {k:reservation[k] for k in
                 ("artikel_id","anzahl","quote_hash","reservierung_id","paketversandfaehig","gueltig_bis","lieferdatum")}
+            clean_reservation["produktart"] = order["produktart"]
             if reservation["lieferdatum"] != row["lieferdatum"]:
                 current = self.row(row["id"])
                 self.cas(current, reservierung_json=encode(clean_reservation), lieferdatum=reservation["lieferdatum"], state="preis_geaendert")
                 raise NeueLieferzusage("Die verbindliche Lieferreservierung nennt einen anderen Bereitstellungstermin. Bitte die neue Übersicht prüfen und erneut bestätigen.")
+            if self.early_mounting({**row, "reservierung_json":encode(clean_reservation)}) and any(
+                    declarations.get(key) is not True for key in ("frueher_montagebeginn", "kenntnis_montagewiderruf")):
+                current = self.row(row["id"])
+                self.cas(current, reservierung_json=encode(clean_reservation), state="preis_geaendert")
+                raise NeueLieferzusage("Durch das mögliche Annahmefenster kann die Montage vor Ablauf der Widerrufsfrist liegen. Bitte die Übersicht und die Erklärungen zum frühen Montagebeginn erneut prüfen.")
             self.hold_slot(row, reservation)
             current = self.row(row["id"])
             self.cas(current, reservierung_json=encode(clean_reservation), state="reserviert")
@@ -557,27 +693,53 @@ def register_reifen_kauf(portal):
         return redirect(url_for("reifen_kauf.uebersicht", bestell_id=order_id))
 
     @bp.get("/reifen/bestellen/<token>/kauf")
+    @bp.get("/raeder/bestellen/<token>/kauf", endpoint="einstieg")
     def start(token):
         service.limit("produkt")
         service.owner(create=True)
         try:
             return service.render(token=token)
         except ValueError:
-            abort(409, description="Die Reifenauswahl ist nicht mehr verfügbar. Bitte neu suchen.")
+            abort(409, description="Die Artikelauswahl ist nicht mehr verfügbar. Bitte neu suchen.")
+
+    @bp.get("/reifen/kauf/<bestell_id>/bearbeiten")
+    def bearbeiten(bestell_id):
+        service.limit("bearbeiten")
+        row = service.row(bestell_id)
+        if not service.order(row)["bearbeitbar"]:
+            abort(409, description="Diese Bestellung kann gerade nicht geändert werden. Bitte prüfen Sie den Bestellstatus oder wenden Sie sich an uns.")
+        try:
+            query, product = service.fresh_order(row)
+            if service.category(query, product) == "felgen":
+                token = erstelle_felgen_auswahl_token(portal.app.secret_key, product["artikel_id"], query["anzahl"], clock=service.now)
+            else:
+                from reifen_bestellung import erstelle_auswahl_token
+                token = erstelle_auswahl_token(portal.app.secret_key, query, product["artikel_id"])
+            form = {**json.loads(row["kunde_json"]), "zahlungsart":row["zahlungsart"],
+                "montage_datum":row["montage_datum"], "montage_uhrzeit":row["montage_uhrzeit"],
+                "standardmontage":"ja" if row["montage_datum"] else ""}
+            return service.render(token=token, form=form, selected=(query, product))
+        except (ValueError, TypeError, KeyError):
+            abort(409, description="Die aktuelle Artikelauswahl konnte nicht geprüft werden. Bitte suchen Sie erneut.")
 
     @bp.post("/reifen/kauf/<token>/entwurf")
     def entwurf(token):
-        service.require_ready()
+        kind = "felgen" if token.startswith(FELGEN_TOKEN_PREFIX) else "reifen"
+        service.require_ready(kind)
         service.limit("entwurf")
+        selected = None
         try:
             query, product = service.fresh(token)
+            selected = (query, product)
             inspection = service.inspect(query, product)
             customer, terms = service.customer(request.form), service.terms()
             payment = request.form.get("zahlungsart")
             if payment not in {"online","vor_ort"}:
                 raise ValueError("Bitte eine Zahlungsart auswählen.")
             day, hour = "", ""
-            if query["montage"] == "ja":
+            if kind == "felgen" and any(request.form.get(key) for key in ("montage_datum", "montage_uhrzeit", "standardmontage")):
+                raise ValueError("Für einzelne Felgen ist keine Montage vereinbart.")
+            if query.get("montage") == "ja":
                 day, hour = request.form.get("montage_datum", ""), request.form.get("montage_uhrzeit", "")
                 if request.form.get("standardmontage") != "ja" or hour not in portal.reifen_slot_zeiten(day):
                     raise ValueError("Bitte einen passenden Montagetermin und die Standardmontage bestätigen.")
@@ -603,7 +765,10 @@ def register_reifen_kauf(portal):
         except HTTPException:
             raise
         except Exception:
-            return service.render(token=token, form=request.form, errors=["Bitte Kontaktdaten, Reifenfreigabe und Termin prüfen."], status=400)
+            if selected is None:
+                abort(409, description="Die Artikelauswahl ist nicht mehr verfügbar. Bitte neu suchen.")
+            return service.render(token=token, form=request.form, selected=selected,
+                errors=["Bitte Kontaktdaten, Artikelfreigabe und gegebenenfalls den Termin prüfen."], status=400)
 
     @bp.get("/reifen/kauf/<bestell_id>")
     def uebersicht(bestell_id):

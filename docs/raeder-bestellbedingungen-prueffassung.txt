@@ -1,0 +1,582 @@
+GÄRTNER – B2C-BESTELLBEDINGUNGEN FÜR REIFEN, FELGEN UND KOMPLETTRÄDER
+Vollständige Prüffassung, Stand 03.11.2026
+Version: prueffassung:raeder-bestellung-2026-11-03-v1
+Status: NICHT FREIGEGEBEN / NICHT VERÖFFENTLICHT
+
+Diese Datei bereitet den Kundentext und die abschließende Abnahme vor. Sie
+bestätigt weder einen aktiven Shop noch verfügbare Zahlungs-, Lieferanten- oder
+Montageverbindungen. Die Abschnitte A bis F sind der vorgeschlagene Kundentext;
+G bis I enthalten ausschließlich interne Prüf- und Freigabehinweise. Vor einer
+Veröffentlichung müssen Kundentext, tatsächlicher Bestellablauf und endgültiger
+Freigabestand übereinstimmen. Die Version des bisherigen Reifenentwurfs bleibt
+unverändert. Diese Datei ist kein bereits freigegebenes Vertrags-JSON und ersetzt
+keinen technisch geprüften, unveränderlichen Textsnapshot einer Bestellung.
+
+A. BESTELLBEDINGUNGEN
+
+1. Verkäufer, Kundenkreis und Leistungen
+
+Verkäufer ist:
+Gärtner GmbH Karosserie & Lack
+Alte Neckarelzer Straße 18/1
+74821 Mosbach, Deutschland
+Vertreten durch Geschäftsführer Christopher Gärtner
+Registergericht: Amtsgericht Mannheim, HRB 754425
+Umsatzsteuer-ID: DE358424941
+Telefon: 06261 1809260
+E-Mail: info@auto-lackierzentrum.de
+
+Diese Bedingungen gelten für Onlinebestellungen neuer Reifen, neuer Felgen und
+neuer Kompletträder durch Verbraucher. Verbraucher sind natürliche Personen,
+die überwiegend zu privaten Zwecken bestellen. Vertragssprache ist Deutsch.
+Ein gewerblicher B2B-Verkauf ist nicht Gegenstand dieses Bestellwegs.
+
+Alle Waren sind ausschließlich zur Abholung an unserer oben genannten Adresse
+in Mosbach oder zur ausdrücklich gewählten Werkstattmontage dort vorgesehen.
+Es erfolgt keine Zustellung an eine Kundenadresse und kein Direktversand an
+Kunden. Die Rechnungsadresse begründet keine Versandoption.
+
+Ein Reifenangebot umfasst nur die bezeichneten Reifen ohne Felgen. Ein
+Felgenangebot umfasst nur die bezeichneten Felgen ohne Reifen. Kompletträder
+umfassen die in der Bestellübersicht einzeln bezeichneten Reifen, Felgen und
+ausdrücklich enthaltenen Komponenten und Arbeiten. Maßgeblich sind Beschreibung,
+Ausführung und Stückzahl. Ein Satz enthält nur dann vier Räder, wenn vier Räder
+ausdrücklich ausgewiesen sind. Ein Produktbild erweitert den beschriebenen
+Lieferumfang nicht; vereinbarte und gesetzlich geschuldete Eigenschaften bleiben
+maßgeblich. Zubehör, RDKS, Befestigungsmittel, Ventile oder Montageleistungen
+sind nur enthalten, soweit sie in der konkreten Übersicht enthalten sind.
+
+In diesem Onlinebestellweg bieten wir nur Waren an, deren Rücksendung in der
+verkauften Ausführung auf dem normalen Postweg als Paket möglich ist. Für ein
+Komplettrad ist die Rücksendemöglichkeit des vollständigen Rads maßgeblich.
+Eine Demontage des Reifens von der Felge wird für die Rückgabe nicht verlangt.
+
+2. Produktwahl und Fahrzeugzuordnung
+
+Die Bestellübersicht bezeichnet die wesentlichen Eigenschaften der gewählten
+Waren: bei Reifen insbesondere Hersteller, Modell, Dimension, Last- und
+Geschwindigkeitsindex, Saison und Stückzahl; bei Felgen Hersteller, Modell,
+Ausführung, Größe und die für das konkrete Angebot bestätigten technischen
+Angaben; bei Kompletträdern die genaue Zusammenstellung und deren Stückzahl.
+
+Eine Auswahl nach Reifengröße oder Felgendurchmesser allein bestätigt keine
+Eignung für ein bestimmtes Fahrzeug. Ist eine Fahrzeugzuordnung Bestandteil
+unseres konkreten Angebots, werden das Fahrzeug sowie die bestätigte Kombination
+und erforderliche Auflagen ausdrücklich benannt. Vor dem verbindlichen Abschluss
+eines fahrzeugbezogenen Komplettradangebots müssen die Fahrzeugvariante,
+zulässige Reifen-Felgen-Kombination, erforderliches Zubehör und gegebenenfalls
+RDKS sowie vorhandene Gutachten und Auflagen geklärt sein. Eine noch ungeklärte
+Fahrzeugzuordnung wird nicht als Freigabe bezeichnet.
+
+Bitte geben Sie die abgefragten Fahrzeug- und Kontaktdaten richtig an. Daraus
+folgt kein Ausschluss unserer gesetzlichen Prüf-, Informations- oder
+Mängelpflichten. Eine gegebenenfalls erforderliche Abnahme oder Eintragung ist
+nur dann Teil unserer Leistung, wenn sie ausdrücklich vereinbart ist. Dazu
+gehörende bekannte Anforderungen und vereinbarte Kosten stehen vor Bestellung
+in der Übersicht. Wir montieren erst, wenn die sichere und zulässige Verwendung
+der konkret vereinbarten Kombination geklärt ist.
+
+3. Preise, Menge und Zusatzleistungen
+
+Alle Kundenpreise sind Euro-Bruttopreise einschließlich der gesetzlichen
+Umsatzsteuer. Vor Ihrer Bestellung sehen Sie Stückpreis, Stückzahl,
+Warenzwischensumme, etwaige ausdrücklich ausgewiesene Beschaffungskosten,
+gewählte Leistungen und den vollständigen Gesamtpreis. Beschaffungskosten
+betreffen den Bezug zur Werkstatt; sie sind keine Kundenadresslieferung.
+Der angezeigte Gesamtpreis ist der von Ihnen für diese Bestellung angebotene
+Preis. Eine spätere Änderung unserer Einkaufspreise erhöht ihn nicht einseitig.
+
+Montage, Wuchten, RDKS-Arbeiten, Ventile, Niederquerschnitts- oder
+Runflatzuschläge, Entsorgung und sonstige Arbeiten werden nur berechnet, wenn
+sie im ausdrücklich gewählten Umfang und im Gesamtpreis enthalten sind oder
+Sie sie später gesondert vereinbaren. Dieselbe Leistung wird nicht doppelt
+berechnet. Ein Reifen-/Felgensatz mit enthaltener Radkonfektionierung führt
+nicht automatisch zu einer zusätzlichen Fahrzeugmontage.
+
+Ändern sich Preis, Artikel, Leistungsumfang oder zugesagte Bereitstellung vor
+Ihrer Bestellung, zeigen wir Ihnen die aktualisierte Übersicht. Nach Ihrer
+Bestellung vereinbaren wir Änderungen nur mit Ihrer ausdrücklichen Zustimmung.
+Es gibt keine automatische Ersatzware, Preiserhöhung, Zusatzarbeit oder
+kostenpflichtige Vertragsverlängerung. Ihre gesetzlichen Rechte bleiben bestehen.
+
+4. Bestellschritte und Vertragsschluss
+
+Sie wählen Artikel und Stückzahl, gegebenenfalls die ausdrücklich angebotene
+Fahrzeugzuordnung und Montageleistung sowie eine angebotene Zahlungsart. Sie
+tragen Ihre Kontakt- und Rechnungsdaten ein. Soweit der Bestellweg einen
+SMS-Code vorsieht, bestätigen Sie damit den Zugriff auf die Telefonnummer.
+Der Code ist weder eine amtliche Identitätsprüfung noch eine Erklärung zum
+Verzicht auf Verbraucherrechte. Eine Bestellung ist keine Werbeanmeldung.
+
+Vor dem letzten Bestellschritt können Sie Angaben und Auswahl berichtigen.
+Unmittelbar vor dem Abschluss sehen Sie die wesentlichen Artikel- und
+Leistungsmerkmale, Stückzahl, vollständigen Gesamtpreis, Zahlungswahl und die
+konkrete Bereitstellungs- beziehungsweise Montagezusage. Die Bedingungen und
+Widerrufsinformationen können Sie vor dem Abschluss abrufen und speichern.
+
+Die Produktanzeige ist eine Einladung, ein Kaufangebot abzugeben. Mit dem Button
+„zahlungspflichtig bestellen“ geben Sie ein verbindliches Angebot zu der
+angezeigten Übersicht ab. Das gilt auch bei der Zahlungswahl „Zahlung vor Ort“:
+Diese Wahl ist eine verbindliche Bestellung mit späterer Zahlung und keine
+unverbindliche Anfrage. Eine zusätzliche Unterschrift ist für die
+Onlinebestellung nicht erforderlich.
+
+Wir bestätigen den Eingang Ihrer Bestellung unverzüglich elektronisch. Diese
+Eingangsbestätigung ist noch keine Vertragsannahme, sofern sie nicht ausdrücklich
+eine Annahmeerklärung enthält. Der Vertrag entsteht erst, wenn Ihnen unsere
+ausdrückliche Bestellannahme auf der Bestätigungsseite oder per E-Mail zugeht.
+Wir nehmen erst nach bestätigter Warenbereitstellung beziehungsweise belastbarer
+Lieferreservierung und, soweit vereinbart, bestätigtem Montageplatz an. Bei
+Onlinezahlung muss zusätzlich die Zahlung sicher bestätigt sein.
+
+Wir können Ihr Angebot bis zum Ende des zweiten auf Ihre Bestellung folgenden
+Werktags annehmen. Werktage für diese Frist sind Montag bis Freitag, ausgenommen
+gesetzliche Feiertage in Baden-Württemberg. Sie sehen die konkrete Frist auch
+in der Bestellübersicht. Geht Ihnen innerhalb der Frist keine ausdrückliche
+Annahme zu, sind Sie an das Angebot nicht mehr gebunden. Eine spätere Annahme
+bedarf einer neuen Einigung. Ihr gesetzliches Widerrufsrecht bleibt unberührt.
+
+Eine bloße Rückkehr von Stripe, ein interner Buchungsstatus oder die Einreihung
+einer E-Mail in eine Warteschlange bestätigt weder Zahlung noch Vertragsannahme.
+Können wir nicht annehmen oder läuft die Annahmefrist erfolglos ab, informieren
+wir Sie und zahlen bereits erhaltene Beträge unverzüglich über das ursprüngliche
+Zahlungsmittel zurück, sofern Sie nicht ausdrücklich eine andere kostenfreie
+Rückzahlung vereinbaren. Eine Bearbeitungsgebühr fällt hierfür nicht an.
+
+5. Onlinezahlung oder Zahlung vor Ort
+
+Die tatsächlich angebotenen Zahlungsmittel werden zu Beginn des Bestellvorgangs
+und in der letzten Übersicht angezeigt. Sie können zwischen den dort angebotenen
+Onlinezahlmitteln und der dort angebotenen verbindlichen Zahlung vor Ort wählen.
+Für die Wahl der Zahlung vor Ort erheben wir keinen Zahlungsaufschlag.
+
+Bei gewählter Onlinezahlung erfolgt die Zahlung des angezeigten Gesamtbetrags
+im Anschluss an Ihre zahlungspflichtige Bestellung über die Stripe-Zahlungsseite.
+Die Zahlungsanforderung vor unserer Annahme ist noch keine Annahmeerklärung.
+Die Annahme und Abwicklung erfolgen nach sicher bestätigter Zahlung und den
+Voraussetzungen unter Ziffer 4. Ein abgebrochener oder unklarer Zahlungsvorgang
+gilt nicht als bezahlt. Ein unklarer Ausgang wird zunächst geprüft; Sie müssen
+nicht auf bloße Vermutung dieselbe Zahlung nochmals auslösen.
+
+Bei Zahlung vor Ort bleibt der vereinbarte Gesamtbetrag nach der Annahme offen
+und ist bei Abholung beziehungsweise nach Ausführung der vereinbarten
+Werkstattmontage vor Ort zu bezahlen. Wir leiten hierfür keine Onlinezahlung ein.
+Eine frühere Fälligkeit oder eine Kreditfinanzierung wird damit nicht
+vereinbart. Bei beiden Zahlungsarten besteht nach Vertragsschluss die Pflicht
+zur Zahlung des vereinbarten Preises; gesetzliche Widerrufs-, Rücktritts-,
+Minderungs- und Zurückbehaltungsrechte bleiben unberührt.
+
+6. Abholung, Termine und Montage
+
+Vor Ihrer verbindlichen Bestellung nennen wir die bestätigte Bereitstellung
+beziehungsweise den vereinbarten Leistungszeitraum und, soweit gewählt, den
+konkreten Montagetermin. Die Bestellannahme gibt diese Zusagen wieder. Ein
+Suchtreffer, vorläufiges Lieferdatum oder freies Kalenderfeld allein reserviert
+keine Ware und keinen Werkstattplatz. Wenn wir die erforderliche Zusage nicht
+bestätigen können, bieten wir keinen verbindlichen Abschluss zu dieser Zusage an.
+
+Abholung und Werkstattmontage erfolgen ausschließlich an unserer oben genannten
+Adresse. Über die Abholbereitschaft informieren wir Sie. Eine nicht abgestimmte
+Verspätung führt nicht automatisch zu Lagerkosten, einer Stornopauschale oder
+einem Verlust gesetzlicher Rechte. Zusätzliche Vereinbarungen treffen wir vorab
+ausdrücklich; gesetzliche Ansprüche bleiben unberührt.
+
+Bei einer gesondert bestellten Werkstattmontage gilt nur der bestätigte Umfang.
+Das bloße Zusammenbauen der als Ware bestellten Kompletträder wird nicht allein
+durch eine getrennte Preiszeile zu einer eigenständigen Dienstleistung mit einem
+eigenständigen Widerrufsausschluss. Eine tatsächlich gesondert vereinbarte
+Werkstattleistung, etwa der Anbau ans Fahrzeug, wird im Leistungsumfang und Preis
+erkennbar von der Warenlieferung unterschieden.
+
+Eine vor Ablauf der Widerrufsfrist beginnende gesonderte Werkstattleistung setzt
+Ihr ausdrückliches Verlangen und die unter D beschriebenen Erklärungen voraus.
+Eine Terminwahl oder die Zustimmung zu diesen Bedingungen genügt dafür nicht.
+Ohne entsprechendes Verlangen vereinbaren wir einen Termin nach Fristablauf.
+
+7. Vertragsbestätigung, Mängel und Beschwerden
+
+Sie erhalten die angenommene Bestellung einschließlich Artikeln und Leistungen,
+Gesamtpreis, Zahlungsstatus, vereinbarter Bereitstellung und Terminen sowie den
+bei Bestellung geltenden Bedingungen, Widerrufsinformationen und dem
+Muster-Widerrufsformular per E-Mail in speicherbarer Form. Die Bestätigung wird
+rechtzeitig, spätestens bei Warenübergabe und vor Beginn einer gesonderten
+Dienstleistung, zur Verfügung gestellt. Spätere Textänderungen ändern den
+gespeicherten Vertragsinhalt Ihrer Bestellung nicht.
+
+Die gesetzlichen Mängelrechte bestehen uneingeschränkt. Ansprüche wegen Mängeln
+neuer Waren verjähren regelmäßig zwei Jahre nach Übergabe; gesetzliche Sonder-
+und Verlängerungsregeln bleiben unberührt. Für die gesonderte Werkstattleistung
+gelten ebenfalls die gesetzlichen Mängelrechte. Eine Herstellergarantie oder
+sonstige zusätzliche Garantie besteht nur, soweit sie für die konkrete Ware
+ausdrücklich ausgewiesen ist; ihre Bedingungen schränken unsere gesetzliche
+Mängelhaftung nicht ein. Die gesetzlich erforderliche harmonisierte Mitteilung
+zur Gewährleistung wird gesondert hervorgehoben bereitgestellt.
+
+Für Fragen, Beschwerden, Mängelanzeigen und Erklärungen erreichen Sie uns über
+die unter Ziffer 1 genannten Kontaktdaten. Eine Anmeldung, eine bestimmte
+Rückgabe- oder Bestellnummer, Originalverpackung oder ein bestimmtes Formular
+ist keine Voraussetzung für die Ausübung Ihrer gesetzlichen Rechte.
+Die Rücksendekostenregel bei normalem Widerruf ändert nicht die gesetzlichen
+Kostenregeln bei mangelhafter Ware oder einer anderen Pflichtverletzung.
+
+Wir sind nicht bereit oder verpflichtet, an Streitbeilegungsverfahren vor einer
+Verbraucherschlichtungsstelle teilzunehmen.
+
+B. WIDERRUF BEIM WARENKAUF – REIFEN, FELGEN UND KOMPLETTRÄDER
+
+Sie können den online geschlossenen Warenkaufvertrag ohne Begründung innerhalb
+von 14 Tagen widerrufen. Die Frist beginnt mit Erhalt der Ware durch Sie oder
+eine von Ihnen benannte Person, die nicht der Transporteur ist. Werden mehrere
+Waren derselben Bestellung getrennt übergeben, zählt der Erhalt der letzten
+Ware; bei einer Ware in mehreren Teilen zählt der letzte Teil. Auch bei
+Abholung in Mosbach ist die tatsächliche Übergabe maßgeblich. Voraussetzung
+für den Fristbeginn ist eine ordnungsgemäße Widerrufsbelehrung.
+
+Teilen Sie Ihren Entschluss eindeutig mit, zum Beispiel telefonisch, per E-Mail
+oder Brief an:
+Gärtner GmbH Karosserie & Lack
+Alte Neckarelzer Straße 18/1, 74821 Mosbach, Deutschland
+E-Mail: info@auto-lackierzentrum.de
+Telefon: 06261 1809260
+
+Sie können das beigefügte Muster-Widerrufsformular verwenden; das ist freiwillig.
+Sie können Ihr Widerrufsrecht außerdem über „Vertrag widerrufen“ auf unserer
+Website ausüben:
+https://auto-lackierzentrum.de/reifen/vertrag-widerrufen
+Sie geben dort Ihren Namen, Angaben zur Identifizierung der Bestellung oder des
+betroffenen Vertragsteils und Ihren elektronischen Bestätigungskontakt an.
+Anschließend übermitteln Sie die Erklärung mit „Widerruf bestätigen“.
+Wir bestätigen den Eingang unverzüglich in speicherbarer elektronischer Form
+mit dem Inhalt Ihrer Erklärung sowie Eingangsdatum und Uhrzeit. Die Funktion
+ergänzt die anderen zulässigen Wege. Zum rechtzeitigen Widerruf genügt das
+Absenden Ihrer eindeutigen Erklärung vor Ablauf der Frist.
+
+Nach einem wirksamen Widerruf erstatten wir erhaltene Zahlungen einschließlich
+etwaiger gesetzlich zu erstattender Standardlieferkosten ohne unnötige
+Verzögerung, spätestens 14 Tage nach Zugang Ihres Widerrufs. Mehrkosten einer
+ausdrücklich gewählten teureren Lieferung gehören nicht dazu. Für die
+Rückzahlung verwenden wir Ihr ursprüngliches Zahlungsmittel, sofern wir nicht
+ausdrücklich etwas anderes vereinbaren und Ihnen dadurch keine Kosten entstehen.
+Beim Warenkauf dürfen wir mit der Rückzahlung warten, bis wir die Ware wieder
+erhalten haben oder Sie die Absendung nachweisen; entscheidend ist das frühere
+Ereignis. Das gilt nicht, wenn wir eine Abholung der Ware angeboten haben.
+
+Geben oder schicken Sie die Waren ohne unnötige Verzögerung, spätestens 14 Tage
+nach Ihrer Widerrufsmitteilung, an unsere oben genannte Adresse zurück. Bei
+Rücksendung genügt die Absendung innerhalb dieser Zeit. Sie tragen die
+unmittelbaren Kosten der Rücksendung. Sie können die Waren innerhalb dieser
+Frist auch persönlich in Mosbach zurückgeben. Unser beschriebenes Onlineangebot
+umfasst nur in der verkauften Ausführung paketversandfähige Waren. Bei einem
+Komplettrad wird für die Rückgabe keine Trennung von Reifen und Felge verlangt.
+
+Eine vorherige Rückgabefreigabe oder Nutzung unseres Formulars ist für den
+Widerruf nicht erforderlich. Die gesetzlichen Regeln für die Gefahr der
+Rücksendung bleiben unberührt. Für einen Wertverlust müssen Sie nur einstehen,
+wenn er durch einen Umgang entsteht, der über die erforderliche Prüfung der
+Beschaffenheit, Eigenschaften und Funktionsweise hinausgeht, und die
+gesetzlichen Voraussetzungen erfüllt sind. Eine pauschale Wiedereinlagerungs-,
+Demontage- oder Bearbeitungsgebühr für den Widerruf wird nicht erhoben.
+
+Die Auswahl üblicher Reifen, Felgen und Zubehörteile oder deren Zusammenbau zu
+einem Standard-Komplettrad wird hier nicht als pauschale Ausnahme vom
+Widerrufsrecht behandelt. Montage, Wuchten, Anbau oder Nutzung schließen den
+Warenwiderruf nicht automatisch aus. Ein etwaiger gesetzlicher Wertersatz wird
+anhand des konkreten Falls geprüft. Diese Fassung sieht keinen automatischen
+Ausschluss für vermeintliche Sonderbestellungen vor.
+
+C. WIDERRUF BEI EINER GESONDERT VEREINBARTEN WERKSTATTLEISTUNG
+
+Für einen online geschlossenen, gesonderten Vertrag über eine entgeltliche
+Werkstattleistung besteht grundsätzlich ein 14-tägiges Widerrufsrecht ab
+Vertragsschluss bei ordnungsgemäßer Belehrung. Erklären können Sie den Widerruf
+ohne Begründung über die unter B genannten Kontaktwege, das folgende Formular
+oder die dort genannte elektronische Widerrufsfunktion. Eine rechtzeitig
+abgesandte Erklärung genügt zur Fristwahrung.
+
+Erhaltene Zahlungen für diesen Vertrag erstatten wir ohne unnötige Verzögerung,
+spätestens 14 Tage nach Eingang des Widerrufs, grundsätzlich über das
+ursprüngliche Zahlungsmittel und ohne zusätzliche Erstattungskosten. Eine
+abweichende kostenfreie Rückzahlung bedarf einer ausdrücklichen Vereinbarung.
+
+Soll die gesonderte Werkstattleistung schon während der Widerrufsfrist beginnen,
+benötigen wir vor Beginn Ihr ausdrückliches Verlangen und Ihre ausdrückliche
+Zustimmung zum frühen Beginn. Zusätzlich müssen Sie bestätigen, dass Sie
+wissen: Ihr Widerrufsrecht für diesen entgeltlichen Dienstleistungsvertrag
+erlischt erst mit vollständig erbrachter Leistung und unter den gesetzlichen
+Voraussetzungen. Eine bloße Terminwahl, ein vorangekreuztes Feld oder die
+allgemeine Zustimmung zu Bestellbedingungen genügt hierfür nicht.
+
+Widerrufen Sie nach einem ausdrücklich verlangten frühen Beginn, kann unter den
+gesetzlichen Voraussetzungen ein angemessener Betrag für die bis zum Widerruf
+erbrachte Leistung anfallen. Ausgangspunkt ist der Anteil der bereits
+erbrachten Leistung an der insgesamt vereinbarten Leistung. Ist deren
+vereinbarter Gesamtpreis unverhältnismäßig hoch, ist stattdessen der Marktwert
+der erbrachten Leistung maßgeblich. Eine pauschale Stornozahlung wird damit
+nicht vereinbart. Ohne die gesetzlichen Voraussetzungen wird kein Wertersatz
+für vorzeitig erbrachte Dienstleistungen verlangt.
+
+Ein Erlöschen des Widerrufsrechts für eine gesonderte Werkstattleistung beseitigt
+nicht pauschal das Widerrufsrecht für die Waren. Bei gemeinsam bestellten Waren
+und Leistungen werden betroffene Positionen und gesetzliche Folgen konkret
+geprüft. Die Fertigstellung der als Ware verkauften Kompletträder wird nicht
+allein aufgrund der frühen Fertigstellung vom Warenwiderruf ausgenommen.
+
+D. GESONDERTE ERKLÄRUNGEN ZUM FRÜHEN BEGINN
+
+Nur bei einer tatsächlich gesondert vereinbarten Werkstattleistung und nur bei
+Beginn innerhalb ihrer Widerrufsfrist; freiwillig, nicht vorangekreuzt:
+
+1. Ausdrückliches Verlangen und Zustimmung:
+„Ich verlange ausdrücklich und stimme zu, dass Gärtner GmbH Karosserie & Lack
+mit der in meiner Bestellübersicht gesondert bezeichneten Werkstattleistung
+zum gewählten Termin bereits vor Ablauf der Widerrufsfrist beginnt.“
+
+2. Getrennte Kenntnisbestätigung:
+„Mir ist bekannt, dass mein Widerrufsrecht für diese Werkstattleistung mit
+vollständiger Leistungserbringung unter den gesetzlichen Voraussetzungen
+erlischt. Mein Widerrufsrecht für die bestellten Waren wird dadurch nicht
+pauschal ausgeschlossen.“
+
+Die konkrete Leistung und deren Preis müssen bei diesen Erklärungen erkennbar
+sein. Beide Erklärungen gehören anschließend mit ihrem tatsächlichen Inhalt
+und der vereinbarten Leistung in die Vertragsbestätigung.
+
+E. MUSTER-WIDERRUFSFORMULAR
+
+(Wenn Sie den Vertrag widerrufen wollen, dann füllen Sie bitte dieses Formular
+aus und senden Sie es zurück.)
+
+An
+Gärtner GmbH Karosserie & Lack
+Alte Neckarelzer Straße 18/1
+74821 Mosbach, Deutschland
+E-Mail: info@auto-lackierzentrum.de
+
+Hiermit widerrufe(n) ich/wir (*) den von mir/uns (*) abgeschlossenen Vertrag über
+den Kauf der folgenden Waren (*)/die Erbringung der folgenden Dienstleistung (*)
+______________________________________________________________________
+______________________________________________________________________
+
+Bestellt am (*)/erhalten am (*)
+______________________________________________________________________
+
+Name des/der Verbraucher(s)
+______________________________________________________________________
+
+Anschrift des/der Verbraucher(s)
+______________________________________________________________________
+______________________________________________________________________
+
+Unterschrift des/der Verbraucher(s) (nur bei Mitteilung auf Papier)
+______________________________________________________________________
+
+Datum
+______________________________________________________________________
+
+(*) Unzutreffendes streichen.
+
+F. KURZHINWEIS UNMITTELBAR VOR DEM ABSCHLUSS
+
+„Mit ‚zahlungspflichtig bestellen‘ geben Sie ein verbindliches Angebot über die
+oben aufgeführten Waren und ausdrücklich gewählten Leistungen zum angezeigten
+Gesamtpreis ab. Dies gilt auch bei Zahlung vor Ort. Der Vertrag entsteht mit
+Zugang unserer ausdrücklichen Annahme nach bestätigter Bereitstellung und
+gegebenenfalls bestätigtem Montageplatz; bei Onlinezahlung zusätzlich nach
+sicher bestätigter Zahlung. Die Annahmefrist steht in Ihrer Übersicht. Bei
+Zahlung vor Ort bleibt der Betrag bis zur Abholung beziehungsweise Ausführung
+der Werkstattmontage offen. Ihre gesetzlichen Widerrufsrechte bleiben bestehen.“
+
+Die Schaltfläche selbst lautet ausschließlich „zahlungspflichtig bestellen“.
+Der Kurztext ersetzt weder die hervorgehobene konkrete Bestellübersicht noch
+die vollständigen Bedingungen und Widerrufsinformationen. Keine verpflichtende
+Datenschutz- oder Werbeeinwilligung mit diesem Abschluss verbinden.
+
+G. INTERNE FREIGABE – VERKÄUFERFAKTEN UND BETRIEBSENTSCHEIDUNGEN
+
+Dieser Abschnitt gehört nicht zum Kundentext. Er ermöglicht die konkrete
+Abnahme der vorgeschlagenen Fassung; keine Unterschrift ist hierfür notwendig.
+
+G1. Am 03.11.2026 mit dem veröffentlichten Impressum abgeglichen:
+Verkäufername, Anschrift, Geschäftsführer, Registergericht/HRB, USt-ID,
+Telefon und Firmen-E-Mail wie unter A1. Dort ist auch die in A7 übernommene
+Nichtteilnahme-Erklärung zur Verbraucherschlichtung veröffentlicht. Vor
+Freigabe bestätigt die Geschäftsführung die fortbestehende Richtigkeit dieser
+Angaben und Erklärung. Eine eigene Register- oder Verpflichtungsprüfung wird
+hierdurch nicht behauptet. Bei einer Teilnahmeverpflichtung müssen zuständige
+Stelle und vorgeschriebene Hinweise ergänzt werden; § 37 VSBG im konkreten
+Beschwerdefall bleibt gesondert zu beachten.
+
+G2. Vom Nutzer bereits bestimmt und in dieser Fassung umgesetzt:
+- B2C-Reifen, Felgen und Kompletträder als eigenes Angebot.
+- Wahl zwischen Onlinezahlung und verbindlicher Zahlung vor Ort.
+- Kunde trägt bei normalem Widerruf unmittelbare Rücksendekosten;
+  persönliche Rückgabe in Mosbach bleibt möglich.
+- Kein automatischer Aufpreis oder geänderter Gesamtpreis nach Bestellung.
+
+Der derzeitige technische Kaufpfad unterstützt Abholung oder ausdrücklich
+gewählte Montage in Mosbach. Eine ausschließliche Beschränkung des künftigen
+B2C-Shops hierauf ist noch als Betriebsscope zu bestätigen; sie wird nicht als
+ausdrücklich erteilte Nutzerentscheidung behandelt. Die bereits bestätigte
+Direktversandpräferenz betrifft die gesondert besprochenen B2B-Lieferanten.
+
+G3. Konkreter Betriebsvorschlag zur abschließenden Bestätigung:
+Annahmefrist bis Ende des zweiten folgenden Werktags, Montag bis Freitag ohne
+Feiertage in Baden-Württemberg. Die Frist muss in der konkreten Übersicht
+berechnet und durchgesetzt werden. Danach erlischt die Angebotsbindung;
+bereits erhaltene Beträge werden unverzüglich zurückgezahlt. Solange diese
+Regel nicht bestätigt und technisch umgesetzt ist, die Fassung nicht aktivieren.
+Eine längere tatsächliche Supplierklärung darf die Frist nicht still verlängern.
+
+G4. Für jede einzelne bestellbare Auswahl vor Abschluss konkret auszufüllen:
+Exakte Waren-/Komponentenidentitäten und Menge, verifizierte wesentliche
+Eigenschaften, Gesamtpreis und alle ausdrücklich gewählten Leistungen,
+Zahlungswahl, verbindliche Bereitstellung/Leistungsfrist, gegebenenfalls
+Montagetermin und Auflagen einer zugesagten Fahrzeugzuordnung. Diese Angaben
+sind individuelle Vertragsdaten; in der Veröffentlichung dürfen an ihrer Stelle
+keine bloßen Platzhalter, geschätzten Zusagen oder nachträglichen offenen
+Mehrkosten erscheinen. Kann der Ablauf diese Informationen nicht verlässlich
+liefern, bleibt der verbindliche Abschluss dieser Auswahl gesperrt.
+
+H. INTERNE ABNAHME – EXTERNE DATEN UND TATSÄCHLICHER ABLAUF
+
+H1. Produktspezifische Voraussetzungen
+Die AGB liefern keine Fahrzeugfreigabe. Für Kompletträder sind Fahrzeugvariante,
+Reifen-/Felgen-/RDKS-/Zubehörkombination, Achszuordnung, Gutachten/Auflagen,
+Setbestand, Setpreis, Montageumfang und Lieferzusage tatsächlich nachzuweisen.
+Für einzelne Felgen oder Reifen keine unbelegte Fahrzeugpassung versprechen.
+EU-Reifenkennzeichnung/Produktdaten, Sicherheitsinformationen, Daten-/Bildrechte
+und alle konkret erforderlichen Angaben außerhalb des AGB-Texts prüfen.
+
+Paketfähige Rücksendung für das vollständige verkaufte Produkt bestätigen,
+einschließlich Gewicht/Abmessungen und erforderlicher sicherer Verpackung.
+Nicht von „PKW“, „Felge“, Preis oder Kundenabholung auf Paketfähigkeit schließen.
+Nicht paketfähige Ware ist vom Abschluss nach dieser Fassung ausgeschlossen.
+Soll solche Ware später angeboten werden, vor Bestellung eine belastbare
+Angabe der Rücksendekosten aufnehmen und die Belehrung entsprechend anpassen;
+keine erfundenen Eurobeträge oder Demontagepflicht verwenden.
+
+H2. Bestellannahme, Zahlung und Vertragssnapshot
+Nur tatsächliche Onlinezahlmittel anzeigen. Eigene Stripe-Produktivanbindung
+und Vor-Ort-Zahlung getrennt prüfen. Sichere Zahlungsbestätigung, Waren- und
+Terminbindung müssen vor Annahme belastbar sein; Checkout-Ablaufzeit und
+Reservierungsdauer müssen zusammenpassen. Bereitstellungs-/Terminänderung
+erfordert neue Zustimmung. Kein automatischer Warenauftrag nach ungeklärter
+Zahlung und kein zweiter Auftrag durch doppelte Rückmeldungen.
+
+Vertrags-E-Mail mit vollständigem unveränderlichem Umfang, Textversion,
+Einzelerklärungen, Widerrufsbelehrung/-formular und erforderlichen Informationen
+nachweisbar bereitstellen. Reine Warteschlangeneinreihung oder spätere
+veränderliche Website ersetzen keinen dauerhaften Datenträger. Rückzahlung
+bei Nichtannahme und gesetzlicher Widerruf müssen operativ möglich sein;
+keine nicht vorhandene automatische Erstattung behaupten.
+
+H3. Widerrufsfunktion – geltender § 356a BGB
+Seit der 2026 eingeführten Regelung ist die Funktion bei diesen über eine
+Onlineoberfläche geschlossenen Fernabsatzverträgen Pflicht. Der derzeit
+vorgesehene Link in B muss tatsächlich auf allen relevanten Bestelloberflächen
+funktionieren, während der Widerrufsfrist ständig verfügbar, hervorgehoben und
+leicht erreichbar sein. Ein versteckter AGB-Link reicht nicht. Funktionsumfang
+für Reifen, Felgen, Kompletträder und Teile einer Bestellung überprüfen.
+
+Erster Schritt „Vertrag widerrufen“; Name, identifizierbarer Vertrag/Vertragsteil,
+elektronischer Bestätigungskontakt; zweiter Schritt „Widerruf bestätigen“.
+Unverzügliche dauerhafte Eingangsbestätigung mit Erklärung, Eingangsdatum und
+Uhrzeit. Rechtzeitiges Absenden über die Funktion wahrt die Widerrufsfrist.
+Kein Kundenlogin, keine SMS-Codepflicht und keine Freigabe des Unternehmers
+als vorgeschaltete Hürde. Funktion und Bestätigungen bleiben auch bei
+deaktivierten Neukäufen erreichbar. Diese Datei behauptet keine bereits erfolgte
+Ende-zu-Ende-Abnahme dieser Funktionen für die neuen Kategorien.
+
+H4. Montage und verbundene Warenleistungen
+Gesonderte Werkstattdienstleistung und Herstellung/Fertigstellung verkaufter
+Komplettradware anhand des wirklichen Leistungsversprechens unterscheiden.
+§ 650 BGB unterstellt die Lieferung herzustellender beweglicher Sachen dem
+Kaufrecht. Die bloße Kombination von Standardkomponenten begründet in dieser
+Fassung keinen Ausschluss nach § 312g Absatz 2 Nummer 1 BGB. Bei künftig
+angebotenen tatsächlichen Sonderanfertigungen deren Einordnung vor Aufnahme
+gesondert prüfen; keine nachträgliche Pauschalklausel verwenden.
+Erklärungen D nur leistungsbezogen, gesondert und nicht vorausgewählt erfassen;
+ein Anspruch auf Dienstleistungs-Wertersatz oder dessen Erlöschen entsteht nicht
+allein aufgrund eines Kalenderklicks oder einer künstlichen Preisaufteilung.
+
+H5. Gewährleistungsmitteilung und Datenschutz
+Seit 27.09.2026 erforderliche harmonisierte Gewährleistungsmitteilung nach
+Anhang I der Durchführungsverordnung (EU) 2025/1960 im tatsächlichen Warenangebot
+gesondert hervorgehoben bereitstellen, nicht durch AGB-Text ersetzen. Vorhandenes
+unverändertes deutsches Original: static/recht/reifen-gewaehrleistung-de.jpg;
+Quellenbeleg docs/reifen-gewaehrleistung-quelle.txt. Lesbarkeit, Farbe und
+Zugang zur vollständigen Darstellung auf Mobilgeräten erneut prüfen. Wenn der
+Hersteller einschlägige Informationen zu einer kostenlosen gewerblichen
+Haltbarkeitsgarantie über mehr als zwei Jahre für die ganze Ware bereitstellt,
+auch die harmonisierte Kennzeichnung und konkrete Garantieinformationen prüfen.
+
+Die tatsächliche Datenschutzerklärung muss die verwendeten Stripe-/Twilio-
+Gesellschaften und Rollen, Telefonnummernprüfung, notwendige Bestell-/Fahrzeug-
+daten, weitere Empfänger, Übermittlungsgrundlagen und konkrete Löschfristen
+abdecken. Keine automatische Werbeeinwilligung oder pauschale Zustimmung zur
+Datenschutzverarbeitung verlangen. Diese AGB enthalten keine abschließende
+anbieterbezogene Datenschutzfreigabe. Vorhandenen Prozessentwurf erst nach
+Klärung der echten Anbieter-/Kontokonfiguration entsprechend vervollständigen.
+
+I. ÄNDERUNGSNOTIZ UND PRIMÄRQUELLEN
+
+Änderungsnotiz ohne Unterschriftenfeld, 03.11.2026:
+Ausgangspunkt ist docs/reifen-bestellbedingungen-entwurf.txt, Version v5.
+Dieser ursprüngliche Reifenentwurf wurde nicht geändert. Neue Gesamtfassung
+für B2C-Reifen/Felgen/Kompletträder; Abholung/Montage Mosbach und entschiedene
+Rücksendekostenregel beibehalten. Warenumfang, Menge und gesonderte Leistungen,
+verbindliche Vor-Ort-Zahlung, keine einseitige Preiserhöhung, Annahmefrist als
+konkreter Betriebsvorschlag, unterschiedliche Widerrufsfolgen für Waren und
+tatsächlich gesonderte Werkstattleistung klargestellt. Kein pauschaler Ausschluss
+für montierte Räder oder zusammengebaute Standardsets. § 356a BGB in aktueller
+Fassung berücksichtigt; Wertersatz korrekt unter § 357a BGB eingeordnet.
+Verkäuferdaten und veröffentlichte Schlichtungserklärung aktuell abgeglichen.
+Extern fehlende Daten und technische Nachweise sind in H getrennt benannt.
+Keine Shop-, Zahlungs-, Datenrechte- oder rechtliche Beratungsfreigabe erklärt.
+
+Primärquellen, am 03.11.2026 online geprüft:
+
+Verkäuferdaten und veröffentlichte Schlichtungserklärung:
+https://auto-lackierzentrum.de/impressum
+
+Bestellübersicht, Zahlungspflicht und Bestellschaltfläche (§ 312j BGB):
+https://www.gesetze-im-internet.de/bgb/__312j.html
+Vertragstextspeicherung/Eingangsbestätigung (§ 312i BGB) und dauerhafte
+Vertragsbestätigung (§ 312f BGB):
+https://www.gesetze-im-internet.de/bgb/__312i.html
+https://www.gesetze-im-internet.de/bgb/__312f.html
+
+Widerruf, Fristbeginn, Dienstleistungs-Erlöschen und elektronische Funktion:
+https://www.gesetze-im-internet.de/bgb/__312g.html
+https://www.gesetze-im-internet.de/bgb/__355.html
+https://www.gesetze-im-internet.de/bgb/__356.html
+https://www.gesetze-im-internet.de/bgb/__356a.html
+Rückgewähr/Rücksendekosten und gesetzlicher Wertersatz:
+https://www.gesetze-im-internet.de/bgb/__357.html
+https://www.gesetze-im-internet.de/bgb/__357a.html
+
+Vorvertragliche Informationen einschließlich nicht paketfähiger Rücksendung,
+Widerrufsfunktion und harmonisierter Gewährleistungsmitteilung:
+https://www.gesetze-im-internet.de/bgbeg/art_246a__1.html
+Form und Zeitpunkt der Informationen:
+https://www.gesetze-im-internet.de/bgbeg/art_246a__4.html
+Amtliches Muster-Widerrufsformular:
+https://www.gesetze-im-internet.de/bgbeg/art_253anlage_2.html
+
+Herzustellende bewegliche Waren und Mängelrechte:
+https://www.gesetze-im-internet.de/bgb/__650.html
+https://www.gesetze-im-internet.de/bgb/__438.html
+https://www.gesetze-im-internet.de/bgb/__634a.html
+Verbraucherstreitbeilegung:
+https://www.gesetze-im-internet.de/vsbg/__36.html
+https://www.gesetze-im-internet.de/vsbg/__37.html
+
+Abrufhinweis: Einige BGB-Einzelseiten waren beim Rechercheabruf zeitweise nicht
+erreichbar; die betroffenen Regelungen wurden im aktuellen amtlichen BGB-
+Gesamttext gelesen, insbesondere §§ 312i, 312j, 312g, 356 und 438:
+https://www.gesetze-im-internet.de/bgb/BJNR001950896.html
+Die Waren- und Leistungsbelehrungen sind eigene, an den gesetzlichen Regeln
+orientierte Formulierungen auf Grundlage des vorhandenen Entwurfs; für sie wird
+keine unveränderte Verwendung des gesetzlichen Musterbelehrungstexts und keine
+gesetzliche Musterwirkung behauptet. Das Muster-Widerrufsformular unter E
+entspricht dem amtlichen Formular mit eingesetzten Verkäuferangaben.

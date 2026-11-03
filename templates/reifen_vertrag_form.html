@@ -1,7 +1,7 @@
 {% extends "reifen_vertrag_basis.html" %}
 {% block content %}
 <h1>Vertrag widerrufen</h1>
-<p>Hier können Sie den Widerruf Ihrer Reifenbestellung erklären. Sie benötigen keinen Kundenlogin und keinen Telefoncode.</p>
+<p>Hier können Sie einen online geschlossenen Vertrag über Reifen, Felgen, Kompletträder oder eine gesondert vereinbarte Werkstattleistung ganz oder teilweise widerrufen. Sie benötigen keinen Kundenlogin und keinen Telefoncode.</p>
 <p class="hint">Sie prüfen Ihre Angaben im nächsten Schritt und senden Ihre Erklärung anschließend mit „Widerruf bestätigen“ ab.</p>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="{{ url_for('reifen_vertrag.pruefen') }}">

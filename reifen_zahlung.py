@@ -52,6 +52,14 @@ def _url(value):
 def _order(value):
     if not isinstance(value, Mapping):
         raise ReifenZahlungFehler("Die serverseitige Bestellung fehlt.")
+    category = value.get("produktart", "reifen")
+    if not isinstance(category, str) or category not in {"reifen", "felgen"}:
+        raise ReifenZahlungFehler("Die Produktart der Bestellung ist ungültig.")
+    for field in ("produkt", "query"):
+        nested = value.get(field)
+        if isinstance(nested, Mapping) and "produktart" in nested:
+            if not isinstance(nested["produktart"], str) or nested["produktart"] != category:
+                raise ReifenZahlungFehler("Die Produktart der Bestellung ist widersprüchlich.")
     order_id = _text(value.get("id"), r"[A-Za-z0-9_-]{1,100}", "Ungültige Bestellreferenz.")
     quote = _text(value.get("quote_hash"), r"[0-9a-f]{64}", "Ungültige Angebotsreferenz.")
     amount = value.get("amount_total")
@@ -59,7 +67,7 @@ def _order(value):
         raise ReifenZahlungFehler("Ein bestätigter positiver EUR-Gesamtbetrag in Cent ist erforderlich.")
     attempt = _text(value.get("payment_attempt", "1"), r"[A-Za-z0-9_-]{1,50}", "Ungültiger Zahlungsversuch.")
     return {"id": order_id, "quote_hash": quote, "amount_total": amount,
-            "currency": "eur", "payment_attempt": attempt}
+            "currency": "eur", "payment_attempt": attempt, "produktart": category}
 
 
 class StripeReifenGateway:
@@ -175,13 +183,14 @@ class StripeReifenGateway:
                 or not 0 <= now - created < 86400 or not 1800 <= expiry - created <= 86400):
             raise ReifenZahlungFehler("Eine eingefrorene Zahlungsfrist zwischen 30 Minuten und 24 Stunden ist erforderlich.")
         metadata = {"integration": INTEGRATION, "order_id": checked["id"], "quote_hash": checked["quote_hash"]}
+        name = ("Felgenbestellung" if checked["produktart"] == "felgen" else "Reifenbestellung") + " " + checked["id"]
         success = self.origin + self.success_path.replace("{order_id}", checked["id"]) + "?session_id={CHECKOUT_SESSION_ID}"
         cancel = self.origin + self.cancel_path.replace("{order_id}", checked["id"])
         params = {"mode": "payment", "ui_mode": "hosted_page", "locale": "de",
                   "payment_method_types": ["card"], "client_reference_id": checked["id"],
                   "metadata": metadata, "payment_intent_data": {"metadata": dict(metadata)},
                   "line_items": [{"quantity": 1, "price_data": {"currency": "eur", "unit_amount": checked["amount_total"],
-                      "product_data": {"name": "Reifenbestellung " + checked["id"]}}}],
+                      "product_data": {"name": name}}}],
                   "success_url": success, "cancel_url": cancel, "expires_at": expiry}
         key_material = "|".join((INTEGRATION, self.mode, checked["id"], checked["quote_hash"], checked["payment_attempt"]))
         key = "reifen-checkout-" + hashlib.sha256(key_material.encode()).hexdigest()

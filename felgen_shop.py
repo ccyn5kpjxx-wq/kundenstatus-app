@@ -1,4 +1,5 @@
-"""Read-only rim catalogue and signed selection; no vehicle or order claims."""
+"""Read-only rim catalogue/selection and a separately gated checkout transition."""
+from collections.abc import Mapping
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -7,6 +8,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from felgen_katalog import FelgenCatalogProvider, FelgenEingabefehler, FelgenKatalogError
 from felgen_bilder import FelgenBildStore, MAX_IMAGE_BYTES
+from raeder_auswahl import erstelle_felgen_auswahl_token
 
 
 def register_felgen_shop(portal):
@@ -21,6 +23,23 @@ def register_felgen_shop(portal):
 
     def serializer():
         return URLSafeTimedSerializer(app.secret_key, salt="felgen-auswahl-v1")
+
+    def checkout_url(product):
+        # A legacy tire-only readiness flag must never enable rim purchases.
+        if "reifen_kauf.einstieg" not in app.view_functions:
+            return None
+        service = app.extensions.get("reifen_kauf")
+        readiness = getattr(service, "readiness_for", None)
+        if not callable(readiness):
+            return None
+        try:
+            state = readiness("felgen")
+            if not isinstance(state, Mapping) or state.get("ready") is not True or state.get("produktart") != "felgen":
+                return None
+            token = erstelle_felgen_auswahl_token(app.secret_key, product["artikel_id"], product["anzahl"])
+            return url_for("reifen_kauf.einstieg", token=token)
+        except Exception:
+            return None
 
     def limit(scope):
         blocked, seconds = portal.public_form_rate_limit_status(scope,
@@ -115,6 +134,7 @@ def register_felgen_shop(portal):
             abort(409, description="Die Felgenauswahl ist abgelaufen oder nicht mehr verfügbar. Bitte suchen Sie erneut.")
         berlin = ZoneInfo("Europe/Berlin")
         return render_template("felgen_auswahl.html", produkt=product,
+            checkout_url=checkout_url(product),
             zurueck_url=url_for("felgen_shop.catalog", suche=product["artikel_id"], anzahl=product["anzahl"], anzeigen="1"),
             pruefen_url=url_for("felgen_shop.auswahl", token=token),
             preisstand_text=datetime.fromisoformat(product["preisstand"]).astimezone(berlin).strftime("%d.%m.%Y %H:%M"),

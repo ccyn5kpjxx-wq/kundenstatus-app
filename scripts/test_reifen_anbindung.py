@@ -25,11 +25,23 @@ REFERENCE = "synthetic-order-000001"
 class Service:
     def __init__(self):
         self.ready = True
-        self.value = {"id":REFERENCE,"mode":"test","telefon":PHONE}
+        self.value = {"id":REFERENCE,"mode":"test","telefon":PHONE,
+                      "query_json":json.dumps({"produktart":"reifen"}), "produkt_json":"{}"}
         self.references = []
+        self.category_checks = []
 
     def readiness(self):
         return {"ready":self.ready}
+
+    def readiness_for(self, category):
+        self.category_checks.append(category)
+        return {"ready":self.ready, "produktart":category}
+
+    def category(self, query, product):
+        kind = query["produktart"]
+        if kind not in {"reifen", "felgen"}:
+            raise ValueError("unconfigured category")
+        return kind
 
     def row(self, reference):
         if reference != REFERENCE or session.get("synthetic_owner") != "owned":
@@ -108,6 +120,18 @@ class ReifenAnbindungTest(unittest.TestCase):
             self.assertNotIn(key,self.app.config)
         sms.assert_not_called()
         gateway.assert_not_called()
+
+    def test_sms_authorization_uses_the_owned_product_category(self):
+        callback = self.configure_sms()["authorize"]
+        self.service.value["query_json"] = json.dumps({"produktart":"felgen"})
+        self.assertTrue(self.authorized(callback,"/code","start"))
+        self.assertEqual(self.service.category_checks, ["felgen"])
+        with patch.object(self.service, "readiness_for", return_value={"ready":True,"produktart":"reifen"}):
+            self.assertFalse(self.authorized(callback,"/code","start"))
+        with patch.object(self.service, "readiness_for", return_value={"ready":1,"produktart":"felgen"}):
+            self.assertFalse(self.authorized(callback,"/code","start"))
+        self.service.value["query_json"] = "invalid-json"
+        self.assertFalse(self.authorized(callback,"/code","start"))
 
     def catalog_environment(self):
         root=Path(self.temp.name)

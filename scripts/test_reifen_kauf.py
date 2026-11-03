@@ -5,8 +5,11 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import sys
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlsplit
@@ -16,9 +19,12 @@ with patch("threading.Thread.start"):
     import smoke_test as isolated
 
 portal = isolated.portal
-from reifen_bestellung import erstelle_auswahl_token
+from reifen_bestellung import erstelle_auswahl_token, lade_auswahl_token
 import reifen_kauf as core
 import reifen_vertrag as contracts
+from felgen_katalog import FelgenCatalogProvider, parse_felgen_feed
+from raeder_auswahl import erstelle_felgen_auswahl_token
+from test_felgen_katalog import POLICY, raw_feed
 
 
 SKU = "SYNTHETICTIRE42"
@@ -194,16 +200,18 @@ class ReifenKaufTest(unittest.TestCase):
         db.close()
 
     def token(self, **query):
-        return erstelle_auswahl_token(portal.app.secret_key, {**QUERY, **query}, SKU)
+        with patch("itsdangerous.timed.time.time", return_value=self.clock().timestamp()):
+            return erstelle_auswahl_token(portal.app.secret_key, {**QUERY, **query}, SKU)
 
     def csrf(self, client=None):
         with (client or self.client).session_transaction() as session:
             return session.get(portal.CSRF_FIELD_NAME)
 
-    def draft(self, change=None, *, query=None, client=None):
+    def draft(self, change=None, *, query=None, client=None, selection_token=None):
         self.client = client or portal.app.test_client()
-        token = self.token(**(query or {}))
-        response = self.client.get("/reifen/bestellen/"+token+"/kauf")
+        token = selection_token or self.token(**(query or {}))
+        prefix = "/raeder/bestellen/" if token.startswith("felgen.") else "/reifen/bestellen/"
+        response = self.client.get(prefix+token+"/kauf")
         self.assertEqual(response.status_code, 200)
         data = {"name":"Synthetic Customer", "email":"kauf@example.invalid", "telefon":"+491711234567",
                 "strasse":"Teststraße 1", "plz":"74821", "ort":"Mosbach", "fahrzeug":"Synthetic Golf",
@@ -616,8 +624,8 @@ class ReifenKaufTest(unittest.TestCase):
         self.assertGreaterEqual(self.final(order).status_code,400)
         self.assertFalse(self.gateway.creates or self.supplier.commits)
 
-    def test_all_mounting_dates_need_two_separate_express_declarations(self):
-        order=self.ready({"montage_datum":self.montage_day(40),"montage_uhrzeit":"09:00"},query={"montage":"ja"})
+    def test_early_mounting_needs_two_separate_express_declarations(self):
+        order=self.ready({"montage_datum":self.montage_day(7),"montage_uhrzeit":"09:00"},query={"montage":"ja"})
         for missing in ("frueher_montagebeginn","kenntnis_montagewiderruf"):
             with self.subTest(missing=missing):
                 self.assertEqual(self.final(order,**{missing:""}).status_code,409)
@@ -752,6 +760,379 @@ class ReifenKaufTest(unittest.TestCase):
         self.assertEqual(response.status_code,200)
         self.assertEqual(len(self.supplier.commits),1)
         self.assertEqual(len(self.rows("reifen_kauf_events")),1)
+
+    def test_owned_edit_preserves_form_and_refreshes_expired_link_without_get_mutation(self):
+        day = self.montage_day()
+        hour = portal.reifen_slot_zeiten(day)[0]
+        order = self.draft({"zahlungsart":"vor_ort", "montage_datum":day, "montage_uhrzeit":hour}, query={"montage":"ja"})
+        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(time.time())-901):
+            expired = self.token(montage="ja")
+        self.change(order, auswahl_token=expired)
+        before = self.read(order)
+        self.article_change["netto_einkauf"] = "110.00"
+        with self.client.session_transaction() as values:
+            session_before = dict(values)
+        with patch.object(portal, "freie_reifen_slots", return_value=[hour]) as slots:
+            response = self.client.get(order["url"] + "/bearbeiten")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Set-Cookie", response.headers)
+        slots.assert_called_once_with(day)
+        html = response.get_data(as_text=True)
+        for name, value in json.loads(before["kunde_json"]).items():
+            self.assertIn(f'name="{name}"', html)
+            self.assertIn(f'value="{value}"', html)
+        self.assertRegex(html, r'name="zahlungsart" value="vor_ort"\s+checked')
+        self.assertIn(f'value="{day}"', html)
+        self.assertIn(f'value="{hour}" selected', html)
+        self.assertRegex(html, r'name="standardmontage" value="ja"\s+checked')
+        # 4 x 143.99 tire gross + 11.90 freight + existing 90.00 mounting.
+        self.assertIn("677,86", html)
+        renewed = re.search(r'action="/reifen/kauf/([^"/]+)/entwurf"', html).group(1)
+        self.assertEqual(lade_auswahl_token(portal.app.secret_key, renewed),
+                         {"query":{**QUERY,"montage":"ja"},"artikel_id":SKU})
+        with self.assertRaises(ValueError):
+            lade_auswahl_token(portal.app.secret_key, expired)
+        self.assertEqual(self.read(order), before)
+        self.assertEqual(len(self.rows()), 1)
+        with self.client.session_transaction() as values:
+            self.assertEqual(dict(values), session_before)
+        self.assertFalse(self.sms.starts or self.sms.checks or self.gateway.creates or self.supplier.reservations or self.supplier.commits)
+
+    def test_edit_requires_owner_current_mode_and_unlocked_unpaid_draft(self):
+        order = self.draft()
+        path = order["url"] + "/bearbeiten"
+        fresh = Mock(wraps=self.service.fresh_order)
+        with patch.object(self.service, "fresh_order", fresh):
+            self.assertEqual(portal.app.test_client().get(path).status_code, 404)
+            for change in ({"state":"zahlung_offen"}, {"state":"zahlung_bestaetigt"}, {"state":"bestaetigt"},
+                           {"state":"lieferauftrag_laeuft"}, {"state":"pruefung_noetig"},
+                           {"state":"entwurf","sms_state":"sending"}, {"sms_state":"checking"},
+                           {"sms_state":"unknown"}, {"sms_state":"limit"}, {"sms_state":"pending","sms_checks":0}, {"sms_state":"pending","sms_checks":5}):
+                self.change(order, **change)
+                self.clear_rate()
+                before = self.read(order)
+                self.assertEqual(self.client.get(path).status_code, 409)
+                self.assertEqual(self.read(order), before)
+            self.change(order, state="entwurf", sms_state="", sms_checks=0)
+            with patch.dict(portal.app.config, {"REIFEN_KAUF_MODE":"live"}):
+                self.clear_rate()
+                self.assertEqual(self.client.get(path).status_code, 409)
+            for change in ({"payment_id":"cs_test_already_started"}, {"payment_id":None,"payment_status":"bezahlt"},
+                           {"payment_status":"unbezahlt","reservierung_json":json.dumps({"reservierung_id":"existing-hold"})}):
+                self.change(order, **change)
+                self.clear_rate()
+                self.assertEqual(self.client.get(path).status_code, 409)
+        fresh.assert_not_called()
+        self.assertFalse(self.sms.starts or self.gateway.creates or self.supplier.reservations or self.supplier.commits)
+
+    def test_owned_draft_can_confirm_after_entry_token_expiry_using_current_exact_sku(self):
+        order = self.ready()
+        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(time.time())-901):
+            expired = self.token()
+        self.change(order, auswahl_token=expired)
+        self.assertEqual(self.client.get("/reifen/bestellen/"+expired+"/kauf").status_code, 409)
+        response = self.final(order)
+        self.assertIn(response.status_code, (302,303))
+        self.assertEqual(self.read(order)["state"], "zahlung_offen")
+        self.assertEqual(self.gateway.creates[0]["artikel_id"], SKU)
+        self.assertEqual(self.gateway.creates[0]["amount_total"], 53550)
+        self.assertEqual(len(self.gateway.creates), 1)
+
+    def test_owned_expired_link_still_requires_current_price_and_stock_confirmation(self):
+        order = self.ready()
+        with patch("itsdangerous.timed.TimestampSigner.get_timestamp", return_value=int(time.time())-901):
+            expired = self.token()
+        self.change(order, auswahl_token=expired)
+        self.article_change["netto_einkauf"] = "110.00"
+        response = self.final(order)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.read(order)["state"], "preis_geaendert")
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+        self.article_change["bestand"] = 0
+        self.assertEqual(self.final(order).status_code, 409)
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+
+    def test_mounting_error_form_uses_submitted_day_and_marks_invalid_day_without_other_slots(self):
+        day = self.montage_day()
+        order = self.draft({"montage_datum":day,"montage_uhrzeit":portal.reifen_slot_zeiten(day)[0]}, query={"montage":"ja"})
+        data = {**json.loads(self.read(order)["kunde_json"]), "email":"invalid-address", "zahlungsart":"vor_ort",
+                "montage_datum":day,"montage_uhrzeit":"14:00","standardmontage":"ja",portal.CSRF_FIELD_NAME:self.csrf()}
+        endpoint = "/reifen/kauf/"+order["token"]+"/entwurf"
+        with patch.object(portal,"freie_reifen_slots",return_value=["14:00"]) as slots:
+            response = self.client.post(endpoint,data=data)
+        self.assertEqual(response.status_code,400)
+        slots.assert_called_once_with(day)
+        self.assertIn(f'value="{day}"',response.text)
+        self.assertIn('value="14:00" selected',response.text)
+        self.assertNotIn('value="08:00"',response.text)
+        with patch.object(portal,"freie_reifen_slots") as slots:
+            response = self.client.post(endpoint,data={**data,"montage_datum":"invalid-date"})
+        self.assertEqual(response.status_code,400)
+        slots.assert_not_called()
+        self.assertRegex(response.text,r'name="montage_datum"[^>]*aria-invalid="true"')
+        self.assertIn('id="tire-montage-date-error"',response.text)
+        self.assertNotIn('value="14:00"',response.text)
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+
+    def test_exhausted_sms_attempts_render_contact_and_cannot_be_reset_by_edit_or_resend(self):
+        order = self.draft()
+        self.post(order,"telefon-code")
+        for _ in range(5):
+            self.assertEqual(self.post(order,"telefon-pruefen",{"code":"000000"}).status_code,409)
+        self.assertEqual(self.read(order)["sms_state"],"limit")
+        before = self.read(order)
+        response = self.client.get(order["url"])
+        self.assertIn("Die Telefonprüfung ist vorerst gesperrt",response.text)
+        self.assertIn("Werkstatt anrufen",response.text)
+        self.assertNotIn('action="'+order["url"]+'/telefon-pruefen"',response.text)
+        self.assertNotIn('action="'+order["url"]+'/telefon-code"',response.text)
+        self.assertNotIn("Angaben ändern",response.text)
+        self.assertEqual(self.client.get(order["url"]+"/bearbeiten").status_code,409)
+        self.assertEqual(self.post(order,"telefon-code").status_code,409)
+        self.assertEqual(self.read(order),before)
+        self.assertEqual(len(self.sms.starts),1)
+        self.assertEqual(len(self.sms.checks),5)
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+        # Previously stored pending rows with an exhausted counter must render
+        # the same recovery state without any GET migration/write.
+        self.change(order,sms_state="pending")
+        before = self.read(order)
+        self.assertEqual(self.service.order(before)["sms_status"],"limit")
+        self.assertIn("Werkstatt anrufen",self.client.get(order["url"]).text)
+        self.assertEqual(self.read(order),before)
+
+    def test_malformed_inspection_delivery_is_redacted_before_customer_error_render(self):
+        order = self.ready()
+        for value in ("PRIVATE-SUPPLIER-SECRET", None, "2026-99-99", {"private":"PRIVATE-SUPPLIER-SECRET"}):
+            self.supplier.inspect_change["lieferdatum"] = value
+            response = self.final(order)
+            self.assertEqual(response.status_code,409)
+            self.assertNotIn("PRIVATE-SUPPLIER-SECRET",response.text)
+            self.assertIn("gültiges Bereitstellungsdatum",response.text)
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+
+    def setup_rims(self):
+        self.rim_changes = {}
+        cache = SimpleNamespace(load=Mock(side_effect=lambda: parse_felgen_feed(
+            raw_feed(self.rim_changes), abgerufen_am=self.clock())))
+        self.rim_provider = FelgenCatalogProvider(cache, policy=deepcopy(POLICY),
+            private_view_authorized=lambda: True, clock=self.clock)
+        portal.app.config["FELGENANGEBOT_PROVIDER"] = self.rim_provider
+        self.terms["produktarten"] = ["reifen", "felgen"]
+        for changes in (self.supplier.inspect_change, self.supplier.reserve_change, self.supplier.commit_change):
+            changes["produktart"] = "felgen"
+
+    def rim_token(self, quantity=4):
+        return erstelle_felgen_auswahl_token(portal.app.secret_key, "1", quantity, clock=self.clock)
+
+    def rim_draft(self, change=None):
+        return self.draft({"standardmontage":"", **(change or {})}, selection_token=self.rim_token())
+
+    def test_rim_readiness_requires_explicit_released_category_scope_and_all_existing_gates(self):
+        self.setup_rims()
+        with portal.app.test_request_context("/", base_url="http://localhost"):
+            self.assertEqual(self.service.readiness()["produktart"], "reifen")
+            self.assertEqual(self.service.readiness_for("felgen")["produktart"], "felgen")
+            self.assertTrue(self.service.readiness_for("felgen")["ready"])
+            for scope in (None, [], ["reifen"], "felgen", ["felgen", "felgen"], ["felgen", "zubehoer"], [True]):
+                with self.subTest(scope=scope), patch.dict(self.terms, {"produktarten":scope}):
+                    self.assertFalse(self.service.readiness_for("felgen")["ready"])
+            with patch.dict(self.terms, {"produktarten":["reifen", "felgen", "komplettraeder"]}):
+                self.assertTrue(self.service.readiness_for("reifen")["ready"])
+                self.assertTrue(self.service.readiness_for("felgen")["ready"])
+                self.assertFalse(self.service.readiness_for("komplettraeder")["ready"])
+            for item in ({"freigegeben":False}, {"status":"entwurf"}, {"offene_entscheidungen":["unknown"]}):
+                with patch.dict(self.terms,item):
+                    self.assertFalse(self.service.readiness_for("felgen")["ready"])
+            for key, value in (("REIFEN_KAUF_ENABLED",False), ("REIFEN_TERMS_APPROVED_SHA256","bad"),
+                               ("REIFEN_KAUF_GATEWAY",None), ("FELGENANGEBOT_PROVIDER",None)):
+                with patch.dict(portal.app.config,{key:value}):
+                    self.assertFalse(self.service.readiness_for("felgen")["ready"])
+            with patch.dict(portal.app.config,{"REIFENANGEBOT_PROVIDER":None}):
+                self.assertTrue(self.service.readiness_for("felgen")["ready"])
+            self.assertFalse(self.service.readiness_for("komplettraeder")["ready"])
+        # Missing scope must also block the real POST before any supplier/SMS/payment IO.
+        self.terms.pop("produktarten")
+        token = self.rim_token()
+        self.client.get("/raeder/bestellen/"+token+"/kauf")
+        response = self.client.post("/reifen/kauf/"+token+"/entwurf",data={portal.CSRF_FIELD_NAME:self.csrf()})
+        self.assertEqual(response.status_code,503)
+        self.assertFalse(self.rows() or self.sms.starts or self.supplier.inspections or self.gateway.creates)
+
+    def test_rim_pickup_full_customer_phone_commit_is_typed_owned_deduplicated_and_unpaid(self):
+        self.setup_rims()
+        order = self.rim_draft({"zahlungsart":"vor_ort", "amount_total":"1", "produktart":"reifen", "anzahl":"8"})
+        row = self.read(order)
+        model = self.service.order(row)
+        self.assertEqual(model["produktart"], "felgen")
+        self.assertEqual(model["query"], {"produktart":"felgen", "anzahl":4})
+        self.assertEqual(model["produkt"]["produktart"], "felgen")
+        self.assertEqual(model["amount_total"], 52360)
+        self.assertEqual(model["produkt"]["preis"]["gesamt_felgen_brutto"], "523.60")
+        self.assertFalse(row["montage_datum"] or row["montage_uhrzeit"] or row["slot_lead_id"])
+        self.assertNotIn("groesse", model["produkt"])
+        self.assertEqual(portal.app.test_client().get(order["url"]).status_code,404)
+        self.assertEqual(self.final(order).status_code,409)
+        self.verify(order)
+        html = self.client.get(order["url"]).text
+        self.assertIn("4 Felgen à 130,90", html)
+        self.assertIn("Fahrzeugpassung ist nicht geprüft", html)
+        self.assertNotIn("Bestätigte Reifenlieferung", html)
+        self.assertNotIn("{%", html)
+        self.assertIn(self.final(order).status_code,(302,303))
+        self.assertIn(self.final(order).status_code,(302,303))
+        row = self.read(order)
+        self.assertEqual(row["state"], "bestellt_zahlung_offen")
+        self.assertEqual(row["payment_status"], "vor_ort_offen")
+        self.assertFalse(row["payment_id"] or row["auftrag_id"] or row["slot_lead_id"])
+        self.assertFalse(self.gateway.creates)
+        self.assertEqual(len(self.supplier.reservations),1)
+        self.assertEqual(len(self.supplier.commits),1)
+        self.assertEqual(self.supplier.commits[0]["produktart"], "felgen")
+        self.assertEqual(len(self.rows("reifen_vertrag_outbox")),1)
+
+    def test_rim_online_callback_uses_saved_category_without_owner_and_never_redirect_paid(self):
+        self.setup_rims()
+        order = self.rim_draft()
+        self.verify(order)
+        self.assertIn(self.final(order).status_code,(302,303))
+        row = self.read(order)
+        self.assertEqual(row["state"], "zahlung_offen")
+        self.assertEqual(self.gateway.creates[0]["produktart"],"felgen")
+        self.assertEqual(self.gateway.creates[0]["amount_total"],52360)
+        self.assertFalse(self.supplier.commits)
+        self.client.get("/reifen/zahlung/erfolg/"+order["id"]+"?paid=1&produktart=reifen")
+        self.assertEqual(self.read(order)["state"],"zahlung_offen")
+        self.gateway.paid(row["payment_id"])
+        event={"event_id":"evt_rim_test", "session_id":row["payment_id"], "ignored":False}
+        self.terms.pop("produktarten")  # New purchases close; existing paid contract can still settle.
+        with patch.dict(portal.app.config,{"REIFEN_KAUF_ENABLED":False}):
+            for _ in range(2):
+                response=portal.app.test_client().post("/webhooks/reifen/stripe",data=json.dumps(event),
+                    headers={"Stripe-Signature":"synthetic-verified-signature"},content_type="application/json")
+                self.assertEqual(response.status_code,200)
+        self.assertEqual(self.read(order)["state"],"bestaetigt")
+        self.assertEqual(self.read(order)["payment_status"],"bezahlt")
+        self.assertEqual(len(self.supplier.commits),1)
+        self.assertEqual(len(self.rows("reifen_vertrag_outbox")),1)
+
+    def test_rim_invalid_readonly_cross_salt_tampered_and_expired_tokens_cannot_start(self):
+        from itsdangerous import URLSafeTimedSerializer
+        self.setup_rims()
+        token = self.rim_token()
+        readonly = URLSafeTimedSerializer(portal.app.secret_key, salt="felgen-auswahl-v1").dumps({"artikel_id":"1","anzahl":4})
+        expired = erstelle_felgen_auswahl_token(portal.app.secret_key, "1", 4,
+            clock=lambda: self.clock()-timedelta(seconds=901))
+        candidates = ("felgen."+readonly, "felgen."+self.token(), token.removeprefix("felgen."),
+                      token+"X", expired)
+        for candidate in candidates:
+            with self.subTest(token=candidate[:30]):
+                self.clear_rate()
+                self.assertEqual(self.client.get("/raeder/bestellen/"+candidate+"/kauf").status_code,409)
+                self.assertEqual(self.client.post("/reifen/kauf/"+candidate+"/entwurf",
+                    data={portal.CSRF_FIELD_NAME:self.csrf()}).status_code,409)
+        self.assertFalse(self.rows() or self.supplier.inspections or self.sms.starts or self.gateway.creates)
+
+    def test_rim_owned_expiry_edit_and_current_exact_price_stock_revalidation(self):
+        self.setup_rims()
+        order = self.rim_draft()
+        self.clock.value += timedelta(minutes=16)
+        self.rim_changes["Einkaufspreis"] = "110,00"
+        before = self.read(order)
+        self.assertEqual(self.client.get("/raeder/bestellen/"+order["token"]+"/kauf").status_code,409)
+        response = self.client.get(order["url"]+"/bearbeiten")
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(self.read(order),before)
+        self.assertIn("575,96",response.text)
+        renewed=re.search(r'action="/reifen/kauf/([^"/]+)/entwurf"',response.text).group(1)
+        selection=self.service.resolver().from_token(renewed,produktart="felgen")
+        self.assertEqual((selection.artikel_id,selection.anzahl),("1",4))
+        self.assertNotIn('name="montage_datum"',response.text)
+        self.verify(order)
+        self.assertEqual(self.final(order).status_code,409)
+        self.assertEqual(self.read(order)["state"],"preis_geaendert")
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+        self.rim_changes["Lagerbestand"]="0"
+        self.assertEqual(self.final(order).status_code,409)
+        self.assertFalse(self.gateway.creates or self.supplier.reservations)
+        self.rim_changes["Lagerbestand"]="8"
+        self.assertIn(self.final(order).status_code,(302,303))
+        self.assertEqual(self.gateway.creates[0]["amount_total"],57596)
+
+    def test_rim_supplier_must_explicitly_acknowledge_category_at_each_phase(self):
+        self.setup_rims()
+        for category in (None,"reifen","komplettraeder"):
+            self.supplier.inspect_change["produktart"]=category
+            with self.assertRaises(ValueError):
+                self.service.inspect(*self.service.fresh(self.rim_token()))
+        self.supplier.inspect_change["produktart"]="felgen"
+        for phase in ("reserve_change","commit_change"):
+            with self.subTest(phase=phase):
+                self.client=portal.app.test_client()
+                order=self.rim_draft({"zahlungsart":"vor_ort"})
+                self.verify(order)
+                getattr(self.supplier,phase).pop("produktart")
+                response=self.final(order)
+                self.assertEqual(response.status_code,409)
+                self.assertEqual(self.read(order)["state"],"pruefung_noetig")
+                self.assertFalse(self.read(order)["accepted_at"])
+                self.assertFalse(self.rows("reifen_vertrag_outbox") or self.gateway.creates)
+                getattr(self.supplier,phase)["produktart"]="felgen"
+
+    def test_rim_rejects_tire_mounting_and_stored_cross_category_before_external_actions(self):
+        self.setup_rims()
+        order=self.rim_draft()
+        before=self.read(order)
+        data={**json.loads(before["kunde_json"]),"zahlungsart":"online","montage_datum":self.montage_day(),
+              "montage_uhrzeit":"09:00","standardmontage":"ja",portal.CSRF_FIELD_NAME:self.csrf()}
+        response=self.client.post("/reifen/kauf/"+order["token"]+"/entwurf",data=data)
+        self.assertEqual(response.status_code,400)
+        self.assertEqual(len(self.rows()),1)
+        self.assertEqual(self.read(order),before)
+        wrong=json.loads(before["produkt_json"])
+        wrong["produktart"]="reifen"
+        self.change(order,produkt_json=json.dumps(wrong))
+        with self.assertRaises(ValueError):
+            self.service.fresh_order(self.read(order))
+        with self.assertRaises(ValueError):
+            self.service.order(self.read(order))
+        self.assertFalse(self.gateway.creates or self.supplier.reservations or self.supplier.commits or self.sms.starts)
+
+    def test_later_mounting_has_no_mandatory_early_waiver_and_holiday_boundary_is_conservative(self):
+        order=self.ready({"montage_datum":self.montage_day(30),"montage_uhrzeit":"09:00"},query={"montage":"ja"})
+        html=self.client.get(order["url"]).text
+        self.assertNotIn('name="frueher_montagebeginn"',html)
+        self.assertNotIn('name="kenntnis_montagewiderruf"',html)
+        self.assertIn(self.final(order,frueher_montagebeginn="",kenntnis_montagewiderruf="").status_code,(302,303))
+        self.assertEqual(self.read(order)["state"],"zahlung_offen")
+        # Christmas + weekend extends a Dec 25 service deadline to Dec 28.
+        self.clock.value=datetime(2026,12,11,10,tzinfo=timezone.utc)
+        row={**self.read(order),"montage_datum":"2026-12-28","reservierung_json":"{}"}
+        self.assertTrue(self.service.early_mounting(row))
+        row["montage_datum"]="2026-12-29"
+        self.assertFalse(self.service.early_mounting(row))
+
+    def test_long_supplier_hold_rechecks_early_service_before_payment_and_delayed_acceptance(self):
+        day=self.montage_day(17)
+        order=self.ready({"montage_datum":day,"montage_uhrzeit":"09:00"},query={"montage":"ja"})
+        self.assertNotIn('name="frueher_montagebeginn"',self.client.get(order["url"]).text)
+        self.supplier.reserve_change["gueltig_bis"]=(self.clock()+timedelta(days=10)).isoformat()
+        response=self.final(order,frueher_montagebeginn="",kenntnis_montagewiderruf="")
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.read(order)["state"],"preis_geaendert")
+        self.assertIn('name="frueher_montagebeginn"',response.text)
+        self.assertFalse(self.gateway.creates or self.supplier.commits)
+        self.assertIn(self.final(order).status_code,(302,303))
+        self.assertEqual(len(self.supplier.reservations),1)
+        # Simulate an older already-paid draft lacking declarations and a late
+        # callback: never accept a now-early service without the required choice.
+        self.change(order,erklaerungen_json=json.dumps({"bestellpflicht":True,"bedingungen":True}))
+        self.clock.value += timedelta(days=7)
+        self.gateway.paid(self.read(order)["payment_id"])
+        response=self.post(order,"zahlung-pruefen")
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.read(order)["state"],"pruefung_noetig")
+        self.assertFalse(self.supplier.commits or self.rows("reifen_vertrag_outbox"))
 
 
 if __name__=="__main__":

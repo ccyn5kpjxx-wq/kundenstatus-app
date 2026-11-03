@@ -125,6 +125,42 @@ class TireContract(unittest.TestCase):
         self.assertEqual(self.confirm(identifier).status_code, 302)
         self.assertEqual(len(self.rows("reifen_vertrag_outbox")), 1)
 
+    def test_all_wheel_categories_allow_partial_withdrawal_in_every_mode_without_otp_or_mail(self):
+        with patch.object(contract, "deliver_pending", side_effect=AssertionError("No mail execution")) as mail:
+            for mode in ("off", "test", "live"):
+                self.app.config.update(REIFEN_CHECKOUT_MODE=mode, REIFEN_KAUF_MODE=mode,
+                                       REIFEN_KAUF_ENABLED=False, REIFEN_KAUF_MAIL_ENABLED=False)
+                for category in ("Reifen", "Felgen", "Kompletträder", "Werkstattleistung"):
+                    with self.subTest(mode=mode, category=category):
+                        response = self.client.get("/reifen/vertrag-widerrufen")
+                        self.assertEqual(response.status_code, 200)
+                        form = response.get_data(as_text=True)
+                        for offered in ("Reifen", "Felgen", "Kompletträder", "Werkstattleistung"):
+                            self.assertIn(offered, form)
+                        self.assertNotIn("Ihrer Reifenbestellung", form)
+                        self.assertNotRegex(form, r'<input\b[^>]*name=[\"\'](?:code|otp|telefon)[\"\']')
+                        self.assertIn("keinen Kundenlogin und keinen Telefoncode", form)
+                        part = f"Eine Position {category}; übrige Positionen unverändert"
+                        identifier = self.draft(bestellnummer=f"SYNTHETIC-{mode}-{category}",
+                                                umfang="teilweise", teil=part)
+                        pending = next(row for row in self.rows("reifen_widerruf") if row["id"] == identifier)
+                        self.assertEqual(pending["confirmed_at"], "")
+                        review = self.client.get("/reifen/widerruf/eingang/" + identifier)
+                        self.assertEqual(review.status_code, 404)
+                        accepted = self.confirm(identifier)
+                        self.assertEqual(accepted.status_code, 302)
+                        receipt = self.client.get(accepted.location)
+                        self.assertEqual(receipt.status_code, 200)
+                        self.assertIn("Angegebener Teil", receipt.get_data(as_text=True))
+                        self.assertIn(part, receipt.get_data(as_text=True))
+                        stored = next(row for row in self.rows("reifen_widerruf") if row["id"] == identifier)
+                        self.assertEqual(json.loads(stored["payload_json"])["teil"], part)
+                self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+                self.assertFalse(self.app.config["REIFEN_KAUF_MAIL_ENABLED"])
+            self.assertEqual(len(self.rows("reifen_vertrag_outbox")), 12)
+            self.assertTrue(all(row["state"] == "queued" for row in self.rows("reifen_vertrag_outbox")))
+            mail.assert_not_called()
+
     def test_review_step_does_not_submit_or_queue_mail(self):
         self.draft()
         self.assertEqual(self.rows("reifen_widerruf")[0]["confirmed_at"], "")

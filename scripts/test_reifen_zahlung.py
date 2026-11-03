@@ -95,6 +95,7 @@ class StripeReifenGatewayTest(unittest.TestCase):
         self.assertEqual(params["payment_method_types"], ["card"])
         self.assertEqual(params["line_items"][0]["quantity"], 1)
         self.assertEqual(params["line_items"][0]["price_data"]["unit_amount"], 62550)
+        self.assertEqual(params["line_items"][0]["price_data"]["product_data"]["name"], "Reifenbestellung reifenOrder123")
         self.assertEqual(result["amount_total"], 62550)
         self.assertEqual(result["reference"], self.order["id"])
         self.assertEqual(result["quote_hash"], self.order["quote_hash"])
@@ -107,6 +108,37 @@ class StripeReifenGatewayTest(unittest.TestCase):
         self.assertNotIn("customer_email", params)
         self.assertNotIn("telefon", json.dumps(params))
         self.assertNotIn(self.order["kunde"]["email"], options["idempotency_key"])
+
+    def test_rim_order_name_is_exact_while_amount_metadata_attempt_and_paid_binding_are_preserved(self):
+        order = {**self.order, "id": "felgenOrder123", "produktart": "felgen",
+                 "produkt": {"produktart": "felgen"}, "query": {"produktart": "felgen", "anzahl": 4}}
+        result = self.gateway.create(order)
+        params, options = self.sessions.creates[0]
+        self.assertEqual(params["line_items"][0]["price_data"]["product_data"]["name"], "Felgenbestellung felgenOrder123")
+        self.assertEqual(params["line_items"][0]["price_data"]["unit_amount"], order["amount_total"])
+        self.assertEqual(params["metadata"], {"integration": payment.INTEGRATION,
+            "order_id": order["id"], "quote_hash": order["quote_hash"]})
+        self.assertEqual(params["payment_intent_data"], {"metadata": params["metadata"]})
+        self.assertEqual(params["expires_at"], order["payment_expires_at"])
+        self.gateway.create(order)
+        self.assertEqual(self.sessions.creates[-1], (params, options))
+        self.assertEqual(len(self.sessions.saved), 1)
+        self.sessions.saved[result["id"]].update(status="complete", payment_status="paid", payment_intent="pi_RimMocked123")
+        self.assertEqual(self.gateway.retrieve(result["id"], expected_order=order)["status"], "succeeded")
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.retrieve(result["id"], expected_order={**order, "quote_hash": "c"*64})
+
+    def test_unknown_nontext_and_contradictory_product_types_are_rejected_before_checkout_io(self):
+        changes = [{"produktart": value} for value in (None, True, 1, [], {}, "Felgen", "komplettraeder", "PRIVATE")]
+        changes.extend(({"produktart": "felgen", "produkt": {"produktart": "reifen"}},
+                        {"produktart": "reifen", "query": {"produktart": "felgen"}},
+                        {"produkt": {"produktart": "felgen"}},
+                        {"produktart": "felgen", "query": {"produktart": None}}))
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(payment.ReifenZahlungFehler) as caught:
+                self.gateway.create({**self.order, **change})
+            self.assertNotIn("PRIVATE", str(caught.exception))
+        self.assertFalse(self.sessions.creates)
 
     def test_retry_reuses_frozen_expiry_parameters_and_idempotency_key(self):
         one = self.gateway.create(self.order)
