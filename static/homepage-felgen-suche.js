@@ -110,22 +110,23 @@
     return values.every(value => value !== null) && values[0] > 0 && values[1] === values[0] * product.anzahl && values[3] === values[1] + values[2];
   };
   const photo = product => {
-    const figure = node('figure','tire-result-media');
-    figure.setAttribute('style','margin:0;max-width:120px;min-height:190px;');
-    const visual = node('div','tire-result-image-box');
-    visual.setAttribute('style','width:100%;height:144px;display:grid;place-items:center;');
+    const figure = node('figure','tire-result-media rim-result-media');
+    const visual = node('div','tire-result-image-box rim-result-image-box');
     const caption = node('figcaption','tire-result-image-caption');
     const unavailable = () => { visual.replaceChildren(node('span','tire-result-image-placeholder','Felgenfoto noch nicht hinterlegt')); caption.textContent = ''; };
     const image = product.bild;
-    const target = image && image.motiv === 'felge' && text(image.alt,250,true)
+    const target = image && typeof image === 'object' && Object.keys(image).length === 4
+      && Object.keys(image).every(key => ['url','alt','bezug','motiv'].includes(key))
+      && image.motiv === 'felge' && image.bezug === 'artikel' && text(image.alt,250,true) && !/[<>]/.test(image.alt)
+      && typeof image.url === 'string' && image.url.startsWith('/api/felgenkatalog/bild/')
       ? localUrl(image.url,new RegExp(`^/api/felgenkatalog/bild/${product.artikel_id}/[0-9a-f]{64}\\.webp$`)) : null;
     if (target) {
-      const picture = node('img','tire-result-image');
-      picture.setAttribute('width','120'); picture.setAttribute('height','144');
+      const picture = node('img','tire-result-image rim-result-image');
+      picture.setAttribute('width','160'); picture.setAttribute('height','160');
       picture.setAttribute('loading','lazy'); picture.setAttribute('decoding','async');
-      picture.setAttribute('alt',image.alt); picture.setAttribute('style','display:block;width:100%;height:144px;object-fit:contain;');
+      picture.setAttribute('alt',image.alt);
       picture.addEventListener('error',unavailable); picture.setAttribute('src',target.pathname);
-      visual.append(picture); caption.textContent = 'Felgenabbildung · Größe/Ausführung kann abweichen.';
+      visual.append(picture); caption.textContent = 'Artikelabbildung · Felge ohne Reifen.';
     } else unavailable();
     figure.append(visual,caption); return figure;
   };

@@ -366,10 +366,11 @@ def _policy(value):
 
 
 class FelgenCatalogProvider:
-    def __init__(self, cache, *, policy=None, publication_approved=False, publication_reference="", private_view_authorized=None, clock=None):
+    def __init__(self, cache, *, policy=None, publication_approved=False, publication_reference="", private_view_authorized=None, clock=None, image_resolver=None):
         self.cache, self._policy = cache, _policy(policy)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._authorize = private_view_authorized if callable(private_view_authorized) else None
+        self._image_resolver = image_resolver if callable(image_resolver) else None
         try:
             reference = _text(publication_reference, 200)
         except (ValueError, TypeError):
@@ -417,13 +418,22 @@ class FelgenCatalogProvider:
         calculation = self._calculation(article, quantity)
         if calculation is None:
             return None
-        return {"artikel_id": article.artikel_id, "ean": article.ean, "hersteller_artikelnummer": article.hersteller_artikelnummer,
+        product = {"artikel_id": article.artikel_id, "ean": article.ean, "hersteller_artikelnummer": article.hersteller_artikelnummer,
                 "hersteller": article.hersteller, "profil": article.profil, "bezeichnung": article.hersteller + " " + article.profil,
                 "material": article.material, "bestand": article.gemeldeter_bestand, "anzahl": quantity,
                 "preisstand": article.abgerufen_am.isoformat(), "gueltig_bis": (article.abgerufen_am + MAX_AGE).isoformat(),
                 "kennungspassung": "nicht_geprueft", "preis": {"einzel_brutto": calculation["einzelpreis_brutto_reifen"],
                     "gesamt_felgen_brutto": calculation["gesamt_brutto_reifen"], "versand_brutto": calculation["versand_brutto"],
                     "gesamt_brutto": calculation["gesamt_brutto"], "waehrung": "EUR"}}
+        if self._image_resolver is not None:
+            try:
+                from felgen_bilder import public_felgen_image_metadata
+                picture = public_felgen_image_metadata(self._image_resolver(article), article.artikel_id)
+                if picture is not None:
+                    product["bild"] = picture
+            except Exception:
+                pass
+        return product
 
     def search(self, args):
         query = parse_felgen_suche(args)

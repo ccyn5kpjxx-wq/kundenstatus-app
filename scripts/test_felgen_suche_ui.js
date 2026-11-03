@@ -173,14 +173,40 @@ const cases=[
       assert.equal(h.results.querySelectorAll('article').length,1);assert.equal(h.results.querySelector('.tire-result-select'),null);
     }
     const url='/api/felgenkatalog/bild/12345/'+ 'a'.repeat(64)+'.webp';
-    for(const bild of [{url,alt:'Synthetische Felgenabbildung',motiv:'reifen'},
-      {url:'https://evil.invalid'+url,alt:'Synthetische Felgenabbildung',motiv:'felge'},
-      {url:url.replace('/12345/','/12346/'),alt:'Synthetische Felgenabbildung',motiv:'felge'}]){
+    for(const bild of [{url,alt:'Synthetische Felgenabbildung',bezug:'artikel',motiv:'reifen'},
+      {url:'https://evil.invalid'+url,alt:'Synthetische Felgenabbildung',bezug:'artikel',motiv:'felge'},
+      {url:url.replace('/12345/','/12346/'),alt:'Synthetische Felgenabbildung',bezug:'artikel',motiv:'felge'}]){
       const h=harness();await reply(h,h.search(),offers(product({bild})));assert.equal(h.results.querySelectorAll('img').length,0);assert.ok(h.results.querySelector('.tire-result-select'));
     }
-    const h=harness();await reply(h,h.search(),offers(product({bild:{url,alt:'Synthetische Felgenabbildung',motiv:'felge'}})));
+    const h=harness();await reply(h,h.search(),offers(product({bild:{url,alt:'Synthetische Felgenabbildung',bezug:'artikel',motiv:'felge'}})));
     const image=h.results.querySelector('img');assert.equal(image.getAttribute('loading'),'lazy');assert.equal(image.getAttribute('decoding'),'async');
+    assert.equal(image.getAttribute('src'),url);assert.equal(image.getAttribute('alt'),'Synthetische Felgenabbildung');
+    assert.equal(image.getAttribute('width'),'160');assert.equal(image.getAttribute('height'),'160');
+    assert.equal(image,h.results.querySelector('.rim-result-image'));
+    for(const element of [image,h.results.querySelector('.rim-result-media'),h.results.querySelector('.rim-result-image-box'),h.results.querySelector('figcaption')]){
+      assert.ok(element);assert.equal(element.getAttribute('style'),null,'CSS owns responsive image sizing and caption styling');
+    }
+    assert.equal(h.results.querySelector('figcaption').textContent,'Artikelabbildung · Felge ohne Reifen.');
     await image.dispatch('error');assert.equal(h.results.querySelectorAll('img').length,0);assert.match(h.results.textContent,/Felgenfoto noch nicht hinterlegt/);assert.equal(h.requests.length,1);
+    assert.equal(h.results.querySelector('figcaption').textContent,'');
+    assert.ok(h.results.querySelector('.tire-result-select'));assert.match(h.results.querySelector('.tire-result-pricing').textContent,/407,14/);
+  }],
+  ['article rim photos require exact local SKU metadata and never substitute tire or assembled-wheel motifs',async()=>{
+    const url='/api/felgenkatalog/bild/12345/'+ 'b'.repeat(64)+'.webp';
+    const valid={url,alt:'Synthetische konkrete Artikelausführung',bezug:'artikel',motiv:'felge'};
+    const invalid=[undefined,null,{}, {url,alt:valid.alt,motiv:'felge'}, {...valid,extra:'not-public'},
+      {...valid,bezug:'profil'}, {...valid,motiv:'reifen'}, {...valid,motiv:'komplettrad'}, {...valid,motiv:'felge_mit_reifen'},
+      {...valid,url:'https://shop.example.invalid'+url}, {...valid,url:'//shop.example.invalid'+url},
+      {...valid,url:url+'?'}, {...valid,url:url+'#'}, {...valid,url:url+'?secret=1'}, {...valid,url:url+'\n'},
+      {...valid,url:url.replace('b'.repeat(64),'B'.repeat(64))}, {...valid,url:url.replace('b'.repeat(64),'b'.repeat(63))},
+      {...valid,url:url.replace('/bild/','/bild/../bild/')}, {...valid,url:url.replace('/12345/','/12346/')},
+      {...valid,alt:''}, {...valid,alt:'x'.repeat(251)}, {...valid,alt:'\u0000secret'}, {...valid,alt:'<img onerror=synthetic>'}];
+    for(const bild of invalid){
+      const h=harness();await reply(h,h.search(),offers(product({bild})));
+      assert.equal(h.results.querySelectorAll('article').length,1);assert.equal(h.results.querySelectorAll('img').length,0);
+      assert.match(h.results.textContent,/Felgenfoto noch nicht hinterlegt/);assert.ok(h.results.querySelector('.tire-result-select'));
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent,/407,14/);assert.equal(h.requests.length,1);
+    }
   }],
   ['pagination preserves all rim filters and a changed dropdown makes one page-one request',async()=>{
     const initial={suche:'Y',hersteller:'Borbet',material:'alu',anzahl:'4',sortierung:'preis_ab'},h=harness(initial);

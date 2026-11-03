@@ -18,7 +18,15 @@ Suche nach Hersteller, Modellbegriffen, Artikelnummer, Herstellerartikelnummer o
 
 `felgen_shop.py` ergänzt reine GET-Endpunkte für Katalog, Auswahlmerkmale und signierte Auswahl. Der eigene Salt bindet Artikelnummer und Menge; bei jeder Auswahl werden aktueller Preis und Bestand erneut geprüft. Keine Kundendaten, Datenbankmutation, Sessioninhaber, Reservierung, SMS, Zahlung oder Lieferantenbestellung entstehen. HTML/JSON sind privat und nicht zwischenspeicherbar. Formularfreie Ansichten erzeugen keinen CSRF-Sessioncookie; bestehende POST-Formulare behalten ihren Schutz.
 
-Felgenmaße in Produktnamen werden nicht als strukturierte Fahrzeugfreigabe ausgegeben. Kein Artikel wird ohne bestätigte Zuordnung als passend bezeichnet. Bilder benötigen reine Felgen als Motiv und eine eigenständige geprüfte Quelle; Reifenbilder und Komplettradbilder werden nicht wiederverwendet. Aktuell ist noch kein Felgenbildbestand angeschlossen.
+Felgenmaße in Produktnamen werden nicht als strukturierte Fahrzeugfreigabe ausgegeben. Kein Artikel wird ohne bestätigte Zuordnung als passend bezeichnet.
+
+## Felgenbilder
+
+`FelgenBildStore` bindet jedes Foto an die aktuelle Artikelnummer, den Hersteller, das vollständige Profil, die Herstellerartikelnummer und die EAN. Leere Kennungen müssen ebenfalls mit dem Katalog übereinstimmen. Es gibt keine Übertragung auf ähnlich benannte Modelle, andere Farben oder Ausführungen. Die öffentliche Metadatenantwort enthält ausschließlich den lokalen SKU-/SHA-Bildpfad, Alternativtext sowie `bezug: artikel` und `motiv: felge`.
+
+Die Lieferanten-Originalbytes bleiben unverändert in einem separaten privaten Verzeichnis. Zulässig sind begrenzte, decodierbare WebP-Dateien mit passendem SHA-256 und positiver Sichtprüfung als reine Felge ohne Reifen. Lieferanten-Platzhalter, Reifen- und Komplettradbilder werden ausgeschlossen. Eine Artikelbeschreibung liest keine Bilddateien; die eigene GET-Bildroute prüft Dateigrenzen, aktuelle Artikelbindung, Hash und Format. Falsche/fehlende optionale Bilder entfernen keinen Preis und ändern keine Passungsangaben. Lokale Ansicht und öffentliche Nutzungsrechte bleiben getrennt.
+
+Die Trefferliste reserviert 160 × 160 Pixel für das Bild, die Auswahlübersicht 200 × 200 Pixel. Die Darstellung verwendet `object-fit: contain`, Bildmaße und Alternativtext; die Trefferliste lädt Bilder verzögert und ersetzt Ladefehler durch neutralen Fehlbildtext. Die Bildroute bleibt privat, nicht zwischenspeicherbar und ohne Sessioncookie. Eine vollständige Katalogabdeckung wird nicht behauptet.
 
 ## Offene Voraussetzung für Kompletträder
 

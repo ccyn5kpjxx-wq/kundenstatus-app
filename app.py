@@ -3183,6 +3183,7 @@ def restrict_public_site_service():
         "felgen_shop.facets",
         "felgen_shop.search",
         "felgen_shop.auswahl",
+        "felgen_shop.bild",
         "reifenangebote_suche",
         "reifenkatalog_auswahl",
         "reifenkatalog_bild",
@@ -3303,7 +3304,7 @@ def csrf_recovery_response():
 
 @app.after_request
 def add_csrf_fields(response):
-    if request.endpoint in {"reifen_auswahl", "felgen_shop.catalog", "felgen_shop.komplettraeder", "felgen_shop.auswahl"}:
+    if request.endpoint in {"reifen_auswahl", "felgen_shop.catalog", "felgen_shop.komplettraeder", "felgen_shop.auswahl", "felgen_shop.bild"}:
         return response
     content_type = response.headers.get("Content-Type", "")
     if "text/html" not in content_type.lower() or response.direct_passthrough:

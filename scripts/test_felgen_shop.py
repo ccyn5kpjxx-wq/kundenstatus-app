@@ -5,12 +5,16 @@ Only synthetic in-memory snapshots are used; network and worker starts are denie
 """
 import ast
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 import hmac
+import json
 from pathlib import Path
 import re
 import secrets
 import sys
+import tempfile
 import time
 from types import SimpleNamespace
 import unittest
@@ -23,10 +27,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from flask import Flask, abort, redirect, request, session, url_for
 from itsdangerous import URLSafeTimedSerializer
+from felgen_bilder import FelgenBildStore
 from felgen_katalog import FelgenCatalogProvider, parse_felgen_feed
 from felgen_shop import register_felgen_shop
 from portal_static_assets import asset_version
 from scripts.test_felgen_katalog import POLICY, raw_feed
+from scripts.test_reifen_bilder import synthetic_webp
 
 
 class RimShopRoutesTest(unittest.TestCase):
@@ -99,7 +105,112 @@ class RimShopRoutesTest(unittest.TestCase):
             self.assertIsNone(self.client.get_cookie("session"))
         self.assertEqual(self.no_write.mock_calls, [])
         for marker in ("PRIVATE-MARKER", "private.invalid", "SECRET-PROVIDER", "einkaufspreis", "netto_einkauf"):
-            self.assertNotIn(marker, response.get_data(as_text=True))
+            self.assertNotIn(marker.encode(), response.get_data())
+
+    def install_images(self, *, authorized=True, motif="felge"):
+        temporary = tempfile.TemporaryDirectory(prefix="offline-rim-route-images-")
+        self.addCleanup(temporary.cleanup)
+        directory = Path(temporary.name) / "private-rim-images"
+        directory.mkdir()
+        image = synthetic_webp()
+        digest = hashlib.sha256(image).hexdigest()
+        (directory / (digest + ".webp")).write_bytes(image)
+        article = self.snapshot.artikel[0]
+        manifest = {"schema": 1, "articles": [{"artikel_id": article.artikel_id,
+            "hersteller": article.hersteller, "profil": article.profil,
+            "hersteller_artikelnummer": article.hersteller_artikelnummer, "ean": article.ean,
+            "sha256": digest, "bezug": "artikel", "motiv": motif,
+            "nachweis": "Synthetic article, approved rim-only fixture"}]}
+        (directory / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        store = FelgenBildStore(directory, catalog_source=lambda: self.snapshot,
+                               private_view_authorized=(lambda: True) if authorized else None)
+        self.app.config["FELGEN_BILD_STORE"] = store
+        self.provider = FelgenCatalogProvider(self.cache, policy=deepcopy(POLICY),
+            private_view_authorized=lambda: True, clock=lambda: self.now, image_resolver=store.describe)
+        self.app.config["FELGENANGEBOT_PROVIDER"] = self.provider
+        return store, f"/api/felgenkatalog/bild/{article.artikel_id}/{digest}.webp", image
+
+    def test_verified_image_route_returns_original_webp_without_cookie_form_or_order(self):
+        store, path, original = self.install_images()
+        self.public = True
+        with patch.object(store, "read", wraps=store.read) as read:
+            response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_data(), original)
+        self.assertEqual(response.headers["Content-Type"], "image/webp")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assert_private(response)
+        self.assertNotIn(b"<form", response.get_data())
+        self.assertNotIn(b"csrf_token", response.get_data())
+        read.assert_called_once_with("1", hashlib.sha256(original).hexdigest())
+        self.cache.load.assert_not_called()
+        self.limit.assert_not_called()
+        self.attempt.assert_not_called()
+
+    def test_image_route_denies_unapproved_missing_wrong_identity_digest_and_query(self):
+        store, path, _ = self.install_images(authorized=False)
+        self.public = True
+        denied = self.client.get(path)
+        self.assertEqual(denied.status_code, 404)
+        self.assert_private(denied)
+        self.app.config.pop("FELGEN_BILD_STORE")
+        missing = self.client.get(path)
+        self.assertEqual(missing.status_code, 404)
+        self.assert_private(missing)
+        fake = SimpleNamespace(read=Mock(side_effect=AssertionError("Untrusted image store")))
+        self.app.config["FELGEN_BILD_STORE"] = fake
+        wrong_store = self.client.get(path)
+        self.assertEqual(wrong_store.status_code, 404)
+        self.assert_private(wrong_store)
+        fake.read.assert_not_called()
+        store, path, _ = self.install_images()
+        for invalid in (path.replace("/1/", "/2/"), path.replace("/1/", "/01/"),
+                        path.rsplit("/", 1)[0]+"/"+"0"*64+".webp"):
+            response = self.client.get(invalid)
+            self.assertEqual(response.status_code, 404)
+            self.assert_private(response)
+        with patch.object(store, "read", wraps=store.read) as read:
+            response = self.client.get(path+"?token=PRIVATE-MARKER")
+            self.assertEqual(response.status_code, 400)
+            self.assert_private(response)
+            read.assert_not_called()
+        article = self.snapshot.artikel[0]
+        self.snapshot = replace(self.snapshot, artikel=(replace(article, profil=article.profil+" another finish"),))
+        response = self.client.get(path)
+        self.assertEqual(response.status_code, 404)
+        self.assert_private(response)
+        self.cache.load.assert_not_called()
+
+    def test_real_selection_and_search_show_only_valid_article_image_without_changing_price(self):
+        original_price = self.client.get("/api/felgenangebote/suche").json["produkte"][0]["preis"]
+        _, path, _ = self.install_images()
+        search = self.client.get("/api/felgenangebote/suche")
+        self.assertEqual(search.status_code, 200)
+        self.assert_private(search)
+        product = search.json["produkte"][0]
+        self.assertEqual(product["preis"], original_price)
+        self.assertEqual(product["bild"], {"url": path, "alt": "Felge ohne Reifen: Synthetic Wheel Model",
+                                          "bezug": "artikel", "motiv": "felge"})
+        selected = self.client.get(self.path)
+        self.assertEqual(selected.status_code, 200)
+        self.assert_private(selected)
+        self.assertIn(f'src="{path}"', selected.text)
+        self.assertIn('alt="Felge ohne Reifen: Synthetic Wheel Model"', selected.text)
+        self.assertIn("523,60 €", selected.text)
+        self.assertIn("Fahrzeugpassung noch nicht geprüft", selected.text)
+        self.assertNotRegex(selected.text, r"<(?:form|input|select)\b")
+        self.assertNotIn('name="csrf_token"', selected.text)
+        for settings in ({"motif": "reifen"}, {"motif": "komplettrad"}, {"authorized": False}):
+            with self.subTest(settings=settings):
+                self.install_images(**settings)
+                product = self.client.get("/api/felgenangebote/suche").json["produkte"][0]
+                self.assertEqual(product["preis"], original_price)
+                self.assertNotIn("bild", product)
+                selected = self.client.get(self.path)
+                self.assertEqual(selected.status_code, 200)
+                self.assert_private(selected)
+                self.assertNotIn("/api/felgenkatalog/bild/", selected.text)
+                self.assertIn("523,60 €", selected.text)
 
     def test_real_category_templates_have_correct_inputs_and_no_fake_fitment_or_set_checkout(self):
         catalog = self.client.get("/felgen?anzeigen=1")
@@ -252,12 +363,13 @@ class RimShopRoutesTest(unittest.TestCase):
         self.attempt.assert_not_called()
 
     def test_get_does_not_change_existing_session_and_existing_post_forms_keep_csrf(self):
+        _, image_path, _ = self.install_images()
         self.client.get("/other-form")
         with self.client.session_transaction() as values:
             values["unrelated"] = "synthetic-session-marker"
             before = dict(values)
             csrf = values["csrf_token"]
-        for path in ("/felgen", "/komplettraeder", self.path, "/api/felgenangebote/suche", "/api/felgenkatalog/auswahl"):
+        for path in ("/felgen", "/komplettraeder", self.path, "/api/felgenangebote/suche", "/api/felgenkatalog/auswahl", image_path):
             response = self.client.get(path)
             self.assertEqual(response.status_code, 200)
             self.assert_private(response, cookie_absent=False)
@@ -269,7 +381,8 @@ class RimShopRoutesTest(unittest.TestCase):
         for rule in self.app.url_map.iter_rules():
             if rule.endpoint.startswith("felgen_shop."):
                 self.assertEqual(rule.methods - {"HEAD", "OPTIONS"}, {"GET"})
-                response = self.client.post(rule.rule.replace("<token>", self.token), data={"csrf_token": csrf})
+                path = image_path if rule.endpoint == "felgen_shop.bild" else rule.rule.replace("<token>", self.token)
+                response = self.client.post(path, data={"csrf_token": csrf})
                 self.assertEqual(response.status_code, 405)
         self.cache.load.assert_not_called()
         self.assertEqual(self.no_write.mock_calls, [])

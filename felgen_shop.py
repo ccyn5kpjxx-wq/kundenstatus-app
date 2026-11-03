@@ -6,6 +6,7 @@ from flask import Blueprint, abort, jsonify, make_response, render_template, req
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from felgen_katalog import FelgenCatalogProvider, FelgenEingabefehler, FelgenKatalogError
+from felgen_bilder import FelgenBildStore, MAX_IMAGE_BYTES
 
 
 def register_felgen_shop(portal):
@@ -77,6 +78,19 @@ def register_felgen_shop(portal):
             return jsonify(status="ungueltige_suche", code=error.code, feld=error.feld, produkte=[], verfuegbar=False), 400
         except FelgenKatalogError as error:
             return jsonify(status="nicht_verfuegbar", code=error.code, produkte=[], verfuegbar=False), 503
+
+    @bp.get("/api/felgenkatalog/bild/<artikel_id>/<digest>.webp")
+    def bild(artikel_id, digest):
+        if request.args:
+            abort(400)
+        images = app.config.get("FELGEN_BILD_STORE")
+        value = images.read(artikel_id, digest) if isinstance(images, FelgenBildStore) else None
+        if not isinstance(value, bytes) or not 1 <= len(value) <= MAX_IMAGE_BYTES:
+            abort(404)
+        response = make_response(value)
+        response.headers["Content-Type"] = "image/webp"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
 
     @bp.get("/felgen/auswahl/<token>")
     def auswahl(token):
