@@ -204,7 +204,7 @@ class CatalogueTest(unittest.TestCase):
         rows[-1]["Einkaufspreis"] = "1,00"
         self.publish(feed(*rows))
         offers = self.provider()(QUERY)["angebote"]
-        self.assertEqual(len(offers), 100)
+        self.assertEqual(len(offers), 12)
         self.assertEqual(offers[0]["artikel_id"], "101")
 
     def test_public_outside_relative_and_unc_locations_are_rejected(self):
@@ -235,8 +235,8 @@ class CatalogueTest(unittest.TestCase):
         for key in ("qualitaet", "runflat", "xl", "schneeflocke"):
             self.assertIsNone(offer[key])
         self.assertFalse(offer["montage_standard_bestaetigt"])
-        self.assertEqual(self.provider()({**QUERY, "qualitaet": "premium"}), {"angebote": []})
-        self.assertEqual(self.provider()({**QUERY, "montage": True}), {"angebote": []})
+        self.assertEqual(self.provider()({**QUERY, "qualitaet": "premium"}), {"angebote": [], "gesamt": 0, "paginiert": True})
+        self.assertEqual(self.provider()({**QUERY, "montage": True}), {"angebote": [], "gesamt": 0, "paginiert": True})
 
     def test_only_confirmed_article_metadata_enables_class_and_standard_mounting(self):
         self.publish()
@@ -248,7 +248,7 @@ class CatalogueTest(unittest.TestCase):
         self.assertTrue(item["xl"] and item["schneeflocke"])
         for change in ({"runflat": True}, {"runflat": None}, {"bestaetigt": 1}, {"nachweis": ""}, {"nachweis": "  "}, {"qualitaet": []}):
             modified = {"1": {**meta["1"], **change}}
-            self.assertEqual(self.provider(article_metadata=modified)({**QUERY, "montage": True}), {"angebote": []})
+            self.assertEqual(self.provider(article_metadata=modified)({**QUERY, "montage": True}), {"angebote": [], "gesamt": 0, "paginiert": True})
 
     def test_freight_is_six_for_one_and_once_zero_from_two(self):
         self.publish()

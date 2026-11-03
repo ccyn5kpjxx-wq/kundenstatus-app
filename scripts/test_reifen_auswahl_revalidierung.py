@@ -87,7 +87,7 @@ class SelectionRevalidationTest(unittest.TestCase):
         self.cache.replace(feed(*rows, {"Artikelnummer": SKU, "Einkaufspreis": "100,00"}))
         provider = self.catalogue_provider()
         self.assertTrue(provider.publication_ready)
-        self.assertEqual(len(provider(QUERY)["angebote"]), 100)
+        self.assertEqual(len(provider(QUERY)["angebote"]), 12)
         self.assertNotIn(SKU, [p["artikel_id"] for p in provider(QUERY)["angebote"]])
         self.assertEqual([p["artikel_id"] for p in provider.lookup(QUERY, SKU)["angebote"]], [SKU])
         public, status = self.search(provider, artikel_id=SKU)

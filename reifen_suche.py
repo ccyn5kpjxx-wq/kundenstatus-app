@@ -9,19 +9,21 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import re
+import unicodedata
 from urllib.parse import urlsplit
 
 from reifenangebote import REIFEN_SAISONS, REIFEN_QUALITAETEN
 from reifenpreis_kalkulation import berechne_reifenpreis
 from reifenservice import berechne_reifenservice
-from tyresystem_provider import TyreSystemCatalogError
+from tyresystem_provider import TyreSystemCatalogError, valid_manufacturer
+from tyresystem_feed import MAX_ROWS
 
 
 MAX_PREISALTER = timedelta(minutes=15)
 MAX_PRODUKTE = 12
 # Workshop decision, 02.11.2026: the existing EUR 5 surcharge applies at 40 or below.
 NIEDERQUERSCHNITT_BIS = 40
-_FELDER = {"groesse", "saison", "qualitaet", "anzahl", "montage"}
+_FELDER = {"groesse", "saison", "qualitaet", "anzahl", "montage", "hersteller", "sortierung", "seite"}
 # Nominal km/h, not alphabetic order. Conservative search: no automatic winter
 # exceptions or special >300 km/h approvals. Source: Michelin's published table:
 # https://www.michelin.de/auto/tipps/grundlagen-reifen/lastindex-geschwindigkeitsindex
@@ -96,10 +98,31 @@ def parse_reifen_suche(args):
     if not isinstance(mounting, str) or mounting not in {"ja", "nein"}:
         raise ReifenSucheEingabefehler("Bitte Abholung oder Montage auswählen.",
                                       code="montage_ungueltig", feld="montage")
-    return {"breite": width, "querschnitt": ratio, "zoll": rim,
+    result = {"breite": width, "querschnitt": ratio, "zoll": rim,
             "lastindex": load, "geschwindigkeitsindex": speed,
             "saison": season, "qualitaet": quality, "anzahl": int(quantity),
             "montage": mounting == "ja"}
+    manufacturer = args.get("hersteller", "")
+    if (not isinstance(manufacturer, str) or len(manufacturer) > 100
+            or any(unicodedata.category(char).startswith("C") for char in manufacturer)
+            or (manufacturer.strip() and not valid_manufacturer(manufacturer.strip()))):
+        raise ReifenSucheEingabefehler("Bitte einen Hersteller aus der Auswahl wählen.",
+                                      code="hersteller_ungueltig", feld="hersteller")
+    if manufacturer.strip():
+        result["hersteller"] = manufacturer.strip()
+    sort = args.get("sortierung", "preis_auf")
+    if sort not in ("preis_auf", "preis_ab", "name"):
+        raise ReifenSucheEingabefehler("Bitte eine gültige Sortierung auswählen.",
+                                      code="sortierung_ungueltig", feld="sortierung")
+    if sort != "preis_auf":
+        result["sortierung"] = sort
+    page = args.get("seite", "1")
+    if not isinstance(page, str) or not re.fullmatch(r"[1-9][0-9]{0,4}", page) or int(page) > 10000:
+        raise ReifenSucheEingabefehler("Bitte eine gültige Ergebnisseite auswählen.",
+                                      code="seite_ungueltig", feld="seite")
+    if page != "1":
+        result["seite"] = int(page)
+    return result
 
 
 def _zeit(value):
@@ -184,6 +207,11 @@ def _produkt(item, query, mounting, now):
     if not re.fullmatch(r"[A-Za-z0-9_.:/-]+", sku):
         raise ValueError("Ungültige Artikel-ID.")
     name = _text(item.get("bezeichnung"), maximum=200)
+    manufacturer = item.get("hersteller")
+    if manufacturer is not None and not valid_manufacturer(manufacturer):
+        raise ValueError("Hersteller ist nicht prüfbar.")
+    if query.get("hersteller") is not None and manufacturer != query["hersteller"]:
+        raise ValueError("Anderer Hersteller.")
     delivery = _text(item.get("lieferzeit"), maximum=120)
     ean = item.get("ean", "")
     if ean is None:
@@ -205,6 +233,8 @@ def _produkt(item, query, mounting, now):
                   "montage_brutto": calculation["montage_brutto"],
                   "gesamt_brutto": calculation["gesamt_brutto"], "waehrung": "EUR"}}
     label = _reifenlabel(item)
+    if manufacturer is not None:
+        product["hersteller"] = manufacturer
     if label is not None:
         product["eu_label"] = label
     return product
@@ -263,6 +293,14 @@ def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
     if not isinstance(raw, Mapping) or not isinstance(raw.get("angebote"), list) or len(raw["angebote"]) > 100:
         return {**unavailable, "code": "angebote_nicht_pruefbar",
                 "nachricht": "Die Reifenangebote konnten nicht vollständig geprüft werden. Bitte versuchen Sie es später erneut."}, 503
+    pagination = {}
+    paginated = raw.get("paginiert", False)
+    if (type(paginated) is not bool or (paginated and ("gesamt" not in raw or len(raw["angebote"]) > MAX_PRODUKTE))
+            or ("gesamt" in raw and (type(raw["gesamt"]) is not int or not len(raw["angebote"]) <= raw["gesamt"] <= MAX_ROWS))):
+        return {**unavailable, "code": "angebote_nicht_pruefbar"}, 503
+    if artikel_id is None and "gesamt" in raw:
+        pagination = {"treffer_gesamt": raw["gesamt"], "seite": query.get("seite", 1),
+                      "seiten": (raw["gesamt"] + MAX_PRODUKTE - 1) // MAX_PRODUKTE}
     current = now or datetime.now(timezone.utc)
     products, seen = [], set()
     for item in raw["angebote"]:
@@ -275,10 +313,66 @@ def suche_reifenangebote(args, provider=None, *, now=None, artikel_id=None):
                 products.append(product)
         except (ValueError, TypeError, ArithmeticError, OverflowError):
             continue
-    products.sort(key=lambda product: Decimal(product["preis"]["gesamt_brutto"]))
+    sort = query.get("sortierung", "preis_auf")
+    if sort == "name":
+        products.sort(key=lambda product: product["bezeichnung"].casefold())
+    else:
+        products.sort(key=lambda product: Decimal(product["preis"]["gesamt_brutto"]), reverse=sort == "preis_ab")
     if not products and raw["angebote"]:
         return {**unavailable, "code": "angebote_nicht_pruefbar",
                 "nachricht": "Für die übermittelten Angebote sind Preis oder Verfügbarkeit nicht ausreichend bestätigt. Bitte versuchen Sie es später erneut."}, 200
+    if not paginated and artikel_id is None:
+        start = (query.get("seite", 1) - 1) * MAX_PRODUKTE
+        products = products[start:start + MAX_PRODUKTE]
     return {"status": "ok" if products else "keine_treffer", "code": "ok" if products else "keine_treffer", "verfuegbar": bool(products),
-            "produkte": products[:MAX_PRODUKTE],
+            **pagination, "produkte": products[:MAX_PRODUKTE],
             "nachricht": "" if products else "Für diese Auswahl sind gerade keine bestätigten Onlinepreise verfügbar."}, 200
+
+
+def suche_reifenkatalog_auswahl(provider=None, *, now=None):
+    """Read-only, freshly validated public facets; no provider structure escapes."""
+    unavailable = {"status": "nicht_verfuegbar", "code": "katalog_nicht_verfuegbar",
+                   "dimensionen": [], "hersteller": [],
+                   "nachricht": "Die verfügbaren Reifengrößen können gerade nicht geladen werden."}
+    try:
+        facets = getattr(provider, "facets", None)
+        if not callable(facets):
+            return {**unavailable, "code": "katalog_nicht_bereit"}, 200
+        raw = facets()
+    except TyreSystemCatalogError as exc:
+        codes = {"cache_stale": "katalog_veraltet", "cache_missing": "katalog_nicht_bereit"}
+        return {**unavailable, "code": codes.get(exc.code, "katalog_nicht_verfuegbar")}, 503
+    except Exception:
+        return unavailable, 503
+    try:
+        if (not isinstance(raw, Mapping) or not isinstance(raw.get("dimensionen"), list)
+                or len(raw["dimensionen"]) > MAX_ROWS or not isinstance(raw.get("hersteller"), list)
+                or len(raw["hersteller"]) > MAX_ROWS):
+            raise ValueError()
+        retrieved, valid_until = _zeit(raw.get("preisstand")), _zeit(raw.get("gueltig_bis"))
+        current = now or datetime.now(timezone.utc)
+        if retrieved <= current - MAX_PREISALTER or valid_until <= current:
+            return {**unavailable, "code": "katalog_veraltet"}, 503
+        if retrieved > current + timedelta(seconds=30) or valid_until <= retrieved:
+            raise ValueError()
+        dimensions, seen = [], set()
+        for item in raw["dimensionen"]:
+            if not isinstance(item, Mapping):
+                raise ValueError()
+            key = (_integer(item.get("breite"), 100, 500), _integer(item.get("querschnitt"), 10, 95),
+                   _integer(item.get("zoll"), 10, 30))
+            seasons = item.get("saisons")
+            if (key in seen or not isinstance(seasons, list) or not 1 <= len(seasons) <= 3
+                    or any(not isinstance(season, str) or season not in REIFEN_SAISONS for season in seasons)
+                    or len(set(seasons)) != len(seasons)):
+                raise ValueError()
+            seen.add(key)
+            dimensions.append({"breite": key[0], "querschnitt": key[1], "zoll": key[2], "saisons": sorted(seasons)})
+        if any(not valid_manufacturer(value) for value in raw["hersteller"]) or len(set(raw["hersteller"])) != len(raw["hersteller"]):
+            raise ValueError()
+        dimensions.sort(key=lambda item: (item["breite"], item["querschnitt"], item["zoll"]))
+        manufacturers = sorted(raw["hersteller"], key=lambda value: (value.casefold(), value))
+        return {"status": "ok", "code": "ok", "dimensionen": dimensions, "hersteller": manufacturers,
+                "preisstand": retrieved.isoformat(), "gueltig_bis": min(valid_until, retrieved + MAX_PREISALTER).isoformat()}, 200
+    except (ValueError, TypeError, ArithmeticError, OverflowError):
+        return unavailable, 503

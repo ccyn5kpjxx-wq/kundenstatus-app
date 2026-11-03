@@ -7,7 +7,7 @@
   const button = panel.querySelector('[data-tire-search-button]');
   const status = panel.querySelector('[data-tire-search-status]');
   const results = panel.querySelector('[data-tire-search-results]');
-  const criteria = ['reifen_groesse_vorne', 'reifen_groesse_hinten', 'reifen_saison', 'reifen_qualitaet', 'reifen_anzahl', 'reifen_montage'];
+  const criteria = ['reifen_groesse_vorne', 'reifen_groesse_hinten', 'reifen_saison', 'reifen_qualitaet', 'reifen_anzahl', 'reifen_montage', 'reifen_hersteller', 'reifen_sortierung'];
   const money = new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'});
   const clock = new Intl.DateTimeFormat('de-DE', {hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin'});
   const seasons = {sommer:'Sommerreifen', winter:'Winterreifen', ganzjahr:'Ganzjahresreifen'};
@@ -18,14 +18,19 @@
   let expiryTimer = null;
   let cooldownTimer = null;
   let retryUntil = 0;
-  const names = {groesse:'reifen_groesse_vorne', groesse_hinten:'reifen_groesse_hinten', saison:'reifen_saison', qualitaet:'reifen_qualitaet', anzahl:'reifen_anzahl', montage:'reifen_montage'};
+  let nextPage = 1;
+  let refreshDimensions = null;
+  let lastDimensionRefresh = 0;
+  const names = {groesse:'reifen_groesse_vorne', groesse_hinten:'reifen_groesse_hinten', saison:'reifen_saison', qualitaet:'reifen_qualitaet', anzahl:'reifen_anzahl', montage:'reifen_montage', hersteller:'reifen_hersteller', sortierung:'reifen_sortierung'};
   const messages = {
     groesse:'Bitte die Reifengröße eingeben, zum Beispiel 225/40 R18 92V. Auch 2254018 ist möglich.',
     groesse_hinten:'Bitte die Größe der Hinterreifen prüfen, zum Beispiel 225/40 R18 92V, oder das optionale Feld leeren.',
     saison:'Bitte Sommerreifen, Winterreifen oder Ganzjahresreifen auswählen.',
     qualitaet:'Bitte eine Marken- und Preiswahl auswählen, zum Beispiel „Alle Marken“.',
     anzahl:'Bitte eine Anzahl zwischen 1 und 8 Reifen auswählen.',
-    montage:'Bitte Abholung oder Montage auswählen.'
+    montage:'Bitte Abholung oder Montage auswählen.',
+    hersteller:'Bitte eine Marke aus dem Katalog oder „Alle Marken“ auswählen.',
+    sortierung:'Bitte eine der angebotenen Sortierungen auswählen.'
   };
 
   const value = name => String(new FormData(form).get(name) || '').trim();
@@ -49,7 +54,7 @@
     const fields = form.querySelectorAll(`[name="${names[key]}"]`);
     if (!fields.length) return;
     const id = `tire-error-${names[key]}`;
-    const parent = fields[0].closest('.field') || fields[0].closest('fieldset');
+    const parent = fields[0].closest('.field') || fields[0].closest('fieldset') || fields[0].closest('.tire-sort');
     let error = form.querySelector(`#${id}`);
     if (text && !error && parent) { error = node('p', 'tire-field-error'); error.id = id; parent.append(error); }
     if (error) { error.textContent = text || ''; error.hidden = !text; }
@@ -132,7 +137,7 @@
   };
   const alternatives = query => {
     const actions = [];
-    if (query.qualitaet !== 'alle') actions.push({label:'Alle Marken anzeigen', run:() => searchWith({qualitaet:'alle'})});
+    if (query.qualitaet !== 'alle' || query.hersteller) actions.push({label:'Alle Marken anzeigen', run:() => searchWith({qualitaet:'alle',hersteller:''})});
     if (query.montage === 'ja') actions.push({label:'Reifen ohne Montage anzeigen', run:() => searchWith({montage:'nein'})});
     actions.push({label:'Suche anpassen', run:() => focusField('groesse')});
     return actions;
@@ -172,6 +177,7 @@
     if (!product || typeof product !== 'object' || !product.preis || typeof product.preis !== 'object') return false;
     if (!['artikel_id','bezeichnung','groesse','lieferzeit'].every(k => typeof product[k] === 'string' && product[k].length > 0 && product[k].length <= 250)) return false;
     if (product.saison !== query.saison || product.preis.waehrung !== 'EUR') return false;
+    if (query.hersteller && product.hersteller !== query.hersteller) return false;
     if (product.qualitaet !== null && !productQualities.includes(product.qualitaet)) return false;
     if (query.qualitaet !== 'alle' && product.qualitaet !== query.qualitaet) return false;
     try {
@@ -195,10 +201,15 @@
   const render = (products, query) => {
     products.forEach(product => {
       const card = node('article', 'tire-result');
-      card.append(node('h3', '', product.bezeichnung));
+      const identity = node('div', 'tire-result-identity');
+      const pricing = node('div', 'tire-result-pricing');
+      const detail = node('div', 'tire-result-detail');
+      card.append(identity, pricing, detail);
+      identity.append(node('h3', '', product.bezeichnung));
       const details = [product.groesse, seasons[product.saison]];
       if (productQualities.includes(product.qualitaet)) details.push(qualities[product.qualitaet]);
-      card.append(node('p', 'tire-result-meta', details.join(' · ')));
+      identity.append(node('p', 'tire-result-meta', details.join(' · ')));
+      if (Number.isInteger(product.bestand) && product.bestand >= Number(query.anzahl)) identity.append(node('p', 'tire-result-stock', 'Im Lieferantenkatalog verfügbar'));
       const label = product.eu_label;
       if (label && ['A','B','C','D','E'].includes(label.kraftstoffeffizienz)
           && ['A','B','C','D','E'].includes(label.nasshaftung)
@@ -210,29 +221,30 @@
             && !eprel.username && !eprel.password && !eprel.search && !eprel.hash
             && (!eprel.port || eprel.port === '443')
             && /^\/(?:qr\/\d{1,12}|screen\/product\/tyres\/\d{1,12})\/?$/.test(eprel.pathname)) {
-          card.append(node('p', 'tire-result-label', `Kraftstoff ${label.kraftstoffeffizienz} · Nasshaftung ${label.nasshaftung} · Rollgeräusch ${label.rollgeraeusch_db} dB (${label.rollgeraeuschklasse})`));
+          identity.append(node('p', 'tire-result-label', `Kraftstoff ${label.kraftstoffeffizienz} · Nasshaftung ${label.nasshaftung} · Rollgeräusch ${label.rollgeraeusch_db} dB (${label.rollgeraeuschklasse})`));
           const labelLink = node('a', 'tire-result-label-link', 'EU-Reifenlabel und Produktdatenblatt');
           labelLink.href = eprel.href;
           labelLink.target = '_blank';
           labelLink.rel = 'noopener noreferrer';
-          card.append(labelLink);
+          identity.append(labelLink);
         }
       }
       const unit = node('p', 'tire-result-unit');
       unit.append(node('strong', '', money.format(amount(product.preis.einzel_brutto) / 100)), node('span', '', 'pro Reifen · inkl. MwSt.'));
-      card.append(unit);
+      pricing.append(unit);
       const breakdown = node('dl');
       const line = (label, val) => breakdown.append(node('dt', '', label), node('dd', '', money.format(amount(val) / 100)));
       line(`${query.anzahl} Reifen`, product.preis.gesamt_reifen_brutto);
       line('Versand / Bezugskosten', product.preis.versand_brutto);
       if (query.montage === 'ja') line('Montage', product.preis.montage_brutto);
-      card.append(breakdown);
+      detail.append(breakdown);
       const total = node('div', 'tire-result-total');
-      total.append(node('span', '', 'Gesamt inkl. MwSt.'), node('strong', '', money.format(amount(product.preis.gesamt_brutto) / 100)));
-      card.append(total, node('p', 'tire-result-delivery', `Lieferzeit: ${product.lieferzeit}`));
-      card.append(node('p', 'tire-result-validity', `Preisstand ${clock.format(new Date(product.preisstand))} Uhr · Preis gültig bis ${clock.format(new Date(product.gueltig_bis))} Uhr (Mosbach)`));
+      total.append(node('span', '', `${query.anzahl} Reifen · Gesamt inkl. MwSt.`), node('strong', '', money.format(amount(product.preis.gesamt_brutto) / 100)));
+      pricing.append(total);
+      detail.append(node('p', 'tire-result-delivery', `Lieferzeit: ${product.lieferzeit}`));
+      detail.append(node('p', 'tire-result-validity', `Preisstand ${clock.format(new Date(product.preisstand))} Uhr · Preis gültig bis ${clock.format(new Date(product.gueltig_bis))} Uhr (Mosbach)`));
       if (panel.dataset.orderEnabled === 'false') {
-        card.append(node('p', 'tire-result-closed', 'Der Bestellabschluss wird in Kürze freigeschaltet.'));
+        if (!standalone) detail.append(node('p', 'tire-result-closed', 'Der Bestellabschluss wird in Kürze freigeschaltet.'));
         results.append(card);
         return;
       }
@@ -243,7 +255,7 @@
           event.preventDefault(); clear(); failed('preis_abgelaufen', query); return;
         }
       });
-      card.append(choose); results.append(card);
+      detail.append(choose); results.append(card);
     });
     const expires = Math.min(...products.map(p => Date.parse(p.gueltig_bis)));
     expiryTimer = window.setTimeout(() => { clear(); failed('preis_abgelaufen', query); }, Math.max(0, expires - Date.now()));
@@ -251,9 +263,14 @@
 
   button.addEventListener('click', async () => {
     if (retryUntil > Date.now()) return;
+    const requestedPage = nextPage;
+    nextPage = 1;
     clear();
     resetErrors();
     const query = {groesse:value('reifen_groesse_vorne'), saison:value('reifen_saison'), qualitaet:value('reifen_qualitaet'), anzahl:value('reifen_anzahl'), montage:value('reifen_montage')};
+    if (value('reifen_hersteller')) query.hersteller = value('reifen_hersteller');
+    if (value('reifen_sortierung') && value('reifen_sortierung') !== 'preis_auf') query.sortierung = value('reifen_sortierung');
+    if (requestedPage > 1) query.seite = String(requestedPage);
     const missing = [];
     if (!parseSize(query.groesse)) missing.push('groesse');
     const rear = value('reifen_groesse_hinten');
@@ -310,7 +327,20 @@
       const products = payload.produkte.slice(0,12).filter(p => validProduct(p, query));
       if (!products.length) { failed('angebote_nicht_pruefbar', query); return; }
       render(products, query);
-      say(`${products.length} passende${products.length === 1 ? 's Angebot' : ' Angebote'}. Preise inklusive Mehrwertsteuer.${panel.dataset.orderEnabled === 'false' ? ' Der Bestellabschluss ist noch geschlossen.' : ` Reifen auswählen und Bestellung mit Zahlungsart${query.montage === 'ja' ? ' und Montagetermin' : ''} prüfen.`}`);
+      if (refreshDimensions && Date.now() - lastDimensionRefresh >= 300000) refreshDimensions();
+      const total = Number.isInteger(payload.treffer_gesamt) && payload.treffer_gesamt >= products.length ? payload.treffer_gesamt : products.length;
+      const count = total > products.length ? `${products.length} von ${total} Angeboten` : `${products.length} passende${products.length === 1 ? 's Angebot' : ' Angebote'}`;
+      say(`${count}. Preise inklusive Mehrwertsteuer.${panel.dataset.orderEnabled === 'false' ? ' Preisansicht; der Bestellabschluss ist noch geschlossen.' : ` Reifen auswählen und Bestellung mit Zahlungsart${query.montage === 'ja' ? ' und Montagetermin' : ''} prüfen.`}`);
+      if (Number.isInteger(payload.seiten) && payload.seiten > 1 && payload.seiten <= 10000
+          && Number.isInteger(payload.seite) && payload.seite >= 1 && payload.seite <= payload.seiten) {
+        const pages = node('nav', 'tire-pagination');
+        pages.setAttribute('aria-label', 'Weitere Reifenangebote');
+        const previous = node('button', '', '← Zurück'); previous.type = 'button'; previous.disabled = payload.seite <= 1;
+        const next = node('button', '', 'Weitere Reifen →'); next.type = 'button'; next.disabled = payload.seite >= payload.seiten;
+        previous.addEventListener('click', () => { nextPage = payload.seite - 1; button.click(); });
+        next.addEventListener('click', () => { nextPage = payload.seite + 1; button.click(); });
+        pages.append(previous, node('span', '', `Seite ${payload.seite} von ${payload.seiten}`), next); results.append(pages);
+      }
     } catch (_) {
       if (current === generation) failed(timedOut ? 'timeout' : 'network', query);
     } finally {
@@ -326,17 +356,105 @@
   }
   criteria.forEach(name => {
     form.querySelectorAll(`[name="${name}"]`).forEach(field => {
-      const changed = () => {
+      const changed = automatic => {
         const key = Object.keys(names).find(key => names[key] === name);
         if (key) fieldError(key);
-        clear(); say('Auswahl geändert. Bitte Preise erneut abrufen.');
+        nextPage = 1; clear(); say('Auswahl geändert. Bitte Preise erneut abrufen.');
+        if (automatic && ['reifen_hersteller','reifen_sortierung','reifen_saison'].includes(name)
+            && parseSize(value('reifen_groesse_vorne'))) button.click();
       };
-      field.addEventListener('input', changed);
-      field.addEventListener('change', changed);
+      field.addEventListener('input', () => changed(false));
+      field.addEventListener('change', () => changed(true));
     });
   });
   document.querySelectorAll('[data-tire-example]').forEach(example => example.addEventListener('click', () => {
     searchWith({groesse:example.dataset.tireExample, saison:'winter', qualitaet:'alle', anzahl:'4', montage:'nein'});
   }));
+  const loadDimensions = async () => {
+    const width = form.querySelector('[data-tire-width]');
+    const ratio = form.querySelector('[data-tire-ratio]');
+    const rim = form.querySelector('[data-tire-rim]');
+    const brand = form.querySelector('[data-tire-brand]');
+    const direct = form.querySelector('[name="reifen_groesse_vorne"]');
+    const catalogStatus = document.querySelector('[data-tire-catalog-status]');
+    if (!panel.dataset.facetsUrl || !width || !ratio || !rim || !brand || !direct) return;
+    let dimensions = [], suffix = '';
+    const options = (field, values, desired, placeholder) => {
+      const all = [node('option', '', placeholder)]; all[0].value = '';
+      values.forEach(value => { const option = node('option', '', String(value)); option.value = String(value); all.push(option); });
+      field.replaceChildren(...all);
+      field.value = values.some(value => String(value) === String(desired)) ? String(desired) : '';
+      field.disabled = !values.length;
+    };
+    const available = () => dimensions.filter(item => item.saisons.includes(value('reifen_saison')));
+    const unique = values => [...new Set(values)].sort((a,b) => a-b);
+    const preserveSuffix = () => {
+      const parsed = parseSize(direct.value.trim());
+      if (parsed) return `${parsed[3] || ''}${parsed[4] || ''}`;
+      const base = direct.value.match(/^\d{3}(?:\s*\/\s*|\s+)\d{2}(?:\s*Z?R\s*|\s+)\d{2}(.*)$/i);
+      return base ? base[1].trim() : suffix;
+    };
+    const synchronize = () => {
+      const parsed = parseSize(direct.value.trim());
+      const rows = available();
+      suffix = preserveSuffix();
+      options(width, unique(rows.map(row => row.breite)), parsed ? parsed[0] : width.value, 'Breite');
+      const heights = rows.filter(row => String(row.breite) === width.value);
+      options(ratio, unique(heights.map(row => row.querschnitt)), parsed ? parsed[1] : ratio.value, 'Höhe');
+      const rims = heights.filter(row => String(row.querschnitt) === ratio.value);
+      options(rim, unique(rims.map(row => row.zoll)), parsed ? parsed[2] : rim.value, 'Zoll');
+    };
+    [width, ratio, rim].forEach((field,index) => field.addEventListener('change', () => {
+      suffix = preserveSuffix();
+      const rows = available();
+      if (index === 0) {
+        options(ratio, unique(rows.filter(row => String(row.breite) === width.value).map(row => row.querschnitt)), '', 'Höhe');
+      }
+      if (index <= 1) {
+        options(rim, unique(rows.filter(row => String(row.breite) === width.value && String(row.querschnitt) === ratio.value).map(row => row.zoll)), '', 'Zoll');
+      }
+      direct.value = width.value && ratio.value && rim.value ? `${width.value}/${ratio.value} R${rim.value}${suffix ? ' ' + suffix : ''}` : '';
+      nextPage = 1; clear(); fieldError('groesse');
+      say(direct.value ? 'Größe gewählt. Jetzt Reifenpreise anzeigen.' : 'Bitte Breite, Höhe und Zoll vollständig auswählen.');
+    }));
+    direct.addEventListener('input', synchronize);
+    form.querySelectorAll('[name="reifen_saison"]').forEach(field => field.addEventListener('change', synchronize));
+    let loading = false;
+    const refresh = async () => {
+    if (loading) return;
+    loading = true;
+    const abort = new AbortController();
+    const timeout = window.setTimeout(() => abort.abort(), 15000);
+    try {
+      const url = new URL(panel.dataset.facetsUrl, window.location.origin);
+      if (url.origin !== window.location.origin || url.pathname !== '/api/reifenkatalog/auswahl' || url.search) throw new Error();
+      const response = await fetch(url, {signal:abort.signal,cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});
+      const data = await response.json();
+      if (!response.ok || data.status !== 'ok' || !Array.isArray(data.dimensionen) || data.dimensionen.length > 10000
+          || !Array.isArray(data.hersteller) || data.hersteller.length > 1000
+          || !Number.isFinite(Date.parse(data.preisstand)) || !Number.isFinite(Date.parse(data.gueltig_bis)) || Date.parse(data.gueltig_bis) <= Date.now()) throw new Error();
+      if (!data.dimensionen.every(item => item && Number.isInteger(item.breite) && item.breite >= 100 && item.breite <= 500
+          && Number.isInteger(item.querschnitt) && item.querschnitt >= 10 && item.querschnitt <= 95
+          && Number.isInteger(item.zoll) && item.zoll >= 10 && item.zoll <= 30
+          && Array.isArray(item.saisons) && item.saisons.length >= 1 && item.saisons.length <= 3
+          && item.saisons.every(season => Object.prototype.hasOwnProperty.call(seasons,season)))
+          || !data.hersteller.every(item => typeof item === 'string' && item.length > 0 && item.length <= 100 && !/[\x00-\x1f\x7f]/.test(item))) throw new Error();
+      dimensions = data.dimensionen;
+      lastDimensionRefresh = Date.now();
+      const selectedBrand = brand.value;
+      const brands = data.hersteller.slice();
+      if (selectedBrand && !brands.includes(selectedBrand)) brands.push(selectedBrand);
+      options(brand, brands, selectedBrand, 'Alle Marken');
+      synchronize();
+      if (catalogStatus) catalogStatus.textContent = `${dimensions.length} Größen im verfügbaren PKW-Katalog · ${data.hersteller.length} Marken · Preisstand ${clock.format(new Date(data.preisstand))} Uhr`;
+    } catch (_) {
+      [width,ratio,rim].forEach(field => options(field, [], '', '–'));
+      if (catalogStatus) catalogStatus.textContent = 'Die Größenliste ist gerade nicht verfügbar. Sie können Ihre Reifengröße direkt eingeben.';
+    } finally { window.clearTimeout(timeout); loading = false; }
+    };
+    refreshDimensions = refresh;
+    await refresh();
+  };
   panel.hidden = false;
+  loadDimensions();
 })();

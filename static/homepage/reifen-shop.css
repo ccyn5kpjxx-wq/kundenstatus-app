@@ -12,6 +12,10 @@ a { color:inherit; text-underline-offset:4px; }
 .shop-brand img { display:block; width:190px; height:auto; }
 .shop-phone { padding:12px 18px; border:1px solid var(--line); border-radius:999px; text-decoration:none; }
 .shop-intro { display:flex; justify-content:space-between; align-items:center; gap:30px; padding:55px 0 30px; }
+.shop-catalog { display:flex; align-items:center; gap:13px; padding:18px 22px; border:1px solid #b6cfc6; border-radius:14px; background:#edf6f0; font-size:14px; }
+.shop-catalog p { margin:5px 0 0; color:#496354; font-size:12px; line-height:1.5; }
+.catalog-dot { width:10px; height:10px; border-radius:50%; background:#31754c; flex-shrink:0; }
+.catalog-private { margin-left:auto; padding:7px 11px; border-radius:999px; background:white; color:#496354; font-size:11px; white-space:nowrap; }
 .eyebrow { color:var(--red); text-transform:uppercase; letter-spacing:.12em; font-weight:800; font-size:11px; }
 h1 { margin:15px 0 18px; font-size:clamp(32px,4.2vw,52px); line-height:1.08; letter-spacing:-.045em; }
 h1 em { color:var(--red); font-style:normal; }
@@ -41,6 +45,37 @@ legend { margin-bottom:10px; }
 .button { width:100%; min-height:49px; padding:12px 22px; background:var(--red); color:white; border:0; border-radius:999px; font:inherit; font-size:14px; font-weight:800; cursor:pointer; }
 .shop-results .tire-search-status { margin:17px 0 22px; }
 .shop-results .tire-search-results { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.tire-seasons { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+.tire-seasons label { position:relative; cursor:pointer; }
+.tire-seasons input { position:absolute; width:1px; min-height:1px; height:1px; opacity:0; }
+.tire-seasons label>span { display:grid; place-items:center; gap:7px; padding:12px 3px; border:1px solid var(--line); border-radius:10px; background:white; font-size:10px; font-weight:750; }
+.tire-seasons b { font-size:23px; font-weight:500; line-height:1; }
+.tire-seasons input:checked+span { color:#a91d18; background:#fff0ed; border-color:var(--red); box-shadow:0 0 0 1px var(--red); }
+.tire-seasons input:focus-visible+span { outline:3px solid var(--red); outline-offset:3px; }
+.tire-dimensions { display:grid; grid-template-columns:1.15fr 1fr 1fr; gap:8px; }
+.tire-dimensions>div { display:grid; gap:6px; }
+.tire-dimensions label { color:var(--muted); font-size:12px; font-weight:600; }
+.tire-dimensions select { padding-left:9px; padding-right:2px; }
+.size-direct-label { margin-top:7px; color:var(--muted); font-size:12px; font-weight:600; }
+.tire-sort { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin:0 0 20px; padding-top:16px; border-top:1px solid var(--line); }
+.tire-sort label { font-size:12px; color:var(--muted); font-weight:600; }
+.tire-sort select { width:auto; max-width:230px; min-height:39px; padding:8px 11px; font-size:12px; }
+.tire-mounting-note { padding:15px; margin-bottom:19px; border-radius:10px; background:#efeee8; font-size:13px; }
+.tire-mounting-note p { margin:6px 0 0; color:var(--muted); line-height:1.6; font-size:12px; }
+.shop-results .tire-search-results { grid-template-columns:1fr; }
+.shop-results .tire-result { display:grid; grid-template-columns:minmax(0,1fr) 155px; gap:10px 20px; }
+.shop-results .tire-result-identity { min-width:0; }
+.shop-results .tire-result-pricing { text-align:right; }
+.shop-results .tire-result-unit { justify-content:flex-end; gap:4px; margin-bottom:11px; }
+.shop-results .tire-result-unit strong { font-size:26px; }
+.shop-results .tire-result-total { display:grid; justify-content:end; gap:5px; padding-top:10px; margin-top:0; font-size:11px; }
+.shop-results .tire-result-total strong { font-size:25px; }
+.shop-results .tire-result-detail { grid-column:1/-1; }
+.shop-results .tire-result-detail dl { margin:4px 0 9px; padding-top:12px; border-top:1px solid var(--line); }
+.tire-result-stock { display:inline-block; margin:2px 0 10px; padding:5px 8px; border-radius:6px; background:#edf6f0; color:#2c6745; font-size:11px; font-weight:650; }
+.tire-pagination { grid-column:1/-1; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:15px 0 2px; font-size:12px; }
+.tire-pagination button { border:1px solid var(--line); border-radius:999px; background:white; color:var(--ink); padding:10px 16px; font:inherit; font-weight:750; cursor:pointer; }
+.tire-pagination button:disabled { opacity:.4; cursor:default; }
 .shop-help { display:flex; justify-content:space-between; align-items:center; gap:25px; margin:35px 0; padding:27px; background:#e8e3da; border-radius:16px; }
 .shop-help h2 { margin-bottom:8px; font-size:20px; }
 .shop-help p { margin:0; color:var(--muted); font-size:13px; line-height:1.6; }
@@ -53,3 +88,4 @@ legend { margin-bottom:10px; }
 @media(max-width:1050px) { .shop-results .tire-search-results { grid-template-columns:1fr; } }
 @media(max-width:760px) { .shop-intro { padding-top:30px; } .shop-intro img { display:none; } .shop-search { grid-template-columns:1fr; } .shop-help { display:block; } .shop-help a { display:inline-block; margin-top:17px; } .shop-steps { font-size:11px; gap:12px; } .shop-header nav { gap:15px; } .shop-header .shop-phone { display:none; } }
 @media(max-width:420px) { .wrap { width:calc(100% - 28px); } .shop-filters,.shop-results { padding:21px; } .shop-brand img { width:155px; } .shop-header nav { font-size:11px; } }
+@media(max-width:540px) { .shop-results .tire-result { grid-template-columns:1fr; } .shop-results .tire-result-pricing { text-align:left; } .shop-results .tire-result-unit { justify-content:flex-start; } .shop-results .tire-result-total { display:flex; justify-content:space-between; align-items:center; } .catalog-private { display:none; } .tire-sort { justify-content:space-between; } }

@@ -3178,6 +3178,7 @@ def restrict_public_site_service():
         "oeffentliche_homepage",
         "oeffentlicher_reifenshop",
         "reifenangebote_suche",
+        "reifenkatalog_auswahl",
         "public_root",
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
@@ -45566,6 +45567,27 @@ def oeffentlicher_reifenshop():
         shop_ready=ready))
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+@app.get("/api/reifenkatalog/auswahl")
+def reifenkatalog_auswahl():
+    from reifen_suche import suche_reifenkatalog_auswahl
+    limited, wait_seconds = public_form_rate_limit_status("reifenkatalog-auswahl",
+        max_attempts=REIFEN_SUCHE_RATE_LIMIT_MAX, window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
+    if limited:
+        payload, status = {"status": "zu_viele_anfragen", "code": "suche_rate_limit", "dimensionen": [], "hersteller": []}, 429
+    elif request.args:
+        payload, status = {"status": "ungueltige_suche", "code": "suchfelder_ungueltig", "dimensionen": [], "hersteller": []}, 400
+    else:
+        record_public_form_attempt("reifenkatalog-auswahl", window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
+        payload, status = suche_reifenkatalog_auswahl(app.config.get("REIFENANGEBOT_PROVIDER"))
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    if limited:
+        response.headers["Retry-After"] = str(wait_seconds)
     return response
 
 

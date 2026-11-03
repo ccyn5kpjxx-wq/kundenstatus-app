@@ -93,8 +93,10 @@ oder echter Wert), `saison`, `qualitaet`, ganzzahliger `anzahl` 1–8 und booles
 `montage`. Maße/Saison werden exakt, LI/SI als Mindestwerte und der gemeldete
 Bestand gegen die Menge geprüft. DOT-/Demo-/Da-Sonderware bleibt ausgeschlossen.
 Es werden nur ganzzahlige Felgendurchmesser normalisiert; keine Umdeutung von
-Halbzollformaten. Die günstigsten geeigneten Kandidaten werden vor dem Limit
-von maximal 100 internen Angeboten ausgewählt. Gemeldeter Bestand ist kein Hold.
+Halbzollformaten. Der Katalogadapter filtert und sortiert die vollständige
+Treffermenge und liefert zwölf Angebote je Seite. Einfache bestehende
+Funktionsprovider bleiben auf maximal 100 interne Angebote begrenzt.
+Gemeldeter Bestand ist kein Hold.
 
 Für `qualitaet="alle"` genügt die tatsächliche Artikelbeschreibung; ohne
 Kuratierung bleibt `item.qualitaet=None`. Für die vier bisherigen Klassen muss
@@ -173,7 +175,37 @@ wird keine neue Empfangszeit ausgegeben. `cache_must_be_checked=True` weist auf
 den erforderlichen Zustandsabgleich hin, ohne einen alten Stand frisch zu nennen.
 Das Kaufgate und Veröffentlichungsrechte werden durch den CLI nicht geändert.
 
-## Offlineprüfung
+## Private lokale Echtkatalogansicht
+
+`private_view_authorized` ist ein zusätzlicher, ausschließlich serverseitig
+injizierter Callback. Nur dessen exakte Rückgabe `True` erlaubt die private
+Ansicht ohne öffentliche Datenfreigabe. Boolwerte oder Ausnahmen erteilen keine
+Berechtigung. `publication_ready` bleibt dabei `False`; die Produktionskonfiguration
+richtet keinen solchen Callback ein. Die lokale Werkstattansicht bindet ihn an
+GET, Loopback-IP, festen Host und die drei Shop-/Such-/Auswahlpfade. Kauf-, Zahlungs-,
+SMS- und Mailwege bleiben geschlossen.
+
+`facets()` liefert aktuelle unterstützte PKW-Größen und Hersteller mit gemeldetem
+Bestand ab einem Stück. Sonderware und ungeeignete Maße bleiben ausgeschlossen.
+`GET /api/reifenkatalog/auswahl` gibt daraus nur validierte Dimensionen, Saisons,
+Hersteller und Originalzeitstempel aus. Der Browser baut daraus abhängige Felder
+für Breite, Höhe und Zoll auf; Freitexteingabe und LI/SI bleiben erhalten.
+
+Die Suchparameter `hersteller`, `sortierung` (`preis_auf`, `preis_ab`, `name`) und
+`seite` sind optional. Herstellerfilter und Sortierung wirken auf den vollständigen
+passenden Katalog vor der Begrenzung auf zwölf Angebote je Seite. `treffer_gesamt`,
+`seite` und `seiten` sind validierte Zähler. Die erneute Prüfung einer gewählten
+SKU erfolgt weiterhin unabhängig vom Suchrang. Qualitätsklassen und Montage-
+Eigenschaften werden aus einem Markennamen oder Profiltext nicht erfunden.
+
+Der lokale Betreiber-Runner erneuert den privaten Export über einen festen,
+begrenzten Unterprozess im Abstand von fünf Minuten. Nur fertig validierte,
+unveränderliche Snapshots werden in die lokale Suchansicht übernommen; eine neue
+Dateiprüfung blockiert dadurch keine laufenden Suchabfragen. Die ursprüngliche
+15-Minuten-Frist wird bei jeder Abfrage geprüft und nie durch Lesen verlängert.
+Der Runner ist keine Render-Aktivierung oder öffentliche Nutzungsfreigabe.
+
+## Offlineprüfungen
 
 Die Kundensuche liefert zusätzlich einen freigegebenen `code`, bei ungültigen
 Eingaben HTTP 400 und optional `feld`. Fehlender Katalog, veralteter Preisstand,
