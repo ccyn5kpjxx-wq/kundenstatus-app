@@ -22,7 +22,7 @@
       <div><span class="eyebrow">Ihr Reifenservice in Mosbach</span><h1 id="shop-title">Reifen finden.<br><em>Preise vergleichen.</em></h1><p>Die passende Größe wählen, echte Marken vergleichen und den Reifenpreis für Ihre gewünschte Stückzahl sehen.</p></div>
     </section>
     <aside class="shop-catalog" aria-label="Reifenkatalog"><span class="catalog-dot" aria-hidden="true"></span><div><strong>{% if reifen_katalog and reifen_katalog.echt %}Echte Reifen und Preise aus TYREsystem{% else %}Reifenkatalog{% endif %}</strong><p data-tire-catalog-status>Verfügbare Größen und Marken werden geladen …</p></div>{% if reifen_katalog and reifen_katalog.lokal %}<span class="catalog-private">Lokale Preisansicht</span>{% endif %}</aside>
-    {% if not shop_ready %}<p class="shop-notice" role="status"><strong>Onlinebestellungen starten in Kürze.</strong> Der Bestellabschluss ist noch geschlossen. Für Ihren aktuellen Reifenbedarf können Sie uns eine <a href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}#kurzanfrage">persönliche Anfrage</a> senden.</p>{% endif %}
+    {% if not shop_ready %}<p class="shop-notice" role="status"><strong>Reifen auswählen und die Auswahl prüfen.</strong> Der verbindliche Online-Bestellabschluss ist noch nicht freigeschaltet.</p>{% endif %}
     <ol class="shop-steps" aria-label="So funktioniert die Reifensuche"><li><span>1</span> Größe &amp; Saison wählen</li><li><span>2</span> Marken &amp; Preise vergleichen</li><li><span>3</span> Abholung &amp; Montage planen</li></ol>
     <form id="reifensuche" class="shop-search" action="{{ url_for('oeffentlicher_reifenshop') }}" method="get" aria-label="Reifensuche">
       <section class="shop-filters" aria-labelledby="filter-title">

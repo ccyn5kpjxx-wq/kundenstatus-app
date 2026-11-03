@@ -173,6 +173,16 @@
     if (!Number.isSafeInteger(cents) || cents > 10000000) throw new Error('Ungültiger Preis');
     return cents;
   };
+  const selectionUrl = raw => {
+    if (typeof raw !== 'string' || /[?#]/.test(raw)) return null;
+    try {
+      const target = new URL(raw, window.location.origin);
+      if (target.origin !== window.location.origin || target.username || target.password || target.search || target.hash
+          || (raw !== target.pathname && raw !== target.href)
+          || !/^\/reifen\/bestellen\/[A-Za-z0-9_.-]{1,2000}(?:\/(?:auswahl|kauf))?$/.test(target.pathname)) return null;
+      return raw;
+    } catch (_) { return null; }
+  };
   const validProduct = (product, query) => {
     if (!product || typeof product !== 'object' || !product.preis || typeof product.preis !== 'object') return false;
     if (!['artikel_id','bezeichnung','groesse','lieferzeit'].every(k => typeof product[k] === 'string' && product[k].length > 0 && product[k].length <= 250)) return false;
@@ -180,10 +190,6 @@
     if (query.hersteller && product.hersteller !== query.hersteller) return false;
     if (product.qualitaet !== null && !productQualities.includes(product.qualitaet)) return false;
     if (query.qualitaet !== 'alle' && product.qualitaet !== query.qualitaet) return false;
-    try {
-      const destination = new URL(product.bestell_url, window.location.origin);
-      if (typeof product.bestell_url !== 'string' || destination.origin !== window.location.origin || !destination.pathname.startsWith('/reifen/bestellen/')) return false;
-    } catch (_) { return false; }
     const until = Date.parse(product.gueltig_bis);
     const at = Date.parse(product.preisstand);
     if (!Number.isFinite(until) || until <= Date.now() || !Number.isFinite(at)) return false;
@@ -240,6 +246,7 @@
     return figure;
   };
   const render = (products, query) => {
+    const renderedGeneration = generation;
     products.forEach(product => {
       const card = node('article', 'tire-result');
       const identity = node('div', 'tire-result-identity');
@@ -284,14 +291,16 @@
       pricing.append(total);
       detail.append(node('p', 'tire-result-delivery', `Lieferzeit: ${product.lieferzeit}`));
       detail.append(node('p', 'tire-result-validity', `Preisstand ${clock.format(new Date(product.preisstand))} Uhr · Preis gültig bis ${clock.format(new Date(product.gueltig_bis))} Uhr (Mosbach)`));
-      if (panel.dataset.orderEnabled === 'false') {
-        if (!standalone) detail.append(node('p', 'tire-result-closed', 'Der Bestellabschluss wird in Kürze freigeschaltet.'));
+      const target = selectionUrl(product.bestell_url);
+      if (!target) {
+        detail.append(node('p', 'tire-result-closed', 'Die Reifenauswahl ist gerade nicht verfügbar. Bitte laden Sie die Preise erneut.'));
         results.append(card);
         return;
       }
-      const choose = node('a', 'tire-result-select', 'Reifen bestellen');
-      choose.href = product.bestell_url;
+      const choose = node('a', 'tire-result-select', 'Reifen auswählen');
+      choose.href = target;
       choose.addEventListener('click', event => {
+        if (generation !== renderedGeneration) { event.preventDefault(); return; }
         if (Date.parse(product.gueltig_bis) <= Date.now()) {
           event.preventDefault(); clear(); failed('preis_abgelaufen', query); return;
         }
@@ -371,7 +380,7 @@
       if (refreshDimensions && Date.now() - lastDimensionRefresh >= 300000) refreshDimensions();
       const total = Number.isInteger(payload.treffer_gesamt) && payload.treffer_gesamt >= products.length ? payload.treffer_gesamt : products.length;
       const count = total > products.length ? `${products.length} von ${total} Angeboten` : `${products.length} passende${products.length === 1 ? 's Angebot' : ' Angebote'}`;
-      say(`${count}. Preise inklusive Mehrwertsteuer.${panel.dataset.orderEnabled === 'false' ? ' Preisansicht; der Bestellabschluss ist noch geschlossen.' : ` Reifen auswählen und Bestellung mit Zahlungsart${query.montage === 'ja' ? ' und Montagetermin' : ''} prüfen.`}`);
+      say(`${count}. Preise inklusive Mehrwertsteuer.${panel.dataset.orderEnabled === 'false' ? ' Sie können Reifen auswählen und die Auswahl prüfen. Der verbindliche Bestellabschluss ist noch geschlossen.' : ` Reifen auswählen und Bestellung mit Zahlungsart${query.montage === 'ja' ? ' und Montagetermin' : ''} prüfen.`}`);
       if (Number.isInteger(payload.seiten) && payload.seiten > 1 && payload.seiten <= 10000
           && Number.isInteger(payload.seite) && payload.seite >= 1 && payload.seite <= payload.seiten) {
         const pages = node('nav', 'tire-pagination');
@@ -500,10 +509,30 @@
     if (!standalone) return false;
     const params = new URLSearchParams(window.location.search || '');
     if (['anzeigen', 'groesse', 'saison', 'anzahl'].some(key => params.getAll(key).length !== 1)
+        || ['qualitaet', 'montage'].some(key => params.getAll(key).length > 1)
         || params.get('anzeigen') !== '1') return false;
     const selection = {groesse:params.get('groesse').trim(), saison:params.get('saison'), anzahl:params.get('anzahl')};
     if (!parseSize(selection.groesse) || !Object.prototype.hasOwnProperty.call(seasons, selection.saison)
         || !/^[1-8]$/.test(selection.anzahl)) return false;
+    const hiddenOption = field => field.type === 'hidden' || field.hidden || field.closest('[hidden]')
+      || (typeof field.getClientRects === 'function' && !field.getClientRects().length);
+    for (const key of ['qualitaet', 'montage']) {
+      if (!params.has(key)) continue;
+      const selected = params.get(key);
+      if (key === 'qualitaet' ? !Object.prototype.hasOwnProperty.call(qualities, selected) : !['ja', 'nein'].includes(selected)) return false;
+      const fields = Array.from(form.querySelectorAll(`[name="${names[key]}"]`));
+      if (!fields.length) return false;
+      const hidden = fields.filter(hiddenOption);
+      if (hidden.length) {
+        if (hidden.length !== fields.length || value(names[key]) !== selected) return false;
+        continue;
+      }
+      const offered = fields.some(field => !field.disabled && !field.closest('fieldset[disabled]')
+        && (field.type === 'radio' ? field.value === selected
+          : field.tagName === 'SELECT' && Array.from(field.querySelectorAll('option')).some(option => option.value === selected && !option.disabled && !option.hidden)));
+      if (!offered) return false;
+      selection[key] = selected;
+    }
     Object.entries(selection).forEach(([key, selected]) => {
       form.querySelectorAll(`[name="${names[key]}"]`).forEach(field => {
         if (field.type === 'radio') field.checked = field.value === selected;

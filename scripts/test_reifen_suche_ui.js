@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const SOURCE = path.join(__dirname, '../static/homepage-reifen-suche.js');
 const START = Date.parse('2026-11-03T10:00:00Z');
 
-function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = '', query = ''} = {}) {
+function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = '', query = '', hiddenShopOptions = false} = {}) {
   let now = START, timerId = 0;
   const timers = new Map(), requests = [], fields = new Map(), groups = new Map();
   const document = {activeElement: null};
@@ -103,7 +103,7 @@ function createHarness(initial = {}, {standalone = false, filters = false, facet
   const form = new Element('form');
   function addField(name, value = '', type = 'text', checked = false) {
     const group = groups.get(name) || new Element(type === 'radio' ? 'fieldset' : 'div', {class: 'field'});
-    const tag = ['reifen_qualitaet', 'reifen_anzahl', 'reifen_hersteller', 'reifen_sortierung'].includes(name) ? 'select' : 'input';
+    const tag = type !== 'hidden' && ['reifen_qualitaet', 'reifen_anzahl', 'reifen_hersteller', 'reifen_sortierung'].includes(name) ? 'select' : 'input';
     const field = new Element(tag, {name, id: type === 'radio' ? `${name}_${value}` : name, type, value});
     field.checked = checked;
     group.append(field);
@@ -115,9 +115,13 @@ function createHarness(initial = {}, {standalone = false, filters = false, facet
   addField('reifen_groesse_vorne', '205/55 R16 91V');
   addField('reifen_groesse_hinten');
   ['sommer', 'winter', 'ganzjahr'].forEach(value => addField('reifen_saison', value, 'radio', value === 'winter'));
-  addField('reifen_qualitaet', 'premium');
+  const quality = addField('reifen_qualitaet', hiddenShopOptions ? 'alle' : 'premium', hiddenShopOptions ? 'hidden' : 'text');
+  if (!hiddenShopOptions) ['alle', 'preisbewusst', 'mittelklasse', 'markenqualitaet', 'premium'].forEach(value => {
+    const option = new Element('option', {value}); quality.append(option);
+  });
   addField('reifen_anzahl', '4');
-  ['ja', 'nein'].forEach(value => addField('reifen_montage', value, 'radio', value === 'ja'));
+  if (hiddenShopOptions) addField('reifen_montage', 'nein', 'hidden');
+  else ['ja', 'nein'].forEach(value => addField('reifen_montage', value, 'radio', value === 'ja'));
   addField('reifen_produktwunsch');
   if (filters || facetsUrl) {
     addField('reifen_hersteller').setAttribute('data-tire-brand', '');
@@ -431,19 +435,71 @@ const cases = [
     assert.equal((await choose.click()).defaultPrevented, true);
     assert.equal(h.requests.length, 1);
   }],
-  ['foreign or script checkout URLs are rejected and product names stay literal text', async () => {
-    for (const bestell_url of ['https://evil.invalid/reifen/bestellen/token', 'javascript:alert(1)']) {
-      const h = createHarness();
-      await reply(h, h.search(), offers(syntheticProduct({bestell_url})));
-      assert.equal(h.results.querySelectorAll('article').length, 0);
-      assert.equal(h.results.querySelectorAll('a').length, 0);
-      assert.match(heading(h), /bestätigter Preis/);
-    }
+  ['product names stay literal text', async () => {
     const safe = createHarness();
     const text = '<img src=x onerror="synthetic">';
     await reply(safe, safe.search(), offers(syntheticProduct({bezeichnung: text})));
     assert.equal(heading(safe), text);
     assert.equal(safe.results.querySelectorAll('img').length, 0);
+  }],
+  ['invalid optional selection URLs keep valid prices without creating an actionable link', async () => {
+    const base = '/reifen/bestellen/offline-token';
+    const invalid = [undefined, null, '', 'javascript:alert(1)', 'https://evil.invalid' + base,
+      '//reifen.example.invalid' + base, 'https://user@reifen.example.invalid' + base,
+      '/reifen/bestellen/', '/reifen/bestellen/../auswahl', '/reifen/bestellen/%74oken/auswahl',
+      base + '?price=1&anzahl=99', base + '#auswahl', base + '?', base + '\n',
+      'https://reifen.example.invalid' + base + '?', 'https://reifen.example.invalid' + base + '#',
+      base + '/entwurf', base + '/auswahl/extra', base + '/kauf/', '/reifen/bestellen/' + 'a'.repeat(2001)];
+    for (const bestell_url of invalid) {
+      const h = createHarness();
+      await reply(h, h.search(), offers(syntheticProduct({bestell_url})));
+      assert.equal(h.results.querySelectorAll('article').length, 1);
+      assert.equal(h.results.querySelector('.tire-result-select'), null);
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.match(h.results.querySelector('.tire-result-closed').textContent, /Reifenauswahl.*nicht verfügbar/);
+      assert.equal(h.requests.length, 1);
+    }
+  }],
+  ['closed checkout still offers a read-only tire selection', async () => {
+    const h = createHarness({}, {standalone:true});
+    h.panel.dataset.orderEnabled = 'false';
+    const bestell_url = '/reifen/bestellen/.eJ_signed-token.abc_123.X-y/auswahl';
+    await reply(h, h.search(), offers(syntheticProduct({bestell_url})));
+    const choose = h.results.querySelector('.tire-result-select');
+    assert.ok(choose);
+    assert.equal(choose.textContent, 'Reifen auswählen');
+    assert.equal(choose.href, bestell_url);
+    assert.equal((await choose.click()).defaultPrevented, false);
+    assert.match(h.status.textContent, /Sie können Reifen auswählen und die Auswahl prüfen\. Der verbindliche Bestellabschluss ist noch geschlossen\./);
+    assert.equal(h.requests.length, 1, 'Selection never starts a hidden request or order');
+  }],
+  ['selection links preserve original signed tokens and never add client prices or quantities', async () => {
+    const base = '/reifen/bestellen/.eJ_signed-token.abc_123.X-y';
+    for (const bestell_url of [base, base + '/kauf', base + '/auswahl', 'https://reifen.example.invalid' + base + '/auswahl']) {
+      const h = createHarness();
+      await reply(h, h.search(), offers(syntheticProduct({bestell_url})));
+      const choose = h.results.querySelector('.tire-result-select');
+      assert.equal(choose.textContent, 'Reifen auswählen');
+      assert.equal(choose.href, bestell_url);
+      const target = new URL(choose.href, 'https://reifen.example.invalid');
+      assert.equal(target.search, '');
+      assert.equal(target.hash, '');
+      assert.equal((await choose.click()).defaultPrevented, false);
+      assert.equal(h.requests.length, 1);
+    }
+  }],
+  ['retained selection links cannot navigate or clear newer results after criteria change', async () => {
+    const h = createHarness();
+    await reply(h, h.search(), offers(syntheticProduct({gueltig_bis:new Date(START + 2000).toISOString()})));
+    const stale = h.results.querySelector('.tire-result-select');
+    h.set('reifen_groesse_vorne', '225/40 R18 92V');
+    await h.field('reifen_groesse_vorne').dispatch('input');
+    assert.equal((await stale.click()).defaultPrevented, true);
+    await reply(h, h.search(), offers(syntheticProduct({groesse:'225/40 R18 92V', bezeichnung:'Neue Reifenauswahl'})));
+    await h.advance(2000);
+    assert.equal((await stale.click()).defaultPrevented, true);
+    assert.equal(heading(h), 'Neue Reifenauswahl', 'An expired stale link must not remove the current results');
+    assert.equal(h.requests.length, 2);
   }],
   ['confirmed local profile photos render safely in the shop and shared inquiry', async () => {
     const url = `/api/reifenkatalog/bild/123456/${'a'.repeat(64)}.webp`;
@@ -666,7 +722,7 @@ const cases = [
   }],
   ['explicit standalone search links populate visible fields before facets and search exactly once after loading', async () => {
     const size = '195/65 R15 91T';
-    const query = '?' + new URLSearchParams({groesse:size, saison:'winter', anzahl:'4', anzeigen:'1', montage:'ja', qualitaet:'premium', hersteller:'Michelin'});
+    const query = '?' + new URLSearchParams({groesse:size, saison:'winter', anzahl:'4', anzeigen:'1', hersteller:'Michelin'});
     const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true, facetsUrl:'/api/reifenkatalog/auswahl', query});
     assert.equal(h.field('reifen_groesse_vorne').value, size);
     assert.equal(h.form.querySelector('[name="reifen_saison"]:checked').value, 'winter');
@@ -684,8 +740,8 @@ const cases = [
     assert.equal(search.searchParams.get('groesse'), size, 'Load and speed indices must remain in the request');
     assert.equal(search.searchParams.get('saison'), 'winter');
     assert.equal(search.searchParams.get('anzahl'), '4');
-    assert.equal(search.searchParams.get('montage'), 'nein', 'Links cannot enable mounting');
-    assert.equal(search.searchParams.get('qualitaet'), 'alle', 'Links cannot silently narrow quality');
+    assert.equal(search.searchParams.get('montage'), 'nein', 'Links without optional choices retain mounting');
+    assert.equal(search.searchParams.get('qualitaet'), 'alle', 'Links without optional choices retain quality');
     assert.equal(search.searchParams.get('hersteller'), null, 'Links cannot silently narrow brands');
     await reply(h, Promise.resolve(), noOffers);
     await flush();
@@ -700,6 +756,49 @@ const cases = [
     assert.equal(h.requests[0].url.searchParams.get('groesse'), '195/65 R15');
     await reply(h, Promise.resolve(), noOffers);
     assert.equal(h.requests.length, 1);
+  }],
+  ['return links preserve explicitly offered quality and mounting choices', async () => {
+    const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true,
+      query:'?groesse=195%2F65%20R15%2091T&saison=winter&anzahl=4&anzeigen=1&qualitaet=premium&montage=ja'});
+    await flush();
+    assert.equal(h.field('reifen_groesse_vorne').value, '195/65 R15 91T');
+    assert.equal(h.field('reifen_qualitaet').value, 'premium');
+    assert.equal(h.form.querySelector('[name="reifen_montage"]:checked').value, 'ja');
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url.searchParams.get('qualitaet'), 'premium');
+    assert.equal(h.requests[0].url.searchParams.get('montage'), 'ja');
+    await reply(h, Promise.resolve(), noOffers);
+  }],
+  ['hidden shop defaults cannot be overridden by return links but exact matching choices remain usable', async () => {
+    const base = '?groesse=195%2F65%20R15&saison=winter&anzahl=4&anzeigen=1';
+    for (const suffix of ['&qualitaet=premium&montage=ja', '&qualitaet=alle&montage=ja', '&qualitaet=premium&montage=nein']) {
+      const h = createHarness({}, {standalone:true, hiddenShopOptions:true, query:base + suffix});
+      await flush();
+      assert.equal(h.requests.length, 0);
+      assert.equal(h.field('reifen_groesse_vorne').value, '205/55 R16 91V', 'Unsupported links apply no partial selection');
+      assert.equal(h.field('reifen_qualitaet').value, 'alle');
+      assert.equal(h.field('reifen_qualitaet').type, 'hidden');
+      assert.equal(h.field('reifen_montage').value, 'nein');
+    }
+    const matching = createHarness({}, {standalone:true, hiddenShopOptions:true, query:base + '&qualitaet=alle&montage=nein'});
+    await flush();
+    assert.equal(matching.requests.length, 1);
+    assert.equal(matching.requests[0].url.searchParams.get('qualitaet'), 'alle');
+    assert.equal(matching.requests[0].url.searchParams.get('montage'), 'nein');
+    assert.equal(matching.field('reifen_qualitaet').type, 'hidden');
+    await reply(matching, Promise.resolve(), noOffers);
+  }],
+  ['invalid or duplicated optional return choices never start a downgraded search', async () => {
+    const base = '?groesse=195%2F65%20R15&saison=winter&anzahl=4&anzeigen=1';
+    for (const suffix of ['&qualitaet=unknown', '&montage=maybe', '&montage=', '&qualitaet=',
+      '&qualitaet=alle&qualitaet=alle', '&montage=ja&montage=ja', '&montage=ja&%6dontage=nein']) {
+      const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true, query:base + suffix});
+      await flush();
+      assert.equal(h.requests.length, 0);
+      assert.equal(h.field('reifen_groesse_vorne').value, '205/55 R16 91V');
+      assert.equal(h.field('reifen_qualitaet').value, 'alle');
+      assert.equal(h.form.querySelector('[name="reifen_montage"]:checked').value, 'nein');
+    }
   }],
   ['editing linked criteria during catalogue loading cancels the pending automatic price search', async () => {
     const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true, facetsUrl:'/api/reifenkatalog/auswahl',

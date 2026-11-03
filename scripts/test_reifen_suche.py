@@ -226,7 +226,8 @@ class ReifenSucheTest(unittest.TestCase):
         self.assertIn('name="reifen_qualitaet"',response.text)
         self.assertNotIn('name="email"',response.text)
         self.assertNotIn('name="telefon"',response.text)
-        self.assertIn('Onlinebestellungen starten in Kürze',response.text)
+        self.assertIn('Reifen auswählen und die Auswahl prüfen.',response.text)
+        self.assertIn('Der verbindliche Online-Bestellabschluss ist noch nicht freigeschaltet.',response.text)
         self.assertEqual(response.headers["Cache-Control"],"no-store")
 
     def test_shop_and_read_only_search_are_available_on_public_homepage_host(self):

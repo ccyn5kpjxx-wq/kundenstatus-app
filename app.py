@@ -3177,6 +3177,7 @@ def restrict_public_site_service():
         "static",
         "oeffentliche_homepage",
         "oeffentlicher_reifenshop",
+        "reifen_auswahl",
         "reifenangebote_suche",
         "reifenkatalog_auswahl",
         "reifenkatalog_bild",
@@ -3297,6 +3298,8 @@ def csrf_recovery_response():
 
 @app.after_request
 def add_csrf_fields(response):
+    if request.endpoint == "reifen_auswahl":
+        return response
     content_type = response.headers.get("Content-Type", "")
     if "text/html" not in content_type.lower() or response.direct_passthrough:
         return response
@@ -45571,6 +45574,48 @@ def oeffentlicher_reifenshop():
     return response
 
 
+@app.get("/reifen/bestellen/<token>/auswahl")
+def reifen_auswahl(token):
+    """Signed, revalidated selection only; never prepares or commits an order."""
+    from flask import after_this_request
+    from reifen_bestellung import lade_auswahl_token
+
+    @after_this_request
+    def private_selection_headers(response):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    if request.args:
+        abort(400, description="Für diese Reifenauswahl sind keine zusätzlichen Angaben erlaubt.")
+    limited, wait_seconds = public_form_rate_limit_status("reifen-auswahl",
+        max_attempts=REIFEN_SUCHE_RATE_LIMIT_MAX, window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
+    if limited:
+        response = make_response("Bitte warten Sie kurz vor der nächsten Auswahlprüfung.", 429)
+        response.headers["Retry-After"] = str(wait_seconds)
+        return response
+    record_public_form_attempt("reifen-auswahl", window_seconds=REIFEN_SUCHE_RATE_LIMIT_WINDOW_SECONDS)
+    try:
+        selection = lade_auswahl_token(app.secret_key, token)
+        query = selection["query"]
+        payload, status = suche_reifenangebote(query, app.config.get("REIFENANGEBOT_PROVIDER"),
+            artikel_id=selection["artikel_id"], now=datetime.now(timezone.utc))
+        product = next((item for item in payload["produkte"] if item["artikel_id"] == selection["artikel_id"]), None)
+        if status != 200 or product is None:
+            raise ValueError()
+        berlin = ZoneInfo("Europe/Berlin")
+        retrieved = datetime.fromisoformat(product["preisstand"]).astimezone(berlin).strftime("%d.%m.%Y %H:%M")
+        expires = datetime.fromisoformat(product["gueltig_bis"]).astimezone(berlin).strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        abort(409, description="Die Reifenauswahl ist abgelaufen oder derzeit nicht verfügbar. Bitte suchen Sie die Reifen erneut.")
+    return make_response(render_template("reifen_auswahl.html", produkt=product, query=query, sale_ready=False,
+        zurueck_url=url_for("oeffentlicher_reifenshop", groesse=query["groesse"], saison=query["saison"],
+            anzahl=query["anzahl"], qualitaet=query["qualitaet"], montage=query["montage"], anzeigen="1"),
+        pruefen_url=url_for("reifen_auswahl", token=token),
+        preisstand_text=retrieved, gueltig_bis_text=expires))
+
+
 @app.get("/api/reifenkatalog/bild/<sku>/<sha>.webp")
 def reifenkatalog_bild(sku, sha):
     from reifen_bilder import ReifenBildStore, MAX_IMAGE_BYTES
@@ -45630,7 +45675,7 @@ def reifenangebote_suche():
         if status == 200 and payload.get("status") == "ok":
             for product in payload["produkte"]:
                 token = erstelle_auswahl_token(app.secret_key, request.args, product["artikel_id"])
-                endpoint = "reifen_kauf.start" if app.config.get("REIFEN_KAUF_MODE") in {"test", "live"} else "reifen_bestellung.start"
+                endpoint = "reifen_kauf.start" if app.config.get("REIFEN_KAUF_MODE") in {"test", "live"} else "reifen_auswahl"
                 product["bestell_url"] = url_for(endpoint, token=token)
         response = jsonify(payload)
         response.status_code = status
