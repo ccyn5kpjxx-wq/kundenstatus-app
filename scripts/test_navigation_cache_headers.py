@@ -82,6 +82,25 @@ class NavigationCacheHeadersTests(unittest.TestCase):
         for name in ('admin-sidebar.css', 'admin-sidebar.js', 'werkstatt_theme.css', 'logo-nav-192.webp'):
             self.assertRegex(html, re.escape('/static/' + name) + r'\?v=[a-f0-9]{20}')
 
+    def test_tire_shop_uses_fresh_content_versions_and_keeps_html_uncached(self):
+        response = p.app.test_client().get('/reifen')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        html = response.get_data(as_text=True)
+        with p.app.test_request_context('/'):
+            for name in ('homepage-reifen-suche.js', 'homepage/reifen-shop.css', 'homepage/reifen-suche.css'):
+                self.assertIn(p.static_asset_url(name), html)
+                self.assertRegex(html, re.escape('/static/' + name) + r'\?v=[a-f0-9]{20}')
+        response.close()
+
+        inquiry = p.app.test_client().get('/anfrage?anliegen=reifenangebot')
+        self.assertEqual(inquiry.status_code, 200)
+        inquiry_html = inquiry.get_data(as_text=True)
+        with p.app.test_request_context('/'):
+            for name in ('homepage-reifen-suche.js', 'homepage/reifen-suche.css'):
+                self.assertIn(p.static_asset_url(name), inquiry_html)
+        inquiry.close()
+
 
 class NavigationRequestTimingTests(unittest.TestCase):
     def test_timing_contains_only_durations_and_statement_count(self):

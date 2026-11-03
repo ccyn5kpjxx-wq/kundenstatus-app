@@ -6,9 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Reifen finden &amp; kaufen | {{ werkstatt_oeffentlich.name }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-shop.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-suche.css') }}">
-  <script src="{{ url_for('static', filename='homepage-reifen-suche.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ static_asset_url('homepage/reifen-shop.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('homepage/reifen-suche.css') }}">
+  <script src="{{ static_asset_url('homepage-reifen-suche.js') }}" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#reifensuche">Zur Reifensuche</a>

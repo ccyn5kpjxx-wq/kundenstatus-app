@@ -8,7 +8,7 @@ const vm = require('node:vm');
 const SOURCE = path.join(__dirname, '../static/homepage-reifen-suche.js');
 const START = Date.parse('2026-11-03T10:00:00Z');
 
-function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = ''} = {}) {
+function createHarness(initial = {}, {standalone = false, filters = false, facetsUrl = '', query = ''} = {}) {
   let now = START, timerId = 0;
   const timers = new Map(), requests = [], fields = new Map(), groups = new Map();
   const document = {activeElement: null};
@@ -179,7 +179,7 @@ function createHarness(initial = {}, {standalone = false, filters = false, facet
       });
     });
   }
-  const window = {fetch, AbortController, location: {origin: 'https://reifen.example.invalid'},
+  const window = {fetch, AbortController, location: {origin: 'https://reifen.example.invalid', search: query},
     setTimeout(callback, delay) { const id = ++timerId; timers.set(id, {callback, at: now + delay}); return id; },
     clearTimeout(id) { timers.delete(id); },
     setInterval(callback, delay) { const id = ++timerId; timers.set(id, {callback, at: now + delay, interval: delay}); return id; },
@@ -235,7 +235,7 @@ const action = (h, text) => {
   assert.ok(control, `Visible action exists: ${text}`);
   return control;
 };
-const flush = async () => { for (let i = 0; i < 6; i += 1) await Promise.resolve(); };
+const flush = async () => { for (let i = 0; i < 12; i += 1) await Promise.resolve(); };
 async function reply(h, pending, payload, code = 200, headers = {}) {
   h.requests.at(-1).respond(payload, code, headers);
   await pending;
@@ -663,6 +663,73 @@ const cases = [
     assert.equal(h.dimensions.ratio.value, '40');
     assert.equal(h.dimensions.rim.value, '19');
     assert.equal(h.requests.length, 1);
+  }],
+  ['explicit standalone search links populate visible fields before facets and search exactly once after loading', async () => {
+    const size = '195/65 R15 91T';
+    const query = '?' + new URLSearchParams({groesse:size, saison:'winter', anzahl:'4', anzeigen:'1', montage:'ja', qualitaet:'premium', hersteller:'Michelin'});
+    const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true, facetsUrl:'/api/reifenkatalog/auswahl', query});
+    assert.equal(h.field('reifen_groesse_vorne').value, size);
+    assert.equal(h.form.querySelector('[name="reifen_saison"]:checked').value, 'winter');
+    assert.equal(h.field('reifen_anzahl').value, '4');
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url.pathname, '/api/reifenkatalog/auswahl', 'Choices must load before the linked search');
+    h.requests[0].respond(facets({dimensionen:[{breite:195, querschnitt:65, zoll:15, saisons:['winter']}]}));
+    await flush();
+    assert.equal(h.dimensions.width.value, '195');
+    assert.equal(h.dimensions.ratio.value, '65');
+    assert.equal(h.dimensions.rim.value, '15');
+    assert.equal(h.requests.length, 2);
+    const search = h.requests[1].url;
+    assert.equal(search.pathname, '/api/reifenangebote/suche');
+    assert.equal(search.searchParams.get('groesse'), size, 'Load and speed indices must remain in the request');
+    assert.equal(search.searchParams.get('saison'), 'winter');
+    assert.equal(search.searchParams.get('anzahl'), '4');
+    assert.equal(search.searchParams.get('montage'), 'nein', 'Links cannot enable mounting');
+    assert.equal(search.searchParams.get('qualitaet'), 'alle', 'Links cannot silently narrow quality');
+    assert.equal(search.searchParams.get('hersteller'), null, 'Links cannot silently narrow brands');
+    await reply(h, Promise.resolve(), noOffers);
+    await flush();
+    assert.equal(h.requests.length, 2, 'Only one linked price search is started');
+  }],
+  ['a valid explicit link also searches once when no guided dimensions are configured', async () => {
+    const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true,
+      query:'?groesse=195%2F65%20R15&saison=winter&anzahl=4&anzeigen=1'});
+    await flush();
+    assert.equal(h.field('reifen_groesse_vorne').value, '195/65 R15');
+    assert.equal(h.requests.length, 1);
+    assert.equal(h.requests[0].url.searchParams.get('groesse'), '195/65 R15');
+    await reply(h, Promise.resolve(), noOffers);
+    assert.equal(h.requests.length, 1);
+  }],
+  ['editing linked criteria during catalogue loading cancels the pending automatic price search', async () => {
+    const h = createHarness({reifen_qualitaet:'alle', reifen_montage:'nein'}, {standalone:true, facetsUrl:'/api/reifenkatalog/auswahl',
+      query:'?groesse=195%2F65%20R15&saison=winter&anzahl=4&anzeigen=1'});
+    h.set('reifen_groesse_vorne', '225/40 R18 92V');
+    await h.field('reifen_groesse_vorne').dispatch('input');
+    h.requests[0].respond(facets());
+    await flush();
+    assert.equal(h.field('reifen_groesse_vorne').value, '225/40 R18 92V');
+    assert.equal(h.dimensions.width.value, '225');
+    assert.equal(h.requests.length, 1, 'Customer changes require a fresh explicit search');
+  }],
+  ['invalid, incomplete or duplicated link parameters never populate fields or search automatically', async () => {
+    const valid = 'groesse=195%2F65%20R15&saison=winter&anzahl=4&anzeigen=1';
+    const invalid = ['', valid.replace('&anzeigen=1', ''), valid.replace('anzeigen=1', 'anzeigen=0'),
+      valid.replace('195%2F65%20R15', '195%2F65'), valid.replace('winter', 'invalid'),
+      valid.replace('anzahl=4', 'anzahl=0'), valid.replace('anzahl=4', 'anzahl=9'),
+      valid.replace('anzahl=4', 'anzahl=04'), valid.replace('&saison=winter', ''),
+      ...['groesse=195%2F65%20R15', 'saison=winter', 'anzahl=4', 'anzeigen=1', '%61nzeigen=1'].map(duplicate => `${valid}&${duplicate}`)];
+    for (const query of invalid) {
+      const h = createHarness({}, {standalone:true, query:'?' + query});
+      await flush();
+      assert.equal(h.requests.length, 0, `Invalid link must not fetch: ${query}`);
+      assert.equal(h.field('reifen_groesse_vorne').value, '205/55 R16 91V');
+      assert.equal(h.field('reifen_anzahl').value, '4');
+    }
+    const inquiry = createHarness({}, {query:'?' + valid});
+    await flush();
+    assert.equal(inquiry.requests.length, 0, 'A shared inquiry never auto-searches from a URL');
+    assert.equal(inquiry.field('reifen_groesse_vorne').value, '205/55 R16 91V');
   }],
   ['only the standalone shop intercepts submission and disables native validation', async () => {
     const requestForm = createHarness();

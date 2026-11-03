@@ -496,6 +496,24 @@
     refreshDimensions = refresh;
     await refresh();
   };
+  const applySearchLink = () => {
+    if (!standalone) return false;
+    const params = new URLSearchParams(window.location.search || '');
+    if (['anzeigen', 'groesse', 'saison', 'anzahl'].some(key => params.getAll(key).length !== 1)
+        || params.get('anzeigen') !== '1') return false;
+    const selection = {groesse:params.get('groesse').trim(), saison:params.get('saison'), anzahl:params.get('anzahl')};
+    if (!parseSize(selection.groesse) || !Object.prototype.hasOwnProperty.call(seasons, selection.saison)
+        || !/^[1-8]$/.test(selection.anzahl)) return false;
+    Object.entries(selection).forEach(([key, selected]) => {
+      form.querySelectorAll(`[name="${names[key]}"]`).forEach(field => {
+        if (field.type === 'radio') field.checked = field.value === selected;
+        else field.value = selected;
+      });
+    });
+    return true;
+  };
+  const linkedSearch = applySearchLink();
+  const linkedGeneration = generation;
   panel.hidden = false;
-  loadDimensions();
+  loadDimensions().then(() => { if (linkedSearch && generation === linkedGeneration) button.click(); });
 })();

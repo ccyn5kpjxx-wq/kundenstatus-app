@@ -9,7 +9,7 @@
   <title>{% if ist_reifenangebot %}Reifenangebot anfragen{% elif formdata.get('anliegen') == 'bremsenservice' or bremsen_gesendet %}Bremsenservice anfragen{% elif formdata.get('anliegen') == 'reifenservice' or reifen_gesendet %}Reifen-Termin buchen{% elif kurzanfrage %}Schnelle Anfrage senden{% else %}Anfrage & Beratung{% endif %} | {{ werkstatt_oeffentlich.name }}</title>
   <meta name="description" content="Unverbindliche Privatkunden-Anfrage für Lack, Glasschaden, Reparatur, Bremsenservice, Reifenservice, Einlagerung, Fahrzeugpflege, Mietwagen oder Fahrzeugcheck bei Gärtner in Mosbach.">
   {% if formdata.get('anliegen') == 'reifenservice' and not gesendet %}<link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifenpreise.css') }}">{% endif %}
-  {% if ist_reifenangebot and not gesendet %}<link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifen-suche.css') }}">{% endif %}
+  {% if ist_reifenangebot and not gesendet %}<link rel="stylesheet" href="{{ static_asset_url('homepage/reifen-suche.css') }}">{% endif %}
   <style>
     :root { --ink:#252624; --ink-soft:#343532; --cream:#f2ede5; --paper:#fffdf9; --muted:#676660; --red:#e32219; --red-dark:#bd1c16; --line:#ded5c8; --teal:#0b6b67; --shadow:0 26px 70px rgba(49,42,33,.14); }
     * { box-sizing:border-box; }
@@ -467,7 +467,7 @@
   {% include "_besucher_tracking.html" %}
   {% if gesendet %}<script>window.gaertnerAdsTrack?.('form');</script>{% endif %}
   <script src="{{ url_for('static', filename='homepage-anfrage-upload.js') }}" defer></script>
-  {% if ist_reifenangebot and not gesendet %}<script src="{{ url_for('static', filename='homepage-reifen-suche.js') }}" defer></script>{% endif %}
+  {% if ist_reifenangebot and not gesendet %}<script src="{{ static_asset_url('homepage-reifen-suche.js') }}" defer></script>{% endif %}
   <script>
     (() => {
       const anliegen = document.getElementById('anliegen');
