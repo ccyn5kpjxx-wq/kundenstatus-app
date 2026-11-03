@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
+import hashlib
 import json
 import os
 import re
@@ -43,6 +44,16 @@ class TyreSystemAPIError(ValueError):
     def __init__(self, code):
         self.code = code if code in _MESSAGES else "unavailable"
         super().__init__(_MESSAGES[self.code])
+
+
+def account_fingerprint(username, mode):
+    """Local API-account binding only; not a supplier-confirmed test/live flag."""
+    if (not isinstance(username, str) or not 1 <= len(username) <= 200 or ":" in username
+            or any(ord(char) < 33 or ord(char) > 126 for char in username) or mode not in {"test", "live"}):
+        raise TyreSystemAPIError("configuration")
+    raw = json.dumps({"configured_mode": mode, "api_username": username},
+                     ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -160,6 +171,10 @@ class TyreSystemInquiryClient:
         values = os.environ if environment is None else environment
         return cls({key: values.get(key) for key in (
             "TYRESYSTEM_API_USERNAME", "TYRESYSTEM_API_PASSWORD", "TYRESYSTEM_API_MODE")}, **kwargs)
+
+    @property
+    def account_fingerprint(self):
+        return account_fingerprint(self._username, self.configured_mode)
 
     def inquire(self, article_id, amount):
         identifier = str(_integer(article_id, 999999999999999999, error="input"))

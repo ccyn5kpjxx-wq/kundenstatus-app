@@ -59,11 +59,51 @@ class FakeSessions:
         return deepcopy(self.saved[sid])
 
 
+class FakeIntents:
+    def __init__(self):
+        self.saved = {}
+        self.retrieves, self.captures, self.cancels = [], [], []
+        self.error = self.capture_error = self.cancel_error = None
+        self.capture_response_lost = self.cancel_response_lost = False
+
+    def retrieve(self, intent):
+        self.retrieves.append(intent)
+        if self.error: raise self.error
+        return deepcopy(self.saved[intent])
+
+    def capture(self, intent, params, *, options):
+        self.captures.append((intent, deepcopy(params), deepcopy(options)))
+        if self.capture_error: raise self.capture_error
+        self.saved[intent].update(status="succeeded", amount_capturable=0, amount_received=params["amount_to_capture"])
+        if self.capture_response_lost: raise TimeoutError("PRIVATE capture response lost")
+        return deepcopy(self.saved[intent])
+
+    def cancel(self, intent, params, *, options):
+        self.cancels.append((intent, deepcopy(params), deepcopy(options)))
+        if self.cancel_error: raise self.cancel_error
+        self.saved[intent].update(status="canceled", amount_capturable=0, amount_received=0)
+        if self.cancel_response_lost: raise TimeoutError("PRIVATE cancel response lost")
+        return deepcopy(self.saved[intent])
+
+
+class FakeCharges:
+    def __init__(self):
+        self.saved, self.retrieves = {}, []
+        self.error = None
+
+    def retrieve(self, charge):
+        self.retrieves.append(charge)
+        if self.error: raise self.error
+        return deepcopy(self.saved[charge])
+
+
 class StripeReifenGatewayTest(unittest.TestCase):
     def setUp(self):
         self.clock_value = int(time.time())
         self.sessions = FakeSessions(self.clock_value)
-        self.client = SimpleNamespace(v1=SimpleNamespace(checkout=SimpleNamespace(sessions=self.sessions)))
+        self.intents, self.charges = FakeIntents(), FakeCharges()
+        self.client = SimpleNamespace(v1=SimpleNamespace(checkout=SimpleNamespace(sessions=self.sessions),
+                                                       payment_intents=self.intents, charges=self.charges))
         self.gateway = payment.StripeReifenGateway(CONFIG, client=self.client, clock=lambda: self.clock_value)
         self.order = {"id": "reifenOrder123", "quote_hash": "b" * 64, "amount_total": 62550,
                       "currency": "eur", "payment_attempt": "1", "payment_expires_at": self.clock_value + 3600,
@@ -86,6 +126,183 @@ class StripeReifenGatewayTest(unittest.TestCase):
                 "type": "checkout.session.completed", "data": {"object": {
                     "id": "cs_test_MockedSession1", "object": "checkout.session",
                     "metadata": {"integration": payment.INTEGRATION}}}, **changes}
+
+    def manual_order(self, **changes):
+        order = {**self.order, "mode":"test", "payment_capture_method":"manual", **changes}
+        created = self.gateway.create(order)
+        suffix = str(len(self.sessions.saved))
+        intent, charge = "pi_Manual"+suffix, "ch_Manual"+suffix
+        session = self.sessions.saved[created["id"]]
+        session.update(status="complete", payment_status="unpaid", payment_intent=intent, url=None)
+        self.intents.saved[intent] = {"id":intent, "object":"payment_intent", "livemode":False,
+            "currency":"eur", "amount":order["amount_total"], "capture_method":"manual",
+            "metadata":deepcopy(session["metadata"]), "status":"requires_capture",
+            "amount_capturable":order["amount_total"], "amount_received":0, "latest_charge":charge}
+        self.charges.saved[charge] = {"id":charge, "object":"charge", "livemode":False,
+            "payment_intent":intent, "currency":"eur", "amount":order["amount_total"],
+            "paid":True, "captured":False, "amount_captured":0,
+            "payment_method_details":{"type":"card", "card":{"capture_before":self.clock_value+1200}}}
+        return {**order, "payment_id":created["id"], "payment_intent":intent}
+
+    def test_manual_capture_is_server_selected_separate_from_legacy_idempotency_and_metadata(self):
+        legacy = self.gateway.create(self.order)
+        manual = self.gateway.create({**self.order, "payment_capture_method":"manual", "payment_id":""})
+        auto_params, auto_options = self.sessions.creates[0]
+        params, options = self.sessions.creates[1]
+        self.assertNotEqual(legacy["id"], manual["id"])
+        self.assertNotEqual(auto_options["idempotency_key"], options["idempotency_key"])
+        self.assertNotIn("capture_method", auto_params["payment_intent_data"])
+        self.assertEqual(params["payment_intent_data"]["capture_method"], "manual")
+        self.assertEqual(params["metadata"], params["payment_intent_data"]["metadata"])
+        self.assertEqual(params["metadata"]["payment_attempt"], "1")
+        self.assertEqual(manual["status"], "open")
+        self.assertTrue(self.gateway.supports_manual_capture)
+        for method in (None, True, {}, "automatic_async", "MANUAL"):
+            calls = len(self.sessions.creates)
+            with self.assertRaises(payment.ReifenZahlungFehler):
+                self.gateway.create({**self.order, "payment_capture_method":method})
+            self.assertEqual(len(self.sessions.creates), calls)
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.create({**self.order, "payment_capture_method":"manual", "mode":"live"})
+        self.assertEqual(len(self.sessions.creates), 2)
+
+    def test_manual_authorization_reads_actual_intent_and_charge_but_never_claims_paid(self):
+        order = self.manual_order()
+        result = self.gateway.retrieve(order["payment_id"], expected_order=order)
+        self.assertEqual(result["id"], order["payment_id"])
+        self.assertEqual(result["payment_intent"], order["payment_intent"])
+        self.assertEqual((result["status"], result["payment_status"]), ("authorized", "authorized"))
+        self.assertEqual((result["amount_capturable"], result["amount_received"]), (62550, 0))
+        self.assertEqual(result["capture_before"], self.clock_value+1200)
+        self.assertEqual(len(self.charges.retrieves), 1)
+        self.assertFalse(self.intents.captures or self.intents.cancels)
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.retrieve(order["payment_id"])
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.retrieve(order["payment_id"], expected_order=self.order)
+
+    def test_manual_binding_rejects_wrong_amount_currency_mode_metadata_attempt_and_stored_ids(self):
+        order = self.manual_order()
+        intent = order["payment_intent"]
+        original = deepcopy(self.intents.saved[intent])
+        invalid = [{"amount":62551}, {"amount":True}, {"currency":"usd"}, {"livemode":True},
+                   {"capture_method":"automatic"}, {"metadata":{}}, {"amount_capturable":62549},
+                   {"amount_received":1}, {"object":"checkout.session"}, {"id":"pi_Foreign"}]
+        for key in ("integration", "order_id", "quote_hash", "payment_attempt", "capture_method"):
+            invalid.append({"metadata":{**original["metadata"], key:"PRIVATE-foreign"}})
+        for change in invalid:
+            self.intents.saved[intent] = {**deepcopy(original), **change}
+            with self.subTest(change=change), self.assertRaises(payment.ReifenZahlungFehler) as caught:
+                self.gateway.retrieve(order["payment_id"], expected_order=order)
+            self.assertNotIn("PRIVATE", str(caught.exception))
+        self.intents.saved[intent] = original
+        for change in ({"mode":"live"}, {"payment_id":"cs_test_Foreign"}, {"payment_intent":"pi_Foreign"}):
+            with self.assertRaises(payment.ReifenZahlungFehler):
+                self.gateway.retrieve(order["payment_id"], expected_order={**order, **change})
+        self.assertFalse(self.intents.captures or self.intents.cancels)
+
+    def test_manual_missing_expired_or_wrong_charge_never_invents_an_authorization_deadline(self):
+        order = self.manual_order()
+        charge = self.intents.saved[order["payment_intent"]]["latest_charge"]
+        original = deepcopy(self.charges.saved[charge])
+        changes = [{"payment_method_details":{"type":"card", "card":{}}},
+                   {"payment_method_details":{"type":"card", "card":{"capture_before":self.clock_value}}},
+                   {"payment_intent":"pi_Foreign"}, {"captured":True}, {"amount_captured":1},
+                   {"amount":1}, {"livemode":True}, {"currency":"usd"}]
+        for change in changes:
+            self.charges.saved[charge] = {**deepcopy(original), **change}
+            with self.subTest(change=change), self.assertRaises(payment.ReifenZahlungFehler):
+                self.gateway.retrieve(order["payment_id"], expected_order=order)
+        self.charges.saved[charge] = original
+        self.charges.error = PermissionError("PRIVATE Charges Read missing")
+        with self.assertRaises(payment.ReifenZahlungFehler) as caught:
+            self.gateway.retrieve(order["payment_id"], expected_order=order)
+        self.assertNotIn("PRIVATE", str(caught.exception))
+        self.assertFalse(self.intents.captures)
+
+    def test_capture_uses_full_bound_amount_and_only_actual_received_funds_are_paid(self):
+        order = self.manual_order()
+        result = self.gateway.capture(order)
+        self.assertEqual((result["status"], result["payment_status"]), ("succeeded", "paid"))
+        self.assertEqual((result["amount_received"], result["amount_capturable"]), (62550, 0))
+        self.assertEqual(result["id"], order["payment_intent"])
+        intent, params, options = self.intents.captures[0]
+        self.assertEqual(intent, order["payment_intent"])
+        self.assertEqual(params, {"amount_to_capture":62550, "final_capture":True})
+        self.assertNotIn(self.order["kunde"]["email"], options["idempotency_key"])
+        self.assertEqual(self.gateway.capture(order), result)
+        self.assertEqual(len(self.intents.captures), 1)
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.cancel_authorization(order)
+        self.assertFalse(self.intents.cancels)
+
+    def test_capture_timeout_recovery_uses_same_intent_and_never_creates_a_second_session(self):
+        order = self.manual_order()
+        self.intents.capture_response_lost = True
+        with self.assertRaises(payment.ReifenZahlungFehler) as caught:
+            self.gateway.capture(order)
+        self.assertNotIn("PRIVATE", str(caught.exception))
+        recovered = self.gateway.retrieve(order["payment_id"], expected_order=order)
+        self.assertEqual(recovered["status"], "succeeded")
+        self.assertEqual(self.gateway.capture(order)["status"], "succeeded")
+        self.assertEqual(len(self.intents.captures), 1)
+        self.assertEqual(len(self.sessions.saved), 1)
+
+    def test_failed_capture_before_provider_effect_retries_with_identical_key_and_parameters(self):
+        order = self.manual_order()
+        self.intents.capture_error = TimeoutError("PRIVATE before capture")
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.capture(order)
+        self.intents.capture_error = None
+        self.assertEqual(self.gateway.capture(order)["status"], "succeeded")
+        self.assertEqual(self.intents.captures[0], self.intents.captures[1])
+
+    def test_cancel_is_only_for_actual_authorization_and_recovery_does_not_issue_refunds(self):
+        order = self.manual_order()
+        self.intents.cancel_response_lost = True
+        with self.assertRaises(payment.ReifenZahlungFehler):
+            self.gateway.cancel_authorization(order)
+        recovered = self.gateway.cancel_authorization(order)
+        self.assertEqual((recovered["status"], recovered["payment_status"]), ("canceled", "canceled"))
+        self.assertEqual((recovered["amount_received"], recovered["amount_capturable"]), (0, 0))
+        self.assertEqual(len(self.intents.cancels), 1)
+        self.assertFalse(self.intents.captures)
+        self.assertEqual(self.intents.cancels[0][1], {"cancellation_reason":"abandoned"})
+        for state in ("requires_action", "processing", "requires_payment_method"):
+            value = self.intents.saved[order["payment_intent"]]
+            value.update(status=state, amount_received=0, amount_capturable=0)
+            with self.assertRaises(payment.ReifenZahlungFehler):
+                self.gateway.cancel_authorization(order)
+        self.assertEqual(len(self.intents.cancels), 1)
+
+    def test_cancel_before_provider_effect_retries_with_the_same_frozen_key(self):
+        order = self.manual_order()
+        self.intents.cancel_error = TimeoutError("PRIVATE before cancel")
+        with self.assertRaises(payment.ReifenZahlungFehler) as caught:
+            self.gateway.cancel_authorization(order)
+        self.assertNotIn("PRIVATE", str(caught.exception))
+        self.intents.cancel_error = None
+        self.assertEqual(self.gateway.cancel_authorization(order)["status"], "canceled")
+        self.assertEqual(self.intents.cancels[0], self.intents.cancels[1])
+        self.assertTrue(self.intents.cancels[0][2]["idempotency_key"].startswith("reifen-cancel-"))
+        self.assertFalse(self.intents.captures)
+
+    def test_manual_capture_or_cancel_requires_a_stored_manual_intent_before_sdk_io(self):
+        for value in (self.order, {**self.order,"payment_capture_method":"manual"},
+                      {**self.order,"payment_capture_method":"manual","payment_intent":"pi_Other","mode":"live"}):
+            for method in (self.gateway.capture, self.gateway.cancel_authorization):
+                with self.assertRaises(payment.ReifenZahlungFehler):
+                    method(value)
+        self.assertFalse(self.intents.retrieves or self.intents.captures or self.intents.cancels)
+
+    def test_manual_success_requires_exact_received_amount_not_a_paid_charge_or_partial_result(self):
+        order = self.manual_order()
+        raw = self.intents.saved[order["payment_intent"]]
+        for received, capturable in ((0,0), (62549,0), (62550,1)):
+            raw.update(status="succeeded", amount_received=received, amount_capturable=capturable)
+            with self.assertRaises(payment.ReifenZahlungFehler):
+                self.gateway.retrieve(order["payment_id"], expected_order=order)
+        self.assertFalse(self.intents.captures)
 
     def test_create_charges_exact_server_total_once_with_no_implicit_extras(self):
         result = self.gateway.create(self.order)

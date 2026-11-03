@@ -194,6 +194,20 @@ def _order_body(order):
         raise ValueError("Die Bedingungsfassung gilt nicht für diese Produktart.")
     if category == "felgen" and (order.get("montage_datum") or order.get("montage_uhrzeit")):
         raise ValueError("Eine Felgenmontage ist in diesem Kaufpfad nicht eingerichtet.")
+    procurement = order.get("beschaffungsverfahren", "reservierung_v1")
+    if procurement not in ("reservierung_v1", "tyresystem_auto_v1"):
+        raise ValueError("Das Beschaffungsverfahren der Vertragskopie ist ungültig.")
+    forecast = ""
+    if procurement == "tyresystem_auto_v1":
+        legal_flow = legal.get("beschaffungsverfahren")
+        if (not isinstance(legal_flow, list) or "tyresystem_auto_v1" not in legal_flow
+                or any(not isinstance(item, str) or item not in {"reservierung_v1", "tyresystem_auto_v1"} for item in legal_flow)
+                or len(set(legal_flow)) != len(legal_flow)
+                or order.get("lieferdatum") or order.get("montage_datum") or order.get("montage_uhrzeit")):
+            raise ValueError("Die Bedingungen oder Lieferangaben passen nicht zur automatischen Beschaffung.")
+        forecast = _text(order.get("lieferprognose"), 300)
+        if payment_method == "online" and order.get("payment_capture_method") != "manual":
+            raise ValueError("Das Zahlungsverfahren passt nicht zur automatischen Beschaffung.")
     product_keys = (("artikel_id", "bezeichnung", "groesse", "ean", "saison", "qualitaet")
                     if category == "reifen" else
                     ("artikel_id", "bezeichnung", "ean", "hersteller", "profil", "hersteller_artikelnummer", "material"))
@@ -201,6 +215,7 @@ def _order_body(order):
                             else ("Felgenbestellung", "Felgen"))
     snapshot = {
         "id": _text(order.get("id"), 200), "anzahl": quantity, "produktart": category,
+        "beschaffungsverfahren": procurement, "lieferprognose": forecast,
         "amount_total": amount, "currency": "EUR", "rechtstexte": legal,
         "kunde": {key: _text(customer.get(key, ""), 300, required=False)
                   for key in ("name", "email", "telefon", "strasse", "hausnummer", "plz", "ort", "land")},
@@ -246,7 +261,8 @@ def _order_body(order):
         "Zahlungsart: " + snapshot["zahlungsart"],
         ("Zahlung: bestätigt und bezahlt." if payment_status == "bezahlt"
          else "Zahlung: noch offen; Bezahlung vor Ort bei Abholung oder Montage."),
-        "Bestätigtes Bereitstellungsdatum: " + (snapshot["lieferdatum"] or "siehe individuelle Vereinbarung"),
+        ("Voraussichtliche Bereitstellung: " + forecast if procurement == "tyresystem_auto_v1" else
+         "Bestätigtes Bereitstellungsdatum: " + (snapshot["lieferdatum"] or "siehe individuelle Vereinbarung")),
         "Bestellannahme: " + (snapshot["accepted_at"] or "siehe Bestellstatus"),
         "Montagetermin: " + (snapshot["montage_datum"] + " " + snapshot["montage_uhrzeit"]
                               if snapshot["montage_datum"] else "ohne Montage"),

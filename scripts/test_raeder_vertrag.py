@@ -25,6 +25,46 @@ def rim_order():
 
 
 class WheelContract(unittest.TestCase):
+    def automatic_order(self):
+        value = rim_order()
+        value.update(beschaffungsverfahren="tyresystem_auto_v1", lieferdatum="",
+                     lieferprognose="Voraussichtlich 1–4 Werktage bis zur Abholung.",
+                     payment_capture_method="manual")
+        value["rechtstexte"]["beschaffungsverfahren"] = ["tyresystem_auto_v1"]
+        return value
+
+    def test_auto_copy_preserves_delivery_forecast_without_confirmed_date_or_supplier_cost(self):
+        value = self.automatic_order()
+        _, _, body, saved = contract._order_body(value)
+        self.assertIn("Voraussichtliche Bereitstellung:", body)
+        self.assertIn(value["lieferprognose"], body)
+        self.assertNotIn("Bestätigtes Bereitstellungsdatum", body)
+        self.assertNotIn("secret-", body)
+        self.assertEqual(saved["beschaffungsverfahren"], "tyresystem_auto_v1")
+        self.assertEqual(saved["lieferdatum"], "")
+
+    def test_auto_contract_needs_explicit_terms_and_cannot_invent_delivery_or_mounting(self):
+        for change in ("old_terms", "date", "mounting", "missing_forecast"):
+            with self.subTest(change=change):
+                value = self.automatic_order()
+                if change == "old_terms": value["rechtstexte"].pop("beschaffungsverfahren")
+                if change == "date": value["lieferdatum"] = "2026-11-09"
+                if change == "mounting": value["montage_datum"] = "2026-11-10"
+                if change == "missing_forecast": value["lieferprognose"] = ""
+                with self.assertRaises(ValueError):
+                    contract._order_body(value)
+
+    def test_authorization_is_not_an_accepted_paid_automatic_order(self):
+        value = self.automatic_order()
+        value.update(zahlungsart="online", status="bestaetigt", zahlung_status="authorized")
+        with self.assertRaises(ValueError):
+            contract._order_body(value)
+        value["zahlung_status"] = "bezahlt"
+        self.assertIn("Zahlung: bestätigt und bezahlt", contract._order_body(value)[2])
+        value["payment_capture_method"] = "automatic"
+        with self.assertRaises(ValueError):
+            contract._order_body(value)
+
     def test_existing_tire_order_remains_a_tire_contract(self):
         _, subject, body, saved = contract._order_body(order())
         self.assertIn("Reifenbestellung", subject)

@@ -22,9 +22,11 @@ from felgen_katalog import FelgenCatalogProvider
 from raeder_auswahl import (FELGEN_TOKEN_PREFIX, RaederAuswahl, RaederAuswahlResolver,
                            erstelle_felgen_auswahl_token)
 from reifen_rechtstexte import reifen_rechtstexte
+from reifen_tyresystem_auto import (AutoBeschaffung, VERFAHREN as AUTO_VERFAHREN,
+    AutoBeschaffungFehler, BACKUP_TABLES as AUTO_TABLES, init_schema as init_auto_schema, sha as auto_sha)
 
 
-BACKUP_TABLES = ("reifen_kaeufe", "reifen_kauf_events", "reifen_kauf_sms_budget")
+BACKUP_TABLES = ("reifen_kaeufe", "reifen_kauf_events", "reifen_kauf_sms_budget", *AUTO_TABLES)
 SCHEMA_FEATURE = "reifen_kauf_v1"
 EDITABLE = {"entwurf", "telefon_bestaetigt", "preis_geaendert"}
 FINAL = {"bestaetigt", "bestellt_zahlung_offen"}
@@ -74,6 +76,9 @@ def init_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS reifen_kauf_sms_budget (
         tag TEXT PRIMARY KEY, starts INTEGER NOT NULL DEFAULT 0
     )""")
+    init_auto_schema(db)
+    from tyresystem_order import init_schema as init_supplier_schema
+    init_supplier_schema(db)
 
 
 class ReifenKauf:
@@ -94,7 +99,19 @@ class ReifenKauf:
     def readiness(self):
         return self.readiness_for("reifen")
 
-    def readiness_for(self, produktart):
+    def auto(self):
+        return AutoBeschaffung(self)
+
+    def auto_authorize_inquiry(self, sku, quantity):
+        return self.auto().authorize_inquiry(sku, quantity)
+
+    def auto_authorize_order(self, frozen_record):
+        return self.auto().authorize_order(frozen_record)
+
+    def auto_pending_ids(self, limit=20):
+        return self.auto().pending_ids(limit)
+
+    def readiness_for(self, produktart, *, verfahren=None):
         cfg = self.app.config
         mode = cfg.get("REIFEN_KAUF_MODE", "off")
         terms = self.terms()
@@ -117,11 +134,17 @@ class ReifenKauf:
         if (not isinstance(terms.get("sha256"), str) or not re.fullmatch(r"[a-f0-9]{64}", terms["sha256"])
                 or cfg.get("REIFEN_TERMS_APPROVED_SHA256") != terms["sha256"]):
             problems.append("Bestellbedingungen noch nicht freigegeben")
-        supplier = cfg.get("REIFEN_KAUF_SUPPLIER")
-        if not all(callable(getattr(supplier, name, None)) for name in ("inspect", "reserve", "commit")):
-            problems.append("Lieferanten- und Lieferreservierung fehlen")
-        elif getattr(supplier, "livemode", None) is not (mode == "live"):
-            problems.append("Lieferantenumgebung stimmt nicht überein")
+        flow = verfahren if verfahren is not None else cfg.get("REIFEN_BESCHAFFUNG_VERFAHREN", "reservierung_v1")
+        if flow == AUTO_VERFAHREN:
+            problems.extend(self.auto().readiness(produktart))
+        elif flow == "reservierung_v1":
+            supplier = cfg.get("REIFEN_KAUF_SUPPLIER")
+            if not all(callable(getattr(supplier, name, None)) for name in ("inspect", "reserve", "commit")):
+                problems.append("Lieferanten- und Lieferreservierung fehlen")
+            elif getattr(supplier, "livemode", None) is not (mode == "live"):
+                problems.append("Lieferantenumgebung stimmt nicht überein")
+        else:
+            problems.append("Beschaffungsverfahren nicht eingerichtet")
         if produktart == "reifen" and not callable(cfg.get("REIFENANGEBOT_PROVIDER")):
             problems.append("Bestätigte Reifenpreise fehlen")
         if produktart == "felgen" and not isinstance(cfg.get("FELGENANGEBOT_PROVIDER"), FelgenCatalogProvider):
@@ -157,7 +180,11 @@ class ReifenKauf:
             abort(503, description="Der Bestellabschluss wird noch eingerichtet.")
 
     def require_row_ready(self, row):
-        self.require_ready(self.category(json.loads(row["query_json"]), json.loads(row["produkt_json"])))
+        record = self.auto().record(row["id"])
+        flow = AUTO_VERFAHREN if record else "reservierung_v1"
+        kind = self.category(json.loads(row["query_json"]), json.loads(row["produkt_json"]))
+        if self.readiness_for(kind, verfahren=flow)["ready"] is not True:
+            abort(503, description="Der Bestellabschluss wird noch eingerichtet.")
         if row["mode"] != self.app.config.get("REIFEN_KAUF_MODE"):
             abort(409, description="Diese Bestellung gehört zu einer anderen Zahlungsumgebung.")
 
@@ -295,7 +322,7 @@ class ReifenKauf:
         edit_allowed = (row["state"] in EDITABLE and row["mode"] == self.app.config.get("REIFEN_KAUF_MODE")
             and row["mode"] in {"test", "live"} and not row["payment_id"] and row["payment_status"] == "unbezahlt"
             and not reservation and sms_status not in {"sending", "pending", "checking", "unknown", "limit"})
-        return {"id":row["id"], "produktart":kind, "status":row["state"], "kunde":customer, "produkt":product, "query":query,
+        result = {"id":row["id"], "produktart":kind, "status":row["state"], "kunde":customer, "produkt":product, "query":query,
             "demo":row["mode"] != "live", "mode":row["mode"], "quote_hash":row["quote_hash"],
             "telefon_bestaetigt":bool(row["telefon_bestaetigt_am"]), "sms_status":sms_status, "zahlungsart":row["zahlungsart"],
             "montage_datum":row["montage_datum"], "montage_uhrzeit":row["montage_uhrzeit"],
@@ -307,7 +334,15 @@ class ReifenKauf:
             "payment_attempt":row["payment_attempt"], "rechtstexte":terms,
             "payment_created_at":int(aware(row["payment_created_at"]).timestamp()) if row["payment_created_at"] else None,
             "reservierung":reservation, "accepted_at":row["accepted_at"],
-            "erklaerungen":json.loads(row["erklaerungen_json"]), "auftrag_id":row["auftrag_id"]}
+            "erklaerungen":json.loads(row["erklaerungen_json"]), "auftrag_id":row["auftrag_id"],
+            "payment_id":row["payment_id"], "payment_intent":row["payment_intent"]}
+        record = self.auto().record(row["id"])
+        result["beschaffungsverfahren"] = AUTO_VERFAHREN if record else "reservierung_v1"
+        if record:
+            result["payment_capture_method"] = "manual"
+            result["lieferprognose"] = record["snapshot"]["policy"]["lieferprognose"]
+            result["bearbeitbar"] = result["bearbeitbar"] and record["state"] == "draft"
+        return result
 
     def inspect(self, query, product):
         kind = self.category(query, product)
@@ -360,12 +395,17 @@ class ReifenKauf:
             query, product = selected if selected is not None else self.fresh(token)
             order, terms = None, self.terms()
         kind = self.category(query, product)
-        state = self.readiness_for(kind)
+        flow = order["beschaffungsverfahren"] if order else self.app.config.get("REIFEN_BESCHAFFUNG_VERFAHREN", "reservierung_v1")
+        state = self.readiness_for(kind, verfahren=flow)
+        if flow == AUTO_VERFAHREN and query.get("montage") == "ja":
+            state = {**state, "ready":False}
         formdata = dict(form or {})
         display_errors = [errors] if isinstance(errors, str) else list(errors or [])
+        if flow == AUTO_VERFAHREN and query.get("montage") == "ja":
+            display_errors.append(str(AutoBeschaffungFehler("montage_nicht_freigegeben")))
         montage_errors = {}
         first_day, slots = "", []
-        if query.get("montage") == "ja" and state["ready"] and not row:
+        if flow != AUTO_VERFAHREN and query.get("montage") == "ja" and state["ready"] and not row:
             try:
                 proof = self.inspect(query, product)
                 minimum = date.fromisoformat(proof["lieferdatum"]) + timedelta(days=1)
@@ -399,6 +439,8 @@ class ReifenKauf:
         early = self.early_mounting(row)
         return render_template("reifen_bestellen.html", auswahl_token=token, produkt=product, query=query,
             produktart=kind,
+            auto_beschaffung=flow == AUTO_VERFAHREN,
+            lieferprognose=(order or {}).get("lieferprognose", self.app.config.get("REIFEN_TYRESYSTEM_AUTO_POLICY", {}).get("lieferprognose", "") if flow == AUTO_VERFAHREN else ""),
             bestellung=order, checkout_endpoint="reifen_kauf", checkout={"demo":(row["mode"] if row else state["mode"]) != "live",
                 "zahlung_freigegeben":state["ready"], "grund":"Zahlung, SMS und Lieferantenverbindung werden noch eingerichtet."},
             formdata=formdata, fehler=display_errors, rechtstexte=terms, fruehe_montage=early, montage_fehler=montage_errors,
@@ -483,6 +525,8 @@ class ReifenKauf:
             db.close()
 
     def finalize(self, row):
+        if self.auto().record(row["id"]) is not None:
+            raise ValueError("Der automatische Beschaffungsstand muss gesondert geprüft werden.")
         if row["state"] in FINAL:
             return
         expected_state = "zahlung_bestaetigt" if row["zahlungsart"] == "online" else "reserviert"
@@ -555,6 +599,8 @@ class ReifenKauf:
             raise ValueError("Die Bestellung muss geprüft werden. Bitte keine weitere Bestellung oder Zahlung starten.") from None
 
     def prepare_payment(self, row, form):
+        if self.auto().record(row["id"]) is not None:
+            return self.auto().prepare(row, form)
         self.require_row_ready(row)
         if row["state"] in FINAL or row["state"] == "zahlung_offen":
             return
@@ -641,6 +687,8 @@ class ReifenKauf:
             raise ValueError("Der Abschluss konnte nicht sicher bestätigt werden. Bitte keine zweite Zahlung starten.") from None
 
     def reconcile(self, order_id):
+        if self.auto().record(order_id) is not None:
+            return self.auto().reconcile(order_id)
         row = self.row(order_id, private=False)
         if row["state"] in FINAL:
             return
@@ -677,6 +725,35 @@ class ReifenKauf:
             if current["state"] == "zahlung_offen":
                 self.cas(current, state="pruefung_noetig", payment_status="unklar")
             raise ValueError("Der Zahlungseingang muss geprüft werden.") from None
+
+    def accept_auto_order(self, row, receipt):
+        if row["state"] in FINAL:
+            return
+        record = self.auto().record(row["id"])
+        if record is None or record["state"] not in {"acknowledged", "capturing"}:
+            raise ValueError("Die bestätigte Lieferantenannahme fehlt.")
+        order = self.auto().bound(row, record)
+        if self.auto().receipt(record, order) != receipt:
+            raise ValueError("Die Lieferantenannahme stimmt nicht überein.")
+        if row["zahlungsart"] == "online" and (row["payment_status"] != "bezahlt" or not row["payment_intent"]):
+            raise ValueError("Ein bestätigter Zahlungseingang fehlt.")
+        db = self.p.get_db()
+        try:
+            stamp = self.now().isoformat()
+            count = db.execute("UPDATE reifen_kaeufe SET state=?,supplier_order_id=?,accepted_at=?,geaendert_am=? "
+                "WHERE id=? AND state='zahlung_offen' AND quote_hash=? AND mode=? AND accepted_at=''",
+                ("bestaetigt" if row["zahlungsart"] == "online" else "bestellt_zahlung_offen",
+                 receipt["bestellnummer"],stamp,stamp,row["id"],row["quote_hash"],row["mode"])).rowcount
+            if count:
+                from reifen_vertrag import enqueue
+                accepted = self.order(dict(db.execute("SELECT * FROM reifen_kaeufe WHERE id=?", (row["id"],)).fetchone()))
+                enqueue(db, accepted, "bestellbestaetigung")
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
 
 def register_reifen_kauf(portal):
@@ -731,7 +808,9 @@ def register_reifen_kauf(portal):
         try:
             query, product = service.fresh(token)
             selected = (query, product)
-            inspection = service.inspect(query, product)
+            automatic = portal.app.config.get("REIFEN_BESCHAFFUNG_VERFAHREN", "reservierung_v1") == AUTO_VERFAHREN
+            policy = service.auto().preflight(query, product)[0] if automatic else None
+            inspection = {"lieferdatum":""} if automatic else service.inspect(query, product)
             customer, terms = service.customer(request.form), service.terms()
             payment = request.form.get("zahlungsart")
             if payment not in {"online","vor_ort"}:
@@ -749,6 +828,8 @@ def register_reifen_kauf(portal):
             order_id = secrets.token_urlsafe(24)
             quote_hash = service.quote_hash(query, product)
             key = digest(encode([owner,portal.app.config["REIFEN_KAUF_MODE"],token,customer,payment,day,hour,quote_hash,terms["sha256"],inspection["lieferdatum"]]))
+            if automatic:
+                key = digest(encode([key, AUTO_VERFAHREN, auto_sha(policy)]))
             db = portal.get_db()
             try:
                 db.execute("""INSERT INTO reifen_kaeufe (id,owner_hash,draft_key,mode,auswahl_token,query_json,
@@ -758,7 +839,12 @@ def register_reifen_kauf(portal):
                     token,encode(query),encode(product),quote_hash,encode(customer),customer["telefon"],payment,
                     day,hour,encode(terms),stamp,stamp,inspection["lieferdatum"]))
                 found = db.execute("SELECT id FROM reifen_kaeufe WHERE draft_key=?", (key,)).fetchone()
+                if automatic:
+                    service.auto().insert(db, found["id"], query, product, quote_hash, terms, policy)
                 db.commit()
+            except Exception:
+                db.rollback()
+                raise
             finally:
                 db.close()
             return go(found["id"])

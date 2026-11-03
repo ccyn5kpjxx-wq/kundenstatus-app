@@ -1,0 +1,79 @@
+AUTOMATISCHE BESCHAFFUNG – ERGÄNZENDE PRÜFFASSUNG
+Stand 03.11.2026. NICHT FREIGEGEBEN, NICHT VERÖFFENTLICHT.
+
+Diese Fassung bereitet die Anpassung der vollständigen B2C-Bestellbedingungen
+an den neuen automatischen Ablauf vor. Sie ist kein eigenständig vollständiger
+AGB-Satz und kein aktiviertes Vertrags-JSON. Die bisherigen Texte zu einer
+bestätigten Lieferreservierung und Zahlung vor der Lieferantenbestellung
+dürfen für diesen Ablauf nicht unverändert übernommen werden.
+
+Vorgeschlagene Kundentexte
+
+Onlinezahlung:
+„Mit Ihrer Bestellung autorisieren Sie den angezeigten Gesamtbetrag auf Ihrer
+Karte. Der Betrag wird zunächst reserviert. Nach Bestätigung der Beschaffung
+ziehen wir den vereinbarten Betrag automatisch ein. Die Reservierung des
+Kartenbetrags allein ist noch keine Zahlungs- oder Bestellannahmebestätigung.
+Wir nehmen Ihre Bestellung durch eine ausdrückliche Bestätigung auf der
+Bestätigungsseite oder per E-Mail an. Die vollständige Vertragskopie erhalten
+Sie zusätzlich per E-Mail. Ohne bestätigte Beschaffung wird kein Betrag
+eingezogen. Ist die Beschaffung nachweislich nicht möglich, veranlassen wir
+die Aufhebung der Kartenreservierung.“
+
+Zahlung bei Abholung:
+„Auch bei Zahlung vor Ort geben Sie eine zahlungspflichtige Bestellung zum
+angezeigten Gesamtbetrag ab. Nach bestätigter Beschaffung bestätigen wir die
+Annahme ausdrücklich. Der Betrag bleibt bis zur Abholung offen.“
+
+Abholung und Lieferprognose:
+„Die angegebenen Lieferzeiten sind Prognosen bis zur Bereitstellung bei uns.
+Ein konkreter Abholtermin ist erst mit einer gesonderten Bereitstellungsnachricht
+bestätigt. Derzeit können Sie im automatischen Bestellweg einzelne Reifen oder
+einzelne Felgen zur Abholung bestellen. Eine Montagebuchung und die Bestellung
+von Kompletträdern werden in diesem Bestellweg noch nicht angeboten.
+Bei einzelnen Felgen ist die Fahrzeugpassung vor Verwendung oder Montage
+anhand der konkreten Fahrzeug- und Felgendaten zu prüfen; der Kauf enthält
+keine Fahrzeugfreigabe.“
+
+Preis- oder Bestandsänderung vor der Beschaffung:
+„Kann die Bestellung vor der Beschaffung nicht zum von Ihnen bestätigten Preis
+ausgeführt werden, wird sie nicht mit einem höheren Preis abgeschlossen.
+Wir veranlassen gegebenenfalls die Aufhebung der Kartenreservierung. Sie
+können anschließend ein aktuelles Angebot erneut auswählen und bestätigen.“
+
+Unklarer Bearbeitungsstand:
+„Falls eine eindeutige Bestätigung aussteht, sehen Sie den Bearbeitungsstand
+in Ihrer Bestellübersicht. Bitte lösen Sie in diesem Fall keine zweite
+Bestellung oder Zahlung aus. Wir klären den Vorgang und informieren Sie.“
+
+Interne Umsetzung und Freigabe – gehört nicht in die Kundenfassung
+
+- Der neue Ablauf verwendet REIFEN_BESCHAFFUNG_VERFAHREN=tyresystem_auto_v1.
+  Die unverändert freigegebene Vertragsfassung muss zusätzlich
+  beschaffungsverfahren=["tyresystem_auto_v1"] enthalten. Die Kategorie-
+  Geltungsbereiche produktarten und die bestehenden Freigaben bleiben nötig.
+- Bestehende Vertrags-/Widerrufsinformationen, Anbieterangaben, Rücksendekosten-
+  regel, Datenschutz und EU-Gewährleistungsmitteilung vollständig abgleichen.
+- Die vorgeschlagene Zwei-Werktage-Annahmefrist aus der älteren Prüffassung ist
+  weder durch diese Ergänzung beschlossen noch implementiert. Vor Freigabe
+  Annahmefrist, unklare Lieferantenbestellungen, Freigabe von Kartenbeträgen und
+  den tatsächlichen Zugang der Annahmebestätigung abschließend abstimmen.
+- Ein Kartenhold ist kein Warenhold. Eine vom Zahlungsanbieter angezeigte
+  Kartenautorisierungsfrist begründet keine Liefer- oder Preisreservierung.
+- Ein positiver Lieferantenbeleg muss nach den tatsächlichen RSU-Regeln die
+  volle bestellte Menge zum übermittelten Preis verbindlich annehmen. Derzeit
+  fehlt dieser Nachweis; die Vorlage der REST-Beispielantwort ersetzt ihn nicht.
+- Der Kaufprozess darf nach einem unklaren Lieferanten-POST nicht automatisch
+  erneut bestellen. Ein gespeicherter eindeutiger Lieferantenbeleg erlaubt den
+  Zahlungsabgleich, ohne eine zweite Warenbestellung auszulösen.
+- Ein später gescheiterter Einzug trotz schon angenommener Warenbestellung ist
+  ein betrieblicher Klärfall. Eine Lieferanten-Storno-API wird nicht behauptet.
+- Vor Freigabe mit echten, bestätigten Testkonten Autorisierung, genau eine
+  API-Testbestellung, Einzug, Aufhebung, Zeitüberschreitung und Vertragsmail
+  prüfen. Die Vorlagen und Offline-Tests aktivieren keine Konten oder Käufe.
+
+Technische Primärquellen für den geprüften Ablauf:
+https://www.tyresystem.de/static/Anleitung/API-REST-Architektur.pdf
+https://docs.stripe.com/payments/place-a-hold-on-a-payment-method
+https://docs.stripe.com/api/payment_intents/capture
+https://docs.stripe.com/api/payment_intents/cancel

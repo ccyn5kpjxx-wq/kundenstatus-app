@@ -102,19 +102,48 @@ Liste `produktarten` mit `"felgen"` enthalten. Die neue Text-Prüffassung ist
 kein freigegebenes Laufzeitdokument. Insbesondere die vorgeschlagene
 Annahmefrist und deren Rückzahlungsfolgen sind noch nicht umgesetzt.
 
-Der Lieferantenadapter muss Felgen bei `inspect`, `reserve` und `commit`
+Im bisherigen Reservierungsverfahren muss der Lieferantenadapter Felgen bei `inspect`, `reserve` und `commit`
 ausdrücklich als Produktart bestätigen. Alle bisherigen Betrags-, Mengen-,
 Preis-, Modus-, Liefertermin- und Wiederholungssicherungen bleiben erforderlich.
 Die öffentliche TYREsystem-REST-Dokumentation eines Bestell-POSTs beweist keine
 Reservierungsdauer, Abbruchmöglichkeit oder Doppelbestellsperre. Ein frischer
 Katalogpreis ersetzt keine Lieferreservierung.
 
+Der vom Nutzer gewählte neue Normalablauf ist `tyresystem_auto_v1`. Er benötigt
+keine fingierte Warenreservierung und keine einzelne Mitarbeiterfreigabe:
+Kartenautorisierung, erneute Inquiry, dauerhaft protokollierter einzelner
+Bestell-POST, gespeicherte eindeutige Lieferantenbestätigung, automatischer Einzug.
+Die neue Flow-Tabelle wird atomar mit dem Kundendraft angelegt; gespeicherte
+Aufträge ohne Auto-Record behalten ihren bisherigen Reservierungsablauf.
+Ein unklarer Lieferantenversuch wird niemals automatisch wiederholt.
+`acknowledged()` liest ausschließlich einen bereits gespeicherten Bestellbeleg;
+ein fehlender Beleg beweist keine unterbliebene Bestellung.
+
+`TYRESYSTEM_AUTO_POLICY_FILE` muss auf eine private, tatsächlich geprüfte
+Policy unter `TYRESYSTEM_PRIVATE_ROOT` zeigen. Die bewusst gesperrte Vorlage
+`docs/tyresystem-auto-policy.example.json` enthält keine erteilten Freigaben.
+Separater RSU-API-Zugang, Konten-/Modusnachweis, Netto-EUR-Stückpreis/Frachtbasis,
+verbindliche volle Mengenannahme zum gesendeten Preis, Artikel-/Paketbelege und
+die tatsächlich geprüften Stripe-Rechte bleiben Voraussetzung. Die Terms
+brauchen ausdrücklich `beschaffungsverfahren=["tyresystem_auto_v1"]`.
+Details: `docs/tyresystem-bestelladapter.md`, `docs/reifen-zahlung.md` und
+`docs/tyresystem-autokauf-bestellinformationen-entwurf.txt`.
+
+Der automatische Pfad unterstützt zunächst einzelne Reifen und Felgen zur
+Abholung. Eine Lieferprognose ist kein bestätigtes Bereitstellungsdatum;
+Montage und Komplettrad-Sets sind in diesem Pfad noch gesperrt. Die Tabellen
+`reifen_tyresystem_auto` und `tyresystem_order_attempts` gehören mit den
+Kaufdaten in die vollständige Sicherung und Wiederherstellung.
+
 ## Zahlung, Vertrag und Betrieb
 
 Stripe erhält die zutreffende Bezeichnung Reifenbestellung oder Felgenbestellung.
-Der derzeitige Onlineablauf zieht nach abgeschlossenem Checkout ein; er ist
-keine reine Kartenautorisierung mit späterer Werkstattfreigabe. Ein solcher
-Freigabeablauf erfordert eine gesonderte Entscheidung und Implementierung.
+Im bisherigen Reservierungsablauf wird nach abgeschlossenem Checkout eingezogen.
+Beim neuen automatischen Verfahren wird zunächst ausschließlich autorisiert;
+erst nach gespeichertem Lieferantenbeleg zieht der Server den exakten Betrag
+ein. Eine Autorisierung oder ein positives `Charge.paid` allein wird nicht als
+bezahlte Bestellung gewertet. Eine Mitarbeiterfreigabe pro Bestellung ist
+kein Bestandteil dieses Normalablaufs.
 Zahlung vor Ort bleibt eine verbindliche Bestellung mit offenem Zahlbetrag.
 
 Die Vertragskopie speichert die passende Artikelidentität, Menge und brutto

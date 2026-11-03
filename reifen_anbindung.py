@@ -143,6 +143,55 @@ def read_terms(path):
         raise ValueError("Die hinterlegte Bedingungsfassung konnte nicht unverändert geladen werden.") from None
 
 
+def configure_tyresystem_orders(portal, env):
+    """Prepare explicit API clients; runtime scopes alone authorize their calls."""
+    cfg = portal.app.config
+    flow = env.get("REIFEN_BESCHAFFUNG_VERFAHREN", "reservierung_v1")
+    cfg["REIFEN_BESCHAFFUNG_VERFAHREN"] = flow
+    configured = ("REIFEN_TYRESYSTEM_INQUIRY", "REIFEN_TYRESYSTEM_ORDERS", "REIFEN_TYRESYSTEM_AUTO_POLICY")
+    previous = portal.app.extensions.pop("reifen_tyresystem_order_configuration", {})
+    for key, value in previous.items():
+        if cfg.get(key) is value:
+            cfg.pop(key, None)
+    if not isinstance(flow, str) or flow not in {"reservierung_v1", "tyresystem_auto_v1"}:
+        cfg["REIFEN_BESCHAFFUNG_VERFAHREN"] = "off"
+        cfg["REIFEN_KAUF_ENABLED"] = False
+        for key in configured:
+            cfg.pop(key, None)
+        return ["Beschaffungsverfahren ungültig; Neubestellungen bleiben gesperrt"]
+    keys = ("TYRESYSTEM_API_USERNAME", "TYRESYSTEM_API_PASSWORD", "TYRESYSTEM_AUTO_POLICY_FILE")
+    if flow != "tyresystem_auto_v1" and not any(env.get(key) for key in keys):
+        return []
+    for key in configured:
+        cfg.pop(key, None)
+
+    def authorized(method, *args):
+        service = portal.app.extensions.get("reifen_kauf")
+        callback = getattr(service, method, None)
+        try:
+            return callable(callback) and callback(*args) is True
+        except Exception:
+            return False
+
+    try:
+        from tyresystem_api import TyreSystemInquiryClient
+        from tyresystem_order import TyreSystemOrderClient, DurableTyreSystemOrders
+        policy = _private_catalog_json(env["TYRESYSTEM_AUTO_POLICY_FILE"],
+            env["TYRESYSTEM_PRIVATE_ROOT"], max_bytes=16 * 1024 * 1024)
+        settings = {key:env.get(key) for key in ("TYRESYSTEM_API_USERNAME", "TYRESYSTEM_API_PASSWORD", "TYRESYSTEM_API_MODE")}
+        inquiry = TyreSystemInquiryClient(settings,
+            authorize=lambda article_id, amount: authorized("auto_authorize_inquiry", article_id, amount))
+        transport = TyreSystemOrderClient(settings,
+            authorize=lambda envelope: authorized("auto_authorize_order", envelope))
+        orders = DurableTyreSystemOrders(portal.get_db, transport)
+        values = dict(zip(configured, (inquiry, orders, policy)))
+        cfg.update(values)
+        portal.app.extensions["reifen_tyresystem_order_configuration"] = values
+        return []
+    except (KeyError, ValueError, TypeError, OSError, RecursionError):
+        return ["TYREsystem-Bestellzugang oder belegte Auto-Policy unvollständig"]
+
+
 def configure_integrations(portal, *, environment=None):
     env = os.environ if environment is None else environment
     cfg = portal.app.config
@@ -151,6 +200,7 @@ def configure_integrations(portal, *, environment=None):
     mode = env.get("REIFEN_KAUF_MODE", "off")
     cfg["REIFEN_KAUF_MODE"] = mode
     cfg["REIFEN_KAUF_ENABLED"] = flag(env.get("REIFEN_KAUF_ENABLED", "0"))
+    errors.extend(configure_tyresystem_orders(portal, env))
     notice = Path(__file__).resolve().parent / "static" / "recht" / "reifen-gewaehrleistung-de.jpg"
     cfg["REIFEN_GEWAERLEISTUNG_NOTICE_READY"] = notice.is_file() and hashlib.sha256(notice.read_bytes()).hexdigest() == "00e2b5ecc4f86bed59cc1ead77db7e98a318f264df97d77a01b5a160dee93138"
     cfg["REIFEN_TERMS_APPROVED_SHA256"] = env.get("REIFEN_TERMS_APPROVED_SHA256", "")
@@ -259,9 +309,23 @@ def run_pending(portal):
         return
     db = portal.get_db()
     try:
-        ids = [row["id"] for row in db.execute("SELECT id FROM reifen_kaeufe WHERE state IN ('zahlung_offen','zahlung_bestaetigt') ORDER BY erstellt_am LIMIT 20").fetchall()]
+        legacy_ids = [row["id"] for row in db.execute("SELECT id FROM reifen_kaeufe WHERE state IN ('zahlung_offen','zahlung_bestaetigt') ORDER BY erstellt_am LIMIT 20").fetchall()]
     finally:
         db.close()
+    automatic_ids = []
+    pending = getattr(service, "auto_pending_ids", None)
+    if callable(pending):
+        try:
+            candidates = pending(limit=20)
+            if isinstance(candidates, (list, tuple)):
+                automatic_ids = [value for value in candidates[:20] if isinstance(value, str) and value]
+        except Exception:
+            pass  # Keep the independent legacy reconciliation available.
+    ids = []
+    for index in range(20):
+        for source in (automatic_ids, legacy_ids):
+            if index < len(source) and source[index] not in ids and len(ids) < 20:
+                ids.append(source[index])
     for order_id in ids:
         try:
             service.reconcile(order_id)

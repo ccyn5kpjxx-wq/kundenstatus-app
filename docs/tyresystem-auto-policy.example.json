@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "freigegeben": false,
+  "nachweis": "",
+  "configured_mode": "test",
+  "account_fingerprint": "",
+  "api_modus_bestaetigt": false,
+  "api_modus_nachweis": "",
+  "stripe_manual_bestaetigt": false,
+  "stripe_manual_nachweis": "",
+  "preis_bestaetigt": false,
+  "preis_nachweis": "",
+  "waehrung": "EUR",
+  "preisbasis": "net_unit",
+  "mwst_satz": "19.00",
+  "aufschlag_prozent": "10.00",
+  "einzelversand_netto": "6.00",
+  "frachtfrei_ab": 2,
+  "auftragsannahme_bestaetigt": false,
+  "auftragsannahme_nachweis": "",
+  "lieferprognose": "",
+  "delivery_address": {
+    "neutraldelivery": 0,
+    "salutation": "Firma",
+    "name": "Gärtner GmbH Karosserie & Lack",
+    "street": "Alte Neckarelzer Straße 18/1",
+    "zipcode": "74821",
+    "city": "Mosbach",
+    "countrycode": "DE"
+  },
+  "artikel_freigaben": {}
+}

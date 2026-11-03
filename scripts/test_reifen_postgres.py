@@ -46,6 +46,8 @@ def migration(path, db):
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     constants[target.id] = value
+    if path.name == "reifen_kauf.py":
+        constants["init_auto_schema"] = lambda connection: migration(ROOT / "reifen_tyresystem_auto.py", connection)
     definitions(path, {"init_schema"}, constants)["init_schema"](db)
 
 
@@ -144,6 +146,19 @@ class ReifenPostgresTests(unittest.TestCase):
         result = self.db.execute(literal_sql(ROOT / "reifen_kauf.py", "reifen_kauf_events"), ("event", "pay", "order", "time"))
         self.assertEqual(result.rowcount, 1)
         self.assertIsNone(result.fetchone())
+
+    def test_automatic_procurement_uses_real_order_id_schemas_without_returning_id(self):
+        for filename, table in (("reifen_tyresystem_auto.py", "reifen_tyresystem_auto"),
+                                ("tyresystem_order.py", "tyresystem_order_attempts")):
+            with self.subTest(table=table):
+                self.assertEqual(self.connection.primary_keys[table], ["order_id"])
+                result = self.db.execute(literal_sql(ROOT / filename, table), ("synthetic-order",))
+                self.assertEqual(result.rowcount, 1)
+                if table == "tyresystem_order_attempts":
+                    self.assertEqual(set(result.fetchone()), {"attempt_id"})
+                else:
+                    self.assertIsNone(result.fetchone())
+                self.assertNotIn("RETURNING id", self.connection.statements[-1])
 
     def test_contract_attachment_uses_actual_sha256_schema(self):
         self.assertEqual(self.connection.primary_keys["reifen_vertrag_anhaenge"], ["sha256"])

@@ -458,6 +458,77 @@ class ReifenAnbindungTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 wiring.read_terms(path)
 
+    def auto_environment(self):
+        policy = Path(self.temp.name) / "auto-policy.json"
+        policy.write_text(json.dumps({"schema":1}), encoding="utf-8")
+        return {"REIFEN_BESCHAFFUNG_VERFAHREN":"tyresystem_auto_v1", "REIFEN_KAUF_MODE":"test",
+                "TYRESYSTEM_PRIVATE_ROOT":self.temp.name, "TYRESYSTEM_AUTO_POLICY_FILE":str(policy),
+                "TYRESYSTEM_API_USERNAME":"synthetic-api-user", "TYRESYSTEM_API_PASSWORD":"synthetic-api-secret",
+                "TYRESYSTEM_API_MODE":"test"}
+
+    def test_auto_configuration_only_constructs_dedicated_clients_without_io_or_activation(self):
+        from tyresystem_api import TyreSystemInquiryClient
+        from tyresystem_order import DurableTyreSystemOrders
+        with patch.object(self.portal, "get_db") as db:
+            self.assertEqual(wiring.configure_integrations(self.portal, environment=self.auto_environment()), [])
+        db.assert_not_called()
+        self.assertIsInstance(self.app.config["REIFEN_TYRESYSTEM_INQUIRY"], TyreSystemInquiryClient)
+        self.assertIsInstance(self.app.config["REIFEN_TYRESYSTEM_ORDERS"], DurableTyreSystemOrders)
+        self.assertEqual(self.app.config["REIFEN_TYRESYSTEM_AUTO_POLICY"], {"schema":1})
+        self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+        self.assertNotIn("REIFEN_KAUF_SUPPLIER", self.app.config)
+        self.assertEqual(self.app.config["REIFEN_TYRESYSTEM_INQUIRY"].account_fingerprint,
+                         self.app.config["REIFEN_TYRESYSTEM_ORDERS"].account_fingerprint)
+
+    def test_auto_removal_incomplete_or_invalid_configuration_revokes_own_clients(self):
+        env = self.auto_environment()
+        keys = ("REIFEN_TYRESYSTEM_INQUIRY", "REIFEN_TYRESYSTEM_ORDERS", "REIFEN_TYRESYSTEM_AUTO_POLICY")
+        for changes in (None, {"TYRESYSTEM_API_PASSWORD":""}, {"TYRESYSTEM_AUTO_POLICY_FILE":str(Path(self.temp.name)/"missing.json")},
+                        {"REIFEN_BESCHAFFUNG_VERFAHREN":"unknown"}):
+            with self.subTest(changes=changes):
+                self.assertEqual(wiring.configure_integrations(self.portal, environment=env), [])
+                current = {} if changes is None else {**env, **changes}
+                errors = wiring.configure_integrations(self.portal, environment=current)
+                self.assertEqual(bool(errors), changes is not None)
+                for key in keys:
+                    self.assertNotIn(key, self.app.config)
+        self.assertEqual(wiring.configure_integrations(self.portal, environment={"TYRESYSTEM_API_MODE":"test"}), [])
+
+    def test_auto_policy_path_stays_private_and_unknown_flow_never_enables_orders(self):
+        env = self.auto_environment()
+        self.app.config["REIFEN_KAUF_ENABLED"] = True
+        for value in ("unknown", [], True):
+            with self.subTest(value=value):
+                self.assertTrue(wiring.configure_integrations(self.portal, environment={**env,
+                    "REIFEN_KAUF_ENABLED":"1", "REIFEN_BESCHAFFUNG_VERFAHREN":value}))
+                self.assertFalse(self.app.config["REIFEN_KAUF_ENABLED"])
+        for bad_path in ("relative.json", str(Path(self.temp.name).parent / "outside.json"), "https://synthetic.invalid/policy"):
+            with self.subTest(path=bad_path):
+                self.assertTrue(wiring.configure_integrations(self.portal, environment={**env,"TYRESYSTEM_AUTO_POLICY_FILE":bad_path}))
+                self.assertNotIn("REIFEN_TYRESYSTEM_ORDERS", self.app.config)
+
+    def test_order_transport_requires_current_core_authorization_even_after_configured(self):
+        from tyresystem_order import TyreSystemOrderError, freeze_order_request
+        self.assertEqual(wiring.configure_integrations(self.portal, environment=self.auto_environment()), [])
+        transport = self.app.config["REIFEN_TYRESYSTEM_ORDERS"].client
+        request = freeze_order_request({"produktart":"reifen", "artikel_id":"123", "ean":"4019238594195",
+            "anzahl":4,"einkauf_netto":"42.28","waehrung":"EUR","reference":"synthetic-order-reference",
+            "delivery_address":{"neutraldelivery":0,"salutation":"Firma","name":"Synthetic Workshop",
+                "street":"Teststrasse 1","zipcode":"74821","city":"Mosbach","countrycode":"DE"}})
+        with self.assertRaises(TyreSystemOrderError):
+            transport.check_authorized(request)
+        self.service.auto_authorize_order = Mock(return_value=1)
+        with self.assertRaises(TyreSystemOrderError):
+            transport.check_authorized(request)
+        self.service.auto_authorize_order.return_value = True
+        transport.check_authorized(request)
+        envelope = self.service.auto_authorize_order.call_args.args[0]
+        self.assertEqual(envelope["reference"], request.reference)
+        self.assertEqual(envelope["account_fingerprint"], transport.account_fingerprint)
+        self.app.extensions.pop("reifen_kauf")
+        with self.assertRaises(TyreSystemOrderError):
+            transport.check_authorized(request)
+
     def test_pending_worker_is_bounded_and_reconciles_without_browser_request(self):
         with closing(self.db()) as db, db:
             db.executemany("INSERT INTO reifen_kaeufe VALUES(?,?,?)",[(str(i),"zahlung_offen" if i%2 else "zahlung_bestaetigt",f"2026-01-{i+1:02d}") for i in range(25)])
@@ -496,6 +567,22 @@ class ReifenAnbindungTest(unittest.TestCase):
             self.assertEqual(stop.wait.call_args.args,(30,))
             self.assertIs(wiring.start_worker(self.portal),stop)
             thread.assert_called_once()
+
+    def test_pending_worker_includes_safe_auto_recovery_with_fair_bounded_deduplication(self):
+        with closing(self.db()) as db, db:
+            db.executemany("INSERT INTO reifen_kaeufe VALUES(?,?,?)",
+                           [(str(i),"zahlung_offen",f"2026-01-{i+1:02d}") for i in range(25)])
+        self.service.auto_pending_ids = Mock(return_value=["auto-acknowledged", "0", "auto-capture-unknown"])
+        self.service.reconcile = Mock()
+        wiring.run_pending(self.portal)
+        identifiers = [call.args[0] for call in self.service.reconcile.call_args_list]
+        self.assertEqual(len(identifiers), 20)
+        self.assertEqual(len(set(identifiers)), 20)
+        self.assertIn("auto-acknowledged", identifiers)
+        self.assertIn("auto-capture-unknown", identifiers)
+        self.assertIn("1", identifiers)
+        self.assertEqual(identifiers.count("0"), 1)
+        self.service.auto_pending_ids.assert_called_once_with(limit=20)
 
 
 if __name__=="__main__":
