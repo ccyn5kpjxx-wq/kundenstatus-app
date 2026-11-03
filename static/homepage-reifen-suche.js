@@ -198,13 +198,52 @@
         && (query.montage === 'ja' || mounting === 0);
     } catch (_) { return false; }
   };
+  const profileImage = product => {
+    const image = product.bild;
+    if (!image || typeof image !== 'object' || image.bezug !== 'profil'
+        || typeof image.url !== 'string' || typeof image.alt !== 'string'
+        || !image.alt.length || image.alt.length > 250 || image.alt !== image.alt.trim()
+        || /[\p{C}<>]/u.test(image.alt)) return null;
+    const match = /^\/api\/reifenkatalog\/bild\/([1-9][0-9]{0,17})\/[0-9a-f]{64}\.webp$/.exec(image.url);
+    if (!match || match[0] !== image.url || match[1] !== product.artikel_id) return null;
+    return {url:image.url, alt:image.alt};
+  };
+  const productFigure = product => {
+    const figure = node('figure', 'tire-result-media');
+    // Keep the shared inquiry usable even when only its existing search CSS is loaded.
+    figure.setAttribute('style', 'margin:0;max-width:120px;min-height:190px;');
+    const visual = node('div', 'tire-result-image-box');
+    visual.setAttribute('style', 'width:100%;height:144px;display:grid;place-items:center;');
+    const caption = node('figcaption', 'tire-result-image-caption');
+    caption.setAttribute('style', 'font-size:11px;line-height:1.45;margin-top:8px;overflow-wrap:anywhere;');
+    const unavailable = () => {
+      visual.replaceChildren(node('span', 'tire-result-image-placeholder', 'Kein Profilbild verfügbar'));
+      caption.textContent = '';
+    };
+    const image = profileImage(product);
+    if (image) {
+      const picture = node('img', 'tire-result-image');
+      picture.setAttribute('width', '120');
+      picture.setAttribute('height', '144');
+      picture.setAttribute('loading', 'lazy');
+      picture.setAttribute('decoding', 'async');
+      picture.setAttribute('alt', image.alt);
+      picture.setAttribute('style', 'display:block;width:100%;max-width:120px;height:144px;object-fit:contain;');
+      picture.addEventListener('error', unavailable);
+      picture.setAttribute('src', image.url);
+      visual.append(picture);
+      caption.textContent = 'Profilabbildung · Ohne Felge. Größe/Ausführung kann abweichen.';
+    } else unavailable();
+    figure.append(visual, caption);
+    return figure;
+  };
   const render = (products, query) => {
     products.forEach(product => {
       const card = node('article', 'tire-result');
       const identity = node('div', 'tire-result-identity');
       const pricing = node('div', 'tire-result-pricing');
       const detail = node('div', 'tire-result-detail');
-      card.append(identity, pricing, detail);
+      card.append(productFigure(product), identity, pricing, detail);
       identity.append(node('h3', '', product.bezeichnung));
       const details = [product.groesse, seasons[product.saison]];
       if (productQualities.includes(product.qualitaet)) details.push(qualities[product.qualitaet]);

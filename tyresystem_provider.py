@@ -303,7 +303,7 @@ def _metadata(values):
 
 class TyreSystemCatalogProvider:
     def __init__(self, cache, *, publication_approved=False, publication_reference="",
-                 policy=None, article_metadata=None, clock=None, private_view_authorized=None):
+                 policy=None, article_metadata=None, clock=None, private_view_authorized=None, image_resolver=None):
         self.cache = cache
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._approved = (publication_approved is True and isinstance(publication_reference, str)
@@ -313,6 +313,7 @@ class TyreSystemCatalogProvider:
         self._policy = _policy(policy)
         self._metadata = _metadata(article_metadata)
         self._private_view_authorized = private_view_authorized if callable(private_view_authorized) else None
+        self._image_resolver = image_resolver if callable(image_resolver) else None
 
     def __repr__(self):
         return "<TyreSystemCatalogProvider private_catalog=redacted>"
@@ -434,5 +435,10 @@ class TyreSystemCatalogProvider:
                     "montage_standard_bestaetigt": meta.get("montage_standard_bestaetigt") is True and meta.get("runflat") is False,
                     "runflat": meta.get("runflat"), "xl": meta.get("xl"), "schneeflocke": meta.get("schneeflocke")}
             item.update({key: getattr(article, key) for key in ("eprel_url", "label_kraftstoff", "label_nass", "label_geraeusch_db", "label_geraeuschklasse")})
+            if self._image_resolver is not None:
+                try:
+                    item["artikel_bild"] = self._image_resolver(article)
+                except Exception:
+                    pass
             offers.append(item)
         return {"angebote": offers, "gesamt": total, "paginiert": True} if artikel_id is None else {"angebote": offers}

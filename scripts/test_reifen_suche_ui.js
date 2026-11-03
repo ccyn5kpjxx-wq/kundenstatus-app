@@ -445,6 +445,70 @@ const cases = [
     assert.equal(heading(safe), text);
     assert.equal(safe.results.querySelectorAll('img').length, 0);
   }],
+  ['confirmed local profile photos render safely in the shop and shared inquiry', async () => {
+    const url = `/api/reifenkatalog/bild/123456/${'a'.repeat(64)}.webp`;
+    const alt = 'Profilabbildung Testmarke Profil "Winter"';
+    for (const standalone of [false, true]) {
+      const h = createHarness({}, {standalone});
+      await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild:{url, alt, bezug:'profil'}})));
+      const picture = h.results.querySelector('img');
+      assert.ok(picture);
+      assert.equal(picture.getAttribute('src'), url);
+      assert.equal(picture.getAttribute('alt'), alt);
+      assert.equal(picture.getAttribute('loading'), 'lazy');
+      assert.equal(picture.getAttribute('decoding'), 'async');
+      assert.equal(picture.getAttribute('width'), '120');
+      assert.equal(picture.getAttribute('height'), '144');
+      assert.match(picture.getAttribute('style'), /object-fit:contain/);
+      assert.equal(h.results.querySelector('figcaption').textContent, 'Profilabbildung · Ohne Felge. Größe/Ausführung kann abweichen.');
+      assert.equal(h.results.querySelectorAll('article').length, 1);
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.ok(h.results.querySelector('.tire-result-select'));
+      assert.equal(h.requests.length, 1);
+    }
+  }],
+  ['missing or invalid optional images never discard a valid price or fetch foreign images', async () => {
+    const url = `/api/reifenkatalog/bild/123456/${'a'.repeat(64)}.webp`;
+    const valid = {url, alt:'Profilabbildung Testmarke Winter', bezug:'profil'};
+    const invalid = [undefined, null, {}, 'image',
+      {...valid, url:`https://evil.invalid${url}`},
+      {...valid, url:`https://reifen.example.invalid${url}`},
+      {...valid, url:`//evil.invalid${url}`},
+      {...valid, url:`${url}?secret=1`}, {...valid, url:`${url}#image`},
+      {...valid, url:`${url}\n`}, {...valid, url:url.replace('/123456/', '/123457/')},
+      {...valid, url:url.replace('/123456/', '/0123456/')},
+      {...valid, url:url.replace('a'.repeat(64), 'A'.repeat(64))},
+      {...valid, url:url.replace('a'.repeat(64), 'a'.repeat(63))},
+      {...valid, url:url.replace('/bild/', '/bild/../bild/')},
+      {...valid, bezug:'artikel'}, {...valid, alt:''}, {...valid, alt:'x'.repeat(251)},
+      {...valid, alt:'\u0000secret'}, {...valid, alt:'<img src=x onerror=alert(1)>'},
+      {...valid, alt:' Profilabbildung'}, {...valid, alt:123},
+    ];
+    for (const bild of invalid) {
+      const h = createHarness();
+      await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild})));
+      assert.equal(h.results.querySelectorAll('article').length, 1);
+      assert.equal(h.results.querySelectorAll('img').length, 0);
+      assert.match(h.results.querySelector('figure').textContent, /Kein Profilbild verfügbar/);
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.ok(h.results.querySelector('.tire-result-select'));
+      assert.equal(h.requests.length, 1);
+    }
+  }],
+  ['failed profile photos fall back to neutral text while prices and selection remain usable', async () => {
+    const h = createHarness();
+    const bild = {url:`/api/reifenkatalog/bild/123456/${'b'.repeat(64)}.webp`, alt:'Profilabbildung Testmarke Winter', bezug:'profil'};
+    await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild})));
+    const picture = h.results.querySelector('img');
+    await picture.dispatch('error');
+    await picture.dispatch('error');
+    assert.equal(h.results.querySelectorAll('img').length, 0);
+    assert.match(h.results.querySelector('figure').textContent, /Kein Profilbild verfügbar/);
+    assert.equal(h.results.querySelector('figcaption').textContent, '');
+    assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+    assert.equal((await h.results.querySelector('.tire-result-select').click()).defaultPrevented, false);
+    assert.equal(h.requests.length, 1, 'Image errors never cause a search or retry request');
+  }],
   ['timeout differs from an ordinary network error', async () => {
     const h = createHarness();
     const pending = h.search();

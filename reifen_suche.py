@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from reifenangebote import REIFEN_SAISONS, REIFEN_QUALITAETEN
 from reifenpreis_kalkulation import berechne_reifenpreis
 from reifenservice import berechne_reifenservice
+from reifen_bilder import public_image_metadata
 from tyresystem_provider import TyreSystemCatalogError, valid_manufacturer
 from tyresystem_feed import MAX_ROWS
 
@@ -237,6 +238,12 @@ def _produkt(item, query, mounting, now):
         product["hersteller"] = manufacturer
     if label is not None:
         product["eu_label"] = label
+    try:
+        picture = public_image_metadata(item.get("artikel_bild"), sku)
+        if picture is not None:
+            product["bild"] = picture
+    except Exception:
+        pass
     return product
 
 

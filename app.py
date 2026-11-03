@@ -3179,6 +3179,7 @@ def restrict_public_site_service():
         "oeffentlicher_reifenshop",
         "reifenangebote_suche",
         "reifenkatalog_auswahl",
+        "reifenkatalog_bild",
         "public_root",
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
@@ -45566,6 +45567,23 @@ def oeffentlicher_reifenshop():
         reifen_saisons=REIFEN_SAISONS, reifen_qualitaeten=REIFEN_QUALITAETEN,
         shop_ready=ready))
     response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+@app.get("/api/reifenkatalog/bild/<sku>/<sha>.webp")
+def reifenkatalog_bild(sku, sha):
+    from reifen_bilder import ReifenBildStore, MAX_IMAGE_BYTES
+    store = app.config.get("REIFEN_BILD_STORE")
+    if request.args or not isinstance(store, ReifenBildStore):
+        abort(404)
+    value = store.read(sku, sha)
+    if not isinstance(value, bytes) or not 1 <= len(value) <= MAX_IMAGE_BYTES:
+        abort(404)
+    response = make_response(value)
+    response.headers["Content-Type"] = "image/webp"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, max-age=300"
     response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response
 
