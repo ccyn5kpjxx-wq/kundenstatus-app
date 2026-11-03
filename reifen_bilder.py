@@ -60,16 +60,17 @@ def validate_webp_bytes(value):
 
 
 def public_image_metadata(value, artikel_id):
-    """Separate optional image whitelist, bound to the selected article ID."""
-    if not isinstance(value, Mapping) or set(value) != {"url", "alt", "bezug"}:
+    """Only an explicitly confirmed tire-only motif belongs in this catalogue."""
+    if not isinstance(value, Mapping) or set(value) != {"url", "alt", "bezug", "motiv"}:
         return None
     url, alt = value.get("url"), value.get("alt")
-    if (not isinstance(url, str) or not _text(alt, 250) or value.get("bezug") != "profil"):
+    if (not isinstance(url, str) or not _text(alt, 250) or value.get("bezug") != "profil"
+            or value.get("motiv") != "reifen"):
         return None
     match = _URL.fullmatch(url)
     if not match or match[1] != artikel_id:
         return None
-    return {"url": url, "alt": alt, "bezug": "profil"}
+    return {"url": url, "alt": alt, "bezug": "profil", "motiv": "reifen"}
 
 
 def _unique(pairs):
@@ -112,9 +113,9 @@ class ReifenBildStore:
                 raise ValueError()
             profiles, ambiguous = {}, set()
             for item in manifest["profiles"]:
-                if (not isinstance(item, dict) or set(item) != {"hersteller", "profil", "sha256", "bezug", "nachweis"}
+                if (not isinstance(item, dict) or set(item) != {"hersteller", "profil", "sha256", "bezug", "nachweis", "motiv"}
                         or not _text(item["hersteller"], 100) or not _text(item["profil"], 200)
-                        or item["bezug"] != "profil" or not isinstance(item["sha256"], str)
+                        or item["bezug"] != "profil" or item["motiv"] != "reifen" or not isinstance(item["sha256"], str)
                         or not _SHA.fullmatch(item["sha256"]) or not _text(item["nachweis"], 200)
                         or "://" in item["nachweis"] or "?" in item["nachweis"]):
                     continue
@@ -183,7 +184,7 @@ class ReifenBildStore:
             if digest is None:
                 return None
             return public_image_metadata({"url": f"/api/reifenkatalog/bild/{article.artikel_id}/{digest}.webp",
-                "alt": f"Profilabbildung {article.hersteller} {article.profil}", "bezug": "profil"}, article.artikel_id)
+                "alt": f"Profilabbildung {article.hersteller} {article.profil}", "bezug": "profil", "motiv": "reifen"}, article.artikel_id)
         except Exception:
             return None
 

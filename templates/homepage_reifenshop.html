@@ -20,7 +20,6 @@
   <main class="wrap">
     <section class="shop-intro" aria-labelledby="shop-title">
       <div><span class="eyebrow">Ihr Reifenservice in Mosbach</span><h1 id="shop-title">Reifen finden.<br><em>Preise vergleichen.</em></h1><p>Die passende Größe wählen, echte Marken vergleichen und den Reifenpreis für Ihre gewünschte Stückzahl sehen.</p></div>
-      <img {{ image_attrs('homepage/karte-reifen-v2-20261021.webp', sizes='(max-width:760px) 260px, 340px') }} alt="Reifen mit silberner Felge" width="340" height="227">
     </section>
     <aside class="shop-catalog" aria-label="Reifenkatalog"><span class="catalog-dot" aria-hidden="true"></span><div><strong>{% if reifen_katalog and reifen_katalog.echt %}Echte Reifen und Preise aus TYREsystem{% else %}Reifenkatalog{% endif %}</strong><p data-tire-catalog-status>Verfügbare Größen und Marken werden geladen …</p></div>{% if reifen_katalog and reifen_katalog.lokal %}<span class="catalog-private">Lokale Preisansicht</span>{% endif %}</aside>
     {% if not shop_ready %}<p class="shop-notice" role="status"><strong>Onlinebestellungen starten in Kürze.</strong> Der Bestellabschluss ist noch geschlossen. Für Ihren aktuellen Reifenbedarf können Sie uns eine <a href="{{ url_for('website_anfrage', anliegen='reifenangebot') }}#kurzanfrage">persönliche Anfrage</a> senden.</p>{% endif %}

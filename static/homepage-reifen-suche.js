@@ -200,7 +200,9 @@
   };
   const profileImage = product => {
     const image = product.bild;
-    if (!image || typeof image !== 'object' || image.bezug !== 'profil'
+    if (!image || typeof image !== 'object' || Object.keys(image).length !== 4
+        || !Object.keys(image).every(key => ['url', 'alt', 'bezug', 'motiv'].includes(key))
+        || image.bezug !== 'profil' || image.motiv !== 'reifen'
         || typeof image.url !== 'string' || typeof image.alt !== 'string'
         || !image.alt.length || image.alt.length > 250 || image.alt !== image.alt.trim()
         || /[\p{C}<>]/u.test(image.alt)) return null;
@@ -232,7 +234,7 @@
       picture.addEventListener('error', unavailable);
       picture.setAttribute('src', image.url);
       visual.append(picture);
-      caption.textContent = 'Profilabbildung · Ohne Felge. Größe/Ausführung kann abweichen.';
+      caption.textContent = 'Profilabbildung · Größe/Ausführung kann abweichen.';
     } else unavailable();
     figure.append(visual, caption);
     return figure;
@@ -269,7 +271,7 @@
         }
       }
       const unit = node('p', 'tire-result-unit');
-      unit.append(node('strong', '', money.format(amount(product.preis.einzel_brutto) / 100)), node('span', '', 'pro Reifen · inkl. MwSt.'));
+      unit.append(node('strong', '', money.format(amount(product.preis.einzel_brutto) / 100)), node('span', '', 'pro Reifen · inkl. MwSt. · ohne Felge'));
       pricing.append(unit);
       const breakdown = node('dl');
       const line = (label, val) => breakdown.append(node('dt', '', label), node('dd', '', money.format(amount(val) / 100)));

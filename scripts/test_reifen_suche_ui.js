@@ -450,7 +450,7 @@ const cases = [
     const alt = 'Profilabbildung Testmarke Profil "Winter"';
     for (const standalone of [false, true]) {
       const h = createHarness({}, {standalone});
-      await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild:{url, alt, bezug:'profil'}})));
+      await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild:{url, alt, bezug:'profil', motiv:'reifen'}})));
       const picture = h.results.querySelector('img');
       assert.ok(picture);
       assert.equal(picture.getAttribute('src'), url);
@@ -460,16 +460,17 @@ const cases = [
       assert.equal(picture.getAttribute('width'), '120');
       assert.equal(picture.getAttribute('height'), '144');
       assert.match(picture.getAttribute('style'), /object-fit:contain/);
-      assert.equal(h.results.querySelector('figcaption').textContent, 'Profilabbildung · Ohne Felge. Größe/Ausführung kann abweichen.');
+      assert.equal(h.results.querySelector('figcaption').textContent, 'Profilabbildung · Größe/Ausführung kann abweichen.');
       assert.equal(h.results.querySelectorAll('article').length, 1);
       assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.match(h.results.querySelector('.tire-result-unit').textContent, /pro Reifen.*ohne Felge/);
       assert.ok(h.results.querySelector('.tire-result-select'));
       assert.equal(h.requests.length, 1);
     }
   }],
   ['missing or invalid optional images never discard a valid price or fetch foreign images', async () => {
     const url = `/api/reifenkatalog/bild/123456/${'a'.repeat(64)}.webp`;
-    const valid = {url, alt:'Profilabbildung Testmarke Winter', bezug:'profil'};
+    const valid = {url, alt:'Profilabbildung Testmarke Winter', bezug:'profil', motiv:'reifen'};
     const invalid = [undefined, null, {}, 'image',
       {...valid, url:`https://evil.invalid${url}`},
       {...valid, url:`https://reifen.example.invalid${url}`},
@@ -495,9 +496,25 @@ const cases = [
       assert.equal(h.requests.length, 1);
     }
   }],
+  ['only explicitly confirmed tire-only motifs render and other motifs keep their valid price', async () => {
+    const base = {url:`/api/reifenkatalog/bild/123456/${'a'.repeat(64)}.webp`, alt:'Profilabbildung Testmarke Winter', bezug:'profil'};
+    const rejected = [base, {...base, motiv:null}, {...base, motiv:'felge'},
+      {...base, motiv:'komplettrad'}, {...base, motiv:'Reifen'}, {...base, motiv:true},
+      {...base, motiv:'reifen', source:'unexpected-metadata'}];
+    for (const bild of rejected) {
+      const h = createHarness();
+      await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild})));
+      assert.equal(h.results.querySelectorAll('article').length, 1);
+      assert.equal(h.results.querySelectorAll('img').length, 0);
+      assert.match(h.results.querySelector('figure').textContent, /Kein Profilbild verfügbar/);
+      assert.match(h.results.querySelector('.tire-result-pricing').textContent, /480,00/);
+      assert.ok(h.results.querySelector('.tire-result-select'));
+      assert.equal(h.requests.length, 1);
+    }
+  }],
   ['failed profile photos fall back to neutral text while prices and selection remain usable', async () => {
     const h = createHarness();
-    const bild = {url:`/api/reifenkatalog/bild/123456/${'b'.repeat(64)}.webp`, alt:'Profilabbildung Testmarke Winter', bezug:'profil'};
+    const bild = {url:`/api/reifenkatalog/bild/123456/${'b'.repeat(64)}.webp`, alt:'Profilabbildung Testmarke Winter', bezug:'profil', motiv:'reifen'};
     await reply(h, h.search(), offers(syntheticProduct({artikel_id:'123456', bild})));
     const picture = h.results.querySelector('img');
     await picture.dispatch('error');

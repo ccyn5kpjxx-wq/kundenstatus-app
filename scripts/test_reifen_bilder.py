@@ -44,7 +44,7 @@ class _ImageFixture:
         self.path.write_bytes(self.image)
         self.catalog = IndexedCatalog.build(feed())
         self.entry = {"hersteller": "Synthetic", "profil": "Winter", "sha256": self.digest,
-                      "bezug": "profil", "nachweis": "Synthetic article 1, verified profile fixture"}
+                      "bezug": "profil", "motiv": "reifen", "nachweis": "Synthetic article 1, verified profile fixture"}
         self.manifest([self.entry])
 
     def manifest(self, profiles):
@@ -86,7 +86,7 @@ class TireImagesTest(_ImageFixture, unittest.TestCase):
         store = self.approved()
         description = store.describe(self.catalog.snapshot.artikel[0])
         self.assertEqual(description, {"url": f"/api/reifenkatalog/bild/1/{self.digest}.webp",
-                                      "alt": "Profilabbildung Synthetic Winter", "bezug": "profil"})
+                                      "alt": "Profilabbildung Synthetic Winter", "bezug": "profil", "motiv": "reifen"})
         self.assertNotIn("nachweis", str(description))
         self.assertEqual(store.read("1", self.digest), self.image)
         self.catalog = IndexedCatalog.build(feed({"Hersteller": "Other"}))
@@ -136,7 +136,7 @@ class TireImagesTest(_ImageFixture, unittest.TestCase):
             self.assertIsNone(self.approved().read("1", self.digest))
 
     def test_optional_metadata_rejects_external_or_wrong_article_urls(self):
-        good = {"url": f"/api/reifenkatalog/bild/1/{self.digest}.webp", "alt": "Synthetic profile", "bezug": "profil"}
+        good = {"url": f"/api/reifenkatalog/bild/1/{self.digest}.webp", "alt": "Synthetic profile", "bezug": "profil", "motiv": "reifen"}
         self.assertEqual(public_image_metadata(good, "1"), good)
         for bad in ({**good, "url": "https://foreign.invalid/?key=PRIVATE"},
                     {**good, "url": f"/api/reifenkatalog/bild/2/{self.digest}.webp"},
@@ -159,13 +159,52 @@ class TireImagesTest(_ImageFixture, unittest.TestCase):
         self.assertIsNone(body["produkte"][0]["qualitaet"])
         self.assertNotIn("nachweis", str(body))
         for resolver in (Mock(side_effect=RuntimeError("PRIVATE-MARKER")),
-                         lambda _: {"url": "https://private.invalid", "alt": "bad", "bezug": "profil"}):
+                         lambda _: {"url": "https://private.invalid", "alt": "bad", "bezug": "profil", "motiv": "reifen"}):
             provider._image_resolver = resolver
             body, status = suche_reifenangebote(query, provider, now=NOW)
             self.assertEqual(status, 200)
             self.assertEqual(body["produkte"][0]["preis"], expected)
             self.assertNotIn("bild", body["produkte"][0])
             self.assertNotIn("PRIVATE", str(body))
+
+    def test_manifest_requires_positive_tire_only_motif_for_description_and_read(self):
+        invalid_entries = [{key: value for key, value in self.entry.items() if key != "motiv"}]
+        invalid_entries.extend({**self.entry, "motiv": motif} for motif in
+                               (None, "felge", "komplettrad", "reifen_mit_felge", "Reifen", "", True, ["reifen"]))
+        for entry in invalid_entries:
+            with self.subTest(motif=entry.get("motiv")):
+                self.manifest([entry])
+                store = self.approved()
+                self.assertIsNone(store.describe(self.catalog.snapshot.artikel[0]))
+                self.assertIsNone(store.read("1", self.digest))
+        self.manifest([self.entry])
+        store = self.approved()
+        self.assertEqual(store.describe(self.catalog.snapshot.artikel[0])["motiv"], "reifen")
+        self.assertEqual(store.read("1", self.digest), self.image)
+
+    def test_missing_or_other_public_motifs_omit_only_image_and_keep_tire_price(self):
+        class Cache:
+            def load(_):
+                return self.catalog
+        image = self.approved().describe(self.catalog.snapshot.artikel[0])
+        self.assertEqual(set(image), {"url", "alt", "bezug", "motiv"})
+        query = {"groesse": "225/40 R18 92V", "saison": "winter", "qualitaet": "alle", "anzahl": "4", "montage": "nein"}
+        provider = TyreSystemCatalogProvider(Cache(), policy=deepcopy(POLICY), private_view_authorized=lambda: True,
+            clock=lambda: NOW, image_resolver=lambda _: image)
+        good, status = suche_reifenangebote(query, provider, now=NOW)
+        self.assertEqual((status, good["produkte"][0]["bild"]["motiv"]), (200, "reifen"))
+        expected = good["produkte"][0]["preis"]
+        invalid = [{key: value for key, value in image.items() if key != "motiv"}]
+        invalid.extend({**image, "motiv": motif} for motif in (None, "felge", "komplettrad", "reifen_mit_felge", True))
+        for metadata in invalid:
+            with self.subTest(motif=metadata.get("motiv")):
+                provider._image_resolver = lambda _, value=metadata: value
+                body, status = suche_reifenangebote(query, provider, now=NOW)
+                self.assertEqual(status, 200)
+                self.assertEqual(len(body["produkte"]), 1)
+                self.assertEqual(body["produkte"][0]["preis"], expected)
+                self.assertIsNone(body["produkte"][0]["qualitaet"])
+                self.assertNotIn("bild", body["produkte"][0])
 
 
 class ImageRouteTest(_ImageFixture, unittest.TestCase):
