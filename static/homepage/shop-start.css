@@ -20,7 +20,7 @@
   display: block;
   object-position: 80% center;
   opacity: .73;
-  filter: blur(2px) saturate(.75);
+  filter: saturate(.75);
   transform: scale(1.015);
 }
 
