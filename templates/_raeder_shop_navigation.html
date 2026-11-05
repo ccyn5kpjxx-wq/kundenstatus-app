@@ -1,8 +1,8 @@
 <nav class="shop-categories" aria-label="Shop-Navigation">
-  {% if shop_header %}<a href="/shop" {% if shop_kategorie == 'start' and not shop_category %}aria-current="page"{% endif %}>Shop</a>{% endif %}
+  {% if shop_header %}<a data-shop-click="nav-shop" href="/shop" {% if shop_kategorie == 'start' and not shop_category %}aria-current="page"{% endif %}>Shop</a>{% endif %}
   {% if shop_kategorie == 'start' %}
-  <a href="{{ shop_felgen_url|default('#felgen') }}" {% if shop_category == 'felgen' %}aria-current="page"{% endif %}>Felgen</a>
-  <a href="{{ shop_reifen_url|default('#reifen') }}" {% if shop_category == 'reifen' %}aria-current="page"{% endif %}>Reifen</a>
+  <a data-shop-click="nav-felgen" href="{{ shop_felgen_url|default('#felgen') }}" {% if shop_category == 'felgen' %}aria-current="page"{% endif %}>Felgen</a>
+  <a data-shop-click="nav-reifen" href="{{ shop_reifen_url|default('#reifen') }}" {% if shop_category == 'reifen' %}aria-current="page"{% endif %}>Reifen</a>
   {% else %}
   <a href="{{ url_for('oeffentlicher_reifenshop') }}" {% if shop_kategorie|default('reifen') == 'reifen' %}aria-current="page"{% endif %}>Reifen</a>
   <a href="{{ url_for('felgen_shop.catalog') }}" {% if shop_kategorie|default('reifen') == 'felgen' %}aria-current="page"{% endif %}>Felgen</a>

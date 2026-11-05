@@ -5,13 +5,11 @@
     const endpoint = {{ (config.get('ANALYTICS_INGEST_URL') or url_for('api_besucher_event')) | tojson }};
     let referrer = '';
     try { referrer = document.referrer ? new URL(document.referrer).hostname : ''; } catch (error) {}
-    const payload = JSON.stringify({
-      website: 'auto-lackierzentrum',
-      seite: window.location.pathname,
-      referrer
-    });
-    const senden = () => {
-      if (navigator.sendBeacon) {
+    const website = 'auto-lackierzentrum';
+    const seite = window.location.pathname;
+    const senden = (eventData, beacon = true) => {
+      const payload = JSON.stringify(eventData);
+      if (beacon && navigator.sendBeacon) {
         const body = new Blob([payload], { type: 'text/plain;charset=UTF-8' });
         if (navigator.sendBeacon(endpoint, body)) return;
       }
@@ -24,8 +22,19 @@
         keepalive: true
       }).catch(() => {});
     };
-    if (document.readyState === 'complete') senden();
-    else window.addEventListener('load', senden, { once: true });
+    const aufrufSenden = () => senden({ website, seite, referrer });
+    if (document.readyState === 'complete') aufrufSenden();
+    else window.addEventListener('load', aufrufSenden, { once: true });
+
+    if (document.querySelector('[data-shop-click]')) {
+      document.addEventListener('click', (event) => {
+        if (!event.isTrusted || !(event.target instanceof Element)) return;
+        const control = event.target.closest('[data-shop-click]');
+        if (control) senden({ website, seite, shop_click: control.dataset.shopClick }, false);
+      }, true);
+    }
   })();
 </script>
+{% if not besucher_ohne_google_ads %}
 <script src="{{ url_for('static', filename='google_ads_tracking.js') }}" data-privacy-url="{{ url_for('datenschutz_seite') }}"></script>
+{% endif %}

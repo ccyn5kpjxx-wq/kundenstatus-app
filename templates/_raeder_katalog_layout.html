@@ -2,12 +2,12 @@
 {% macro catalog_header() %}
 <header class="shop-header">
   <div class="wrap catalog-header">
-    <a class="shop-brand" href="/shop"><img {{ image_attrs('logo-transparent.png', sizes='190px') }} alt="{{ werkstatt_oeffentlich.name }} · Shop" width="190" height="56"></a>
+    <a class="shop-brand" data-shop-click="nav-logo" href="/shop"><img {{ image_attrs('logo-transparent.png', sizes='190px') }} alt="{{ werkstatt_oeffentlich.name }} · Shop" width="190" height="56"></a>
     {% set shop_header = true %}
     {% include "_raeder_shop_navigation.html" %}
     <div class="catalog-header-actions">
-      <a href="{{ company_homepage_url|default(url_for('oeffentliche_homepage')) }}">Zur Firmenhomepage</a>
-      <a class="shop-phone" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
+      <a data-shop-click="nav-homepage" href="{{ company_homepage_url|default(url_for('oeffentliche_homepage')) }}">Zur Firmenhomepage</a>
+      <a class="shop-phone" data-shop-click="nav-anrufen" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
     </div>
   </div>
 </header>

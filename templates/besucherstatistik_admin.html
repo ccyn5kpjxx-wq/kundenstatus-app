@@ -107,6 +107,37 @@
   {% endfor %}
 </div>
 
+{% if statistik['shop_klicks'] is not none %}
+<section class="page-card p-4 mb-4" id="shop-klicks" aria-labelledby="shop-klicks-title">
+  <div class="section-title">
+    <div>
+      <h5 id="shop-klicks-title" class="mb-1">Shop-Klicks auf der Website</h5>
+      <p class="mb-0">Wo Besucher klicken und welche Schaltflächen sie nutzen. Anzeigenklicks stehen separat unter Google Ads.</p>
+    </div>
+    {% set klicks = statistik['shop_klicks']['gesamt'] %}
+    <span class="badge-soft">{{ klicks }} {{ 'Klick' if klicks == 1 else 'Klicks' }} · {{ statistik['tage'] }} Tage</span>
+  </div>
+  {% if statistik['shop_klicks']['items'] %}
+    <div class="analytics-table-shell">
+      <table class="table analytics-table align-middle">
+        <thead><tr><th scope="col">Seite</th><th scope="col">Angeklicktes Element</th><th scope="col" class="text-end">Klicks</th></tr></thead>
+        <tbody>
+        {% for row in statistik['shop_klicks']['items'] %}
+          <tr>
+            <td>{{ row['seite_label'] }}<br><small class="text-muted">{{ row['seite'] }}</small></td>
+            <td>{{ row['element_label'] }}</td>
+            <td class="fw-bold text-end">{{ row['klicks'] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="analytics-note mb-0">In diesem Zeitraum sind noch keine Shop-Klicks erfasst.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 <section class="page-card p-4 mb-4 ads-panel" id="google-ads-kosten" aria-labelledby="google-ads-title">
   <div class="ads-head">
     <div>

@@ -10430,6 +10430,14 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_besucher_events_visitor_hash
             ON besucher_events (visitor_hash);
 
+        CREATE TABLE IF NOT EXISTS shop_klick_tageswerte (
+            datum TEXT NOT NULL,
+            seite TEXT NOT NULL,
+            element TEXT NOT NULL,
+            anzahl INTEGER NOT NULL,
+            PRIMARY KEY (datum, seite, element)
+        );
+
         CREATE TABLE IF NOT EXISTS google_ads_tageswerte (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             datum            TEXT NOT NULL,
@@ -30786,6 +30794,9 @@ BESUCHER_WEBSITES = {
         "seiten": {
             "/": "Homepage",
             "/homepage": "Homepage",
+            "/shop": "Shop-Startseite",
+            "/shop/felgen": "Shop · Felgen",
+            "/shop/reifen": "Shop · Reifen",
             "/leistungen": "Leistungen",
             "/portale": "Portale",
             "/team": "Team",
@@ -30828,6 +30839,39 @@ BESUCHER_WEBSITE_ALIASES = {
     "www.tomorrowworks-agentur.de": "tomorrowworks",
     "autovermietung-mos.de": "autovermietung-mos",
     "www.autovermietung-mos.de": "autovermietung-mos",
+}
+SHOP_NAV_KLICKS = {
+    "nav-shop": "Shop-Navigation · Shop",
+    "nav-logo": "Shoplogo · Zum Shop",
+    "nav-felgen": "Shop-Navigation · Felgen",
+    "nav-reifen": "Shop-Navigation · Reifen",
+    "nav-homepage": "Zur Firmenhomepage",
+    "nav-anrufen": "Telefonnummer anklicken",
+}
+SHOP_KLICK_ELEMENTE = {
+    "/": {
+        "home-nav-shop": "Hauptmenü · Reifen & Felgen Shop",
+        "home-card-shop": "Shopkarte · Zum Shop",
+        "home-show-shop": "Themenwahl · Shopkarte anzeigen",
+        "home-card-reifen": "Reifenkarte · Zum Reifen-Shop",
+    },
+    "/shop": {
+        **SHOP_NAV_KLICKS,
+        "hero-felgen": "Titelbereich · Felgen entdecken",
+        "hero-reifen": "Titelbereich · Reifen entdecken",
+        "card-felgen-angebot": "Felgenkarte · Felgenangebot anfragen",
+        "card-reifen-angebot": "Reifenkarte · Reifenangebot anfragen",
+    },
+    "/shop/felgen": {
+        **SHOP_NAV_KLICKS,
+        "hero-felgen-angebot": "Felgenangebot anfragen",
+        "other-reifen": "Auch Reifen ansehen",
+    },
+    "/shop/reifen": {
+        **SHOP_NAV_KLICKS,
+        "hero-reifen-angebot": "Reifenangebot anfragen",
+        "other-felgen": "Auch Felgen ansehen",
+    },
 }
 GOOGLE_ADS_KAMPAGNEN = {
     "auto-lackierzentrum": {
@@ -31683,6 +31727,61 @@ def besucher_client_klassen(user_agent):
     return geraet, browser, ist_bot
 
 
+def log_shop_klick(seite, element, user_agent):
+    if not isinstance(seite, str) or not isinstance(element, str):
+        return
+    if seite == "/homepage":
+        seite = "/"
+    if element not in SHOP_KLICK_ELEMENTE.get(seite, {}):
+        return
+    if besucher_client_klassen(user_agent)[2]:
+        return
+
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
+    cutoff = heute - timedelta(days=89)
+    db = get_db()
+    try:
+        db.execute("DELETE FROM shop_klick_tageswerte WHERE datum < ?", (cutoff.isoformat(),))
+        db.execute(
+            """
+            INSERT INTO shop_klick_tageswerte (datum, seite, element, anzahl)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT (datum, seite, element) DO UPDATE SET
+                anzahl = shop_klick_tageswerte.anzahl + 1
+            """,
+            (heute.isoformat(), seite, element),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_shop_klick_statistik(db, tage):
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
+    cutoff = (heute - timedelta(days=tage - 1)).isoformat()
+    rows = db.execute(
+        """
+        SELECT seite, element, SUM(anzahl) AS klicks
+        FROM shop_klick_tageswerte
+        WHERE datum >= ?
+        GROUP BY seite, element
+        ORDER BY klicks DESC, seite, element
+        """,
+        (cutoff,),
+    ).fetchall()
+    items = []
+    for row in rows:
+        label = SHOP_KLICK_ELEMENTE.get(row["seite"], {}).get(row["element"])
+        if label:
+            items.append({
+                "seite": row["seite"],
+                "seite_label": besucher_seiten_label("auto-lackierzentrum", row["seite"]),
+                "element_label": label,
+                "klicks": int(row["klicks"]),
+            })
+    return {"gesamt": sum(item["klicks"] for item in items), "items": items}
+
+
 def log_besucher_event(seite, referrer="", user_agent="", ip_address="", website="auto-lackierzentrum"):
     website = normalize_besucher_website(website)
     seite = normalize_besucher_seite(seite, website=website)
@@ -31826,6 +31925,9 @@ def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
             """,
             (cutoff, *ausgeblendete_websites),
         ).fetchall()
+        shop_klicks = None
+        if website in {"alle", "auto-lackierzentrum"} and "auto-lackierzentrum" not in ausgeblendete_websites:
+            shop_klicks = list_shop_klick_statistik(db, tage)
     finally:
         db.close()
 
@@ -31884,6 +31986,7 @@ def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
         "geraete": [dict(row) for row in geraete_rows],
         "browser": [dict(row) for row in browser_rows],
         "websites": websites,
+        "shop_klicks": shop_klicks,
     }
 
 
@@ -39602,6 +39705,10 @@ def api_besucher_event():
     origin = besucher_request_origin(website)
     if not website or origin is None:
         return "", 204
+    if "shop_click" in payload:
+        if website == "auto-lackierzentrum" and payload.keys() == {"website", "seite", "shop_click"}:
+            log_shop_klick(payload["seite"], payload["shop_click"], request.headers.get("User-Agent", ""))
+        return besucher_cors_response(origin)
     log_besucher_event(
         website=website,
         seite=payload.get("seite") or "",

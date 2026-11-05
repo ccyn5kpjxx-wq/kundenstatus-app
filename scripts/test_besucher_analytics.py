@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -33,6 +35,66 @@ def check(label, passed):
     return bool(passed)
 
 
+def check_shop_klicks(client, common, temp_get_db):
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
+    database = temp_get_db()
+    database.executemany(
+        "INSERT INTO shop_klick_tageswerte VALUES (?, '/shop', 'hero-felgen', ?)",
+        [((heute - timedelta(days=91)).isoformat(), 100), ((heute - timedelta(days=12)).isoformat(), 3)],
+    )
+    database.commit()
+    page_views_before = database.execute("SELECT COUNT(*) FROM besucher_events").fetchone()[0]
+    database.close()
+
+    def click(seite, element, *, origin=None, user_agent=None, **extra):
+        headers = dict(common["headers"])
+        if origin:
+            headers["Origin"] = origin
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        return client.post(
+            "/api/besucher", headers=headers, base_url=common["base_url"],
+            json={"website": "auto-lackierzentrum", "seite": seite, "shop_click": element, **extra},
+        )
+
+    results = (
+        click("/homepage", "home-nav-shop"),
+        click("/", "home-nav-shop"),
+        click("/shop/felgen", "hero-felgen-angebot"),
+        click("/shop/reifen", "hero-reifen-angebot"),
+        click("/shop", "hero-felgen", origin="https://example.invalid"),
+        click("/shop", "hero-felgen", user_agent="Googlebot/2.1"),
+        click("/shop", "hero-felgen", label="person@example.invalid"),
+        click("/shop?email=person@example.invalid", "hero-felgen"),
+        click("/shop", ["hero-felgen"]),
+        click("/shop/reifen", "hero-felgen-angebot"),
+    )
+    aktuell = portal.list_besucher_statistik(7)["shop_klicks"]
+    monat = portal.list_besucher_statistik(30, website="auto-lackierzentrum")["shop_klicks"]
+    fremde_website = portal.list_besucher_statistik(30, website="autovermietung-mos")["shop_klicks"]
+    database = temp_get_db()
+    page_views_after = database.execute("SELECT COUNT(*) FROM besucher_events").fetchone()[0]
+    werte = [tuple(row) for row in database.execute(
+        "SELECT datum, seite, element, anzahl FROM shop_klick_tageswerte ORDER BY datum, seite"
+    )]
+    database.close()
+    checks = [
+        check("Shop-Klicks verwenden den bestehenden Beacon ohne zusätzliche Seitenaufrufe",
+              all(response.status_code == 204 for response in results) and page_views_after == page_views_before),
+        check("Nur freigegebene Shop-Seiten und Elemente werden anonym pro Tag gezählt", werte == [
+            ((heute - timedelta(days=12)).isoformat(), "/shop", "hero-felgen", 3),
+            (heute.isoformat(), "/", "home-nav-shop", 2),
+            (heute.isoformat(), "/shop/felgen", "hero-felgen-angebot", 1),
+            (heute.isoformat(), "/shop/reifen", "hero-reifen-angebot", 1),
+        ]),
+        check("Analytics trennt Shop-Klicks nach Seite und Element und respektiert den gewählten Filter",
+              aktuell["gesamt"] == 4 and monat["gesamt"] == 7 and fremde_website is None
+              and aktuell["items"][0] == {"seite": "/", "seite_label": "Homepage", "klicks": 2,
+                                           "element_label": "Hauptmenü · Reifen & Felgen Shop"}),
+    ]
+    return all(checks)
+
+
 def main():
     portal.app.config["TESTING"] = True
     original_get_db = portal.get_db
@@ -61,6 +123,13 @@ def main():
                 geraet TEXT DEFAULT '',
                 browser TEXT DEFAULT '',
                 ist_bot INTEGER DEFAULT 0
+            );
+            CREATE TABLE shop_klick_tageswerte (
+                datum TEXT NOT NULL,
+                seite TEXT NOT NULL,
+                element TEXT NOT NULL,
+                anzahl INTEGER NOT NULL,
+                PRIMARY KEY (datum, seite, element)
             );
             CREATE TABLE google_ads_tageswerte (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -261,6 +330,7 @@ def main():
             stored_ads = database.execute("SELECT kosten_cent FROM google_ads_tageswerte WHERE website='tomorrowworks'").fetchone()[0]
             database.close()
             ok &= check("Anzeige-Filter löscht keine Besucher- oder Kostendaten", unchanged_count == len(rows) and stored_ads == 9999)
+            ok &= check_shop_klicks(client, common, temp_get_db)
 
             captured = {}
             portal.render_template = lambda name, **context: captured.update(
@@ -336,6 +406,7 @@ def main():
             portal.render_template = original_render_template
             portal.PUBLIC_SITE_ONLY = original_public_only
 
+        portal.log_shop_klick("/shop/felgen", "hero-felgen-angebot", chrome_ua)
         render_client = portal.app.test_client()
         with render_client.session_transaction() as session:
             session["admin"] = True
@@ -351,6 +422,9 @@ def main():
             and "Autovermietung MOS" in rendered_html
             and "Erkannte Bots" in rendered_html
             and "Google Ads Kosten" in rendered_html
+            and "Shop-Klicks auf der Website" in rendered_html
+            and "Felgenangebot anfragen" in rendered_html
+            and "1 Klick · 30 Tage" in rendered_html
             and "Kosten je Abschluss" in rendered_html
             and "Weitere Kennzahlen" in rendered_html
             and "10,00 € Tagesbudget eingerichtet" in rendered_html,
@@ -369,6 +443,29 @@ def main():
             and "https://www.googletagmanager.com" in content_security_policy
             and "frame-src 'self' https://www.googletagmanager.com" in content_security_policy,
         )
+        public_base_url = "https://auto-lackierzentrum.de"
+        original_public_base = portal.PUBLIC_BASE_URL
+        original_public_hosts = portal.PUBLIC_HOSTS
+        original_indexable = portal.PUBLIC_SITE_INDEXABLE
+        try:
+            portal.PUBLIC_BASE_URL = public_base_url
+            portal.PUBLIC_HOSTS = {"auto-lackierzentrum.de"}
+            portal.PUBLIC_SITE_INDEXABLE = True
+            for path, seite in (("/homepage", "/"), ("/shop", "/shop"),
+                                ("/shop/felgen", "/shop/felgen"), ("/shop/reifen", "/shop/reifen")):
+                page = render_client.get(path, base_url=public_base_url)
+                markup = page.get_data(as_text=True)
+                ok &= check(
+                    f"{path}: Shop-Bedienelemente und vorhandener Beacon verbunden",
+                    page.status_code == 200
+                    and set(re.findall(r'data-shop-click="([^"]+)"', markup)) == set(portal.SHOP_KLICK_ELEMENTE[seite])
+                    and "/api/besucher" in markup and "shop_click: control.dataset.shopClick" in markup
+                    and (path == "/homepage" or "google_ads_tracking.js" not in markup),
+                )
+        finally:
+            portal.PUBLIC_BASE_URL = original_public_base
+            portal.PUBLIC_HOSTS = original_public_hosts
+            portal.PUBLIC_SITE_INDEXABLE = original_indexable
         ads_tracking = (ROOT / "static" / "google_ads_tracking.js").read_text(encoding="utf-8")
         ok &= check(
             "Google-Ads-Linker verbindet Homepage und Anfrageformular",

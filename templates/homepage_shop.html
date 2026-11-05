@@ -36,14 +36,14 @@
           <p>{{ description if category else 'Sportliche Alufelgen fürs Tuning, Stahlfelgen für den Alltag und Reifen für jede Saison. Mit persönlicher Beratung und Montage in Mosbach.' }}</p>
           <div class="catalog-hero-actions">
             {% if category == 'felgen' %}
-              <a class="catalog-primary" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
+              <a class="catalog-primary" data-shop-click="hero-felgen-angebot" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
               {% if felgen_url %}<a class="catalog-secondary" href="{{ felgen_url }}">Zum Felgenkatalog</a>{% endif %}
             {% elif category == 'reifen' %}
-              <a class="catalog-primary" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
+              <a class="catalog-primary" data-shop-click="hero-reifen-angebot" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
               {% if reifen_url %}<a class="catalog-secondary" href="{{ reifen_url }}">Zum Reifenkatalog</a>{% endif %}
             {% else %}
-              <a class="catalog-primary" href="{{ shop_felgen_url|default('#felgen') }}">Felgen entdecken</a>
-              <a class="catalog-secondary" href="{{ shop_reifen_url|default('#reifen') }}">Reifen entdecken</a>
+              <a class="catalog-primary" data-shop-click="hero-felgen" href="{{ shop_felgen_url|default('#felgen') }}">Felgen entdecken</a>
+              <a class="catalog-secondary" data-shop-click="hero-reifen" href="{{ shop_reifen_url|default('#reifen') }}">Reifen entdecken</a>
             {% endif %}
           </div>
         </div>
@@ -81,7 +81,7 @@
         </div></article>
       </div>
       {% set other_url = shop_reifen_url if category == 'felgen' else shop_felgen_url %}
-      {% if other_url %}<p><a href="{{ other_url }}">{{ 'Auch Reifen ansehen' if category == 'felgen' else 'Auch Felgen ansehen' }} →</a></p>{% endif %}
+      {% if other_url %}<p><a data-shop-click="{{ 'other-reifen' if category == 'felgen' else 'other-felgen' }}" href="{{ other_url }}">{{ 'Auch Reifen ansehen' if category == 'felgen' else 'Auch Felgen ansehen' }} →</a></p>{% endif %}
     </section>
     {% else %}
     <section class="wrap shop-start-categories" id="sortiment" aria-labelledby="sortiment-titel">
@@ -95,7 +95,7 @@
             <p>Alufelgen, Stahlfelgen und sportliche Designs. Wir prüfen, welche Felgen zu Ihrem Fahrzeug passen.</p>
             <div class="catalog-hero-actions">
               {% if felgen_url %}<a class="catalog-primary" href="{{ felgen_url }}">Zum Felgenkatalog</a>{% endif %}
-              <a class="{{ 'catalog-secondary' if felgen_url else 'catalog-primary' }}" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
+              <a class="{{ 'catalog-secondary' if felgen_url else 'catalog-primary' }}" data-shop-click="card-felgen-angebot" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
             </div>
           </div>
         </article>
@@ -106,7 +106,7 @@
             <p>Sommer-, Winter- und Ganzjahresreifen. Wir helfen bei der passenden Größe und bieten auf Wunsch die Montage an.</p>
             <div class="catalog-hero-actions">
               {% if reifen_url %}<a class="catalog-primary" href="{{ reifen_url }}">Zum Reifenkatalog</a>{% endif %}
-              <a class="{{ 'catalog-secondary' if reifen_url else 'catalog-primary' }}" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
+              <a class="{{ 'catalog-secondary' if reifen_url else 'catalog-primary' }}" data-shop-click="card-reifen-angebot" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
             </div>
           </div>
         </article>
@@ -119,5 +119,9 @@
     <a href="{{ url_for('impressum_seite') }}">Impressum</a>
     <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>
   </footer>
+  {% if site_indexable %}
+    {% set besucher_ohne_google_ads = true %}
+    {% include "_besucher_tracking.html" %}
+  {% endif %}
 </body>
 </html>

@@ -25,7 +25,7 @@
     <nav class="wrap site-nav" aria-label="Hauptnavigation">
       <a class="brand" href="{{ url_for('oeffentliche_homepage') }}" aria-label="Gärtner – Startseite"><img {{ image_attrs('logo-transparent.png', sizes='230px') }} alt="{{ werkstatt_oeffentlich.name }}" width="210" height="60" decoding="async"></a>
       <button class="menu-toggle" aria-expanded="false" aria-controls="hauptmenue">Menü <span aria-hidden="true">☰</span></button>
-      <div class="nav-links" id="hauptmenue"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a href="{{ url_for('oeffentlicher_shop') }}">Reifen &amp; Felgen Shop</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Geschäftspartner</a><a href="{{ url_for('oeffentliches_team') }}">Über uns</a><a href="#kontakt">Kontakt</a><a class="mobile-portal-link" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge</a></div>
+      <div class="nav-links" id="hauptmenue"><a href="{{ url_for('oeffentliche_leistungen') }}">Leistungen</a><a data-shop-click="home-nav-shop" href="{{ url_for('oeffentlicher_shop') }}">Reifen &amp; Felgen Shop</a><a href="{{ url_for('oeffentliche_geschaeftspartner') }}">Geschäftspartner</a><a href="{{ url_for('oeffentliches_team') }}">Über uns</a><a href="#kontakt">Kontakt</a><a class="mobile-portal-link" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge</a></div>
       <a class="button nav-portal" href="{{ url_for('oeffentliche_portale') }}">Portale &amp; Zugänge <span aria-hidden="true">↗</span></a>
     </nav>
   </header>
@@ -43,7 +43,7 @@
               <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
               <h3>{{ jahreszeit.reifen_titel }}</h3>
               <p>Neue Reifen, Radwechsel und Einlagerung.<br>Reifen finden oder Termin wählen.</p>
-              <a class="button current-booking" href="{{ url_for('oeffentlicher_shop', shop_category='reifen') }}">Zum Reifen-Shop <span aria-hidden="true">→</span></a>
+              <a class="button current-booking" data-shop-click="home-card-reifen" href="{{ url_for('oeffentlicher_shop', shop_category='reifen') }}">Zum Reifen-Shop <span aria-hidden="true">→</span></a>
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
             </div>
           </article>
@@ -52,7 +52,7 @@
             <div class="current-feature-copy">
               <h3>Reifen &amp; Felgen Shop</h3>
               <p>Passende Reifen und Felgen entdecken und ein Angebot in Mosbach anfragen.</p>
-              <a class="button current-booking" href="{{ url_for('oeffentlicher_shop') }}">Zum Shop <span aria-hidden="true">→</span></a>
+              <a class="button current-booking" data-shop-click="home-card-shop" href="{{ url_for('oeffentlicher_shop') }}">Zum Shop <span aria-hidden="true">→</span></a>
             </div>
           </article>
           <article class="current-card current-feature current-feature-brief" data-current-card data-card-title="Versicherungsschaden" role="group" aria-roledescription="Karte" aria-label="3 von 8 · Versicherungsschaden">
@@ -116,7 +116,7 @@
           </div>
           <div class="current-choices" aria-label="Thema direkt auswählen">
             <button type="button" data-deck-index="0" aria-pressed="true" aria-controls="aktuelle-karten">Reifen</button>
-            <button type="button" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Shop</button>
+            <button type="button" data-shop-click="home-show-shop" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Shop</button>
             <button type="button" data-deck-index="2" aria-pressed="false" aria-controls="aktuelle-karten">Schaden</button>
             <button type="button" data-deck-index="3" aria-pressed="false" aria-controls="aktuelle-karten">Lack</button>
             <button type="button" data-deck-index="4" aria-pressed="false" aria-controls="aktuelle-karten">Bremsen</button>
