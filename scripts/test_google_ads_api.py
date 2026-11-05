@@ -45,8 +45,9 @@ class FakeResponse:
 
 
 class FakeGoogleAdsHttp:
-    def __init__(self, metric_day):
+    def __init__(self, metric_day, include_shop=False):
         self.metric_day = metric_day
+        self.include_shop = include_shop
         self.calls = []
 
     def post(self, url, data=None, headers=None, json=None, timeout=None):
@@ -61,14 +62,16 @@ class FakeGoogleAdsHttp:
             return FakeResponse({"access_token": "test-access-token"})
         query = (json or {}).get("query", "")
         campaigns = [
-            ("1111111111", portal.GOOGLE_ADS_KAMPAGNEN["auto-lackierzentrum"]["kampagne"]),
-            ("2222222222", portal.GOOGLE_ADS_KAMPAGNEN["tomorrowworks"]["kampagne"]),
-            ("3333333333", portal.GOOGLE_ADS_KAMPAGNEN["autovermietung-mos"]["kampagne"]),
+            ("1111111111", portal.GOOGLE_ADS_KAMPAGNEN["auto-lackierzentrum"]["kampagne"], 1230000, 6, 120, 2.5),
+            ("2222222222", portal.GOOGLE_ADS_KAMPAGNEN["tomorrowworks"]["kampagne"], 450000, 2, 40, 1),
+            ("3333333333", portal.GOOGLE_ADS_KAMPAGNEN["autovermietung-mos"]["kampagne"], 990000, 3, 75, 0),
         ]
+        if self.include_shop:
+            campaigns.append(("24441136966", "Gärtner Shop | umbenannt", 870000, 4, 40, 1))
         if "campaign.status" in query:
             return FakeResponse([{"results": [
                 {"campaign": {"id": campaign_id, "name": campaign_name}}
-                for campaign_id, campaign_name in campaigns
+                for campaign_id, campaign_name, *_ in campaigns
             ]}])
         return FakeResponse([{"results": [
             {
@@ -81,11 +84,7 @@ class FakeGoogleAdsHttp:
                     "conversions": conversions,
                 },
             }
-            for (campaign_id, campaign_name), cost_micros, clicks, impressions, conversions in (
-                (campaigns[0], 1230000, 6, 120, 2.5),
-                (campaigns[1], 450000, 2, 40, 1),
-                (campaigns[2], 990000, 3, 75, 0),
-            )
+            for campaign_id, campaign_name, cost_micros, clicks, impressions, conversions in campaigns
         ]}])
 
 
@@ -135,7 +134,27 @@ def main():
         )
     )
     print(f"[{'OK' if passed else 'FEHLER'}] Google-Ads-OAuth, Header und Tagesimport")
-    return 0 if passed else 1
+
+    fake_shop_http = FakeGoogleAdsHttp(metric_day, include_shop=True)
+    shop_summary = portal.sync_google_ads_tageswerte(tage=7, http_client=fake_shop_http)
+    site = portal.list_google_ads_statistik(7, website="auto-lackierzentrum")
+    campaigns = {row["kampagnen_key"]: row for row in site["campaigns"]}
+    other_site = portal.list_google_ads_statistik(7, website="autovermietung-mos")
+    hidden_site = portal.list_google_ads_statistik(7, ausgeblendete_websites=("auto-lackierzentrum",))
+    shop_passed = (
+        shop_summary["kampagnen"] == 4 and shop_summary["tageswerte"] == 4
+        and "24441136966" in fake_shop_http.calls[-1]["query"]
+        and set(campaigns) == {"auto-lackierzentrum", "gaertner-shop"}
+        and campaigns["auto-lackierzentrum"]["klicks"] == 6 and campaigns["auto-lackierzentrum"]["kosten_cent"] == 123
+        and campaigns["gaertner-shop"]["klicks"] == 4 and campaigns["gaertner-shop"]["kosten_cent"] == 87
+        and campaigns["gaertner-shop"]["budget_tag_cent"] == 250
+        and all(row["website"] == "auto-lackierzentrum" for row in campaigns.values())
+        and site["klicks"] == 10 and site["kosten_cent"] == 210 and site["tagesbudget_cent"] == 750
+        and [row["kampagnen_key"] for row in other_site["campaigns"]] == ["autovermietung-mos"]
+        and all(row["website"] != "auto-lackierzentrum" for row in hidden_site["campaigns"])
+    )
+    print(f"[{'OK' if shop_passed else 'FEHLER'}] Separate Shop-Kampagne am gleichen Tag und Website-Filter")
+    return 0 if passed and shop_passed else 1
 
 
 if __name__ == "__main__":

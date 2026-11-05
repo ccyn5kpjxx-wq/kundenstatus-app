@@ -12,7 +12,7 @@ oder Budgets.
 3. Im zugehörigen Google-Cloud-Projekt ist die Google Ads API aktiviert.
 4. Ein OAuth-Client und ein Refresh-Token mit dem Scope
    `https://www.googleapis.com/auth/adwords` sind vorhanden.
-5. Die zehnstellige Ads-Kundennummer des Kontos mit den drei Kampagnen ist
+5. Die zehnstellige Ads-Kundennummer des Kontos mit den Kampagnen ist
    bekannt. Bei Zugriff über ein MCC wird zusätzlich dessen Kundennummer als
    Login-Kundennummer benötigt.
 
@@ -42,6 +42,10 @@ Ohne weitere Konfiguration erwartet das Portal exakt diese Namen:
 - `Lackierzentrum | Suche | Test 2026-07`
 - `Tomorrowworks | Suche | Test 2026-07`
 - `Autovermietung MOS | Suche | Test 2026-07`
+
+Die separate Suchkampagne `Gärtner Shop | Suche | Felgen & Reifen` wird im
+gleichen Konto anhand der ID `24441136966` zusätzlich erfasst, wenn sie dort
+vorhanden ist. Ihre Tageswerte erscheinen separat unter Auto-Lackierzentrum.
 
 Stabiler ist die Zuordnung über die numerischen Kampagnen-IDs:
 

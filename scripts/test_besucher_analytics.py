@@ -267,13 +267,13 @@ def main():
             ok &= check("Besucher-Hashes bleiben je Website getrennt", rows[0]["visitor_hash"] != rows[5]["visitor_hash"])
             ok &= check("90-Tage-Löschfrist greift", all(row["visitor_hash"] != "alt" for row in rows))
             ok &= check(
-                "Google-Ads-Kosten werden über alle drei Kampagnen ausgewertet",
+                "Google-Ads-Kosten werden über alle Kampagnen ausgewertet",
                 google_ads["kosten_cent"] == 1234
                 and google_ads["klicks"] == 10
                 and google_ads["impressionen"] == 200
-                and google_ads["tagesbudget_cent"] == 1500
-                and google_ads["max_budget_cent"] == 10500
-                and len(google_ads["campaigns"]) == 3,
+                and google_ads["tagesbudget_cent"] == 1750
+                and google_ads["max_budget_cent"] == 12250
+                and len(google_ads["campaigns"]) == 4,
             )
             ok &= check(
                 "Google-Ads-Kosten sind nach Website filterbar",
@@ -310,8 +310,8 @@ def main():
             ok &= check(
                 "Dashboard-Werbekosten und Budgets enthalten nur die zwei sichtbaren Websites",
                 sichtbare_ads["kosten_cent"] == 1484 and sichtbare_ads["klicks"] == 12
-                and sichtbare_ads["tagesbudget_cent"] == 1000
-                and sichtbare_ads["max_budget_cent"] == 7000
+                and sichtbare_ads["tagesbudget_cent"] == 1250
+                and sichtbare_ads["max_budget_cent"] == 8750
                 and {row["website"] for row in sichtbare_ads["campaigns"]} == {"auto-lackierzentrum", "autovermietung-mos"},
             )
             for key, expected in (("auto-lackierzentrum", 4), ("autovermietung-mos", 1)):
@@ -391,6 +391,24 @@ def main():
                 and updated_ads["klicks"] == 15
                 and updated_ads["conversions"] == 3,
             )
+            shop_ads_post = client.post(
+                "/admin/besucherstatistik/google-ads",
+                data={
+                    portal.CSRF_FIELD_NAME: csrf_token,
+                    "next_tage": "7", "next_website": "auto-lackierzentrum",
+                    "website": "gaertner-shop", "datum": datetime.now().strftime("%Y-%m-%d"),
+                    "kosten": "1,25", "klicks": "2", "impressionen": "15", "conversions": "0",
+                },
+            )
+            both_campaigns = {row["kampagnen_key"]: row for row in
+                              portal.list_google_ads_statistik(7, website="auto-lackierzentrum")["campaigns"]}
+            ok &= check(
+                "Manuelle Shop-Tageswerte überschreiben die alte Kampagne nicht",
+                shop_ads_post.status_code in {302, 303}
+                and both_campaigns["auto-lackierzentrum"]["kosten_cent"] == 2050
+                and both_campaigns["gaertner-shop"]["kosten_cent"] == 125
+                and both_campaigns["gaertner-shop"]["klicks"] == 2,
+            )
 
             portal.PUBLIC_SITE_ONLY = True
             public_client = portal.app.test_client()
@@ -427,7 +445,8 @@ def main():
             and "1 Klick · 30 Tage" in rendered_html
             and "Kosten je Abschluss" in rendered_html
             and "Weitere Kennzahlen" in rendered_html
-            and "10,00 € Tagesbudget eingerichtet" in rendered_html,
+            and "12,50 € Tagesbudget eingerichtet" in rendered_html
+            and '<option value="gaertner-shop">Gärtner Shop | Suche | Felgen &amp; Reifen</option>' in rendered_html,
         )
         public_homepage = render_client.get(
             "/homepage",

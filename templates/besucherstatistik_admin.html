@@ -215,7 +215,7 @@
       <input type="hidden" name="next_tage" value="{{ statistik['tage'] }}">
       <input type="hidden" name="next_website" value="{{ statistik['website'] }}">
       <div class="ads-entry-grid">
-        <div class="ads-entry-campaign"><label class="form-label" for="ads-website">Kampagne</label><select class="form-select" id="ads-website" name="website" required>{% for row in google_ads['campaigns'] %}<option value="{{ row['website'] }}">{{ row['website_label'] }}</option>{% endfor %}</select></div>
+        <div class="ads-entry-campaign"><label class="form-label" for="ads-website">Kampagne</label><select class="form-select" id="ads-website" name="website" required>{% for row in google_ads['campaigns'] %}<option value="{{ row['kampagnen_key'] }}">{{ row['kampagne'] }}</option>{% endfor %}</select></div>
         <div><label class="form-label" for="ads-datum">Datum</label><input class="form-control" id="ads-datum" type="date" name="datum" value="{{ google_ads['heute'] }}" max="{{ google_ads['heute'] }}" required></div>
         <div><label class="form-label" for="ads-kosten">Kosten in €</label><input class="form-control" id="ads-kosten" name="kosten" inputmode="decimal" placeholder="0,00" required></div>
         <div><label class="form-label" for="ads-klicks">Klicks</label><input class="form-control" id="ads-klicks" type="number" name="klicks" min="0" step="1" value="0" required></div>

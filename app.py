@@ -30873,10 +30873,19 @@ SHOP_KLICK_ELEMENTE = {
         "other-felgen": "Auch Felgen ansehen",
     },
 }
+# Kampagnenschlüssel bleiben die Speicherkennung in google_ads_tageswerte.website.
+# Mehrere Kampagnen können zur selben Website gehören.
 GOOGLE_ADS_KAMPAGNEN = {
     "auto-lackierzentrum": {
         "kampagne": "Lackierzentrum | Suche | Test 2026-07",
         "budget_tag_cent": 500,
+    },
+    "gaertner-shop": {
+        "website": "auto-lackierzentrum",
+        "kampagne": "Gärtner Shop | Suche | Felgen & Reifen",
+        "budget_tag_cent": 250,
+        "campaign_id": "24441136966",
+        "optional": True,
     },
     "tomorrowworks": {
         "kampagne": "Tomorrowworks | Suche | Test 2026-07",
@@ -31060,8 +31069,8 @@ def google_ads_match_campaigns(config, campaign_rows):
     matched = {}
     missing = []
     ambiguous = []
-    for website, campaign_config in GOOGLE_ADS_KAMPAGNEN.items():
-        configured_id = config["campaign_ids"].get(website)
+    for key, campaign_config in GOOGLE_ADS_KAMPAGNEN.items():
+        configured_id = config["campaign_ids"].get(key) or campaign_config.get("campaign_id")
         if configured_id:
             candidates = [row for row in available if row["id"] == configured_id]
         else:
@@ -31070,14 +31079,19 @@ def google_ads_match_campaigns(config, campaign_rows):
                 row for row in available if row["name"].casefold() == expected_name
             ]
         if len(candidates) == 1:
-            matched[candidates[0]["id"]] = {
-                "website": website,
+            campaign_id = candidates[0]["id"]
+            if campaign_config.get("optional") and (
+                campaign_id in matched or campaign_id in config["campaign_ids"].values()
+            ):
+                continue
+            matched[campaign_id] = {
+                "website": key,
                 "name": candidates[0]["name"] or campaign_config["kampagne"],
             }
         elif len(candidates) > 1:
-            ambiguous.append(BESUCHER_WEBSITES[website]["label"])
-        else:
-            missing.append(BESUCHER_WEBSITES[website]["label"])
+            ambiguous.append(campaign_config["kampagne"])
+        elif not campaign_config.get("optional"):
+            missing.append(BESUCHER_WEBSITES[key]["label"])
     if ambiguous:
         raise GoogleAdsSyncError(
             "Mehrere gleichnamige Kampagnen gefunden. Bitte Kampagnen-IDs hinterlegen: "
@@ -31422,6 +31436,11 @@ def google_ads_parse_conversions(value):
     return round(number, 2) if 0 <= number <= 100000000 else None
 
 
+def normalize_google_ads_kampagne(value):
+    key = clean_text(value).lower()
+    return key if key in GOOGLE_ADS_KAMPAGNEN else normalize_besucher_website(key)
+
+
 def save_google_ads_tageswert(
     website,
     datum,
@@ -31431,7 +31450,7 @@ def save_google_ads_tageswert(
     conversions=0.0,
     quelle="manuell",
 ):
-    website = normalize_besucher_website(website)
+    website = normalize_google_ads_kampagne(website)
     if website not in GOOGLE_ADS_KAMPAGNEN:
         raise ValueError("Unbekannte Google-Ads-Kampagne")
     try:
@@ -31496,44 +31515,41 @@ def list_google_ads_statistik(tage=30, website="alle", ausgeblendete_websites=()
     ausgeblendete_websites = tuple(key for key in BESUCHER_WEBSITES if key in ausgeblendete_websites)
     if website in ausgeblendete_websites:
         website = "alle"
+    campaign_websites = {key: config.get("website", key) for key, config in GOOGLE_ADS_KAMPAGNEN.items()}
+    selected_keys = [
+        key for key, site in campaign_websites.items()
+        if site not in ausgeblendete_websites and website in {"alle", site}
+    ]
     erster_tag = date.today() - timedelta(days=tage - 1)
     letzter_tag = date.today()
-    website_filter = (
-        f" AND website NOT IN ({','.join('?' for _ in ausgeblendete_websites)})"
-        if ausgeblendete_websites else ""
-    )
-    params = (erster_tag.isoformat(), letzter_tag.isoformat(), *ausgeblendete_websites)
-    if website != "alle":
-        website_filter += " AND website=?"
-        params += (website,)
-    db = get_db()
-    try:
-        rows = db.execute(
-            f"""
-            SELECT website,
-                   SUM(kosten_cent) AS kosten_cent,
-                   SUM(klicks) AS klicks,
-                   SUM(impressionen) AS impressionen,
-                   SUM(conversions) AS conversions,
-                   COUNT(DISTINCT datum) AS erfasste_tage,
-                   MAX(aktualisiert_am) AS aktualisiert_am
-            FROM google_ads_tageswerte
-            WHERE datum >= ? AND datum <= ?{website_filter}
-            GROUP BY website
-            """,
-            params,
-        ).fetchall()
-    finally:
-        db.close()
+    rows = []
+    if selected_keys:
+        placeholders = ",".join("?" for _ in selected_keys)
+        db = get_db()
+        try:
+            rows = db.execute(
+                f"""
+                SELECT website,
+                       SUM(kosten_cent) AS kosten_cent,
+                       SUM(klicks) AS klicks,
+                       SUM(impressionen) AS impressionen,
+                       SUM(conversions) AS conversions,
+                       COUNT(DISTINCT datum) AS erfasste_tage,
+                       MAX(aktualisiert_am) AS aktualisiert_am
+                FROM google_ads_tageswerte
+                WHERE datum >= ? AND datum <= ? AND website IN ({placeholders})
+                GROUP BY website
+                """,
+                (erster_tag.isoformat(), letzter_tag.isoformat(), *selected_keys),
+            ).fetchall()
+        finally:
+            db.close()
 
     lookup = {row["website"]: dict(row) for row in rows}
-    selected_keys = [key for key in GOOGLE_ADS_KAMPAGNEN if key not in ausgeblendete_websites]
-    if website != "alle":
-        selected_keys = [website]
     campaigns = []
     for key in selected_keys:
         config = GOOGLE_ADS_KAMPAGNEN[key]
-        site = BESUCHER_WEBSITES[key]
+        site = BESUCHER_WEBSITES[campaign_websites[key]]
         raw = lookup.get(key, {})
         kosten_cent = int(raw.get("kosten_cent") or 0)
         klicks = int(raw.get("klicks") or 0)
@@ -31543,7 +31559,8 @@ def list_google_ads_statistik(tage=30, website="alle", ausgeblendete_websites=()
         kosten_pro_abschluss_cent = round(kosten_cent / conversions) if conversions else 0
         ctr = (klicks / impressionen * 100) if impressionen else 0
         campaigns.append({
-            "website": key,
+            "website": campaign_websites[key],
+            "kampagnen_key": key,
             "website_label": site["label"],
             "domain": site["domain"],
             "kampagne": config["kampagne"],
@@ -39753,7 +39770,7 @@ def admin_google_ads_tageswert():
     if next_website != "alle":
         next_website = normalize_besucher_website(next_website) or "alle"
 
-    website = normalize_besucher_website(request.form.get("website"))
+    website = normalize_google_ads_kampagne(request.form.get("website"))
     datum = clean_text(request.form.get("datum"))
     kosten_cent = google_ads_parse_kosten_cent(request.form.get("kosten"))
     klicks = google_ads_parse_nonnegative_int(request.form.get("klicks"))
@@ -39784,7 +39801,7 @@ def admin_google_ads_tageswert():
         else:
             schedule_change_backup("google-ads-tageswert")
             flash(
-                f"Google-Ads-Werte für {BESUCHER_WEBSITES[website]['label']} am "
+                f"Google-Ads-Werte für {GOOGLE_ADS_KAMPAGNEN[website]['kampagne']} am "
                 f"{datetime.strptime(datum, '%Y-%m-%d').strftime('%d.%m.%Y')} gespeichert.",
                 "success",
             )
