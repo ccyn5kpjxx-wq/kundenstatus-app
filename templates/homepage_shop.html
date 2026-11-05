@@ -1,0 +1,123 @@
+<!doctype html>
+{% set shop_kategorie = 'start' %}
+{% from "_raeder_katalog_layout.html" import catalog_header with context %}
+{% set category = shop_category|default('') %}
+{% if category == 'felgen' %}
+  {% set page_title = 'Felgen kaufen in Mosbach' %}
+  {% set description = 'Alufelgen fürs Tuning und Stahlfelgen für den Alltag. Gärtner prüft die Passung für Ihr Fahrzeug und erstellt ein persönliches Angebot.' %}
+{% elif category == 'reifen' %}
+  {% set page_title = 'Reifen kaufen in Mosbach' %}
+  {% set description = 'Sommerreifen, Winterreifen und Ganzjahresreifen in passender Größe. Persönliches Angebot und auf Wunsch Reifenmontage bei Gärtner in Mosbach.' %}
+{% else %}
+  {% set page_title = 'Felgen & Reifen kaufen in Mosbach' %}
+  {% set description = 'Alufelgen, Stahlfelgen und Reifen in Mosbach. Gärtner berät zu Größe, Fahrzeugpassung und Montage. Jetzt ein persönliches Angebot anfragen.' %}
+{% endif %}
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="{{ 'index, follow' if site_indexable else 'noindex, nofollow' }}">
+  <title>{{ page_title }} | Gärtner Shop</title>
+  <meta name="description" content="{{ description }}">
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <link rel="stylesheet" href="{{ static_asset_url('homepage/reifen-shop.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('homepage/reifen-katalog-premium.css') }}">
+  <link rel="stylesheet" href="{{ static_asset_url('homepage/shop-start.css') }}">
+</head>
+<body class="catalog-page catalog-premium shop-start">
+  <a class="skip-link" href="#sortiment">Zum Sortiment</a>
+  {{ catalog_header() }}
+  <main>
+    <section class="shop-intro catalog-hero catalog-hero--backdrop" aria-labelledby="shop-title">
+      <div class="wrap">
+        <div class="catalog-hero-content">
+          <span class="eyebrow">Gärtner Shop · Mosbach</span>
+          <h1 id="shop-title">{{ page_title if category else 'Felgen & Reifen' }}</h1>
+          <p>{{ description if category else 'Sportliche Alufelgen fürs Tuning, Stahlfelgen für den Alltag und Reifen für jede Saison. Mit persönlicher Beratung und Montage in Mosbach.' }}</p>
+          <div class="catalog-hero-actions">
+            {% if category == 'felgen' %}
+              <a class="catalog-primary" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
+              {% if felgen_url %}<a class="catalog-secondary" href="{{ felgen_url }}">Zum Felgenkatalog</a>{% endif %}
+            {% elif category == 'reifen' %}
+              <a class="catalog-primary" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
+              {% if reifen_url %}<a class="catalog-secondary" href="{{ reifen_url }}">Zum Reifenkatalog</a>{% endif %}
+            {% else %}
+              <a class="catalog-primary" href="{{ shop_felgen_url|default('#felgen') }}">Felgen entdecken</a>
+              <a class="catalog-secondary" href="{{ shop_reifen_url|default('#reifen') }}">Reifen entdecken</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <figure class="catalog-hero-media" aria-hidden="true">
+        {% if category == 'reifen' %}
+        <img src="{{ static_asset_url('homepage/reifen-katalog-titel.webp') }}" alt="" width="1672" height="941" fetchpriority="high">
+        {% else %}
+        <img src="{{ static_asset_url('homepage/karte-reifen-felgen-shop.webp') }}" alt="" width="1774" height="887" fetchpriority="high">
+        {% endif %}
+      </figure>
+    </section>
+    {% if category %}
+    <section class="wrap shop-start-categories" id="sortiment" aria-labelledby="sortiment-titel">
+      <span class="eyebrow">Beratung in Mosbach</span>
+      <h2 id="sortiment-titel">{{ 'Passende Felgen finden' if category == 'felgen' else 'Passende Reifen finden' }}</h2>
+      <div class="shop-start-grid">
+        <article class="shop-start-card"><div class="shop-start-card-body">
+          {% if category == 'felgen' %}
+          <h3>Fahrzeug und Größe</h3>
+          <p>Nennen Sie uns Marke, Modell und Baujahr oder HSN und TSN. Wir prüfen Felgengröße, Lochkreis und Einpresstiefe für Ihr Fahrzeug.</p>
+          {% else %}
+          <h3>Größe und Saison</h3>
+          <p>Die Größe steht auf der Reifenflanke, zum Beispiel 205/55 R16. Wir helfen bei der Auswahl von Sommer-, Winter- oder Ganzjahresreifen.</p>
+          {% endif %}
+        </div></article>
+        <article class="shop-start-card"><div class="shop-start-card-body">
+          {% if category == 'felgen' %}
+          <h3>Gutachten und Montage</h3>
+          <p>Wir prüfen die Unterlagen zur ausgewählten Felge und klären Auflagen und Montage. Für ein komplettes Rad beraten wir Sie auch zum passenden Reifen.</p>
+          {% else %}
+          <h3>Montage vor Ort</h3>
+          <p>Geben Sie bei der Anfrage an, wie viele Reifen Sie benötigen und ob Sie eine Montage wünschen. Wir besprechen die passende Ausführung und den Termin.</p>
+          {% endif %}
+        </div></article>
+      </div>
+      {% set other_url = shop_reifen_url if category == 'felgen' else shop_felgen_url %}
+      {% if other_url %}<p><a href="{{ other_url }}">{{ 'Auch Reifen ansehen' if category == 'felgen' else 'Auch Felgen ansehen' }} →</a></p>{% endif %}
+    </section>
+    {% else %}
+    <section class="wrap shop-start-categories" id="sortiment" aria-labelledby="sortiment-titel">
+      <span class="eyebrow">Das Sortiment</span>
+      <h2 id="sortiment-titel">Was suchen Sie?</h2>
+      <div class="shop-start-grid">
+        <article class="shop-start-card" id="felgen" aria-labelledby="felgen-titel">
+          <img src="{{ static_asset_url('homepage/karte-reifen-felgen-shop.webp') }}" alt="" width="1774" height="887" loading="lazy">
+          <div class="shop-start-card-body">
+            <h3 id="felgen-titel">Felgen</h3>
+            <p>Alufelgen, Stahlfelgen und sportliche Designs. Wir prüfen, welche Felgen zu Ihrem Fahrzeug passen.</p>
+            <div class="catalog-hero-actions">
+              {% if felgen_url %}<a class="catalog-primary" href="{{ felgen_url }}">Zum Felgenkatalog</a>{% endif %}
+              <a class="{{ 'catalog-secondary' if felgen_url else 'catalog-primary' }}" href="{{ felgen_anfrage_url }}">Felgenangebot anfragen</a>
+            </div>
+          </div>
+        </article>
+        <article class="shop-start-card" id="reifen" aria-labelledby="reifen-titel">
+          <img src="{{ static_asset_url('homepage/reifen-katalog-titel.webp') }}" alt="" width="1672" height="941" loading="lazy">
+          <div class="shop-start-card-body">
+            <h3 id="reifen-titel">Reifen</h3>
+            <p>Sommer-, Winter- und Ganzjahresreifen. Wir helfen bei der passenden Größe und bieten auf Wunsch die Montage an.</p>
+            <div class="catalog-hero-actions">
+              {% if reifen_url %}<a class="catalog-primary" href="{{ reifen_url }}">Zum Reifenkatalog</a>{% endif %}
+              <a class="{{ 'catalog-secondary' if reifen_url else 'catalog-primary' }}" href="{{ reifen_anfrage_url }}">Reifenangebot anfragen</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+    {% endif %}
+  </main>
+  <footer class="wrap shop-footer">
+    <span>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.ort }}</span>
+    <a href="{{ url_for('impressum_seite') }}">Impressum</a>
+    <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>
+  </footer>
+</body>
+</html>

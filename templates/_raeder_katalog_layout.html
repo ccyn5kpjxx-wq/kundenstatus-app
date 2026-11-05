@@ -1,0 +1,31 @@
+{% from "_homepage_images.html" import image_attrs %}
+{% macro catalog_header() %}
+<header class="shop-header">
+  <div class="wrap catalog-header">
+    <a class="shop-brand" href="/shop"><img {{ image_attrs('logo-transparent.png', sizes='190px') }} alt="{{ werkstatt_oeffentlich.name }} · Shop" width="190" height="56"></a>
+    {% set shop_header = true %}
+    {% include "_raeder_shop_navigation.html" %}
+    <div class="catalog-header-actions">
+      <a href="{{ company_homepage_url|default(url_for('oeffentliche_homepage')) }}">Zur Firmenhomepage</a>
+      <a class="shop-phone" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>
+    </div>
+  </div>
+</header>
+{% endmacro %}
+
+{% macro catalog_intro(title, description, image_file, width, height, inquiry_type, backdrop=false) %}
+<section class="shop-intro catalog-hero{% if backdrop %} catalog-hero--backdrop{% endif %}" aria-labelledby="shop-title">
+  <div class="catalog-hero-content">
+    <span class="eyebrow">Gärtner Reifenshop · Mosbach</span>
+    <h1 id="shop-title">{{ title }}</h1>
+    <p>{{ description }}</p>
+    <div class="catalog-hero-actions">
+      <a class="catalog-primary" href="#results-title">{{ title }} ansehen</a>
+      <a class="catalog-secondary" href="{{ url_for('website_anfrage', anliegen=inquiry_type) }}#kurzanfrage">Angebot anfragen</a>
+    </div>
+  </div>
+  <figure class="catalog-hero-media">
+    <img src="{{ static_asset_url('homepage/' ~ image_file) }}" alt="" width="{{ width }}" height="{{ height }}" fetchpriority="high">
+  </figure>
+</section>
+{% endmacro %}

@@ -93,6 +93,7 @@
 .current-stack{display:grid;gap:16px;min-width:0}
 .current-feature{position:relative;display:flex;flex-direction:column;min-width:0;overflow:hidden;border:1px solid #ffffffa0;border-radius:14px;background:#202720;box-shadow:0 16px 40px #0003;color:#fff}
 .current-feature-photo{display:block;flex:none;width:100%;height:auto;aspect-ratio:3/2;object-fit:contain;object-position:center;background:#202720}
+.current-feature-shop .current-feature-photo{object-fit:cover;object-position:right center}
 .current-feature-copy{position:relative;display:flex;flex:1;flex-direction:column;align-items:flex-start;justify-content:flex-start;min-height:0;padding:18px 22px 22px;background:#101810}
 .current-feature-copy>.current-booking{margin-top:auto}
 .current-kicker{display:block;font-size:10px;line-height:1.4;font-weight:800;letter-spacing:.12em;text-transform:uppercase}

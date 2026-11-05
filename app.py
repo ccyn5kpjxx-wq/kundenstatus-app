@@ -3174,6 +3174,7 @@ def restrict_public_site_service():
     allowed_endpoints = {
         "static",
         "oeffentliche_homepage",
+        "oeffentlicher_shop",
         "public_root",
         "mietwagen_vorschau",
         "mietwagen_vorschau_datei",
@@ -46343,6 +46344,7 @@ def public_sitemap():
     if not public_site_is_indexable_request():
         abort(404)
     urls = ("", "/leistungen", "/geschaeftspartner", "/team", "/portale", "/impressum", "/datenschutz")
+    urls += ("/shop", "/shop/felgen", "/shop/reifen")
     urls += tuple(f"/leistungen/{slug}" for slug in HOMEPAGE_LEISTUNGEN)
     entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
     body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
@@ -46534,6 +46536,24 @@ def homepage_jahreszeit(heute=None):
         "reifen_bild": "homepage/karte-reifen-herbst-20261021.webp" if key == "herbst" else hero_bild,
         "reifen_kicker": kicker, "reifen_titel": titel,
     }
+
+
+@app.get("/shop", defaults={"shop_category": None})
+@app.get("/shop/<any(felgen,reifen):shop_category>")
+def oeffentlicher_shop(shop_category):
+    """Independent public shop entry with the established offer request flow."""
+    shop_path = url_for("oeffentlicher_shop", shop_category=shop_category)
+    anfrage_url = homepage_portal_links()["anfrage"]
+    return render_template(
+        "homepage_shop.html",
+        site_indexable=public_site_is_indexable_request(),
+        canonical_url=f"{PUBLIC_BASE_URL}{shop_path}" if PUBLIC_BASE_URL else "",
+        shop_category=shop_category,
+        shop_felgen_url=url_for("oeffentlicher_shop", shop_category="felgen"),
+        shop_reifen_url=url_for("oeffentlicher_shop", shop_category="reifen"),
+        reifen_anfrage_url=f"{anfrage_url}?anliegen=reifenangebot#kurzanfrage",
+        felgen_anfrage_url=f"{anfrage_url}#kurzanfrage",
+    )
 
 
 @app.route("/homepage")
