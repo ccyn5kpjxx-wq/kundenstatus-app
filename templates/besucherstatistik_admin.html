@@ -117,6 +117,16 @@
     {% set klicks = statistik['shop_klicks']['gesamt'] %}
     <span class="badge-soft">{{ klicks }} {{ 'Klick' if klicks == 1 else 'Klicks' }} · {{ statistik['tage'] }} Tage</span>
   </div>
+  <h6 class="mt-3 mb-2" id="shop-seitenaufrufe">Seitenaufrufe bei Auto-Lackierzentrum</h6>
+  <div class="analytics-kpis mb-3" role="group" aria-labelledby="shop-seitenaufrufe">
+    {% for page in statistik['shop_klicks']['seitenaufrufe'] %}
+      <div class="analytics-kpi p-3">
+        <span>{{ page['label'] }}</span>
+        <strong>{{ page['aufrufe'] }}</strong>
+        <small>{{ page['seite'] }}</small>
+      </div>
+    {% endfor %}
+  </div>
   {% if statistik['shop_klicks']['items'] %}
     <div class="analytics-table-shell">
       <table class="table analytics-table align-middle">

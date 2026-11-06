@@ -37,7 +37,16 @@
       <aside class="current-deck" id="aktuell" aria-labelledby="current-title" aria-roledescription="Kartenstapel" data-current-deck>
         <div class="current-heading"><h2 id="current-title">Aktuell bei uns</h2><span>{{ jahreszeit.label }}</span></div>
         <div class="current-stack" id="aktuelle-karten">
-          <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="1 von 8 · Reifen">
+          <article class="current-card current-feature current-feature-shop" data-current-card data-card-title="Shop" role="group" aria-roledescription="Karte" aria-label="1 von 8 · Shop">
+            <img class="current-feature-photo" src="{{ static_asset_url('homepage/karte-reifen-felgen-shop.webp') }}" alt="Schwarze Mehrspeichenfelge" width="1774" height="887" decoding="async">
+            <div class="current-feature-copy">
+              <h3>Reifen &amp; Felgen Shop</h3>
+              <p>Alu- und Stahlfelgen für Ihr Fahrzeug. Wir beraten Sie zu Größen, Gutachten und Montage.</p>
+              <a class="button current-booking" data-shop-click="home-felgen" href="{{ url_for('oeffentlicher_shop', shop_category='felgen') }}">Felgen ansehen <span aria-hidden="true">→</span></a>
+              <a class="button current-booking" data-shop-click="home-card-shop" href="{{ url_for('oeffentlicher_shop') }}">Zum Shop <span aria-hidden="true">→</span></a>
+            </div>
+          </article>
+          <article class="current-card current-feature" data-current-card data-card-title="Reifen" data-reifen-buchung role="group" aria-roledescription="Karte" aria-label="2 von 8 · Reifen">
             <img class="current-feature-photo" {{ image_attrs('homepage/karte-reifen-v2-20261021.webp', sizes='(max-width:760px) calc(100vw - 96px), 440px') }} alt="Komplettes Rad mit Reifen und silberner Felge" width="1536" height="1024" decoding="async">
             <div class="current-feature-copy">
               <span class="current-kicker">{{ jahreszeit.reifen_kicker }}</span>
@@ -45,14 +54,6 @@
               <p>Neue Reifen, Radwechsel und Einlagerung.<br>Reifen finden oder Termin wählen.</p>
               <a class="button current-booking" data-shop-click="home-card-reifen" href="{{ url_for('oeffentlicher_shop', shop_category='reifen') }}">Zum Reifen-Shop <span aria-hidden="true">→</span></a>
               <a class="button current-booking" href="{{ portal_links.anfrage }}?anliegen=reifenservice#kurzanfrage">Reifentermin online buchen <span aria-hidden="true">→</span></a>
-            </div>
-          </article>
-          <article class="current-card current-feature current-feature-shop" data-current-card data-card-title="Shop" role="group" aria-roledescription="Karte" aria-label="2 von 8 · Shop">
-            <img class="current-feature-photo" src="{{ static_asset_url('homepage/karte-reifen-felgen-shop.webp') }}" alt="Schwarze Mehrspeichenfelge" width="1774" height="887" decoding="async">
-            <div class="current-feature-copy">
-              <h3>Reifen &amp; Felgen Shop</h3>
-              <p>Passende Reifen und Felgen entdecken und ein Angebot in Mosbach anfragen.</p>
-              <a class="button current-booking" data-shop-click="home-card-shop" href="{{ url_for('oeffentlicher_shop') }}">Zum Shop <span aria-hidden="true">→</span></a>
             </div>
           </article>
           <article class="current-card current-feature current-feature-brief" data-current-card data-card-title="Versicherungsschaden" role="group" aria-roledescription="Karte" aria-label="3 von 8 · Versicherungsschaden">
@@ -111,12 +112,12 @@
         <div class="current-controls" data-deck-controls hidden>
           <div class="current-navigation">
             <button type="button" class="current-arrow" data-deck-prev aria-label="Vorherige Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">←</span></button>
-            <p class="current-position" aria-live="polite" aria-atomic="true" data-deck-status>1 von 8 · Reifen</p>
+            <p class="current-position" aria-live="polite" aria-atomic="true" data-deck-status>1 von 8 · Shop</p>
             <button type="button" class="current-arrow" data-deck-next aria-label="Nächste Karte" aria-controls="aktuelle-karten"><span aria-hidden="true">→</span></button>
           </div>
           <div class="current-choices" aria-label="Thema direkt auswählen">
-            <button type="button" data-deck-index="0" aria-pressed="true" aria-controls="aktuelle-karten">Reifen</button>
-            <button type="button" data-shop-click="home-show-shop" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Shop</button>
+            <button type="button" data-shop-click="home-show-shop" data-deck-index="0" aria-pressed="true" aria-controls="aktuelle-karten">Shop</button>
+            <button type="button" data-deck-index="1" aria-pressed="false" aria-controls="aktuelle-karten">Reifen</button>
             <button type="button" data-deck-index="2" aria-pressed="false" aria-controls="aktuelle-karten">Schaden</button>
             <button type="button" data-deck-index="3" aria-pressed="false" aria-controls="aktuelle-karten">Lack</button>
             <button type="button" data-deck-index="4" aria-pressed="false" aria-controls="aktuelle-karten">Bremsen</button>

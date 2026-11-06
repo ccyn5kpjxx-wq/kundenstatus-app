@@ -30851,6 +30851,7 @@ SHOP_NAV_KLICKS = {
 SHOP_KLICK_ELEMENTE = {
     "/": {
         "home-nav-shop": "Hauptmenü · Reifen & Felgen Shop",
+        "home-felgen": "Startseite · Felgen ansehen",
         "home-card-shop": "Shopkarte · Zum Shop",
         "home-show-shop": "Themenwahl · Shopkarte anzeigen",
         "home-card-reifen": "Reifenkarte · Zum Reifen-Shop",
@@ -31967,6 +31968,16 @@ def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
             "label", item["website"] or "Unbekannt"
         )
         seiten.append(item)
+    if shop_klicks is not None:
+        shop_aufrufe = {row["seite"]: row["aufrufe"] for row in seiten if row["website"] == "auto-lackierzentrum"}
+        shop_klicks["seitenaufrufe"] = [
+            {
+                "seite": seite,
+                "label": besucher_seiten_label("auto-lackierzentrum", seite),
+                "aufrufe": shop_aufrufe.get(seite, 0),
+            }
+            for seite in ("/", "/shop", "/shop/felgen", "/shop/reifen")
+        ]
     website_lookup = {row["website"]: dict(row) for row in website_rows}
     websites = []
     for key, config in BESUCHER_WEBSITES.items():

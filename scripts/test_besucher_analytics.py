@@ -60,6 +60,7 @@ def check_shop_klicks(client, common, temp_get_db):
     results = (
         click("/homepage", "home-nav-shop"),
         click("/", "home-nav-shop"),
+        click("/homepage", "home-felgen"),
         click("/shop/felgen", "hero-felgen-angebot"),
         click("/shop/reifen", "hero-reifen-angebot"),
         click("/shop", "hero-felgen", origin="https://example.invalid"),
@@ -75,7 +76,7 @@ def check_shop_klicks(client, common, temp_get_db):
     database = temp_get_db()
     page_views_after = database.execute("SELECT COUNT(*) FROM besucher_events").fetchone()[0]
     werte = [tuple(row) for row in database.execute(
-        "SELECT datum, seite, element, anzahl FROM shop_klick_tageswerte ORDER BY datum, seite"
+        "SELECT datum, seite, element, anzahl FROM shop_klick_tageswerte ORDER BY datum, seite, element"
     )]
     database.close()
     checks = [
@@ -83,14 +84,17 @@ def check_shop_klicks(client, common, temp_get_db):
               all(response.status_code == 204 for response in results) and page_views_after == page_views_before),
         check("Nur freigegebene Shop-Seiten und Elemente werden anonym pro Tag gezählt", werte == [
             ((heute - timedelta(days=12)).isoformat(), "/shop", "hero-felgen", 3),
+            (heute.isoformat(), "/", "home-felgen", 1),
             (heute.isoformat(), "/", "home-nav-shop", 2),
             (heute.isoformat(), "/shop/felgen", "hero-felgen-angebot", 1),
             (heute.isoformat(), "/shop/reifen", "hero-reifen-angebot", 1),
         ]),
         check("Analytics trennt Shop-Klicks nach Seite und Element und respektiert den gewählten Filter",
-              aktuell["gesamt"] == 4 and monat["gesamt"] == 7 and fremde_website is None
+              aktuell["gesamt"] == 5 and monat["gesamt"] == 8 and fremde_website is None
               and aktuell["items"][0] == {"seite": "/", "seite_label": "Homepage", "klicks": 2,
-                                           "element_label": "Hauptmenü · Reifen & Felgen Shop"}),
+                                           "element_label": "Hauptmenü · Reifen & Felgen Shop"}
+              and any(row["element_label"] == "Startseite · Felgen ansehen" and row["klicks"] == 1
+                      for row in aktuell["items"])),
     ]
     return all(checks)
 
@@ -419,6 +423,29 @@ def main():
                 base_url="https://auto-lackierzentrum.de",
             )
             ok &= check("Beacon ist im reinen Homepage-Betrieb freigegeben", public_response.status_code == 204)
+            heute = datetime.now()
+            datenbank = temp_get_db()
+            datenbank.executemany(
+                """
+                INSERT INTO besucher_events (erstellt_am, visitor_hash, website, seite)
+                VALUES (?, 'shop-seitenaufrufe-test', ?, ?)
+                """,
+                [
+                    (heute.isoformat(sep=" "), "auto-lackierzentrum", "/shop/felgen"),
+                    (heute.isoformat(sep=" "), "autovermietung-mos", "/shop"),
+                    ((heute - timedelta(days=12)).isoformat(sep=" "), "auto-lackierzentrum", "/shop/reifen"),
+                ],
+            )
+            datenbank.commit()
+            datenbank.close()
+            kurz = portal.list_besucher_statistik(7)["shop_klicks"]["seitenaufrufe"]
+            lang = portal.list_besucher_statistik(30, website="auto-lackierzentrum")["shop_klicks"]["seitenaufrufe"]
+            ok &= check(
+                "Shop-Seitenaufrufe zeigen auch Nullwerte und berücksichtigen Website, Zeitraum und Bots",
+                [(row["seite"], row["aufrufe"]) for row in kurz]
+                == [("/", 2), ("/shop", 0), ("/shop/felgen", 1), ("/shop/reifen", 0)]
+                and [row["aufrufe"] for row in lang] == [2, 0, 1, 1],
+            )
         finally:
             portal.get_db = original_get_db
             portal.render_template = original_render_template
@@ -441,6 +468,7 @@ def main():
             and "Erkannte Bots" in rendered_html
             and "Google Ads Kosten" in rendered_html
             and "Shop-Klicks auf der Website" in rendered_html
+            and 'id="shop-seitenaufrufe"' in rendered_html
             and "Felgenangebot anfragen" in rendered_html
             and "1 Klick · 30 Tage" in rendered_html
             and "Kosten je Abschluss" in rendered_html

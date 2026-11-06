@@ -71,8 +71,8 @@ def main():
             return False
         path = target.path + ("?" + target.query if target.query else "")
         return client.get(path).status_code == 200
-    tire_links = deck.card_links[0] if deck.cards and deck.cards[0].get("data-card-title") == "Reifen" else []
-    shop_links = deck.card_links[1] if len(deck.cards) > 1 and deck.cards[1].get("data-card-title") == "Shop" else []
+    shop_links = deck.card_links[0] if deck.cards and deck.cards[0].get("data-card-title") == "Shop" else []
+    tire_links = deck.card_links[1] if len(deck.cards) > 1 and deck.cards[1].get("data-card-title") == "Reifen" else []
     tire_destinations = {"reifenshop" if urlparse(href).path == "/shop/reifen" else
                          parse_qs(urlparse(href).query).get("anliegen", [""])[0] for href in tire_links}
     deck_script = client.get("/static/homepage/aktuelles-karten.js")
@@ -98,11 +98,14 @@ def main():
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
         "Passendes saisonales Titelbild vorhanden": image_path(saison["hero_bild"]) in html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
         "Aktuelle Reifenbuchung im ersten Homepagebereich": all(x in hero_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
-        "Acht Themen mit eigener Shopkarte": [card.get("data-card-title") for card in deck.cards] == ["Reifen", "Shop", "Versicherungsschaden", "Lackierarbeiten", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
+        "Acht Themen mit Shopkarte an erster Stelle": [card.get("data-card-title") for card in deck.cards] == ["Shop", "Reifen", "Versicherungsschaden", "Lackierarbeiten", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
         "Alle Karten ohne JavaScript lesbar und verlinkt": bool(deck.cards) and all("hidden" not in card and "inert" not in card for card in deck.cards) and all(links and all(card_link_reachable(href) for href in links) for links in deck.card_links),
         "Reifenkarte bietet Reifenauswahl und Werkstatttermin": {"reifenshop", "reifenservice"} <= tire_destinations,
-        "Separater Shop in Hauptmenü und Karte": (
-            shop_links == ["/shop"] and 'href="/shop">Reifen &amp; Felgen Shop</a>' in html
+        "Felgen direkt aus der ersten Shopkarte erreichbar": (
+            shop_links == ["/shop/felgen", "/shop"]
+            and 'href="/shop">Reifen &amp; Felgen Shop</a>' in html
+            and 'data-shop-click="home-felgen" href="/shop/felgen"' in hero_html
+            and '1 von 8 · Shop</p>' in hero_html
         ),
         "Kartenpfeile und Themen sind beschriftete native Buttons": len(deck.controls) == 2 and all(tag == "button" and data.get("type") == "button" and data.get("aria-label") and data.get("aria-controls") == "aktuelle-karten" for tag, data in deck.controls) and len(deck.choices) == 8 and all(tag == "button" and data.get("aria-pressed") in ("true", "false") for tag, data in deck.choices),
         "Leasingkarte bietet Check vor Rueckgabe und Smart Repair": all(x in hero_html for x in ('Leasing-Check &amp; Smart Repair','Unnötige Rückgabekosten vermeiden.','Dellen und kleine Lackschäden vorab prüfen.','?anliegen=leasingrueckgabe#kurzanfrage')) and client.get('/static/homepage/karte-leasing-v2-20261021.webp').status_code == 200,
