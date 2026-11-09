@@ -201,7 +201,7 @@ class OrderPriceComparison:
             else:
                 with self.p.workshop_intake.db() as db:
                     group = self.p.workshop_intake._group(db, source['group_id'])
-                    file = self.p.workshop_intake._file(db, source['group_id'], source['file_id'])
+                    file = self.p.workshop_intake._file_metadata(db, source['group_id'], source['file_id'])
                 # Inspect the actual source, never classify an arbitrary file
                 # using the allowed supplier copied from the destination order.
                 if normalize_supplier(group['supplier']) != normalize_supplier(source['supplier']):

@@ -370,6 +370,12 @@ class MaterialIntake:
                 FROM einkauf_eingang e ORDER BY source_at DESC,id DESC LIMIT ?''', (limit,)).fetchall()
         return [dict(dict(row), already_ordered=bool(row['already_ordered']), dispatchable=False) for row in rows]
 
+    def original_file_list(self, group_id):
+        with self.db() as db:
+            return [dict(row) for row in db.execute(
+                'SELECT id,original_name,mime FROM einkauf_eingang_dateien WHERE eingang_id=? ORDER BY id',
+                (_id(group_id),)).fetchall()]
+
     def detail(self, group_id):
         with self.db() as db:
             group = self._group(db, group_id)

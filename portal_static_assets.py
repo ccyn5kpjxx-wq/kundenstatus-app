@@ -7,7 +7,7 @@ from pathlib import Path
 
 PUBLIC_UI_ASSETS = frozenset({
     'admin-sidebar.css', 'admin-sidebar.js', 'werkstatt_theme.css',
-    'inspektionscheckliste.css', 'logo-nav-192.webp',
+    'inspektionscheckliste.css', 'logo-nav-192.webp', 'bestellordner.css',
 })
 
 

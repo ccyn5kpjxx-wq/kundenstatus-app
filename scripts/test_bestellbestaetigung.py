@@ -195,7 +195,7 @@ class ConfirmationLinkTests(ConfirmationFixture,unittest.TestCase):
         with self.links.request_snapshot():
             self.assertTrue(self.comparison.detail('material:1')['confirmation']['available'])
 
-    def test_real_get_closed_archive_contains_saved_quote_without_enabling_batch_form(self):
+    def test_real_get_loads_saved_quote_and_batch_form_only_on_opening_archive(self):
         from test_bestelluebersicht import OverviewTests
         from werkstatt_bestellvergleich import OrderPriceComparison
         archive = OverviewTests('runTest')
@@ -229,14 +229,16 @@ class ConfirmationLinkTests(ConfirmationFixture,unittest.TestCase):
         with patch.object(archive.manager,'tick',side_effect=AssertionError('GET must not dispatch')):
             closed = archive.client.get('/admin/assistent-bestellungen')
             expanded = archive.client.get('/admin/assistent-bestellungen?archive_day=sent:2026-10-06')
-        for response in (closed,expanded):
-            self.assertEqual(response.status_code,200)
-            html = response.get_data(as_text=True)
-            self.assertIn('12,50 € netto je Karton',html)
-            self.assertIn('Auftragsbestätigung vom 06.10.2026',html)
-            self.assertIn('Original-Testband',html)
-        self.assertNotIn('name="proposal_ref_material:1"',closed.get_data(as_text=True))
-        self.assertIn('name="proposal_ref_material:1"',expanded.get_data(as_text=True))
+        self.assertEqual(closed.status_code,200)
+        self.assertEqual(expanded.status_code,200)
+        closed_html = closed.get_data(as_text=True)
+        expanded_html = expanded.get_data(as_text=True)
+        self.assertIn('Bestellt am 06.10.2026',closed_html)
+        self.assertIn('archive_day=sent:2026-10-06',closed_html)
+        for marker in ('12,50 € netto je Karton', 'Auftragsbestätigung vom 06.10.2026',
+                       'Original-Testband', 'name="proposal_ref_material:1"'):
+            self.assertNotIn(marker,closed_html)
+            self.assertIn(marker,expanded_html)
         with archive.manager.db() as db:
             self.assertEqual([dict(row) for row in db.execute('SELECT * FROM einkauf_material_dialoge')],before)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM '+TABLE).fetchone()[0],1)

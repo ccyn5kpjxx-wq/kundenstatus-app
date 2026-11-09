@@ -22,6 +22,10 @@ Positionen in **Bestellung am TT.MM.JJJJ**, einschließlich des jeweiligen
 Mitarbeiters. Neue Anforderungen bleiben im offenen Bereich. Jeder Datumsblock
 hat eine eigene Seitennavigation mit 25 Positionen; auch große Bestellläufe
 werden vollständig angezeigt. Ältere Datumsblöcke sind separat paginiert.
+Die Bestellübersicht zeigt Datum und Anzahl auch für geschlossene Blöcke.
+Artikel, Preise, Lieferstatus und die Belegzuordnung eines Blocks werden
+beim Öffnen geladen. Bildvorschauen in einzelnen Bestellungen laden erst
+über den Bereich „Originaldateien & Bildvorschauen“ oder den Bilder-Link.
 
 Der erste bestätigte Versandzeitpunkt bleibt auch bei einer späteren Reparatur
 der Gesendet-Kopie unverändert. Für alte Bestellungen ohne gespeicherten

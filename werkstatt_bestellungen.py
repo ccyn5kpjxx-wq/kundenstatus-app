@@ -263,7 +263,8 @@ class OrderManagement:
                 'verified': bool(row['verified_at'] and row['verified_by'])}
 
     def availability(self):
-        smtp = self.p.get_werkstatt_smtp_config()
+        smtp_status = getattr(self.p,'get_werkstatt_smtp_status_config',self.p.get_werkstatt_smtp_config)
+        smtp = smtp_status()
         imap = self.p.get_werkstatt_imap_config()
         mailbox_ready = bool(smtp.get('smtp_configured') and (smtp.get('smtp_ssl') or smtp.get('smtp_tls'))
                              and imap.get('configured') and imap.get('ssl') and imap.get('user')
@@ -656,7 +657,7 @@ def register_orders(portal):
         if not item or not item.get('intake_id') or service is None:
             return []
         try:
-            return service.detail(item['intake_id'])['files']
+            return service.original_file_list(item['intake_id'])
         except (ValueError, LookupError):
             return []
 
@@ -672,27 +673,27 @@ def register_orders(portal):
             request_id = str(uuid.uuid4())
             pending[request_id] = True
             session['assistant_order_requests'] = dict(list(pending.items())[-20:])
-        overview = OrderOverview(portal.get_db).page(request.args)
+        overview = OrderOverview(portal.get_db).page(request.args,include_queue=False)
         material_current = None
         material_id = (overview.get('selected') or {}).get('material_id')
         if material_id and getattr(portal, 'material_dialog', None):
             material_current = portal.material_dialog.status(material_id)
-        intake = getattr(portal, 'workshop_intake', None)
         from werkstatt_bestellvergleich_ui import comparison_context
-        # Native details can be opened without another request. Every archive
-        # row rendered into this response therefore needs its price context.
-        visible_overview = dict(overview,items=overview['open']['items']+
-            [entry for group in overview['archive_groups'] for entry in group['items']])
+        archive_entries = [entry for group in overview['archive_groups'] for entry in group['items']]
+        selected = overview['selected']
+        visible_overview = dict(overview,
+            items=[entry for entry in overview['open']['items']+archive_entries if not entry.get('comparison_pending')],
+            selected=selected if selected and not selected.get('comparison_pending') else None)
         catalog = getattr(getattr(portal, 'cockpit_data', None), 'catalog', None)
         display_snapshot = getattr(catalog, 'display_snapshot', None)
         scope = display_snapshot() if request.method == 'GET' and callable(display_snapshot) else nullcontext()
         with scope:
             historical_prices = historical_price_context(portal, overview)
-            comparisons = comparison_context(portal, visible_overview)
+            comparisons = comparison_context(portal,visible_overview,confirmation_entries=archive_entries)
         return render_template('assistent_bestellungen.html', contacts=manager.contacts(), availability=manager.availability(),
                                overview=overview, cap_cents=manager.cap(), csrf=csrf, request_id=request_id,
                                order_material=material_current, order_files=original_files(material_current),
-                               intake_entries=intake.list(limit=20) if intake else None,
+                               show_order_images=request.args.get('bilder')=='1',
                                historical_prices=historical_prices,
                                errors=errors or [], form=form, **comparisons), code
 

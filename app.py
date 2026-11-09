@@ -27885,7 +27885,7 @@ def get_werkstatt_imap_config():
     }
 
 
-def get_werkstatt_smtp_config():
+def get_werkstatt_smtp_config(*, include_local_hostname=True):
     """Use the visible mailbox identity for SMTP, independently of Schaden aliases."""
     imap = get_werkstatt_imap_config()
     ionos_hosts = {
@@ -27905,8 +27905,12 @@ def get_werkstatt_smtp_config():
         "smtp_host": host, "smtp_port": env_int("MAIL_SMTP_PORT", 465 if use_ssl else 587),
         "smtp_user": user, "_smtp_password": password,
         "smtp_ssl": use_ssl, "smtp_tls": env_flag("MAIL_SMTP_TLS", not use_ssl),
-        "local_hostname": smtp_lokaler_hostname(),
+        "local_hostname": smtp_lokaler_hostname() if include_local_hostname else None,
     }
+
+
+def get_werkstatt_smtp_status_config():
+    return get_werkstatt_smtp_config(include_local_hostname=False)
 
 
 def werkstatt_imap_status():

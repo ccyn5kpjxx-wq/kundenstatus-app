@@ -138,8 +138,8 @@ class OverviewTests(unittest.TestCase):
         self.p.cockpit_data = SimpleNamespace(catalog=catalog)
         self.p.order_price_comparison = OrderPriceComparison(self.p)
         contexts = []
-        def capture_context(*args):
-            result = comparison_context(*args)
+        def capture_context(*args, **kwargs):
+            result = comparison_context(*args, **kwargs)
             contexts.append(result)
             return result
         # Exercise the actual GET, real candidate resolution and permission checks.
@@ -207,8 +207,8 @@ class OverviewTests(unittest.TestCase):
         source_portal, catalog, service = self.comparison_fixture()
         before = self.comparison_rows(self.p.get_db), self.comparison_rows(source_portal.get_db)
         contexts = []
-        def capture(*args):
-            result = comparison_context(*args)
+        def capture(*args, **kwargs):
+            result = comparison_context(*args, **kwargs)
             contexts.append(result)
             return result
         for error_type in (RuntimeError, sqlite3.OperationalError):
@@ -245,8 +245,8 @@ class OverviewTests(unittest.TestCase):
         contexts = []
         successful = []
         original = service._catalog_estimate
-        def capture(*args):
-            result = comparison_context(*args)
+        def capture(*args, **kwargs):
+            result = comparison_context(*args, **kwargs)
             contexts.append(result)
             return result
         for error_type in (RuntimeError, sqlite3.OperationalError):
@@ -320,14 +320,37 @@ class OverviewTests(unittest.TestCase):
         group=data['archive_groups'][0]
         self.assertEqual(group['label'],'Bestellt am 12.10.2026')
         self.assertEqual((group['count'],group['pages']),(126,6))
+        self.assertEqual(group['items'],[])
         seen=[]
+        people=set()
         for page in range(1,7):
             block=self.reader.page({'archive_day':'sent:2026-10-12','archive_page':str(page)},now=self.now)['archive_groups'][0]
             self.assertTrue(block['expanded'])
             seen.extend(item['id'] for item in block['items'])
+            people.update(item['person'] for item in block['items'])
         self.assertEqual(len(set(seen)),126)
         self.assertEqual(len(seen),126)
-        self.assertEqual({item['person'] for item in group['items']},{'Testperson A','Testperson B'})
+        self.assertEqual(people,{'Testperson A','Testperson B'})
+
+    def test_older_archive_link_opens_its_page_and_keeps_filters(self):
+        for day in range(1,22):
+            key=f'archive-{day}'
+            self.batch(key,state='sent')
+            self.order(key,batch=key)
+            with self.manager.db() as db:
+                db.execute('UPDATE assistent_bestellpakete SET result_json=? WHERE id=?',
+                           (canonical({'sent_at':f'2026-10-{day:02}T09:00:00+00:00'}),key))
+                db.commit()
+        initial=self.client.get('/admin/assistent-bestellungen?q=TEST-50')
+        self.assertEqual(initial.status_code,200)
+        self.assertIn('Bestellt am 21.10.2026',initial.get_data(as_text=True))
+        self.assertNotIn('Grünes Band',initial.get_data(as_text=True))
+        older=self.client.get('/admin/assistent-bestellungen?q=TEST-50&archive_day=sent:2026-10-01')
+        self.assertEqual(older.status_code,200)
+        self.assertIn('Bestellt am 01.10.2026',older.get_data(as_text=True))
+        self.assertIn('Grünes Band',older.get_data(as_text=True))
+        self.assertIn('q=TEST-50',older.get_data(as_text=True))
+        self.assertNotIn('Bestellt am 21.10.2026',older.get_data(as_text=True))
 
     def test_legacy_copy_update_does_not_invent_a_send_date_or_archive_uncertain(self):
         self.batch('legacy',state='sent',outbox='sent')

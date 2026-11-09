@@ -337,6 +337,8 @@ class OrderOverview:
             '_sort_created':created,'_urgent':urgent,'revision':row.get('revision',1),
             'editable':row['state'] in {'open','review','approved'},
             'restorable':row['state']=='cancelled' and bool(fields.get('admin_removal')),
+            # This projection is used only for dialogs without a dispatch row.
+            'comparison_pending':not external,
             '_archive_sent_at':snapshot.get('sent_at') if state=='external_sent' else None,
             '_archive_run_at':None,'historical_identity':historical_identity}
 
@@ -361,17 +363,31 @@ class OrderOverview:
         """Independent pages keep open work and every dated archive reachable."""
         archived = {'sent','copy_pending','external_sent'}
         rows = db.execute(f'SELECT * FROM ({base}) entries{where} ORDER BY created_at DESC,id DESC',params).fetchall()
-        all_lines = [order_line(row) for row in rows]+material_lines
-        all_lines.sort(key=lambda line:(line['_sort_created'],str(line['id'])),reverse=True)
-        open_lines = [line for line in all_lines if line['state'] not in archived|{'cancelled'}]
-        removed = [line for line in all_lines if line['state']=='cancelled']
-        groups = {}
-        for line in all_lines:
-            if line['state'] in archived:
-                groups.setdefault(self._archive_key(line),[]).append(line)
+        # Sorting and grouping need dates and states, not hydrated order snapshots.
+        all_lines = [(row['created_at'],str(row['id']),row,False) for row in rows]
+        all_lines.extend((line['_sort_created'],str(line['id']),line,True) for line in material_lines)
+        all_lines.sort(key=lambda entry:entry[:2],reverse=True)
+        open_lines, removed, groups = [], [], {}
+        for _, _, line, is_material in all_lines:
+            state = line['state'] if is_material else line['view_state']
+            if state in archived:
+                evidence = line if is_material else {
+                    '_archive_sent_at':_object(line['result_json']).get('sent_at'),
+                    '_archive_run_at':line['due_at'],
+                }
+                groups.setdefault(self._archive_key(evidence),[]).append((line,is_material))
+            elif state == 'cancelled':
+                removed.append((line,is_material))
+            else:
+                open_lines.append((line,is_material))
+        def items(lines,page):
+            return [line if is_material else order_line(line)
+                    for line,is_material in lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]]
         keys = sorted(groups,key=lambda key:(key.split(':')[-1],key),reverse=True)
         blocks_page = min(_number(query.get('archive_blocks_page')),max(1,(len(keys)+19)//20))
         requested = _text(query.get('archive_day'),40)
+        if requested in groups:
+            blocks_page = keys.index(requested)//20+1
         requested_page = _number(query.get('archive_page'))
         archive_groups = []
         for key in keys[(blocks_page-1)*20:blocks_page*20]:
@@ -385,12 +401,14 @@ class OrderOverview:
                 label = ('Bestellt am ' if key.startswith('sent:') else 'Bestelllauf am ')+day
             archive_groups.append({'key':key,'label':label,'count':len(lines),'page':page,'pages':pages,
                 'legacy':not key.startswith('sent:'),'expanded':requested==key,
-                'items':lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]})
+                'items':items(lines,page) if requested==key else []})
         def paginated(lines,key):
             pages = max(1,(len(lines)+self.PAGE_SIZE-1)//self.PAGE_SIZE)
             page = min(_number(query.get(key)),pages)
-            return {'items':lines[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE],'count':len(lines),'page':page,'pages':pages}
+            return {'items':items(lines,page),'count':len(lines),'page':page,'pages':pages}
         return {'open':paginated(open_lines,'open_page'),'removed':paginated(removed,'removed_page'),
+            'archive_day':requested if requested in groups else '',
+            'archive_page':next((group['page'] for group in archive_groups if group['expanded']),1),
             'archive_groups':archive_groups,'archive_count':sum(len(items) for items in groups.values()),
             'archive_blocks_count':len(keys),'archive_blocks_page':blocks_page,
             'archive_blocks_pages':max(1,(len(keys)+19)//20)}
@@ -418,7 +436,7 @@ class OrderOverview:
                     return False
         return True
 
-    def page(self, query=None, *, now=None):
+    def page(self, query=None, *, now=None, include_queue=True):
         query = query or {}
         now = now or datetime.now(timezone.utc)
         filters = {key: _text(query.get(key), 160).strip() for key in ('q', 'person', 'supplier', 'state', 'urgency', 'from', 'to', 'batch')}
@@ -492,11 +510,13 @@ class OrderOverview:
                 counts[line['state']] = counts.get(line['state'],0)+1
             count = sum(counts.values())
             page = min(_number(query.get('page')), max(1, (count + self.PAGE_SIZE - 1) // self.PAGE_SIZE))
-            # Fetch only the queue prefix needed for this merged page. All
-            # material candidates are metadata, never original files or services.
-            rows = db.execute(f'SELECT * FROM ({base}) entries{where} ORDER BY created_at DESC,id DESC LIMIT ?', (*params,page*self.PAGE_SIZE)).fetchall()
-            lines = sorted([order_line(row) for row in rows]+filtered_material,
-                           key=lambda line:(line['_sort_created'],str(line['id'])),reverse=True)[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]
+            lines = []
+            if include_queue:
+                # The chef dashboard uses this merged page. The order folder
+                # displays independently paged sections instead.
+                rows = db.execute(f'SELECT * FROM ({base}) entries{where} ORDER BY created_at DESC,id DESC LIMIT ?', (*params,page*self.PAGE_SIZE)).fetchall()
+                lines = sorted([order_line(row) for row in rows]+filtered_material,
+                               key=lambda line:(line['_sort_created'],str(line['id'])),reverse=True)[(page-1)*self.PAGE_SIZE:page*self.PAGE_SIZE]
             sections = self._sections(db,base,where,params,order_line,filtered_material,query)
             draft_base = """SELECT a.*,CASE WHEN SUBSTR(a.erstellt_am,3,1)='.' AND SUBSTR(a.erstellt_am,6,1)='.'
                 THEN SUBSTR(a.erstellt_am,7,4)||'-'||SUBSTR(a.erstellt_am,4,2)||'-'||SUBSTR(a.erstellt_am,1,2)||' '||SUBSTR(a.erstellt_am,12)
