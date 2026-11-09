@@ -498,6 +498,48 @@ class OfficeDocumentTests(unittest.TestCase):
         self.assertNotIn('action="' + base + '/bezahlt"', paid_html)
         hook.assert_not_called()
 
+    def test_chef_lists_open_and_paid_receipts_separately(self):
+        draft = self.create(raw=pdf_bytes("draft"), belegnummer="DRAFT", kategorie="rechnung")
+        approved = self.create(raw=pdf_bytes("approved"), belegnummer="APPROVED")
+        working = self.create(raw=pdf_bytes("working"), belegnummer="WORKING")
+        for key in (approved, working):
+            self.approve(key, typ="rechnung", kategorie="rechnung")
+        self.assertEqual(self.action(working, "ueberweisung").status_code, 303)
+
+        base = "/admin/buero/belege"
+
+        def page(query=""):
+            response = self.admin.get(base + query)
+            self.assertEqual(response.status_code, 200)
+            return response.get_data(as_text=True)
+
+        def listed(html):
+            return set(re.findall(r'href="' + base + r'/([a-f0-9]{32})\?kategorie=', html))
+
+        self.assertEqual(listed(page()), {draft, approved, working})
+        self.assertEqual(listed(page("?bereich=erledigt")), set())
+
+        payment = self.action(working, "bezahlt", admin=True, zahlungsdatum="2026-01-05",
+                              zahlungsreferenz="Synthetic executed payment")
+        self.assertEqual(payment.status_code, 303)
+
+        self.assertEqual(listed(page()), {draft, approved})
+        self.assertEqual(listed(page("?bereich=freigegeben")), {approved})
+        archive = page("?bereich=erledigt")
+        self.assertEqual(listed(archive), {working})
+        self.assertIn("Erledigt <strong>1</strong>", archive)
+        self.assertIn("?kategorie=rechnung&amp;bereich=erledigt", archive)
+        self.assertEqual(listed(page("?bereich=erledigt&kategorie=rechnung")), {working})
+        self.assertEqual(listed(page("?bereich=erledigt&kategorie=steuern")), set())
+        self.assertEqual(listed(page("?status=bezahlt")), {working})
+        detail = self.admin.get(payment.headers["Location"]).get_data(as_text=True)
+        self.assertIn("Erledigte Belege", detail)
+        self.assertIn("Synthetic executed payment", detail)
+
+        office_page = self.office.get("/werkstatt/buero/belege").get_data(as_text=True)
+        self.assertIn(working, office_page)
+        self.assertNotIn("?bereich=erledigt", office_page)
+
     def test_admin_payment_uses_existing_order_eligibility_for_business_and_private_sources(self):
         for category, area, working in (("miete", "geschaeftlich", False), ("kaution", "geschaeftlich", True), ("privat", "privat", False)):
             with self.subTest(category=category):

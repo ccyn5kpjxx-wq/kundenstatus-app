@@ -31,6 +31,7 @@ AREAS = {"unklar": "Noch zuzuordnen", "geschaeftlich": "Geschäftlich", "privat"
 STATES = {"entwurf": "In Erfassung", "eingereicht": "Zur Cheffreigabe", "freigegeben": "Freigegeben / geprüft",
           "zurueckgewiesen": "Zurück zur Bearbeitung", "zahlung_in_bearbeitung": "Überweisung extern in Bearbeitung",
           "bezahlt": "Zahlung dokumentiert"}
+LIST_GROUPS = ("alle", "offen", "ungeprueft", "freigegeben", "erledigt")
 MAX_ORIGINAL_BYTES = 10 * 1024 * 1024
 MAX_REQUEST_BYTES = MAX_ORIGINAL_BYTES + 128 * 1024
 FIELDS = {"typ", "kategorie", "lieferant", "belegnummer", "belegdatum", "betrag_brutto", "faelligkeit", "notiz",
@@ -485,7 +486,7 @@ class OfficeDocuments:
         who = self.identity(admin=admin)
         if status != "alle" and status not in STATES:
             raise ValueError("Gültigen Belegstatus auswählen.")
-        if category != "alle" and category not in CATEGORIES or group not in ("alle", "ungeprueft", "freigegeben"):
+        if (category != "alle" and category not in CATEGORIES) or group not in LIST_GROUPS:
             raise ValueError("Gültigen Ordner und Arbeitsbereich auswählen.")
         with self.db() as db:
             terms, args = [], [who["actor"]]
@@ -498,10 +499,15 @@ class OfficeDocuments:
             if category != "alle":
                 terms.append("(" + _CATEGORY_SQL + ")=?")
                 args.append(category)
-            if group == "ungeprueft":
+            if group == "offen":
+                terms.append("b.status<>'bezahlt'")
+            elif group == "erledigt":
+                terms.append("b.status='bezahlt'")
+            elif group == "ungeprueft":
                 terms.append("b.status IN ('entwurf','eingereicht','zurueckgewiesen')")
             elif group == "freigegeben":
-                terms.append("b.status IN ('freigegeben','zahlung_in_bearbeitung','bezahlt')")
+                terms.append("b.status IN ('freigegeben','zahlung_in_bearbeitung')" if admin else
+                             "b.status IN ('freigegeben','zahlung_in_bearbeitung','bezahlt')")
             where = " WHERE " + " AND ".join(terms) if terms else ""
             columns = ",".join("b." + column for column in _META.split(","))
             rows = db.execute(f"SELECT {columns},COALESCE(s.seen_revision,0) AS seen_revision FROM buero_belege b "
@@ -522,9 +528,9 @@ class OfficeDocuments:
 
     def counters(self, *, admin=False):
         who = self.identity(admin=admin)
-        categories = {key: {"label": label, "neue_anzahl": 0, "offen_anzahl": 0, "zahlung_offen": 0, "gesamt": 0}
+        categories = {key: {"label": label, "neue_anzahl": 0, "offen_anzahl": 0, "zahlung_offen": 0, "gesamt": 0, "erledigt": 0}
                       for key, label in CATEGORIES.items()}
-        result = dict(neue_anzahl=0, offen_anzahl=0, zahlung_offen=0, ungeprueft=0, freigegeben=0, kategorien=categories)
+        result = dict(neue_anzahl=0, offen_anzahl=0, zahlung_offen=0, ungeprueft=0, freigegeben=0, erledigt=0, kategorien=categories)
         with self.db() as db:
             rows = db.execute("""SELECT b.status,b.typ,b.payable,b.business_confirmed,b.quelle_geprueft,b.bereich,b.kategorie,b.kategorie_vorschlag,b.revision,
                 COALESCE(s.seen_revision,0) AS seen_revision FROM buero_belege b
@@ -542,7 +548,11 @@ class OfficeDocuments:
             for name, value in (("neue_anzahl", new), ("offen_anzahl", opened), ("zahlung_offen", payment)):
                 bucket[name] += int(value)
                 result[name] += int(value)
-            result["ungeprueft" if row["status"] in ("entwurf", "eingereicht", "zurueckgewiesen") else "freigegeben"] += 1
+            if row["status"] == "bezahlt":
+                bucket["erledigt"] += 1
+                result["erledigt"] += 1
+            if not admin or row["status"] != "bezahlt":
+                result["ungeprueft" if row["status"] in ("entwurf", "eingereicht", "zurueckgewiesen") else "freigegeben"] += 1
         return result
 
     def record_scan_suggestion(self, key, revision, category, hint, suggested_kind="", *, intake=False):
@@ -1040,10 +1050,16 @@ def register_office_documents(p):
             who = service.identity(admin=admin)
             status = request.args.get("status", "alle")
             category = request.args.get("kategorie", "alle")
-            group = request.args.get("bereich", "alle")
-            if (status != "alle" and status not in STATES) or (category != "alle" and category not in CATEGORIES) or group not in ("alle", "ungeprueft", "freigegeben"):
+            group = request.args.get("bereich")
+            if ((status != "alle" and status not in STATES) or (category != "alle" and category not in CATEGORIES)
+                    or (group is not None and group not in LIST_GROUPS)):
                 raise ValueError("Gültigen Ordner und Arbeitsbereich auswählen.")
             selected = service.detail(key, admin=admin) if key else None
+            if group is None:
+                group = "alle"
+                if admin:
+                    show_paid = status == "bezahlt" or (selected and selected["status"] == "bezahlt")
+                    group = "erledigt" if show_paid else "offen"
             if selected and error and status_code == 400 and request.method == "POST":
                 # Retain the user's unsaved transfer entries for correction;
                 # the protected record/revision remains unchanged on failure.
