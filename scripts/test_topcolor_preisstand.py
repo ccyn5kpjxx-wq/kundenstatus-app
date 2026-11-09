@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import werkstatt_rechnungsquelle as reader
-from werkstatt_artikel_import import InvoiceCatalog, _price_evidence
+from werkstatt_artikel_import import InvoiceCatalog, _price_evidence, _price_match_text
 from werkstatt_bestellungen import historical_price_context
 
 
@@ -226,6 +226,51 @@ class DisplaySnapshotTests(unittest.TestCase):
         self.assertIsNot(results[0][0], results[1][0])
         self.assertNotEqual(results[0][0]['items'], results[1][0]['items'])
         self.assertEqual(catalog._search.call_count, 2)
+
+    def test_historical_index_normalizes_each_observation_once_and_keeps_ambiguity(self):
+        catalog = self.catalog()
+        row = HistoricalPriceTests('runTest').row
+        catalog._search.side_effect = None
+        catalog._search.return_value = [row(date='2026-08-01'), row(id=2, ve=''),
+            row(id=3, artikelnummer='SYNTHETIC-02'), row(id=4, artikelnummer='UNRELATED-SKU'),
+            row(id=5, artikelnummer='SYNTHETIC-02', lieferant='Other supplier', price='50.00')]
+        with catalog.display_snapshot():
+            snapshot = catalog.knowledge_rows()
+            before = deepcopy(snapshot)
+            keys = [' synthetic-01 ', 'synthetic-02', 'absent']
+            expected = [catalog.historical_price('  TOP-color GmbH ', sku, 'Gebinde', '0,5 L', snapshot=dict(snapshot))
+                        for sku in keys]
+            with patch('werkstatt_artikel_import._price_match_text', wraps=_price_match_text) as normalize:
+                actual = [catalog.historical_price('  TOP-color GmbH ', sku, 'Gebinde', '0,5 L', snapshot=snapshot)
+                          for sku in keys]
+            self.assertEqual(sum(call.args == ('UNRELATED-SKU',) for call in normalize.call_args_list), 1)
+            self.assertEqual(actual, expected)
+            self.assertIsNone(actual[0]['amount'])
+            self.assertEqual(actual[1]['amount'], '10.00')
+            self.assertEqual(snapshot, before)
+        catalog._search.assert_called_once()
+
+    def test_historical_index_keeps_distinct_limits_supplied_snapshots_and_fresh_reads(self):
+        catalog = self.catalog()
+        row = HistoricalPriceTests('runTest').row
+        rows = [row(), row(id=2, artikelnummer='SYNTHETIC-02')]
+        catalog._search.side_effect = lambda query, limit, **kwargs: rows[:limit]
+        def price(snapshot=None):
+            return catalog.historical_price('TOP-Color GmbH', 'SYNTHETIC-01', 'Gebinde', '0.5 L', snapshot=snapshot)
+        with catalog.display_snapshot():
+            self.assertEqual(price()['amount'], '10.00')
+            limited = price(catalog.knowledge_rows(limit=1))
+            self.assertIsNone(limited['amount'])
+            self.assertTrue(any('begrenzt' in warning for warning in limited['warnings']))
+            supplied = dict(catalog.knowledge_rows(), items=[row(price='12.00')])
+            self.assertEqual(price(supplied)['amount'], '12.00')
+            self.assertEqual(price()['amount'], '10.00')
+        rows[:] = [row(price='13.00')]
+        with catalog.display_snapshot():
+            self.assertEqual(price()['amount'], '13.00')
+        catalog._search.side_effect = RuntimeError('synthetic fresh read failure')
+        with self.assertRaisesRegex(RuntimeError, 'fresh read failure'):
+            price()
 
 
 class HistoricalContextTests(unittest.TestCase):

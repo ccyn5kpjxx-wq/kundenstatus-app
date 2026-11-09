@@ -48,6 +48,10 @@ def _product_text(value):
     return ' '.join(unicodedata.normalize('NFKC', text).split())
 
 
+def _price_match_text(value):
+    return _product_text(value).replace(',', '.')
+
+
 _PAYMENT_TEXT = re.compile(
     r'\b(?:iban|bic|swift|bankverbindung|kontoverbindung|kontoinhaber|kontonummer|kontoauszug|kontobelastung|'
     r'zahlungsziel|zahlungsbedingung(?:en)?|zahlungstermin|zahlungseingang|zahlungshinweis|zahlungsart|zahlweise|'
@@ -602,7 +606,7 @@ class InvoiceCatalog:
         The context is isolated between HTTP threads and reset on every exit.
         It must not wrap writes or source/permission changes.
         """
-        token = _DISPLAY_SNAPSHOT.set({'catalog': self, 'values': {}})
+        token = _DISPLAY_SNAPSHOT.set({'catalog': self, 'values': {}, 'historical_indexes': {}})
         try:
             yield
         finally:
@@ -635,6 +639,24 @@ class InvoiceCatalog:
             scoped_values[limit] = snapshot
         return snapshot
 
+    def _historical_price_rows(self, snapshot, supplier, article_number):
+        scope = _DISPLAY_SNAPSHOT.get()
+        scoped_values = scope['values'] if scope is not None and scope['catalog'] is self else {}
+        limit = next((limit for limit, current in scoped_values.items() if current is snapshot), None)
+        if limit is None:
+            # A caller can supply its own observations, for example a scan preview.
+            return [row for row in snapshot['items'] if _price_match_text(row.get('lieferant')) == supplier
+                    and _price_match_text(row.get('artikelnummer')) == article_number]
+
+        indexes = scope['historical_indexes']
+        if limit not in indexes:
+            index = {}
+            for row in snapshot['items']:
+                key = (_price_match_text(row.get('lieferant')), _price_match_text(row.get('artikelnummer')))
+                index.setdefault(key, []).append(row)
+            indexes[limit] = index
+        return indexes[limit].get((supplier, article_number), ())
+
     def historical_price(self, supplier, article_number, unit, packaging='', *, snapshot=None):
         """Pure historical display; never create reviews, prices or purchases.
 
@@ -650,22 +672,21 @@ class InvoiceCatalog:
                   'tax_rate': None, 'date': None, 'source': {}, 'evidence': {}, 'warnings': [],
                   'historical': True, 'verified': False, 'dispatchable': False,
                   'unit': '', 'packaging': '', 'matches': [], 'matched_by': 'exact'}
-        normal = lambda value: _product_text(value).replace(',', '.')
-        supplier, article_number = normal(supplier), normal(article_number)
+        supplier, article_number = _price_match_text(supplier), _price_match_text(article_number)
         order_unit = material_unit(unit)
         if not supplier or not article_number:
             result['warnings'].append('Lieferant und Lieferantenartikelnummer zuerst eindeutig zuordnen.')
             return result
         if snapshot is None:
             snapshot = self.knowledge_rows(limit=5000)
-        rows = [row for row in snapshot['items'] if normal(row.get('lieferant')) == supplier
-                and normal(row.get('artikelnummer')) == article_number]
+        rows = self._historical_price_rows(snapshot, supplier, article_number)
+        package_key = _price_match_text(packaging)
         dated = [invoice_date((row.get('quelle') or {}).get('datum')) for row in rows
                  if order_unit and material_unit(row.get('ve')) == order_unit
-                 and (not packaging or normal(row.get('gebinde')) == normal(packaging))]
+                 and (not packaging or _price_match_text(row.get('gebinde')) == package_key)]
         newest = max((value for value in dated if value), default='')
         ambiguous = [row for row in rows if (not material_unit(row.get('ve'))
-                     or material_unit(row.get('ve')) == order_unit and not normal(row.get('gebinde')))
+                     or material_unit(row.get('ve')) == order_unit and not _price_match_text(row.get('gebinde')))
                      and (not invoice_date((row.get('quelle') or {}).get('datum'))
                           or invoice_date((row.get('quelle') or {}).get('datum')) >= newest)]
         if ambiguous:
@@ -679,15 +700,14 @@ class InvoiceCatalog:
         if not rows:
             result['warnings'].append('Keine historische Quelle mit passender Lieferantenartikelnummer und Bestelleinheit.')
             return result
-        package_key = normal(packaging)
         if not package_key:
-            packages = {normal(row.get('gebinde')) for row in rows}
+            packages = {_price_match_text(row.get('gebinde')) for row in rows}
             if len(packages) != 1 or not next(iter(packages)):
                 result['warnings'].append('Gebinde ist nicht eindeutig belegt; passende Rechnungsvariante prüfen.')
                 return result
             package_key = next(iter(packages))
             result['matched_by'] = 'unique_package'
-        rows = [row for row in rows if normal(row.get('gebinde')) == package_key]
+        rows = [row for row in rows if _price_match_text(row.get('gebinde')) == package_key]
         if not rows:
             result['warnings'].append('Keine historische Quelle mit genau diesem Gebinde.')
             return result
