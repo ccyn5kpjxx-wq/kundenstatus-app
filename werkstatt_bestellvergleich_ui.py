@@ -21,17 +21,17 @@ def comparison_key(entry):
     return None
 
 
-def comparison_context(portal, overview):
+def comparison_context(portal, overview, *, confirmation_entries=None):
     from werkstatt_bestellbestaetigung import get_order_confirmations
     service = getattr(portal,'order_price_comparison',None)
     if service is None:
-        return _comparison_context(portal,overview)
+        return _comparison_context(portal,overview,confirmation_entries=confirmation_entries)
     links = get_order_confirmations(portal,service)
     with links.request_snapshot():
-        return _comparison_context(portal,overview)
+        return _comparison_context(portal,overview,confirmation_entries=confirmation_entries)
 
 
-def _comparison_context(portal, overview, confirmations=True):
+def _comparison_context(portal, overview, confirmations=True, *, confirmation_entries=None):
     from werkstatt_liefereingang import delivery_context
     service = getattr(portal, 'order_price_comparison', None)
     context = dict(price_summaries={}, order_comparison=None, comparison_files=[], comparison_candidates=[],
@@ -44,10 +44,14 @@ def _comparison_context(portal, overview, confirmations=True):
     if confirmations:
         from werkstatt_bestellbestaetigung import get_order_confirmations
         links = get_order_confirmations(portal,service)
-        batch = links.batch_form(entries)
+    form_entries = entries if confirmation_entries is None else confirmation_entries
+    if confirmations and form_entries:
+        batch = links.batch_form(form_entries,include_summaries=confirmation_entries is None)
         context['confirmation_summaries'] = batch['summaries']
         context['confirmation_orders'] = {binding['source']:binding for binding in batch['orders']}
-        context['confirmation_candidates'] = list(links._proposals().values())
+        if batch['orders']:
+            context['confirmation_candidates'] = list(links._proposals().values())
+    unresolved_confirmations = []
     for entry in entries:
         key = comparison_key(entry)
         if not key:
@@ -55,10 +59,17 @@ def _comparison_context(portal, overview, confirmations=True):
         try:
             detail = service.detail(key)
         except (ValueError, LookupError, PermissionError):
+            if confirmations and confirmation_entries is not None:
+                unresolved_confirmations.append(entry)
             continue
         context['price_summaries'][entry['source']] = detail
+        if confirmations and confirmation_entries is not None and detail.get('confirmation') is not None:
+            context['confirmation_summaries'][entry['source']] = detail['confirmation']
         if entry is selected:
             context['order_comparison'] = detail
+    if unresolved_confirmations:
+        # A broken invoice comparison does not invalidate an independent quote.
+        context['confirmation_summaries'].update(links.summaries(unresolved_confirmations))
     detail = context['order_comparison']
     if detail is None:
         return context

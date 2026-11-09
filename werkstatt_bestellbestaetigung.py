@@ -43,21 +43,22 @@ class OrderConfirmationLinks:
 
     def _proposals(self):
         """One scoped snapshot and one original hash per document, no OCR/import."""
-        cached = _REQUEST_PROPOSALS.get()
-        if cached is not None and cached['service'] is self:
-            return cached['proposals']
-        return self._fresh_proposals()
+        snapshot = _REQUEST_PROPOSALS.get()
+        if snapshot is None or snapshot['service'] is not self:
+            return self._fresh_proposals()
+        if 'proposals' not in snapshot:
+            # Only this optional read is recoverable. Other comparison failures
+            # still propagate, and a later display retries a failed read.
+            try:
+                snapshot['proposals'] = self._fresh_proposals()
+            except Exception as error:
+                logging.getLogger(__name__).warning('Optional confirmation source unavailable (%s)',type(error).__name__)
+                snapshot['proposals'] = {}
+        return snapshot['proposals']
 
     @contextmanager
     def request_snapshot(self):
-        # Only this optional read is recoverable. Do not hide failures in the
-        # caller's invoice/delivery logic, and never reuse an older quote.
-        try:
-            proposals = self._fresh_proposals()
-        except Exception as error:
-            logging.getLogger(__name__).warning('Optional confirmation source unavailable (%s)',type(error).__name__)
-            proposals = {}
-        token = _REQUEST_PROPOSALS.set({'service':self,'proposals':proposals})
+        token = _REQUEST_PROPOSALS.set({'service':self})
         try:
             yield
         finally:
@@ -257,8 +258,7 @@ class OrderConfirmationLinks:
                     can_dispatch=False,price_approved=False)
 
     def summaries(self, entries, *, proposals=None):
-        proposals = self._proposals() if proposals is None else proposals
-        results = {}
+        linked = []
         with self.comparison.db() as db:
             for entry in entries:
                 key = entry if isinstance(entry,str) else entry.get('source') or entry.get('order_key')
@@ -268,14 +268,17 @@ class OrderConfirmationLinks:
                     order = self.comparison._order(db,key)
                 except (ValueError,LookupError,PermissionError):
                     continue
-                rows = db.execute(f'SELECT * FROM {TABLE} WHERE order_key=? ORDER BY id',(order['key'],)).fetchall()
-                if rows:
-                    results[key] = self._view(rows[-1],order,proposals)
-        return results
+                row = db.execute(f'SELECT * FROM {TABLE} WHERE order_key=? ORDER BY id DESC LIMIT 1',
+                                 (order['key'],)).fetchone()
+                if row:
+                    linked.append((key, order, row))
+        if not linked:
+            return {}
+        proposals = self._proposals() if proposals is None else proposals
+        return {key:self._view(row,order,proposals) for key,order,row in linked}
 
-    def batch_form(self, entries):
-        proposals = self._proposals()
-        results = []
+    def batch_form(self, entries, *, include_summaries=True):
+        orders = []
         with self.comparison.db() as db:
             for entry in entries:
                 key = entry if isinstance(entry,str) else entry.get('source') or entry.get('order_key')
@@ -285,14 +288,17 @@ class OrderConfirmationLinks:
                     order = self.comparison._order(db,key)
                 except (ValueError,LookupError,PermissionError):
                     continue
-                if not order['dispatch_known']:
-                    continue
-                candidates = [dict(quote,review_notes=self._review(order,quote,'')) for quote in proposals.values()
-                              if normalize_supplier(quote['supplier']) == normalize_supplier(order['supplier'])]
-                candidates.sort(key=lambda quote:(quote['date'],quote['source']['position']),reverse=True)
-                results.append(dict(source=key,order_key=order['key'],order_fingerprint=order['fingerprint'],order=order,
-                                    proposals=candidates))
-        return {'orders':results,'summaries':self.summaries(entries,proposals=proposals)}
+                if order['dispatch_known']:
+                    orders.append((key, order))
+        proposals = self._proposals() if orders else None
+        results = []
+        for key, order in orders:
+            candidates = [dict(quote,review_notes=self._review(order,quote,'')) for quote in proposals.values()
+                          if normalize_supplier(quote['supplier']) == normalize_supplier(order['supplier'])]
+            candidates.sort(key=lambda quote:(quote['date'],quote['source']['position']),reverse=True)
+            results.append(dict(source=key,order_key=order['key'],order_fingerprint=order['fingerprint'],order=order,
+                                proposals=candidates))
+        return {'orders':results,'summaries':self.summaries(entries,proposals=proposals) if include_summaries else {}}
 
 
 def get_order_confirmations(portal, comparison=None):
