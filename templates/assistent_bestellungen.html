@@ -84,7 +84,7 @@
 <summary>Originaldateien &amp; Bildvorschauen öffnen</summary>
 <div class="original-gallery">{% for file in order_files %}
 {% set original_url=url_for('werkstatt_orders.original_preview',group_id=order_material.intake_id,file_id=file.id) %}
-<figure>{% if file.mime in preview_types %}<a href="{{ original_url }}" target="_blank" rel="noopener" class="order-preview-link"><img {% if show_order_images %}src{% else %}data-preview-src{% endif %}="{{ original_url }}" alt="Originalbild: {{ file.original_name }}" loading="lazy" decoding="async"></a>{% endif %}
+<figure>{% if file.mime in preview_types %}<a href="{{ original_url }}" target="_blank" rel="noopener" {% if not show_order_images %}hidden{% endif %}><img {% if show_order_images %}src{% else %}data-preview-src{% endif %}="{{ original_url }}" alt="Originalbild: {{ file.original_name }}" loading="lazy" decoding="async"></a>{% endif %}
 <figcaption>{{ file.original_name }}<div class="actions"><a href="{{ original_url }}" target="_blank" rel="noopener">Original öffnen</a><a href="{{ url_for('werkstatt_intake.original',group_id=order_material.intake_id,file_id=file.id) }}">Herunterladen</a></div></figcaption></figure>
 {% endfor %}</div></details>
 <script>
@@ -95,6 +95,7 @@
     for (const image of gallery.querySelectorAll('img[data-preview-src]')) {
       image.src = image.dataset.previewSrc;
       delete image.dataset.previewSrc;
+      image.parentElement.hidden = false;
     }
   }
   function openLinkedGallery() {
