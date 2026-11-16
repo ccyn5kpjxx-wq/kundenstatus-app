@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import hashlib
 from io import BytesIO
+import json
 import re
 from zoneinfo import ZoneInfo
 
@@ -36,7 +37,19 @@ def _berichtszeilen(text):
         if quoted:
             line = quoted.group(1)
         else:
-            line = re.sub(r"^- (?:generic|text):\s*", "", line)
+            scalar = re.match(r"^- (?:generic|text):\s*(.*)$", line)
+            if scalar:
+                line = scalar.group(1)
+                # Accessible DOM exports quote some scalars, including negative
+                # amounts. Decode that serialization without changing the source.
+                if line.startswith('"'):
+                    try:
+                        decoded = json.loads(line)
+                    except json.JSONDecodeError:
+                        pass
+                    else:
+                        if isinstance(decoded, str):
+                            line = decoded
         result.append(line.strip())
     return result
 

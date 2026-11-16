@@ -283,6 +283,26 @@ class LexwareBerichtsimportTest(ZahlenTestFixture):
         record = self.parse(report(income="-100,00", expense="-20,00", difference="-80,00"))
         self.assertEqual((record["einnahmen_cent"], record["ausgaben_cent"]), (-10000, -2000))
 
+    def test_dom_quoted_negative_difference_keeps_original_source(self):
+        original = report(income="0,00", expense="80,00", difference="-80,00").replace(
+            b"- generic: -80,00", b'- generic: "-80,00"')
+        record = self.parse(original)
+        self.assertEqual((record["einnahmen_cent"], record["ausgaben_cent"]), (0, 8000))
+        portal.lexware_euer_monatsstand_speichern(record, original)
+        client = portal.app.test_client()
+        with client.session_transaction() as session:
+            session["admin"] = True
+        response = client.get("/admin/zahlen/lexware-bericht/2026/11")
+        self.assertEqual(response.data, original)
+        response.close()
+        self.assertIn("-80,00 €", self.page())
+
+    def test_malformed_dom_quoted_difference_is_rejected(self):
+        original = report(income="0,00", expense="80,00", difference="-80,00").replace(
+            b"- generic: -80,00", b'- generic: "-80,00')
+        with self.assertRaises(ValueError):
+            self.parse(original)
+
     def test_failed_or_older_source_does_not_replace_saved_month(self):
         data = report()
         record = self.parse(data)
