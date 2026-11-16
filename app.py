@@ -3163,6 +3163,8 @@ def configure_website_upload_limit():
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
     if (request.endpoint or "").startswith(("reifen_kauf.", "reifen_vertrag.")) and request.method == "POST":
         request.max_content_length = 262144 if request.endpoint == "reifen_kauf.webhook" else 16384
+    if (request.endpoint or "").startswith("shop_public_v2.") and request.method == "POST":
+        request.max_content_length = 262144 if request.endpoint == "shop_public_v2.stripe_webhook" else 16384
 
 
 @app.before_request
@@ -3200,6 +3202,15 @@ def restrict_public_site_service():
         "public_sitemap",
         "legacy_public_redirect",
     }
+    # The stateless homepage only reads released products. On a persistent
+    # portal (including its configured public hostname), the exact v2 handlers
+    # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
+    if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product"} and request.method == "GET":
+        return None
+    if not PUBLIC_SITE_ONLY and request.endpoint in {
+            "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
+            "shop_public_v2.order_status", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook"}:
+        return None
     if (request.endpoint not in allowed_endpoints
             and not (request.endpoint or '').startswith(('mos_public.', 'mos_termination.'))):
         abort(404)
@@ -3221,7 +3232,7 @@ def protect_csrf():
         return None
     if progress_csrf_exempt(sys.modules[__name__]):
         return None
-    if request.endpoint in {'mos_public.webhook', 'reifen_kauf.webhook'}:
+    if request.endpoint in {'mos_public.webhook', 'reifen_kauf.webhook', 'shop_public_v2.stripe_webhook'}:
         return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
     if request.path.startswith("/webhooks/whatsapp"):
         return None
@@ -60535,6 +60546,11 @@ reifen_vertraege = register_reifen_vertrag(sys.modules[__name__])
 BACKUP_TABLES += REIFEN_ANBINDUNG_TABLES
 BACKUP_SCHEMA_FEATURES += (REIFEN_ANBINDUNG_FEATURE,)
 configure_reifen_integrations(sys.modules[__name__])
+
+from shop_runtime import register_shop_runtime
+# No adapters/credentials/DB connections are inherited from the legacy tyre or
+# rental flows. All new shop stages remain off until explicitly wired/released.
+shop_runtime = register_shop_runtime(sys.modules[__name__])
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)
