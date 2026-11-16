@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Zahlen · Umsatz-Ziel{% endblock %}
+{% block title %}Zahlen · Zahlungen{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -26,11 +26,18 @@
 
 {% block content %}
 
+{% macro zahlungswert(label) -%}
+  {{ label if z.hat_daten and (not z.zahlungsabgleich_unvollstaendig or label != '0,00 €') else '—' }}
+{%- endmacro %}
+{% macro monatswert(monat, label) -%}
+  {{ label if monat.hat_daten and (not monat.unvollstaendig or label != '0,00 €') else '—' }}
+{%- endmacro %}
+
 <div class="section-title mb-4">
   <div>
     <div class="badge-soft mb-3">Controlling · Zahlen</div>
-    <h1 class="mb-2">Umsatz-Ziel &amp; Tendenz</h1>
-    <p class="mb-0">Einnahmen, Ausgaben und Monatsziel auf einen Blick — direkt aus deinen Lexware-Daten.</p>
+    <h1 class="mb-2">Lexware-Zahlen &amp; Monatsziel</h1>
+    <p class="mb-0">{{ z.datenbasis_label }}.</p>
   </div>
   <div class="d-flex align-items-center gap-2 flex-wrap">
     <a class="btn btn-soft" href="{{ url_for('admin_zahlen', jahr=z.prev_jahr, monat=z.prev_monat) }}" title="{{ z.vormonat_label }}">&larr;</a>
@@ -46,31 +53,85 @@
 </a>
 {% endif %}
 
-<div class="ampel-hero ampel-{{ z.ampel }} mb-4">
+{% if z.lexware_euer_snapshot %}
+<div class="alert alert-info mb-4" role="status">
+  <strong>Lexware-Auswertung nach Zahldatum.</strong>
+  Stichtag {{ z.snapshot_stichtag }} &middot; Quellenstand {{ z.snapshot_quellenzeitpunkt }}.
+  Die Beträge stammen aus der Lexware-EÜR; spätere Buchungen sind erst im nächsten übernommenen Stand enthalten.
+  <a href="{{ url_for('admin_zahlen_lexware_original', jahr=z.jahr, monat=z.monat) }}" class="ms-2">Originalbericht herunterladen</a>
+</div>
+{% if z.snapshot_veraltet %}
+<div class="alert alert-warning mb-4" role="status">
+  <strong>Berichtsstand vom {{ z.snapshot_stichtag }}.</strong>
+  Für spätere Buchungen bitte einen neuen Lexware-Bericht übernehmen.
+</div>
+{% endif %}
+{% else %}
+<div class="alert alert-info mb-4" role="status">
+  <strong>Belegzugeordnete Zahlungen nach Zahlungsdatum.</strong>
+  Für die vollständige Lexware-Auswertung „Nach Zahldatum“ ist ein aktueller EÜR-Stand erforderlich.
+  Direkt gebuchte Bankumsätze und weitere EÜR-Buchungen können in dieser Belegübersicht fehlen.
+</div>
+{% endif %}
+{% if z.zahlungsabgleich_unvollstaendig or not z.hat_daten %}
+<div class="alert alert-warning mb-4" role="status">
+  {% if not z.hat_daten %}
+    <strong>Zahlungsdaten fehlen.</strong> Sobald zu Belegen erfasste Zahlungen vorliegen, erscheinen hier die Beträge.
+  {% else %}
+    <strong>Zahlungsabgleich unvollständig.</strong> Die angezeigten Beträge zeigen den verfügbaren Teilstand.
+  {% endif %}
+  {% if z.zahlungsdaten_luecken %}
+    Für {{ z.zahlungsdaten_luecken }} Beleg{{ 'e' if z.zahlungsdaten_luecken != 1 else '' }} fehlen verlässliche Zahlungsdaten.
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="page-card p-3 mb-4">
+  <details>
+    <summary>Lexware-Berichtsstand übernehmen</summary>
+    <p class="small text-muted mt-3 mb-2">In Lexware die Einnahmen-Überschussrechnung für {{ z.monat_label }} nach Zahldatum öffnen. Den unveränderten Druckbericht als PDF oder Textbericht übernehmen; Monat, Betrieb, Summen und Erstellungsdatum werden geprüft. Neue Buchungen werden mit einem neuen Bericht übernommen.</p>
+    <form method="POST" action="{{ url_for('admin_zahlen_lexware_bericht') }}" enctype="multipart/form-data" class="d-flex gap-2 align-items-end flex-wrap">
+      {{ csrf_field()|safe }}
+      <input type="hidden" name="jahr" value="{{ z.jahr }}">
+      <input type="hidden" name="monat" value="{{ z.monat }}">
+      <div>
+        <label class="form-label" for="lexware-bericht">Lexware-Druckbericht für {{ z.monat_label }}</label>
+        <input id="lexware-bericht" class="form-control" type="file" name="lexware_bericht" accept=".pdf,.txt" required>
+      </div>
+      <button type="submit" class="btn btn-soft">Berichtsstand übernehmen</button>
+    </form>
+  </details>
+</div>
+
+<div class="ampel-hero ampel-{{ 'neutral' if z.zahlungsabgleich_unvollstaendig or not z.hat_daten else z.ampel }} mb-4">
   <div class="row align-items-center g-3">
     <div class="col-lg-7">
       <div class="text-uppercase small" style="letter-spacing: .08em; opacity: .85;">
-        {% if z.ist_aktueller_monat %}Stand heute, {{ z.heute_label }} · Tag {{ z.as_of }} von {{ z.tage_im_monat }}{% elif z.ist_zukunft %}Ausblick {{ z.monat_label }}{% else %}Monatsergebnis {{ z.monat_label }}{% endif %}
+        {% if z.lexware_euer_snapshot %}Lexware-Stand {{ z.snapshot_stichtag }}{% elif z.ist_aktueller_monat %}Stand heute, {{ z.heute_label }} · Tag {{ z.as_of }} von {{ z.tage_im_monat }}{% elif z.ist_zukunft %}Ausblick {{ z.monat_label }}{% else %}Monatsergebnis {{ z.monat_label }}{% endif %}
       </div>
       <div class="ampel-headline mt-1">
         <span class="ampel-dot"></span>
-        {% if z.ampel == 'gruen' %}Auf Kurs
+        {% if z.lexware_euer_snapshot %}Lexware-Stand
+        {% elif z.zahlungsabgleich_unvollstaendig or not z.hat_daten %}Zahlungsabgleich offen
+        {% elif z.ampel == 'gruen' %}Auf Kurs
         {% elif z.ampel == 'gelb' %}Knapp — Druck machen
         {% elif z.ampel == 'rot' %}Unter Ziel
         {% elif z.ist_zukunft %}Noch nicht begonnen
         {% elif z.ziel_gesetzt %}Startphase — Prognose folgt
         {% else %}Noch kein Auto-Ziel{% endif %}
       </div>
-      {% if z.ziel_gesetzt and z.ist_aktueller_monat %}
-      <div class="mt-2" style="opacity: .92;">Hochrechnung Monatsende: <strong>{{ z.hochrechnung_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
+      {% if z.zahlungsabgleich_unvollstaendig or not z.hat_daten %}
+      <div class="mt-2" style="opacity: .92;">Monatsziel und Schätzung folgen nach vollständigem Zahlungsabgleich.</div>
+      {% elif z.ziel_gesetzt and z.ist_aktueller_monat %}
+      <div class="mt-2" style="opacity: .92;">Geschätzte Zahlungseingänge bis Monatsende <strong>{{ z.hochrechnung_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
       {% elif z.ziel_gesetzt %}
-      <div class="mt-2" style="opacity: .92;">Einnahmen: <strong>{{ z.einnahmen_bisher_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
+      <div class="mt-2" style="opacity: .92;">Zahlungseingänge <strong>{{ z.einnahmen_bisher_label }}</strong> &middot; Auto-Ziel {{ z.ziel_label }}</div>
       {% else %}
       <div class="mt-2" style="opacity: .92;">{{ z.ziel_erklaerung }}</div>
       {% endif %}
     </div>
     <div class="col-lg-5">
-      {% if z.ziel_gesetzt %}
+      {% if z.ziel_gesetzt and z.hat_daten and not z.zahlungsabgleich_unvollstaendig %}
       <div class="d-flex justify-content-between small mb-1" style="opacity: .9;">
         <span>Ziel-Fortschritt</span><span>{{ z.fortschritt_pct }} %</span>
       </div>
@@ -83,33 +144,35 @@
 
 <div class="zahlen-grid mb-4">
   <div class="card metric-card metric-green">
-    <div class="metric-label">Einnahmen{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
-    <div class="metric-value">{{ z.einnahmen_bisher_label }}</div>
+    <div class="metric-label">{% if z.lexware_euer_snapshot %}Einnahmen{% else %}Zahlungseingänge{% endif %}{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
+    <div class="metric-value">{{ zahlungswert(z.einnahmen_bisher_label) }}</div>
   </div>
   <div class="card metric-card metric-warm">
-    <div class="metric-label">Ausgaben{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
-    <div class="metric-value">{{ z.ausgaben_bisher_label }}</div>
-    {% if z.hat_investitionen %}<div class="small mt-1" style="color: rgba(255,255,255,.85); position: relative; z-index: 1;">+ {{ z.investitionen_bisher_label }} Investitionen</div>{% endif %}
+    <div class="metric-label">{% if z.lexware_euer_snapshot %}Ausgaben{% else %}Zahlungsausgänge{% endif %}{% if z.ist_aktueller_monat %} bisher{% endif %}</div>
+    <div class="metric-value">{{ zahlungswert(z.ausgaben_bisher_label) }}</div>
+    {% if z.hat_investitionen %}<div class="small mt-1" style="color: rgba(255,255,255,.85); position: relative; z-index: 1;">davon {{ z.investitionen_bisher_label }} Investitionen</div>{% endif %}
   </div>
   <div class="card metric-card metric-blue">
-    <div class="metric-label">Differenz</div>
-    <div class="metric-value">{{ z.differenz_bisher_label }}</div>
+    <div class="metric-label">{% if z.lexware_euer_snapshot %}Differenz{% else %}Zahlungssaldo{% endif %}</div>
+    <div class="metric-value">{{ zahlungswert(z.differenz_bisher_label) }}</div>
   </div>
   <div class="card metric-card metric-gold">
-    <div class="metric-label">{% if z.ist_aktueller_monat %}Hochrechnung{% else %}Ziel{% endif %}</div>
-    <div class="metric-value">{% if z.ist_aktueller_monat %}{{ z.hochrechnung_label }}{% else %}{{ z.ziel_label }}{% endif %}</div>
+    <div class="metric-label">{% if z.ist_aktueller_monat %}Eingänge zum Monatsende (Schätzung){% else %}Ziel{% endif %}</div>
+    <div class="metric-value">{% if not z.hat_daten or z.zahlungsabgleich_unvollstaendig %}—{% elif z.ist_aktueller_monat %}{{ z.hochrechnung_label }}{% elif z.ziel_gesetzt %}{{ z.ziel_label }}{% else %}—{% endif %}</div>
   </div>
 </div>
 
 <div class="row g-3 mb-4">
   <div class="col-lg-6">
     <div class="page-card p-4 h-100">
-      <h2 class="h5 mb-2">Tendenz gegenüber Vormonat</h2>
+      <h2 class="h5 mb-2">Zahlungseingänge gegenüber Vormonat</h2>
       <p class="text-muted mb-3">
         {{ z.monat_label }} vs. {{ z.vormonat_label }} —
-        {% if z.ist_aktueller_monat %}jeweils bis Tag {{ z.as_of }}{% else %}ganzer Monat{% endif %}.
+          {% if z.ist_aktueller_monat %}jeweils bis Tag {{ z.as_of }}{% else %}ganzer Monat{% endif %}.
       </p>
-      {% if z.tendenz_pct is not none %}
+      {% if z.zahlungsabgleich_unvollstaendig or not z.hat_daten %}
+        <div class="text-muted">Der Vergleich folgt nach vollständigem Zahlungsabgleich.</div>
+      {% elif z.tendenz_pct is not none %}
         <div style="font-size: 1.5rem;">
           {% if z.tendenz_up %}<span class="trend-up">&#9650; +{{ z.tendenz_delta_label }} ({{ z.tendenz_pct }} %)</span>
           {% else %}<span class="trend-down">&#9660; &minus;{{ z.tendenz_delta_label }} ({{ z.tendenz_pct | abs }} %)</span>{% endif %}
@@ -118,18 +181,26 @@
           {{ z.monat_label }}: {{ z.einnahmen_bisher_label }} &middot; {{ z.vormonat_label }}: {{ z.vormonat_einnahmen_bisher_label }}
         </div>
       {% else %}
-        <div class="text-muted">Für {{ z.vormonat_label }} liegen (noch) keine Vergleichszahlen vor.</div>
+        <div class="text-muted">Für {{ z.vormonat_label }} liegen noch keine vergleichbaren Zahlen auf derselben Grundlage vor.</div>
       {% endif %}
     </div>
   </div>
   <div class="col-lg-6">
     <div class="page-card p-4 h-100">
-      <h2 class="h5 mb-2">Auto-Ziel{% if z.ziel_gesetzt %}: {{ z.ziel_label }}{% endif %}</h2>
+      <h2 class="h5 mb-2">Auto-Ziel{% if z.ziel_gesetzt and z.hat_daten and not z.zahlungsabgleich_unvollstaendig %} · {{ z.ziel_label }}{% endif %}</h2>
+      {% if z.zahlungsabgleich_unvollstaendig or not z.hat_daten %}
+      <p class="mb-0 text-muted">Das Monatsziel folgt nach vollständigem Zahlungsabgleich.</p>
+      {% else %}
       <p class="mb-2">{{ z.ziel_erklaerung }}</p>
       <p class="text-muted small mb-0">
-        Das Ziel berechnet sich bei jedem Aufruf neu aus den Lexware-Zahlen — kein Eintragen nötig.
-        Regel: Vormonat schlagen; läuft der Monat stärker, kommt die Hälfte des Vorsprungs (max. +15&nbsp;%) obendrauf.
+        {% if z.lexware_euer_snapshot %}
+        Das Ziel nutzt ausschließlich den vollständigen Lexware-EÜR-Vormonat. Eine Hochrechnung wird nur für einen heute erstellten aktuellen Monatsstand als Schätzung angezeigt; ohne Tagesvergleich gibt es keinen Trend-Aufschlag.
+        {% else %}
+        Das Ziel richtet sich nach den erfassten Zahlungseingängen des Vormonats.
+        Liegen die Eingänge am gleichen Stichtag höher, steigt das Ziel um die Hälfte des Vorsprungs, höchstens um 15&nbsp;%.
+        {% endif %}
       </p>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -138,31 +209,34 @@
 <div class="page-card p-4 mb-4">
   <div class="section-title mb-3">
     <div>
-      <h2 class="h5 mb-1">Größte Ausgaben im {{ z.monat_label }}</h2>
-      <p class="mb-0 text-muted small">Einmalige Anschaffungen (Auto, Maschine, Anlage) als Investition markieren — sie zählen dann nicht mehr in die laufenden Ausgaben und die Differenz. Investitionen laufen getrennt, darum kann die laufende Summe von der Lexware-Übersicht abweichen.</p>
+      <h2 class="h5 mb-1">Größte Zahlungsausgänge im {{ z.monat_label }}</h2>
+      <p class="mb-0 text-muted small">Markierte Investitionen bleiben in den gesamten Zahlungsausgängen und im Saldo enthalten. Die Kennzahl weist sie zusätzlich als Teilbetrag aus.</p>
     </div>
   </div>
   <div class="table-responsive">
     <table class="table align-middle">
       <thead>
-        <tr><th>Beleg</th><th class="text-end">Betrag</th><th>Zählt als</th><th></th></tr>
+        <tr><th>Beleg</th><th>Zahlungsdatum</th><th class="text-end">Betrag</th><th>Kategorie</th><th></th></tr>
       </thead>
       <tbody>
         {% for b in z.top_ausgaben %}
         <tr>
           <td>
             <div class="fw-bold">{{ b.kontakt }}</div>
-            <div class="text-muted small">{% if b.nummer %}Nr. {{ b.nummer }} · {% endif %}{{ b.datum }}</div>
+            {% if b.nummer %}<div class="text-muted small">Nr. {{ b.nummer }}</div>{% endif %}
           </td>
+          <td>{{ b.datum }}</td>
           <td class="text-end">{{ b.betrag_label }}</td>
           <td>{% if b.ist_investition %}<span class="badge text-bg-info">Investition</span>{% else %}<span class="badge text-bg-secondary">laufende Ausgabe</span>{% endif %}</td>
           <td class="text-end">
+            {% if b.id %}
             <form method="POST" action="{{ url_for('admin_zahlen_investition', beleg_id=b.id) }}" class="m-0 d-inline">
               {{ csrf_field()|safe }}
               <input type="hidden" name="jahr" value="{{ z.jahr }}">
               <input type="hidden" name="monat" value="{{ z.monat }}">
               <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">{% if b.ist_investition %}Doch laufende Ausgabe{% else %}Als Investition markieren{% endif %}</button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -175,23 +249,26 @@
 {% if z.alle_ausgaben and z.alle_ausgaben|length > 6 %}
 <div class="page-card p-4 mb-4">
   <details>
-    <summary style="cursor:pointer;" class="h6 mb-0">Alle Ausgaben im {{ z.monat_label }} anzeigen ({{ z.alle_ausgaben|length }}) — auch hier als Investition markierbar</summary>
+    <summary style="cursor:pointer;" class="h6 mb-0">Alle Zahlungsausgänge im {{ z.monat_label }} anzeigen ({{ z.alle_ausgaben|length }})</summary>
     <div class="table-responsive mt-3">
       <table class="table align-middle">
-        <thead><tr><th>Beleg</th><th class="text-end">Betrag</th><th>Zählt als</th><th></th></tr></thead>
+        <thead><tr><th>Beleg</th><th>Zahlungsdatum</th><th class="text-end">Betrag</th><th>Kategorie</th><th></th></tr></thead>
         <tbody>
           {% for b in z.alle_ausgaben %}
           <tr>
-            <td><div class="fw-bold">{{ b.kontakt }}</div><div class="text-muted small">{% if b.nummer %}Nr. {{ b.nummer }} · {% endif %}{{ b.datum }}</div></td>
+            <td><div class="fw-bold">{{ b.kontakt }}</div>{% if b.nummer %}<div class="text-muted small">Nr. {{ b.nummer }}</div>{% endif %}</td>
+            <td>{{ b.datum }}</td>
             <td class="text-end">{{ b.betrag_label }}</td>
             <td>{% if b.ist_investition %}<span class="badge text-bg-info">Investition</span>{% else %}<span class="badge text-bg-secondary">laufende Ausgabe</span>{% endif %}</td>
             <td class="text-end">
+              {% if b.id %}
               <form method="POST" action="{{ url_for('admin_zahlen_investition', beleg_id=b.id) }}" class="m-0 d-inline">
                 {{ csrf_field()|safe }}
                 <input type="hidden" name="jahr" value="{{ z.jahr }}">
                 <input type="hidden" name="monat" value="{{ z.monat }}">
                 <button type="submit" class="btn btn-sm btn-soft" data-no-loading="true">{% if b.ist_investition %}Doch laufende Ausgabe{% else %}Als Investition markieren{% endif %}</button>
               </form>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -206,7 +283,7 @@
   <div class="section-title mb-3">
     <div>
       <h2 class="h5 mb-1">Monatsübersicht</h2>
-      <p class="mb-0 text-muted small">Nach Belegdatum, Bruttowerte — wie in Lexware. Klick einen Monat für Details.</p>
+      <p class="mb-0 text-muted small">Einnahmen und Ausgaben nach Zahlungsdatum. Grundlage und Stand sind je Monat angegeben. Klick einen Monat für Details.</p>
     </div>
   </div>
   {% if z.uebersicht %}
@@ -226,11 +303,13 @@
         <tr {% if m.ist_aktiv %}style="background: rgba(20, 93, 102, .06);"{% endif %}>
           <td>
             <a class="fw-bold text-decoration-none" style="color: var(--ink);" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">{{ m.label }}</a>
-            {% if m.vormonat_geschlagen %}<span class="badge text-bg-success ms-1" title="Stärker als der Vormonat">&#9650; Vormonat</span>{% endif %}
+            {% if m.quellen_label %}<div class="text-muted small">{{ m.quellen_label }}</div>{% endif %}
+            {% if m.unvollstaendig %}<div class="text-warning small">Teilstand</div>{% endif %}
+            {% if m.vormonat_geschlagen and not m.unvollstaendig %}<span class="badge text-bg-success ms-1" title="Stärker als der Vormonat">&#9650; Vormonat</span>{% endif %}
           </td>
-          <td class="text-end">{{ m.einnahmen_label }}</td>
-          <td class="text-end">{{ m.ausgaben_label }}{% if m.investitionen_label %}<div class="text-muted small">+ {{ m.investitionen_label }} Invest</div>{% endif %}</td>
-          <td class="text-end {% if m.differenz_positiv %}trend-up{% else %}trend-down{% endif %}">{{ m.differenz_label }}</td>
+          <td class="text-end">{{ monatswert(m, m.einnahmen_label) }}</td>
+          <td class="text-end">{{ monatswert(m, m.ausgaben_label) }}{% if m.investitionen_label %}<div class="text-muted small">davon {{ m.investitionen_label }} Investitionen</div>{% endif %}</td>
+          <td class="text-end {% if m.differenz_positiv %}trend-up{% else %}trend-down{% endif %}">{{ monatswert(m, m.differenz_label) }}</td>
           <td class="text-end"><a class="btn btn-sm btn-soft" href="{{ url_for('admin_zahlen', jahr=m.jahr, monat=m.monat) }}">Öffnen</a></td>
         </tr>
         {% endfor %}
@@ -238,17 +317,22 @@
     </table>
   </div>
   {% else %}
-  <div class="text-muted">Noch keine Lexware-Rechnungen in der Datenbank.</div>
+  <div class="text-muted">Es liegen noch keine Zahlungen zu Lexware-Belegen vor.</div>
   {% endif %}
 </div>
 
 <div class="text-muted small">
-  {% if z.lexware_verbunden %}
-    Quelle: Lexware-Rechnungen &middot; letzter Abgleich: {{ z.last_sync or 'noch nie' }}
+  {% if z.lexware_euer_snapshot %}
+  Quelle: {{ z.snapshot_quelldatei }} &middot; Lexware EÜR nach Zahldatum &middot; Stand {{ z.snapshot_quellenzeitpunkt }}.
   {% else %}
-    Lexware ist nicht verbunden — sobald der API-Schlüssel gesetzt ist, erscheinen automatisch die aktuellen Zahlen.
+  <p class="mb-1">Die Beträge umfassen Bank- und Kassenzahlungen mit Belegzuordnung sowie manuell zu Belegen erfasste Zahlungen in Lexware. Skonto, reine Verrechnungen sowie Bank- und Kassenumsätze ohne Belegzuordnung sind ausgenommen.</p>
+  {% if z.lexware_verbunden %}
+    {% if z.last_sync %}Letzter erfolgreicher Zahlungsabgleich am {{ z.last_sync }}.{% else %}Ein erfolgreicher Zahlungsabgleich steht noch aus.{% endif %}
+  {% else %}
+    Eine Verbindung zu Lexware ist erforderlich.
   {% endif %}
-  &middot; {{ z.eintraege }} Belege berücksichtigt.
+  {% if z.hat_daten %}&middot; {{ z.eintraege }} erfasste Zahlungen berücksichtigt.{% endif %}
+  {% endif %}
 </div>
 
 {% endblock %}

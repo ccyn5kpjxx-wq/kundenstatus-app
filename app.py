@@ -59,6 +59,14 @@ from backup_storage import BackupStorage
 from portal_static_assets import asset_version, is_versioned_ui_asset
 from portal_request_timing import start_request_timing, timed_database_call, server_timing_header
 from portal_navigation_snapshot import NAVIGATION_SQL_COUNT_KEYS, load_navigation_sql_counts
+from lexware_zahlungsuebersicht import (
+    SETTING_KEY as LEXWARE_EUER_MONATSSTAENDE,
+    monatsstaende_lesen as lexware_euer_daten_validieren,
+    monatsstand_ersetzen as lexware_euer_stand_ersetzen,
+    monatsstand_anwenden as lexware_euer_stand_anwenden,
+    monatsstand_aus_bericht as lexware_euer_bericht_lesen,
+)
+from mos_company_identity import LEGAL_NAME as WORKSHOP_LEGAL_NAME
 import mietwagen_checkout
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
@@ -20112,7 +20120,7 @@ def lexware_rechnung_permalink(voucher_id, voucher_type):
     return f"{LEXWARE_APP_BASE_URL}/permalink/{path}/view/{voucher_id}"
 
 
-def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100, max_pages=25):
+def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100, max_pages=25, *, archived=False):
     # Alle Seiten holen, nicht nur die erste: sonst fehlen aeltere Belege
     # (z. B. laengst bezahlte Rechnungen) und die Monatszahlen sind unvollstaendig.
     items = []
@@ -20121,23 +20129,151 @@ def fetch_lexware_voucherlist(voucher_types, voucher_status, size=100, max_pages
         query = (
             f"?voucherType={quote(voucher_types)}"
             f"&voucherStatus={quote(voucher_status)}"
-            f"&archived=false&size={int(size)}&page={page}&sort=updatedDate,DESC"
+            f"&archived={'true' if archived else 'false'}&size={int(size)}&page={page}&sort=updatedDate,DESC"
         )
         data = lexware_request("GET", "/v1/voucherlist", query=query)
-        content = data.get("content", [])
+        content = data.get("content") if isinstance(data, dict) else None
+        if (not isinstance(content, list) or not isinstance(data.get("last"), bool)
+            or any(not isinstance(item, dict) or not clean_text(item.get("id")) for item in content)):
+            raise RuntimeError("Lexware-Belegliste konnte nicht vollständig gelesen werden.")
         items.extend(content)
-        if not content or data.get("last", True):
-            break
+        if data["last"]:
+            if len({item["id"] for item in items}) != data.get("totalElements", len(items)):
+                raise RuntimeError("Lexware-Belegliste hat sich während des Abgleichs geändert.")
+            return items
         page += 1
         time.sleep(0.3)
-    return items
+    raise RuntimeError("Lexware-Belegliste unvollständig: Seitenlimit erreicht.")
 
 
 def fetch_lexware_payment(voucher_id):
     try:
-        return lexware_request("GET", f"/v1/payments/{quote(clean_text(voucher_id))}")
-    except RuntimeError as exc:
+        payment = lexware_request("GET", f"/v1/payments/{quote(clean_text(voucher_id))}")
+    except (OSError, RuntimeError, ValueError) as exc:
         return {"error": str(exc)}
+    return payment if isinstance(payment, dict) else {"error": "Ungültige Lexware-Zahlungsdaten"}
+
+
+LEXWARE_ZAHLUNGSSTAND = "LEXWARE_ZAHLUNGSSTAND_V1"
+LEXWARE_ZAHLUNGSARTEN = {
+    "partPaymentFinancialTransaction", "partPaymentCashBox", "manualPayment",
+}
+LEXWARE_ZAHLUNGSVERRECHNUNGEN = {
+    "partPaymentCreditNote", "cashDiscount", "dunningCosts",
+    "currencyConversion", "irrecoverableReceivable",
+}
+LEXWARE_ZAHLUNGSRICHTUNG = {
+    **LEXWARE_RECHNUNG_TYPES,
+    "creditnote": "Ausgabe",
+    "salescreditnote": "Ausgabe",
+    "purchasecreditnote": "Einnahme",
+}
+
+
+def lexware_zahlungsposten(payment):
+    """Return dated cash movements, including manually recorded payments."""
+    items = payment.get("paymentItems")
+    if not isinstance(items, list):
+        raise ValueError("Zahlungsposten fehlen")
+    payments = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Ungültiger Zahlungsposten")
+        kind = item.get("paymentItemType")
+        if kind not in LEXWARE_ZAHLUNGSARTEN:
+            if kind not in LEXWARE_ZAHLUNGSVERRECHNUNGEN:
+                raise ValueError("Unbekannte Lexware-Zahlungsart")
+            continue
+        posted_at = datetime.fromisoformat(clean_text(item.get("postingDate")))
+        if posted_at.tzinfo:
+            posted_at = posted_at.astimezone(ZoneInfo("Europe/Berlin"))
+        amount = Decimal(str(item.get("amount")))
+        if not amount.is_finite() or amount < 0 or item.get("currency", payment.get("currency")) != "EUR":
+            raise ValueError("Ungültiges Zahlungsdatum, Betrag oder Währung")
+        if amount:
+            payments.append({
+                "datum": posted_at.date().isoformat(),
+                "cent": int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                "manuell": kind == "manualPayment",
+            })
+    return payments
+
+
+def lexware_zahlungsbeleg(voucher, payment):
+    voucher_id = clean_text(voucher.get("id"))
+    voucher_type = voucher.get("voucherType")
+    if not voucher_id or voucher_type not in LEXWARE_ZAHLUNGSRICHTUNG:
+        raise ValueError("Ungültiger Lexware-Zahlungsbeleg")
+    if (payment.get("voucherType", voucher_type) != voucher_type
+        or payment.get("error")):
+        raise ValueError("Kein passender Lexware-Zahlungsdatensatz")
+    return {
+        "voucher_id": voucher_id,
+        "voucher_number": clean_text(voucher.get("voucherNumber")),
+        "contact_name": clean_text(voucher.get("contactName")),
+        "richtung": LEXWARE_ZAHLUNGSRICHTUNG[voucher_type],
+        "posten": lexware_zahlungsposten(payment),
+    }
+
+
+def lexware_zahlungsstand_lesen():
+    try:
+        stand = json.loads(get_app_setting(LEXWARE_ZAHLUNGSSTAND, "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return stand if isinstance(stand, dict) else {}
+
+
+def lexware_zahlungsstand_speichern(belege, luecken, unvollstaendig):
+    stand = lexware_zahlungsstand_lesen()
+    zahlungsbelege = [beleg for beleg in belege.values() if beleg["posten"]]
+    # A failed refresh must not replace a previously complete payment history.
+    if not unvollstaendig or (not stand.get("letzter_erfolg") and zahlungsbelege):
+        stand = {
+            "belege": zahlungsbelege,
+            "letzter_erfolg": "" if unvollstaendig else now_str(),
+        }
+    stand.update(luecken=luecken, unvollstaendig=unvollstaendig)
+    set_app_setting(LEXWARE_ZAHLUNGSSTAND, json.dumps(stand, ensure_ascii=False))
+
+
+def lexware_zahlungsstand_fehler_markieren():
+    stand = lexware_zahlungsstand_lesen()
+    stand["unvollstaendig"] = True
+    set_app_setting(LEXWARE_ZAHLUNGSSTAND, json.dumps(stand, ensure_ascii=False))
+
+
+def lexware_euer_monatsstaende_lesen():
+    try:
+        payload = json.loads(get_app_setting(LEXWARE_EUER_MONATSSTAENDE, "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return lexware_euer_daten_validieren(payload)
+
+
+def lexware_euer_monatsstand_speichern(payload, original):
+    """Import parsed totals only together with their verified original export."""
+    try:
+        bisher = json.loads(get_app_setting(LEXWARE_EUER_MONATSSTAENDE, "{}"))
+    except (TypeError, ValueError):
+        bisher = {}
+    stand = lexware_euer_stand_ersetzen(bisher, payload, original)
+    # Keep the exact source privately, independently of subsequently refreshed
+    # payment caches. The hash-derived basename cannot escape this directory.
+    suffix = pathlib.Path(payload["quelldatei"]).suffix.lower()
+    if suffix not in {".pdf", ".txt"}:
+        raise ValueError("Unbekanntes Lexware-Berichtsformat.")
+    folder = pathlib.Path(UPLOAD_DIR) / "lexware_zahlenberichte"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / (payload["quelle_sha256"] + suffix)
+    try:
+        with target.open("xb") as output:
+            output.write(original)
+    except FileExistsError:
+        if hashlib.sha256(target.read_bytes()).hexdigest() != payload["quelle_sha256"]:
+            raise ValueError("Die gespeicherte Originaldatei ist beschädigt.")
+    set_app_setting(LEXWARE_EUER_MONATSSTAENDE, json.dumps(stand, ensure_ascii=False))
+    return stand
 
 
 def upsert_lexware_rechnung(voucher, payment=None):
@@ -20217,23 +20353,77 @@ def sync_lexware_rechnungen():
     synced = 0
     errors = []
     seen_voucher_ids = set()
+    zahlungsbelege = {}
+    zahlungsluecken = 0
+
+    def erfasse_zahlungen(voucher, payment):
+        nonlocal zahlungsluecken
+        try:
+            beleg = lexware_zahlungsbeleg(voucher, payment)
+        except (InvalidOperation, TypeError, ValueError):
+            zahlungsluecken += 1
+        else:
+            zahlungsbelege[beleg["voucher_id"]] = beleg
+
     for voucher_status in ("open", "overdue", "transferred", "sepadebit", "paid", "voided"):
         try:
             vouchers = fetch_lexware_voucherlist("invoice,salesinvoice,purchaseinvoice,downpaymentinvoice", voucher_status)
-        except RuntimeError as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             errors.append(str(exc))
             continue
         for voucher in vouchers:
+            voucher_id = clean_text(voucher.get("id"))
+            if not voucher_id or voucher_id in seen_voucher_ids:
+                continue
             if voucher_status == "voided":
                 # Stornierte Belege ohne Payment-Abruf uebernehmen; der Status
                 # wird ueber voucherStatus=voided als 'storniert' gespeichert.
                 upsert_lexware_rechnung(voucher)
             else:
-                payment = fetch_lexware_payment(voucher.get("id"))
+                payment = fetch_lexware_payment(voucher_id)
+                erfasse_zahlungen(voucher, payment)
                 upsert_lexware_rechnung(voucher, payment)
-            seen_voucher_ids.add(clean_text(voucher.get("id")))
+            seen_voucher_ids.add(voucher_id)
             synced += 1
             time.sleep(0.55)
+
+    # The payment history also needs archived invoices and cash refunds. Keep
+    # these out of the invoice and dunning workbench.
+    zahlungslisten_fehler = False
+    for types, archived in (
+        ("creditnote,salescreditnote,purchasecreditnote", False),
+        (",".join(LEXWARE_ZAHLUNGSRICHTUNG), True),
+    ):
+        try:
+            vouchers = fetch_lexware_voucherlist(types, "any", archived=archived)
+        except (OSError, RuntimeError, ValueError):
+            zahlungslisten_fehler = True
+            continue
+        for voucher in vouchers:
+            voucher_id = clean_text(voucher.get("id"))
+            if (not voucher_id or voucher_id in zahlungsbelege
+                or voucher.get("voucherStatus") in {"draft", "unchecked", "voided"}):
+                continue
+            time.sleep(0.55)
+            payment = fetch_lexware_payment(voucher_id)
+            if (voucher.get("voucherType") == "creditnote"
+                and payment.get("error", "").startswith("Lexware API Fehler 406:")):
+                # A linked credit note settles the invoice by offset. Lexware
+                # provides no independent payment resource for this case.
+                time.sleep(0.55)
+                try:
+                    credit = lexware_request("GET", f"/v1/credit-notes/{quote(voucher_id)}")
+                except (OSError, RuntimeError, ValueError):
+                    credit = {}
+                if (isinstance(credit, dict) and credit.get("voucherStatus") == "paidoff"
+                    and any(isinstance(link, dict) and link.get("voucherType") in {
+                        "invoice", "downpaymentinvoice", "salesinvoice",
+                    } for link in (credit.get("relatedVouchers") or []))):
+                    continue
+            erfasse_zahlungen(voucher, payment)
+    lexware_zahlungsstand_speichern(
+        zahlungsbelege, zahlungsluecken, bool(errors or zahlungslisten_fehler or zahlungsluecken),
+    )
     if not errors and seen_voucher_ids:
         # Belege, die Lexware gar nicht mehr liefert (geloescht), nicht weiter
         # als gueltig mitzaehlen. Nur nach komplettem, fehlerfreiem Abgleich.
@@ -20271,7 +20461,11 @@ def maybe_sync_lexware_rechnungen():
         last_dt = None
     if last_dt and datetime.now() - last_dt < timedelta(minutes=LEXWARE_AUTO_SYNC_MINUTES):
         return None
-    return sync_lexware_rechnungen()
+    try:
+        return sync_lexware_rechnungen()
+    except Exception:
+        lexware_zahlungsstand_fehler_markieren()
+        raise
 
 
 def hydrate_lexware_rechnung(row):
@@ -44233,18 +44427,6 @@ UMSATZ_MONATE = (
 
 
 
-# --- Zahlen / Umsatz-Ziel (Cockpit-Kachel) ---------------------------------
-# Liest die echten Einnahmen/Ausgaben aus den synchronisierten Lexware-Rechnungen
-# (Tabelle lexware_rechnungen) und stellt sie als Monatsziel mit Tendenz/Ampel dar.
-# Das Ziel berechnet sich automatisch: Vormonat schlagen; liegt der Monat vor dem
-# Vormonats-Tempo, kommt die Haelfte des Vorsprungs (max. +15 %) obendrauf.
-UMSATZ_MONATE = (
-    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
-    "Juli", "August", "September", "Oktober", "November", "Dezember",
-)
-
-
-
 def umsatz_euro_label(value):
     try:
         amount = float(value or 0)
@@ -44266,7 +44448,8 @@ def umsatz_parse_voucher_date(value):
 
 
 def umsatz_ziel_daten(jahr=None, monat=None):
-    heute = datetime.now().date()
+    """Vergleicht zu Lexware-Belegen erfasste Zahlungen nach Zahlungsdatum."""
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
     if not jahr or not monat:
         jahr, monat = heute.year, heute.month
     try:
@@ -44287,46 +44470,85 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     def next_month(y, m):
         return (y + 1, 1) if m == 12 else (y, m + 1)
 
-    db = get_db()
+    stand = lexware_zahlungsstand_lesen()
+    zahlungsbelege = stand.get("belege")
+    letzter_erfolg = clean_text(stand.get("letzter_erfolg"))
+    unvollstaendig = bool(stand.get("unvollstaendig") or not letzter_erfolg)
+    luecken = int(stand.get("luecken") or 0)
+    db = None
     try:
+        db = get_db()
         rows = db.execute(
-            "SELECT id, voucher_number, contact_name, voucher_date, total_amount, richtung, "
-            "COALESCE(investition, 0) AS investition FROM lexware_rechnungen "
-            "WHERE COALESCE(status, '') NOT IN ('storniert', 'geloescht')"
+            "SELECT id, voucher_id, voucher_type, status, voucher_status, raw_json, "
+            "COALESCE(investition, 0) AS investition FROM lexware_rechnungen"
         ).fetchall()
     except Exception:
         rows = []
+        unvollstaendig = True
     finally:
-        db.close()
+        if db is not None:
+            db.close()
+
+    rechnungen = {row["voucher_id"]: row for row in rows}
+    if not isinstance(zahlungsbelege, list):
+        unvollstaendig = True
+        letzter_erfolg = ""
+        zahlungsbelege = []
+        cache_luecken = 0
+        # Vor dem ersten Abgleich sind nur echte Zahlungsposten aus dem
+        # bisherigen Belegcache verwendbar. Ein Belegstatus genügt nicht.
+        for row in rows:
+            if (row["voucher_type"] not in LEXWARE_ZAHLUNGSRICHTUNG
+                or row["status"] in {"storniert", "geloescht"}
+                or row["voucher_status"] in {"draft", "unchecked", "voided"}):
+                continue
+            try:
+                payload = json.loads(row["raw_json"] or "{}")
+                voucher = payload.get("voucher") if isinstance(payload, dict) else None
+                payment = payload.get("payment") if isinstance(payload, dict) else None
+                if (not isinstance(voucher, dict) or voucher.get("id") != row["voucher_id"]
+                    or voucher.get("voucherType") != row["voucher_type"] or not isinstance(payment, dict)):
+                    raise ValueError("Kein passender Lexware-Zahlungsdatensatz")
+                zahlungsbelege.append(lexware_zahlungsbeleg(voucher, payment))
+            except (InvalidOperation, TypeError, ValueError):
+                cache_luecken += 1
+        luecken = max(luecken, cache_luecken)
 
     monats_summen = {}
     tages_summen = {}
     ausgaben_belege = {}
     eintraege = 0
-    for row in rows:
-        datum = umsatz_parse_voucher_date(row["voucher_date"])
-        if not datum:
+    for beleg in zahlungsbelege:
+        richtung = beleg["richtung"]
+        if richtung not in {"Einnahme", "Ausgabe"}:
             continue
-        try:
-            betrag = float(row["total_amount"] or 0)
-        except (TypeError, ValueError):
-            continue
-        richtung = clean_text(row["richtung"])
-        if richtung == "Einnahme":
-            key = "einnahmen"
-        elif richtung == "Ausgabe":
-            # Als Investition markierte Belege (Auto, Maschine, Anlage) laufen
-            # getrennt und verzerren die laufenden Ausgaben nicht.
-            key = "investitionen" if int(row["investition"] or 0) else "ausgaben"
-        else:
-            continue
-        eintraege += 1
-        ym = (datum.year, datum.month)
-        monats_summen.setdefault(ym, {"einnahmen": 0.0, "ausgaben": 0.0, "investitionen": 0.0})[key] += betrag
-        tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}, "investitionen": {}})
-        tag_dict[key][datum.day] = tag_dict[key].get(datum.day, 0.0) + betrag
-        if key != "einnahmen":
-            ausgaben_belege.setdefault(ym, []).append(row)
+        rechnung = rechnungen.get(beleg["voucher_id"])
+        investition = richtung == "Ausgabe" and rechnung is not None and bool(rechnung["investition"])
+        key = "einnahmen" if richtung == "Einnahme" else "ausgaben"
+        for posten in beleg["posten"]:
+            datum = umsatz_parse_voucher_date(posten["datum"])
+            if not datum or datum > heute:
+                continue
+            cent = posten["cent"]
+            eintraege += 1
+            ym = (datum.year, datum.month)
+            monatssumme = monats_summen.setdefault(ym, {"einnahmen": 0, "ausgaben": 0, "investitionen": 0})
+            tag_dict = tages_summen.setdefault(ym, {"einnahmen": {}, "ausgaben": {}, "investitionen": {}})
+            monatssumme[key] += cent
+            tag_dict[key][datum.day] = tag_dict[key].get(datum.day, 0) + cent
+            if investition:
+                monatssumme["investitionen"] += cent
+                tag_dict["investitionen"][datum.day] = tag_dict["investitionen"].get(datum.day, 0) + cent
+            if richtung == "Ausgabe":
+                ausgaben_belege.setdefault(ym, []).append({
+                    "id": rechnung["id"] if rechnung is not None else None,
+                    "kontakt": beleg["contact_name"] or "Unbekannter Zahlungsempfänger",
+                    "nummer": beleg["voucher_number"],
+                    "datum": datum.strftime(DATE_FMT),
+                    "cent": cent,
+                    "betrag_label": umsatz_euro_label(cent / 100),
+                    "ist_investition": investition,
+                })
 
     cur = (jahr, monat)
     ist_aktueller_monat = cur == (heute.year, heute.month)
@@ -44341,33 +44563,27 @@ def umsatz_ziel_daten(jahr=None, monat=None):
 
     def bisher(ym, schluessel, bis_tag):
         werte = tages_summen.get(ym, {}).get(schluessel, {})
-        return sum(amt for tag, amt in werte.items() if tag <= bis_tag)
+        return sum(cent for tag, cent in werte.items() if tag <= bis_tag) / 100
+
+    def monat_total(ym, schluessel):
+        return monats_summen.get(ym, {}).get(schluessel, 0) / 100
 
     einnahmen_bisher = bisher(cur, "einnahmen", as_of)
     ausgaben_bisher = bisher(cur, "ausgaben", as_of)
     investitionen_bisher = bisher(cur, "investitionen", as_of)
-    einnahmen_monat_total = monats_summen.get(cur, {}).get("einnahmen", 0.0)
-    ausgaben_monat_total = monats_summen.get(cur, {}).get("ausgaben", 0.0)
-    investitionen_monat_total = monats_summen.get(cur, {}).get("investitionen", 0.0)
-    differenz_bisher = einnahmen_bisher - ausgaben_bisher
+    einnahmen_monat_total = monat_total(cur, "einnahmen")
+    ausgaben_monat_total = monat_total(cur, "ausgaben")
+    investitionen_monat_total = monat_total(cur, "investitionen")
+    differenz_bisher = round(einnahmen_bisher - ausgaben_bisher, 2)
 
-    alle_ausgaben = []
-    for beleg in sorted(ausgaben_belege.get(cur, []), key=lambda r: -float(r["total_amount"] or 0)):
-        alle_ausgaben.append({
-            "id": beleg["id"],
-            "kontakt": clean_text(beleg["contact_name"]) or "Unbekannter Lieferant",
-            "nummer": clean_text(beleg["voucher_number"]),
-            "datum": clean_text(beleg["voucher_date"])[:10],
-            "betrag_label": umsatz_euro_label(beleg["total_amount"]),
-            "ist_investition": bool(int(beleg["investition"] or 0)),
-        })
+    alle_ausgaben = sorted(ausgaben_belege.get(cur, []), key=lambda beleg: -beleg["cent"])
     top_ausgaben = alle_ausgaben[:6]
 
     prev_y, prev_m = prev_month(jahr, monat)
     vm = (prev_y, prev_m)
-    vormonat_einnahmen_bisher = bisher(vm, "einnahmen", as_of)
-    vormonat_einnahmen_total = monats_summen.get(vm, {}).get("einnahmen", 0.0)
-    tendenz_delta = einnahmen_bisher - vormonat_einnahmen_bisher
+    vormonat_einnahmen_total = monat_total(vm, "einnahmen")
+    vormonat_einnahmen_bisher = bisher(vm, "einnahmen", as_of) if ist_aktueller_monat else vormonat_einnahmen_total
+    tendenz_delta = round(einnahmen_bisher - vormonat_einnahmen_bisher, 2)
     if vormonat_einnahmen_bisher > 0:
         tendenz_pct = round(tendenz_delta / vormonat_einnahmen_bisher * 100)
     else:
@@ -44377,7 +44593,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
     # (gleicher Stichtag), kommt die Haelfte des Vorsprungs als Aufschlag dazu,
     # gedeckelt bei +15 %. In den ersten 2 Tagen kein Aufschlag (zu wenig Daten).
     bump_pct = 0
-    if vormonat_einnahmen_total > 0 and not ist_zukunft:
+    if vormonat_einnahmen_total > 0 and not ist_zukunft and not unvollstaendig:
         if (
             ist_aktueller_monat
             and as_of >= 3
@@ -44436,11 +44652,11 @@ def umsatz_ziel_daten(jahr=None, monat=None):
 
     uebersicht = []
     for ym in sorted(monats_summen.keys()):
-        e = monats_summen[ym].get("einnahmen", 0.0)
-        a = monats_summen[ym].get("ausgaben", 0.0)
-        inv = monats_summen[ym].get("investitionen", 0.0)
+        e = monat_total(ym, "einnahmen")
+        a = monat_total(ym, "ausgaben")
+        inv = monat_total(ym, "investitionen")
         vm_von_ym = prev_month(ym[0], ym[1])
-        vm_einnahmen = monats_summen.get(vm_von_ym, {}).get("einnahmen", 0.0)
+        vm_einnahmen = monat_total(vm_von_ym, "einnahmen")
         uebersicht.append({
             "jahr": ym[0],
             "monat": ym[1],
@@ -44448,16 +44664,16 @@ def umsatz_ziel_daten(jahr=None, monat=None):
             "einnahmen_label": umsatz_euro_label(e),
             "ausgaben_label": umsatz_euro_label(a),
             "investitionen_label": umsatz_euro_label(inv) if inv > 0 else "",
-            "differenz_label": umsatz_euro_label(e - a),
+            "differenz_label": umsatz_euro_label(round(e - a, 2)),
             "differenz_positiv": (e - a) >= 0,
             "ist_aktiv": ym == cur,
-            "vormonat_geschlagen": vm_einnahmen > 0 and e > vm_einnahmen and ym != cur,
+            "vormonat_geschlagen": vm_einnahmen > 0 and e > vm_einnahmen and ym < (heute.year, heute.month),
         })
     uebersicht.reverse()
 
     next_y, next_m = next_month(jahr, monat)
 
-    return {
+    result = {
         "jahr": jahr,
         "monat": monat,
         "monat_label": f"{UMSATZ_MONATE[monat]} {jahr}",
@@ -44466,10 +44682,12 @@ def umsatz_ziel_daten(jahr=None, monat=None):
         "as_of": as_of,
         "tage_im_monat": tage_im_monat,
         "heute_label": heute.strftime("%d.%m.%Y"),
-        "hat_daten": eintraege > 0,
+        "hat_daten": eintraege > 0 or bool(letzter_erfolg),
         "eintraege": eintraege,
         "lexware_verbunden": bool(LEXWARE_API_KEY),
-        "last_sync": get_app_setting("LEXWARE_LAST_SYNC", ""),
+        "last_sync": letzter_erfolg,
+        "zahlungsabgleich_unvollstaendig": unvollstaendig,
+        "zahlungsdaten_luecken": luecken,
         "einnahmen_bisher_label": umsatz_euro_label(einnahmen_bisher),
         "ausgaben_bisher_label": umsatz_euro_label(ausgaben_bisher),
         "investitionen_bisher_label": umsatz_euro_label(investitionen_bisher),
@@ -44503,6 +44721,7 @@ def umsatz_ziel_daten(jahr=None, monat=None):
         "next_jahr": next_y,
         "next_monat": next_m,
     }
+    return lexware_euer_stand_anwenden(result, lexware_euer_monatsstaende_lesen())
 
 
 _LEXWARE_HINTERGRUND_SYNC_LOCK = threading.Lock()
@@ -44535,6 +44754,7 @@ def lexware_sync_im_hintergrund_starten():
             sync_lexware_rechnungen()
         except Exception as exc:
             try:
+                lexware_zahlungsstand_fehler_markieren()
                 set_app_setting("LEXWARE_LAST_SYNC_ERROR", clean_text(str(exc))[:1000])
                 # Auch im Fehlerfall den Zeitstempel setzen, damit der Auto-Sync-Backoff
                 # greift und die Rechnungsseite nicht endlos neu startet/neu lädt.
@@ -44586,7 +44806,7 @@ def admin_zahlen_investition(beleg_id):
     db.commit()
     db.close()
     flash(
-        "Beleg zählt jetzt als Investition (läuft getrennt von den laufenden Ausgaben)." if neu
+        "Beleg wird innerhalb der Zahlungsausgänge als Investition ausgewiesen." if neu
         else "Beleg zählt wieder als laufende Ausgabe.",
         "success",
     )
@@ -44598,6 +44818,47 @@ def admin_zahlen_investition(beleg_id):
     if jahr and monat:
         return redirect(url_for("admin_zahlen", jahr=jahr, monat=monat))
     return redirect(url_for("admin_zahlen"))
+
+
+@app.post("/admin/zahlen/lexware-bericht")
+@admin_required
+def admin_zahlen_lexware_bericht():
+    upload = request.files.get("lexware_bericht")
+    try:
+        if not upload or not upload.filename:
+            raise ValueError("Bitte einen Lexware-Druckbericht auswählen.")
+        original = upload.read(12 * 1024 * 1024 + 1)
+        name = pathlib.PureWindowsPath(upload.filename).name
+        name = pathlib.PurePosixPath(name).name
+        stand = lexware_euer_bericht_lesen(original, name, WORKSHOP_LEGAL_NAME)
+        jahr, monat = int(request.form.get("jahr") or 0), int(request.form.get("monat") or 0)
+        if (jahr, monat) != (stand["jahr"], stand["monat"]):
+            raise ValueError("Der Bericht gehört nicht zum ausgewählten Monat.")
+        lexware_euer_monatsstand_speichern(stand, original)
+    except (TypeError, ValueError) as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin_zahlen"))
+    flash(f"Lexware-Berichtsstand für {UMSATZ_MONATE[monat]} {jahr} übernommen.", "success")
+    return redirect(url_for("admin_zahlen", jahr=jahr, monat=monat))
+
+
+@app.get("/admin/zahlen/lexware-bericht/<int:jahr>/<int:monat>")
+@admin_required
+def admin_zahlen_lexware_original(jahr, monat):
+    record = lexware_euer_monatsstaende_lesen().get(f"{jahr:04d}-{monat:02d}")
+    if not record:
+        abort(404)
+    suffix = pathlib.Path(record["quelldatei"]).suffix.lower()
+    if suffix not in {".txt", ".pdf"}:
+        abort(404)
+    path = pathlib.Path(UPLOAD_DIR) / "lexware_zahlenberichte" / (record["quelle_sha256"] + suffix)
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != record["quelle_sha256"]:
+        abort(404)
+    response = send_file(path, as_attachment=True,
+        download_name=secure_filename(record["quelldatei"]) or f"Lexware-{jahr}-{monat:02d}{suffix}",
+        mimetype="application/pdf" if suffix == ".pdf" else "text/plain; charset=utf-8")
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 def schadenaufnahme_payload_from_form(form, require_address=False):
