@@ -1,9 +1,14 @@
-"""Continuous Render worker for the MOS contract outbox (never auto-enabled).
+"""Continuous Render worker for MOS contract and deposit-reminder outboxes.
 
 The per-cycle starter validates the same live secrets and starts an isolated
 Flask CLI process. A failed cycle terminates this worker with a non-zero code
 so Render service-failure notification can alert an operator. Do not run this
 on a web instance or in a test environment.
+
+The shared ``mos-contract-delivery`` CLI also queues and sends one scoped-link
+deposit reminder during the twelve hours before an advance booking's pickup.
+Missed or uncertain reminders surface as failures; the worker never authorizes
+a card or contacts Stripe. Existing explicit live-mail preflight remains required.
 """
 
 import os

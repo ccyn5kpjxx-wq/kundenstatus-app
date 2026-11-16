@@ -1,5 +1,6 @@
 """Public-facing TEST flow; explicit configuration, isolated portal DB, no live mode."""
 from base64 import b64encode
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -25,15 +26,16 @@ from mos_return import (init_schema as init_return_schema, deposit_release_eligi
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 from mos_contract_delivery import _single_address
 import mos_site_handoff
+from mietwagen_checkout import deferred_deposit_quote, deposit_authorization_opens, deposit_authorization_due
 from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS, public_workshop_contact
 
 LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
 BERLIN = ZoneInfo('Europe/Berlin')
 WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
                    'first_hour':8, 'last_hour':20, 'step_minutes':60}
-# A rolling calendar-week window keeps the public select finite. A manually
-# opened appointment can still be offered outside it, subject to payment gates.
-WEEKLY_SLOT_HORIZON_DAYS = 7
+# The booking window rolls forward on every request without opening database
+# rows in bulk. Explicit database closures still override these defaults.
+WEEKLY_SLOT_HORIZON_MONTHS = 12
 
 
 def weekly_handover_enabled(cfg):
@@ -44,12 +46,23 @@ def weekly_handover_enabled(cfg):
     return True
 
 
-def weekly_handover_slots(now=None):
-    """Future Berlin wall-clock hours, today through the next six local dates."""
+def weekly_handover_end_date(now=None):
+    """Last local booking date, twelve calendar months from Berlin's today."""
     now=now or datetime.now(timezone.utc)
     if now.tzinfo is None:raise ValueError('Zeitzone für Übergabezeiten fehlt.')
     today=now.astimezone(BERLIN).date()
-    for offset in range(WEEKLY_SLOT_HORIZON_DAYS):
+    year,month=divmod(today.year*12+today.month-1+WEEKLY_SLOT_HORIZON_MONTHS,12)
+    month+=1
+    return today.replace(year=year,month=month,day=min(today.day,monthrange(year,month)[1]))
+
+
+def weekly_handover_slots(now=None):
+    """Future Berlin hours through the same local date twelve months ahead."""
+    now=now or datetime.now(timezone.utc)
+    if now.tzinfo is None:raise ValueError('Zeitzone für Übergabezeiten fehlt.')
+    today=now.astimezone(BERLIN).date()
+    end_date=weekly_handover_end_date(now)
+    for offset in range((end_date-today).days+1):
         day=today+timedelta(days=offset)
         if day.weekday()==6:continue
         for hour in range(8,21):
@@ -134,6 +147,20 @@ def default_end_slot(slots, max_days):
     later.sort()
     target=start+timedelta(days=1)
     return next((slot for end,slot in later if end>=target),later[-1][1] if later else None)
+
+
+def slot_page_view(open_slots, weekly, closed_slots):
+    """Keep a year's recurring appointments manageable in the staff view."""
+    selected_day=request.args.get('day')
+    if selected_day:
+        try:datetime.strptime(selected_day,'%Y-%m-%d')
+        except ValueError:abort(400)
+    else:
+        selected_day=open_slots[0]['slot'][:10] if open_slots else datetime.now(BERLIN).date().isoformat()
+    return {'open_slots':[row for row in open_slots if row['slot'][:10]==selected_day],
+            'closed_slots':[row for row in closed_slots if row['slot'][:10]==selected_day],
+            'slot_day':selected_day,'open_slot_count':len(open_slots),
+            'weekly_schedule':weekly,'slot_horizon_end':weekly_handover_end_date().isoformat()}
 
 
 def selected_slots_open(db,start,end,weekly=False,now=None):
@@ -238,6 +265,10 @@ def register(portal):
         if not isinstance(cfg.get('slots'),list) or len(set(cfg['slots'])) != len(cfg['slots']):
             raise ValueError('Übergabetermine müssen eine Liste eindeutiger Zeitpunkte sein.')
         weekly_handover_enabled(cfg)
+        if cfg.get('deposit_timing') not in (None,'before_pickup'):
+            raise ValueError('Unbekannter Zeitpunkt für die Kautionsreservierung.')
+        if cfg.get('deposit_timing')=='before_pickup' and cfg.get('deposit_method')!='card_authorization_at_booking':
+            raise ValueError('Spätere Kaution benötigt eine separate Kreditkartenautorisierung.')
         for slot in cfg['slots']:
             dt=datetime.fromisoformat(slot)
             if dt.tzinfo is None or dt.astimezone(BERLIN).isoformat()!=slot:
@@ -287,6 +318,7 @@ def register(portal):
             if request.content_length and request.content_length>65536:abort(413)
             return
         settling={'mos_public.status','mos_public.retry','mos_public.cancel','mos_public.webhook','mos_public.receipt',
+                  'mos_public.deposit_access','mos_public.deposit_page','mos_public.simulate_deposit',
                   'mos_public.cancel_paid','mos_public.admin_bookings','mos_public.admin_action',
                   'mos_public.signed_contract_pdf','mos_public.admin_contract_pdf',
                   'mos_public.admin_handover','mos_public.admin_return',
@@ -411,14 +443,43 @@ def register(portal):
             'lessor_email':cfg.get('merchant_email',''),'lessor_phone':cfg.get('merchant_phone','')}
         if cfg.get('cancellation_policy'):
             quoted['cancellation_policy']=cfg['cancellation_policy']
+        if authorization and cfg.get('deposit_timing')=='before_pickup':
+            quoted['deposit_timing']='before_pickup'
         return quoted
 
-    def owned(hold_id):
+    def owned(hold_id,deposit_access=False):
         try:h=setup()['service'].read(hold_id)
         except ValueError:abort(404)
         payload=json.loads(h['payload'])
-        if payload['quote'].get('owner_hash')!=owner():abort(404)
+        if payload['quote'].get('owner_hash')!=owner():
+            access=session.get('mos_deposit_access',{}).get(hold_id,{})
+            if (not deposit_access or access.get('scope')!='deposit'
+                    or access.get('owner_hash')!=payload['quote'].get('owner_hash')
+                    or access.get('payload_sha256')!=hashlib.sha256(h['payload'].encode()).hexdigest()
+                    or access.get('expires_at',0)<=int(time.time())):
+                abort(404)
         return h,payload
+
+    @bp.route('/buchung-oeffnen',methods=['GET','POST'])
+    def deposit_access():
+        # The bearer token arrives in a URL fragment, then a CSRF-protected
+        # POST. It never appears in a request URL, referrer, or access log.
+        if request.method=='POST':
+            from mos_deposit_reminder import validate_access_token
+            try:access=validate_access_token(portal,request.form.get('token',''))
+            except (ValueError,TypeError,KeyError):
+                return render_template('mos_public/error.html',message='Dieser Kautionslink ist ungültig oder abgelaufen. Bitte die Werkstatt kontaktieren.'),404
+            allowed={key:value for key,value in session.get('mos_deposit_access',{}).items()
+                     if value.get('expires_at',0)>int(time.time())}
+            allowed[access['hold_id']]={key:access[key] for key in ('scope','owner_hash','payload_sha256','expires_at')}
+            # Keep the signed session cookie bounded even after many bookings.
+            session['mos_deposit_access']=dict(list(allowed.items())[-5:])
+            response=redirect(url_for('mos_public.status',hold_id=access['hold_id']),code=303)
+        else:
+            response=app.make_response(render_template('mos_public/access.html'))
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['Cache-Control']='no-store'
+        return response
 
     def retry_existing_checkout(request_key,customer,signature_data):
         """Replayed form submissions may reuse only the original signed hold."""
@@ -578,8 +639,9 @@ def register(portal):
                         h['contract_delivery_delay_seconds']=round((accepted-queued).total_seconds())
                 except ValueError:
                     pass
-        return render_template('mos_public/admin.html',holds=holds,open_slots=open_slots,
-                               closed_slots=closed_slots,request_id=secrets.token_urlsafe(24))
+        return render_template('mos_public/admin.html',holds=holds,
+                               request_id=secrets.token_urlsafe(24),
+                               **slot_page_view(open_slots,weekly,closed_slots))
 
     @bp.get('/admin/termine')
     @portal.admin_required
@@ -593,8 +655,8 @@ def register(portal):
             open_slots=listed_slots(db,True,weekly)
             closed_slots=listed_slots(db,False)
         finally:db.close()
-        return render_template('mos_public/admin.html',holds=[],open_slots=open_slots,
-                               closed_slots=closed_slots,slot_only=True)
+        return render_template('mos_public/admin.html',holds=[],slot_only=True,
+                               **slot_page_view(open_slots,weekly,closed_slots))
 
     @bp.post('/admin/termine')
     @portal.admin_required
@@ -663,7 +725,7 @@ def register(portal):
                 except Exception:
                     review_db.rollback();raise
                 finally:review_db.close()
-        return redirect(url_for('mos_public.admin_slot_page'),code=303)
+        return redirect(url_for('mos_public.admin_slot_page',day=slot[:10]),code=303)
 
     @bp.get('/admin/<hold_id>/vertrag.pdf')
     @portal.admin_required
@@ -848,7 +910,8 @@ def register(portal):
             slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(cfg))]
         finally:db.close()
         return render_template('mos_public/index.html',listings=LISTINGS,slots=slots,
-                               default_end=default_end_slot(slots,cfg['max_days']))
+                               default_end=default_end_slot(slots,cfg['max_days']),
+                               weekly_schedule=weekly_handover_enabled(cfg),max_days=cfg['max_days'])
 
     @app.cli.command('mos-contract-delivery')
     def deliver_contracts():
@@ -865,6 +928,11 @@ def register(portal):
         mail_cfg=portal.get_werkstatt_smtp_config()
         if not mail_cfg.get('smtp_configured') or not (mail_cfg.get('smtp_ssl') or mail_cfg.get('smtp_tls')):
             raise click.ClickException('Verschlüsselter Werkstatt-Mailversand ist nicht eingerichtet.')
+        # The same monitored worker sends due deposit links. No card is
+        # authorized or charged by this background job.
+        setup()
+        from mos_deposit_reminder import run_cycle as deposit_reminder_cycle
+        reminders=deposit_reminder_cycle(portal,mail_cfg,live=True,enabled=True)
         db=portal.get_db()
         try:init_contract_schema(db);init_order_receipt_schema(db);db.commit()
         finally:db.close()
@@ -893,8 +961,12 @@ def register(portal):
         unresolved_receipts=order_receipt_unresolved_count(portal)
         missing=len(unfinished_live_ids(portal))
         click.echo(f'MOS Bestelleingangsbestätigungen offen oder zu prüfen: {unresolved_receipts}; '
-                   f'Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}')
-        if errors or unresolved_receipts or unresolved or missing:
+                   f'Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}; '
+                   f'Kautionserinnerungen versandt: {reminders["sent"]}; offen oder zu prüfen: {reminders["unresolved"]}; '
+                   f'Kautionserinnerungen verspätet: {reminders["overdue"]}; '
+                   f'Kaution nach Abholzeit noch offen: {reminders["missing_deposit_overdue"]}')
+        if (errors or unresolved_receipts or unresolved or missing or reminders['errors']
+                or reminders['unresolved'] or reminders['overdue'] or reminders['missing_deposit_overdue']):
             raise click.ClickException('MOS Bestell- oder Vertragszustellung ist noch nicht abgeschlossen.')
 
     @app.cli.command('mos-booking-reconcile')
@@ -958,6 +1030,11 @@ def register(portal):
             datetime.now(timezone.utc)>release_review_deadline(
                 datetime.fromisoformat(row['cleared_at'] or row['returned_at']),portal.bw_feiertage)
             for row in uncleared_returns)
+        from mos_deposit_reminder import missing_deposit_overdue
+        try:deferred_deposit_overdue=missing_deposit_overdue(portal)
+        except Exception:
+            errors+=1
+            deferred_deposit_overdue=0
         paid_without_webhook=0
         for pending in pending_sessions:
             try:
@@ -1013,9 +1090,10 @@ def register(portal):
                    f'Bestelleingangsbestätigungen nach Providerabgleich neu vorgemerkt: {receipt_queued}; '
                    f'unklare Checkout-Aufträge: {uncertain_checkouts}; ungeklärte Kartenreservierungen: {unresolved_deposits}; '
                    f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}; '
-                   f'Kautionsfreigaben nach internem Prüftermin: {clear_return_overdue}')
+                   f'Kautionsfreigaben nach internem Prüftermin: {clear_return_overdue}; '
+                   f'Kaution nach Abholzeit noch offen: {deferred_deposit_overdue}')
         if (errors or paid_without_webhook or uncertain_checkouts or unresolved_deposits
-                or review_count or failed_refunds or clear_return_overdue):
+                or review_count or failed_refunds or clear_return_overdue or deferred_deposit_overdue):
             raise click.ClickException('Offene Zahlungs- oder Prüffälle; Admin-Prüfung erforderlich.')
 
     @bp.post('/quote')
@@ -1029,7 +1107,11 @@ def register(portal):
             except ValueError as error:
                 return render_template('mos_public/error.html',message=str(error)),400
         else:
-            q=quote(request.form.get('vehicle'),request.form.get('start'),request.form.get('end'))
+            def form_slot(name):
+                if name+'_date' in request.form or name+'_time' in request.form:
+                    return local_slot_to_iso(request.form.get(name+'_date','')+'T'+request.form.get(name+'_time',''))
+                return request.form.get(name)
+            q=quote(request.form.get('vehicle'),form_slot('start'),form_slot('end'))
         token=serializer().dumps({'quote':q,'nonce':secrets.token_urlsafe(20)})
         return render_template('mos_public/quote.html',q=q,token=token,prefill=prefill)
 
@@ -1090,7 +1172,7 @@ def register(portal):
         if closed:return closed
         signed_payload(p)
         state=setup()
-        if p['quote'].get('deposit_authorized_cents'):
+        if p['quote'].get('deposit_authorized_cents') and not deferred_deposit_quote(p['quote']):
             try:
                 state['service'].prepare_deposit(hold_id)
                 deposit=state['service'].reconcile_deposit(hold_id)
@@ -1113,11 +1195,15 @@ def register(portal):
 
     @bp.get('/status/<hold_id>/kaution')
     def deposit_page(hold_id):
-        h,p=owned(hold_id)
-        if (h['status']!='pending' or not app.config['MOS_PUBLIC_BOOKING'].get('enabled')
-                or not p['quote'].get('deposit_authorized_cents')):
+        h,p=owned(hold_id,deposit_access=True)
+        deferred=deferred_deposit_quote(p['quote'])
+        if deferred:
+            permitted=h['status']=='confirmed' and deposit_authorization_due(p['quote'])
+        else:
+            permitted=h['status']=='pending' and app.config['MOS_PUBLIC_BOOKING'].get('enabled')
+        if not permitted or not p['quote'].get('deposit_authorized_cents'):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
-        closed=closed_slot_response(hold_id,p['quote'])
+        closed=closed_slot_response(hold_id,p['quote']) if not deferred else None
         if closed:return closed
         signed_payload(p)
         state=setup()
@@ -1126,13 +1212,15 @@ def register(portal):
             deposit=state['service'].reconcile_deposit(hold_id)
         except Exception:
             if deposit_state(hold_id)=='released':
-                return render_status(hold_id,'Diese Kartenreservierung wurde freigegeben. Bitte mit einer Kreditkarte und einem passenden Termin neu buchen.'),409
+                message=('Diese Kartenreservierung konnte nicht verwendet werden und wurde freigegeben. Deine bezahlte Buchung bleibt bestehen; bitte vor Abholung die Werkstatt kontaktieren.' if deferred else
+                         'Diese Kartenreservierung wurde freigegeben. Bitte mit einer Kreditkarte und einem passenden Termin neu buchen.')
+                return render_status(hold_id,message),409
             app.logger.exception('MOS Kartenformular konnte nicht vorbereitet werden')
             return render_status(hold_id,'Kartenreservierung derzeit nicht erreichbar. Bitte Status erneut prüfen.'),503
         if deposit.get('ready'):
             return redirect(url_for('mos_public.status',hold_id=hold_id),code=303)
         if deposit.get('status') not in {'requires_payment_method','requires_confirmation','requires_action'}:
-            return render_status(hold_id,'Kartenreservierung nicht verfügbar. Der Mietpreis wurde nicht abgebucht.'),409
+            return render_status(hold_id,'Kartenreservierung nicht verfügbar. Bitte die Werkstatt vor Abholung kontaktieren.' if deferred else 'Kartenreservierung nicht verfügbar. Der Mietpreis wurde nicht abgebucht.'),409
         return render_template('mos_public/deposit.html',h=h,q=p['quote'],
             client_secret=deposit['client_secret'],
             publishable_key=app.config.get('MOS_PUBLIC_STRIPE_PUBLISHABLE_KEY',''),
@@ -1140,12 +1228,13 @@ def register(portal):
 
     @bp.post('/status/<hold_id>/kaution-test')
     def simulate_deposit(hold_id):
-        h,p=owned(hold_id)
+        h,p=owned(hold_id,deposit_access=True)
         state=setup()
-        if (state['cfg']['mode']!='offline' or h['status']!='pending'
+        deferred=deferred_deposit_quote(p['quote'])
+        if (state['cfg']['mode']!='offline' or h['status']!=('confirmed' if deferred else 'pending')
                 or not p['quote'].get('deposit_authorized_cents')):
             abort(404)
-        closed=closed_slot_response(hold_id,p['quote'])
+        closed=closed_slot_response(hold_id,p['quote']) if not deferred else None
         if closed:return closed
         signed_payload(p)
         deposit=state['service'].prepare_deposit(hold_id)
@@ -1158,10 +1247,11 @@ def register(portal):
         return render_status(hold_id)
 
     def render_status(hold_id,error=None):
-        h,p=owned(hold_id)
+        h,p=owned(hold_id,deposit_access=True)
+        deferred=deferred_deposit_quote(p['quote'])
         try:setup()['service'].cancel_or_reconcile(hold_id)
         except Exception:pass
-        h,_=owned(hold_id)
+        h,_=owned(hold_id,deposit_access=True)
         deposit=None
         if p['quote'].get('deposit_authorized_cents'):
             card_state=deposit_state(hold_id)
@@ -1171,9 +1261,10 @@ def register(portal):
                 try:deposit=setup()['service'].reconcile_deposit(hold_id)
                 except Exception:
                     if deposit_state(hold_id)=='released':
-                        h,_=owned(hold_id)
+                        h,_=owned(hold_id,deposit_access=True)
                         deposit={'status':'released','ready':False}
-                        error=error or 'Diese Kartenreservierung konnte nicht verwendet werden und wurde freigegeben. Bitte neu buchen.'
+                        error=error or ('Diese Kartenreservierung konnte nicht verwendet werden und wurde freigegeben. Deine bezahlte Buchung bleibt bestehen; bitte vor Abholung die Werkstatt kontaktieren.' if deferred else
+                                       'Diese Kartenreservierung konnte nicht verwendet werden und wurde freigegeben. Bitte neu buchen.')
                     else:
                         app.logger.exception('MOS Kartenreservierung konnte nicht abgeglichen werden')
                         error=error or 'Kartenreservierung muss geprüft werden. Bitte Werkstatt kontaktieren.'
@@ -1201,7 +1292,10 @@ def register(portal):
                       .strftime('%d.%m.%Y um %H:%M Uhr')) if signed_at else None
         return render_template('mos_public/status.html',h=h,q=p['quote'],account=acc,error=error,deposit=deposit,
                                contract=contract,signed=signed,signed_local=signed_local,
-                               presigned=presigned)
+                               presigned=presigned,
+                               deposit_due=deferred and h['status']=='confirmed' and deposit_authorization_due(p['quote']),
+                               deposit_opens_local=(deposit_authorization_opens(p['quote']).astimezone(BERLIN).strftime('%d.%m.%Y um %H:%M Uhr') if deferred else None),
+                               deposit_link_access=p['quote'].get('owner_hash')!=owner())
 
     @bp.get('/status/<hold_id>/vertrag.pdf')
     def signed_contract_pdf(hold_id):

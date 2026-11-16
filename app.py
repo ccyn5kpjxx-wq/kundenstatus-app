@@ -8486,6 +8486,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
     "miet_checkout_contracts",
     "miet_checkout_contract_delivery",
     "miet_checkout_order_receipts",
+    "miet_checkout_deposit_reminders",
     "miet_checkout_handovers",
     "miet_checkout_vehicle_blocks",
     "miet_checkout_vehicle_readiness",

@@ -55,6 +55,10 @@ def snapshot(payload):
         or q['amount_cents'] != q['rental_cents']
     ):
         raise ValueError('Zahlbetrag und Kreditkartenreservierung stimmen nicht überein.')
+    if 'deposit_timing' in q and (q['deposit_timing'] != 'before_pickup'
+            or q.get('deposit_method') != 'card_authorization_at_booking'
+            or q.get('deposit_authorized_cents') != 50000):
+        raise ValueError('Unbekannter Zeitpunkt der Kreditkartenreservierung.')
     contract = {
         'lessor_name': LESSOR_NAME, 'lessor_address': LESSOR_ADDRESS,
         'offer_name': OFFER_NAME, 'customer_name': customer['name'],
@@ -72,7 +76,7 @@ def snapshot(payload):
     }
     # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
-    for key in ('deposit_authorized_cents', 'deposit_method', 'cancellation_policy'):
+    for key in ('deposit_authorized_cents', 'deposit_method', 'deposit_timing', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
     # Old signed quotes have no contact fields and must keep their original hash.
@@ -184,8 +188,12 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
         ('Mietpreis inkl. MwSt.', _eur(contract['rental_cents'])),
     ]
     if contract.get('deposit_authorized_cents', 0):
+        deferred = contract.get('deposit_timing') == 'before_pickup'
         rows += [
-            ('Kaution auf Kreditkarte reserviert', _eur(contract['deposit_authorized_cents']) + ' - keine Abbuchung'),
+            ('Kaution vor Abholung online reservieren' if deferred else 'Kaution auf Kreditkarte reserviert',
+             _eur(contract['deposit_authorized_cents']) + ' - keine Abbuchung'
+             + ('; frühestens zwölf Stunden vor Abholung auf einer Kreditkarte. '
+                'Eine gültige Kartenreservierung ist Voraussetzung für die Fahrzeugübergabe.' if deferred else '')),
             ('Zahlbetrag (nur Miete)', _eur(contract['amount_cents'])),
         ]
     else:
