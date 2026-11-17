@@ -55,6 +55,15 @@ def snapshot(payload):
         or q['amount_cents'] != q['rental_cents']
     ):
         raise ValueError('Zahlbetrag und Kreditkartenreservierung stimmen nicht überein.')
+    if 'long_rental_deposit_policy' in q and (
+            q['long_rental_deposit_policy']!='paid_at_booking_v1'
+            or q.get('deposit_method')!='charge_with_rent_refund_after_return'
+            or type(q.get('days')) is not int or not 6<=q['days']<=30
+            or q.get('deposit_charged_cents')!=50000 or q.get('deposit_authorized_cents',0)!=0
+            or q.get('deposit_cents')!=50000 or q.get('checkout_deposit') is not True
+            or q.get('amount_cents')!=q.get('rental_cents',0)+50000
+            or 'deposit_timing' in q or 'deposit_authorization_mode' in q):
+        raise ValueError('Bezahlte Kaution und Gesamtbetrag für die längere Miete stimmen nicht überein.')
     if 'deposit_timing' in q and (q['deposit_timing'] != 'before_pickup'
             or q.get('deposit_method') != 'card_authorization_at_booking'
             or q.get('deposit_authorized_cents') != 50000):
@@ -82,7 +91,7 @@ def snapshot(payload):
     # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
     for key in ('deposit_authorized_cents', 'deposit_method', 'deposit_timing',
-                'deposit_authorization_mode', 'cancellation_policy'):
+                'deposit_authorization_mode', 'long_rental_deposit_policy', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
     # Old signed quotes have no contact fields and must keep their original hash.
@@ -208,6 +217,13 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
             ('Kaution im Zahlbetrag', _eur(contract['deposit_charged_cents'])),
             ('Vorgesehener Zahlbetrag', _eur(contract['amount_cents'])),
         ]
+        if contract.get('long_rental_deposit_policy')=='paid_at_booking_v1':
+            rows += [('Kautionszahlung bei Buchung',
+                      '500 EUR werden zusammen mit der Miete bezahlt; keine zusätzliche Kartenreservierung vor Abholung.'),
+                     ('Kautionserstattung',
+                      'Nach dokumentierter unbeanstandeter Rückgabe veranlassen wir die vollständige Erstattung '
+                      'spätestens binnen zwei Werktagen auf das ursprünglich verwendete Zahlungsmittel. '
+                      'Die Bank kann die Gutschrift später anzeigen.')]
     rows += [
         ('Vertragliche Selbstbeteiligung', _eur(contract['deductible_cents'])),
         ('Freikilometer', str(contract['included_km']) + ' km'),

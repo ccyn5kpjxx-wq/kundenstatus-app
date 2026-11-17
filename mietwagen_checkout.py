@@ -16,6 +16,9 @@ from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS
 STANDARD_DEPOSIT_MAX_DAYS = 5
 EXTENDED_DEPOSIT_MAX_DAYS = 28
 EXTENDED_DEPOSIT_MODE = 'extended_if_available'
+LONG_RENTAL_DEPOSIT_METHOD = 'charge_with_rent_refund_after_return'
+LONG_RENTAL_DEPOSIT_POLICY = 'paid_at_booking_v1'
+LONG_RENTAL_MAX_DAYS = 30
 
 
 def init_schema(db):
@@ -44,6 +47,24 @@ def init_schema(db):
 
 def _card_authorization_quote(quote):
     return quote.get('deposit_method') == 'card_authorization_at_booking'
+
+
+def is_long_rental_paid_deposit(quote):
+    return (quote.get('long_rental_deposit_policy') == LONG_RENTAL_DEPOSIT_POLICY
+            and quote.get('deposit_method') == LONG_RENTAL_DEPOSIT_METHOD)
+
+
+def validate_long_rental_paid_deposit(quote):
+    if (not is_long_rental_paid_deposit(quote)
+            or type(quote.get('days')) is not int or not 5 < quote['days'] <= LONG_RENTAL_MAX_DAYS
+            or type(quote.get('rental_cents')) is not int or quote['rental_cents'] <= 0
+            or any(type(quote.get(key)) is not int for key in
+                   ('amount_cents','deposit_charged_cents','deposit_cents','deposit_authorized_cents'))
+            or quote.get('deposit_charged_cents') != 50000 or quote.get('deposit_cents') != 50000
+            or quote.get('deposit_authorized_cents') != 0 or quote.get('checkout_deposit') is not True
+            or quote.get('amount_cents') != quote['rental_cents'] + 50000
+            or 'deposit_timing' in quote or 'deposit_authorization_mode' in quote):
+        raise ValueError('Längere Mieten benötigen den vereinbarten Mietpreis plus 500 EUR rückzahlbare Kaution; sechs bis 30 Miettage.')
 
 
 def deferred_deposit_quote(quote):
@@ -88,7 +109,9 @@ def _checkout_disclosure(quote, *, test_mode):
         f"{quote['extra_km_cents']/100:.2f} EUR/km. "
         f'Aktuelle Abholadresse für die persönliche Übergabe: Gärtner, {WORKSHOP_ADDRESS}.'
     )
-    deposit = ('500 EUR Kaution vor Abholung online auf Kreditkarte reservieren '
+    deposit = ('500 EUR rückzahlbare Kaution im Zahlbetrag; Erstattung nach ordnungsgemäßer Rückgabe. '
+               if is_long_rental_paid_deposit(quote) else
+               '500 EUR Kaution vor Abholung online auf Kreditkarte reservieren '
                '(frühestens 12 Stunden vorher), ohne Abbuchung. '
                if deferred_deposit_quote(quote) else
                '500 EUR Kaution bereits separat auf der Kreditkarte reserviert, ohne Abbuchung. '
@@ -219,6 +242,8 @@ class SharedCheckout:
             raise ValueError('Verbindlicher serverseitiger Preis und Regelversion erforderlich.')
         if 'deposit_timing' in quote and not deferred_deposit_quote(quote):
             raise ValueError('Unbekannter Zeitpunkt der Kartenreservierung.')
+        if 'long_rental_deposit_policy' in quote:
+            validate_long_rental_paid_deposit(quote)
         authorization_mode = quote.get('deposit_authorization_mode')
         if authorization_mode is not None and (
                 authorization_mode != EXTENDED_DEPOSIT_MODE or not deferred_deposit_quote(quote)
@@ -229,11 +254,12 @@ class SharedCheckout:
             raise ValueError('Mieten über fünf Tage benötigen eine bestätigte verlängerte Kreditkartenautorisierung; höchstens 28 Miettage.')
         payload = json.dumps({'customer': {'name': name, 'telefon': customer.get('telefon', ''),
                             'email': customer.get('email', '')}, 'quote': quote}, sort_keys=True)
-        if _card_authorization_quote(quote):
+        if _card_authorization_quote(quote) or is_long_rental_paid_deposit(quote):
             if (type(quote.get('rental_cents')) is not int or quote['rental_cents'] <= 0
-                    or quote['amount_cents'] != quote['rental_cents']
-                    or quote.get('deposit_authorized_cents') != 50000
-                    or quote.get('deposit_charged_cents') != 0
+                    or (_card_authorization_quote(quote) and (
+                        quote['amount_cents'] != quote['rental_cents']
+                        or quote.get('deposit_authorized_cents') != 50000
+                        or quote.get('deposit_charged_cents') != 0))
                     or quote.get('vehicle_id') != int(vehicle_id)
                     or datetime.fromisoformat(quote['start_slot']).date() != start
                     or datetime.fromisoformat(quote['end_slot']).date() != end):
@@ -266,6 +292,65 @@ class SharedCheckout:
             return dict(row) if row else None
         finally:
             db.close()
+
+    def _validated_charged_payment(self, h, checkout, payment, *, expected_refunded_cents=0):
+        q = json.loads(h['payload'])['quote']
+        validate_long_rental_paid_deposit(q)
+        from mos_public_contract import signed_payload
+        signed_payload(json.loads(h['payload']))
+        self.validate(h, checkout)
+        pi = checkout.get('payment_intent')
+        charge = payment.get('latest_charge')
+        if (type(expected_refunded_cents) is not int or expected_refunded_cents not in (0,50000)
+                or checkout.get('status') != 'complete' or checkout.get('payment_status') != 'paid'
+                or not isinstance(pi, str) or not pi.startswith('pi_')
+                or h['payment_intent'] not in (None, pi)
+                or payment.get('id') != pi or payment.get('object') != 'payment_intent'
+                or payment.get('livemode') is not self.gateway.livemode
+                or payment.get('status') != 'succeeded' or payment.get('currency') != 'eur'
+                or any(type(payment.get(key)) is not int for key in ('amount','amount_received','amount_capturable'))
+                or payment.get('amount') != q['amount_cents']
+                or payment.get('amount_received') != q['amount_cents']
+                or payment.get('amount_capturable') != 0
+                or not isinstance(charge, dict) or charge.get('object') != 'charge'
+                or charge.get('payment_intent') != pi or charge.get('currency') != 'eur'
+                or charge.get('amount') != q['amount_cents'] or charge.get('paid') is not True
+                or charge.get('captured') is not True or charge.get('disputed') is not False
+                or type(charge.get('amount_refunded')) is not int
+                or charge['amount_refunded'] != expected_refunded_cents):
+            raise ValueError('Mietzahlung und vollständig bezahlte 500-EUR-Kaution müssen beim Anbieter geprüft werden.')
+        return True
+
+    def _require_charged_booking(self, db, h):
+        if h['status'] != 'confirmed' or not h['mietvorgang_id'] or not h['payment_intent'] or not h['session_id']:
+            raise ValueError('Keine bestätigte bezahlte Langzeitmiete.')
+        validate_long_rental_paid_deposit(json.loads(h['payload'])['quote'])
+        rental = db.execute('SELECT mietfahrzeug_id,status,rueckgabe_datum FROM mietvorgaenge WHERE id=?',
+                            (h['mietvorgang_id'],)).fetchone()
+        if (not rental or rental['mietfahrzeug_id'] != h['mietfahrzeug_id']
+                or rental['status'] != 'aktiv' or rental['rueckgabe_datum']
+                or db.execute('SELECT id FROM miet_checkout_cancellations WHERE id=?', (h['id'],)).fetchone()
+                or db.execute('SELECT id FROM miet_checkout_refunds WHERE hold_id=?', (h['id'],)).fetchone()):
+            raise ValueError('Miete storniert, beendet oder Erstattung vorhanden; Zahlungsprüfung erforderlich.')
+
+    def verify_charged_deposit(self, hold_id):
+        """Fresh read-only payment evidence; handover must recheck DB under lock."""
+        h = self.read(hold_id)
+        with self.locked(h['mietfahrzeug_id']) as (db, _):
+            current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+            self._require_charged_booking(db, current)
+        checkout = self.gateway.retrieve(h['session_id'])
+        payment = self.gateway.retrieve_payment(h['payment_intent'])
+        self._validated_charged_payment(h, checkout, payment)
+        verified_at = datetime.now(timezone.utc).isoformat()
+        with self.locked(h['mietfahrzeug_id']) as (db, _):
+            current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+            self._require_charged_booking(db, current)
+            self._validated_charged_payment(current, checkout, payment)
+        evidence={key:checkout.get(key) for key in ('id','object','client_reference_id','metadata',
+            'payment_intent','livemode','status','payment_status','mode','amount_total','currency')}
+        return {**evidence, 'deposit_net_cents': 50000, 'refunded_cents': 0,
+                'verified_at': verified_at}
 
     @staticmethod
     def _deposit_attempt(db, hold_id):
@@ -725,6 +810,13 @@ class SharedCheckout:
         if h['status'] != 'pending':
             raise ValueError('Reservierung nicht offen.')
         q = json.loads(h['payload'])['quote']
+        if is_long_rental_paid_deposit(q):
+            validate_long_rental_paid_deposit(q)
+            from mos_public_contract import signed_payload
+            signed_payload(json.loads(h['payload']))
+            if _pickup_passed(q):
+                self.cancel_or_reconcile(hold_id, cancel=True)
+                raise ValueError('Der Abholtermin ist verstrichen. Bitte neu buchen.')
         if _card_authorization_quote(q):
             from mos_public_contract import signed_payload
             signed_payload(json.loads(h['payload']))
@@ -774,7 +866,7 @@ class SharedCheckout:
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
             if current['status'] != 'pending':
                 raise ValueError('Reservierung nicht mehr offen.')
-            pickup_passed_before_provider = _card_authorization_quote(q) and _pickup_passed(q)
+            pickup_passed_before_provider = (_card_authorization_quote(q) or is_long_rental_paid_deposit(q)) and _pickup_passed(q)
             if not pickup_passed_before_provider:
                 _require_open_public_slots(db, q, self.p.USE_POSTGRES)
                 if not self.p.mietfahrzeug_zeitraum_frei_db(
@@ -841,7 +933,7 @@ class SharedCheckout:
             except Exception:
                 self.p.app.logger.exception('MOS Checkout nach Terminschließung muss manuell abgeglichen werden')
             raise ValueError('Der Übergabetermin ist nicht mehr geöffnet. Zahlungsstatus wird geprüft.')
-        if _card_authorization_quote(q) and _pickup_passed(q):
+        if (_card_authorization_quote(q) or is_long_rental_paid_deposit(q)) and _pickup_passed(q):
             self.cancel_or_reconcile(hold_id, cancel=True)
             raise ValueError('Der Abholtermin ist verstrichen. Bitte neu buchen.')
         return session
@@ -929,7 +1021,7 @@ class SharedCheckout:
                 duplicate = not isinstance(pi,str) or not pi.startswith('pi_') or db.execute(
                     'SELECT id FROM miet_checkout_holds WHERE payment_intent=? AND id!=?',(pi,h['id'])).fetchone()
                 start, end = date.fromisoformat(h['start_datum']), date.fromisoformat(h['end_datum'])
-                pickup_passed = _card_authorization_quote(q) and _pickup_passed(q)
+                pickup_passed = (_card_authorization_quote(q) or is_long_rental_paid_deposit(q)) and _pickup_passed(q)
                 conflict = (pickup_passed or not slots_open or not deposit_ok or h['status'] == 'released' or duplicate or not int(vehicle['aktiv'] or 0)
                     or self.p.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}
                     or not self.p.mietfahrzeug_zeitraum_frei_db(db,h['mietfahrzeug_id'],start,end,exclude_hold_id=h['id']))
@@ -967,7 +1059,7 @@ class SharedCheckout:
         new_bookings_enabled = self._new_bookings_enabled()
         q = json.loads(h['payload'])['quote']
         if not h['session_id']:
-            if (_card_authorization_quote(q)
+            if ((_card_authorization_quote(q) or is_long_rental_paid_deposit(q))
                     and (cancel or not new_bookings_enabled or h['expires_at'] <= int(time.time()) or _pickup_passed(q))):
                 self._begin_release_without_session(h, 'Buchung vor Mietpreiszahlung abgebrochen')
                 self.release_deposit(h['id'], 'Buchung vor Mietpreiszahlung abgebrochen')
@@ -983,7 +1075,7 @@ class SharedCheckout:
                         db.execute("UPDATE miet_checkout_holds SET status='released' WHERE id=?",(h['id'],))
             return  # Unknown creation outcome never frees stock.
         session = self.gateway.retrieve(h['session_id'])
-        if (cancel or not new_bookings_enabled or _card_authorization_quote(q) and _pickup_passed(q)) and session.get('status') == 'open':
+        if (cancel or not new_bookings_enabled or (_card_authorization_quote(q) or is_long_rental_paid_deposit(q)) and _pickup_passed(q)) and session.get('status') == 'open':
             session = self.gateway.expire(h['session_id'])
         self.validate(h, session)
         if (session.get('status') == 'expired' and session.get('payment_status') == 'unpaid'

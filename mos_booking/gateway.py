@@ -123,15 +123,29 @@ class StripeTestGateway:
     def retrieve(self, sid):
         return self.client.v1.checkout.sessions.retrieve(sid).to_dict()
 
+    def retrieve_payment(self, payment_intent):
+        if not isinstance(payment_intent, str) or not payment_intent.startswith('pi_'):
+            raise ValueError('Ungültige Zahlungsreferenz.')
+        return self.client.v1.payment_intents.retrieve(
+            payment_intent, {'expand': ['latest_charge']}).to_dict()
+
     def expire(self, sid):
         return self.client.v1.checkout.sessions.expire(sid).to_dict()
 
-    def refund(self, payment_intent, amount, key):
-        return self.client.v1.refunds.create({'payment_intent':payment_intent,'amount':amount},
+    def refund(self, payment_intent, amount, key, *, metadata=None):
+        params={'payment_intent':payment_intent,'amount':amount}
+        if metadata is not None:
+            if not isinstance(metadata,dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in metadata.items()):
+                raise ValueError('Ungültige Erstattungsreferenz.')
+            params['metadata']=dict(metadata)
+        return self.client.v1.refunds.create(params,
                     options={'idempotency_key':key}).to_dict()
 
     def retrieve_refund(self, refund_id):
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
+
+    def list_refunds(self, payment_intent):
+        return self.client.v1.refunds.list({'payment_intent':payment_intent,'limit':100}).to_dict()
 
     def create_deposit_intent(self, params, key):
         request = _deposit_params(params)
@@ -232,7 +246,7 @@ class OfflineGateway:
         sig = hmac.new(self.secret.encode(), str(stamp).encode() + b'.' + body, hashlib.sha256).hexdigest()
         return body, f't={stamp},v1={sig}'
 
-    def refund(self, payment_intent, amount, key):
+    def refund(self, payment_intent, amount, key, *, metadata=None):
         with closing(sqlite3.connect(self.path)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS demo_refunds (id TEXT PRIMARY KEY, key TEXT UNIQUE, data TEXT)')
             old=db.execute('SELECT data FROM demo_refunds WHERE key=?',(key,)).fetchone()
@@ -240,11 +254,41 @@ class OfflineGateway:
                 result=json.loads(old[0])
                 if result['payment_intent']!=payment_intent or result['amount']!=amount:
                     raise ValueError('Test-Erstattungsreferenz verändert.')
+                if metadata is not None and result.get('metadata')!=metadata:
+                    raise ValueError('Test-Erstattungsmetadaten verändert.')
                 return result
             result={'id':'re_offline_'+uuid.uuid4().hex,'object':'refund','payment_intent':payment_intent,
                     'amount':amount,'currency':'eur','livemode':False,'status':'succeeded'}
+            if metadata is not None:result['metadata']=dict(metadata)
             db.execute('INSERT INTO demo_refunds VALUES (?,?,?)',(result['id'],key,json.dumps(result)))
             return result
+
+    def list_refunds(self, payment_intent):
+        with closing(sqlite3.connect(self.path)) as db:
+            table=db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='demo_refunds'").fetchone()
+            rows=([json.loads(row[0]) for row in db.execute('SELECT data FROM demo_refunds').fetchall()] if table else [])
+        data=[row for row in rows if row.get('payment_intent')==payment_intent]
+        return {'object':'list','has_more':len(data)>100,'data':data[:100]}
+
+    def retrieve_payment(self, payment_intent):
+        with closing(sqlite3.connect(self.path)) as db:
+            sessions = [json.loads(row[0]) for row in db.execute('SELECT data FROM demo_sessions').fetchall()]
+            session = next((row for row in sessions if row.get('payment_intent') == payment_intent), None)
+            if not session:
+                raise ValueError('Synthetische Zahlung fehlt.')
+            has_refunds = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='demo_refunds'").fetchone()
+            refunds = ([json.loads(row[0]) for row in db.execute('SELECT data FROM demo_refunds').fetchall()]
+                       if has_refunds else [])
+        refunded = sum(row['amount'] for row in refunds
+                       if row.get('payment_intent') == payment_intent and row.get('status') == 'succeeded')
+        amount = session['amount_total']
+        return {'id': payment_intent, 'object': 'payment_intent', 'livemode': False,
+                'status': 'succeeded', 'currency': session['currency'], 'amount': amount,
+                'amount_received': amount, 'amount_capturable': 0,
+                'latest_charge': {'id': 'ch_synthetic_' + payment_intent,
+                    'object': 'charge', 'payment_intent': payment_intent,
+                    'currency': session['currency'], 'amount': amount, 'paid': True,
+                    'captured': True, 'disputed': False, 'amount_refunded': refunded}}
 
     def retrieve_refund(self, refund_id):
         with closing(sqlite3.connect(self.path)) as db:

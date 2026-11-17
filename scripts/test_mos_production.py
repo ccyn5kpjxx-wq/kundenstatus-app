@@ -240,6 +240,19 @@ class ProductionTests(unittest.TestCase):
         cfg['max_days']=29
         self.assertTrue(any('höchstens 28' in e for e in launch_errors(cfg)))
 
+    def test_paid_long_rental_policy_has_its_own_bound_operator_approvals(self):
+        cfg=self.ready_config()
+        cfg.update(max_days=30,deposit_timing='before_pickup',
+                   long_rental_deposit_method='charge_with_rent_refund_after_return')
+        for name in ('business_review','legal_review','finance_review'):
+            cfg['launch'][name]['deposit_timing']='before_pickup'
+        self.assertEqual(sum('Kaution ab sechs' in e for e in launch_errors(cfg)),3)
+        for name in ('business_review','legal_review','finance_review'):
+            cfg['launch'][name]['long_rental_deposit_method']=cfg['long_rental_deposit_method']
+        self.assertEqual(launch_errors(cfg),[])
+        cfg['max_days']=31
+        self.assertTrue(any('höchstens 30' in e for e in launch_errors(cfg)))
+
     def test_signed_off_draft_terms_still_block_live_launch(self):
         base=self.ready_config()
         for marker in ('ENTWURF-2026-09-26-02', 'ENTWURF_2026-09-26',

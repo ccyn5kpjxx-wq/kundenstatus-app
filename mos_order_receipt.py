@@ -106,11 +106,27 @@ def _message(row):
     message['To'] = row['recipient']
     message['Subject'] = 'Eingang Ihrer MOS-Online-Bestellung'
     euros, cents = divmod(row['amount_cents'], 100)
+    price_details = ''
+    if row.get('payload'):
+        quote = json.loads(row['payload'])['quote']
+        if quote.get('long_rental_deposit_policy') == 'paid_at_booking_v1':
+            rental = quote['rental_cents']
+            deposit = quote['deposit_charged_cents']
+            if (type(rental) is not int or type(deposit) is not int or deposit != 50000
+                    or rental <= 0 or rental + deposit != row['amount_cents']):
+                raise ValueError('Mietpreis und bezahlte Kaution müssen geprüft werden.')
+            rent_euros, rent_cents = divmod(rental, 100)
+            dep_euros, dep_cents = divmod(deposit, 100)
+            price_details = (f'Mietpreis inkl. MwSt.: {rent_euros},{rent_cents:02d} EUR\n'
+                             f'Rückzahlbare Kaution: {dep_euros},{dep_cents:02d} EUR\n'
+                             'Die Kaution wird nach dokumentierter ordnungsgemäßer oder vollständig '
+                             'geklärter Rückgabe erstattet.\n\n')
     message.set_content(
         'Wir bestätigen den Eingang Ihrer Online-Bestellung für die Fahrzeugmiete.\n\n'
         f"Bestellreferenz: {row['hold_id']}\n"
-        f'Mietpreis laut Bestellung: {euros},{cents:02d} EUR\n\n'
-        'Der Zahlungsanbieter meldet die Mietpreiszahlung als abgeschlossen. '
+        f'Zahlbetrag laut Bestellung: {euros},{cents:02d} EUR\n\n'
+        + price_details +
+        'Der Zahlungsanbieter meldet die Zahlung als abgeschlossen. '
         'Diese Eingangsbestätigung ist keine zusätzliche Annahme oder Zusage '
         'einer Fahrzeugübergabe. Falls die Bestellung geprüft werden muss, '
         'informiert Sie die Werkstatt über das Ergebnis.\n\n'
