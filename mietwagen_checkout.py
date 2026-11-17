@@ -13,6 +13,10 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS
 
+STANDARD_DEPOSIT_MAX_DAYS = 5
+EXTENDED_DEPOSIT_MAX_DAYS = 28
+EXTENDED_DEPOSIT_MODE = 'extended_if_available'
+
 
 def init_schema(db):
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_holds (
@@ -28,6 +32,12 @@ def init_schema(db):
         hold_id TEXT PRIMARY KEY, intent_id TEXT UNIQUE, status TEXT NOT NULL,
         created_at BIGINT NOT NULL, authorized_at BIGINT, capture_before TEXT,
         reason TEXT NOT NULL DEFAULT '')''')
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_deposit_attempts (
+        hold_id TEXT NOT NULL, generation INTEGER NOT NULL, intent_id TEXT UNIQUE,
+        status TEXT NOT NULL, created_at BIGINT NOT NULL, authorized_at BIGINT,
+        capture_before TEXT, reason TEXT NOT NULL DEFAULT '',
+        provider_status TEXT, amount_received BIGINT, released_verified_at TEXT,
+        PRIMARY KEY (hold_id,generation))''')
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_creation_attempts (
         hold_id TEXT PRIMARY KEY, created_at BIGINT NOT NULL)''')
 
@@ -40,6 +50,13 @@ def deferred_deposit_quote(quote):
     """Only a new, signed quote can defer its separate card authorization."""
     return (_card_authorization_quote(quote)
             and quote.get('deposit_timing') == 'before_pickup')
+
+
+def extended_deposit_quote(quote):
+    return (deferred_deposit_quote(quote)
+            and quote.get('deposit_authorization_mode') == EXTENDED_DEPOSIT_MODE
+            and type(quote.get('days')) is int
+            and STANDARD_DEPOSIT_MAX_DAYS < quote['days'] <= EXTENDED_DEPOSIT_MAX_DAYS)
 
 
 def deposit_authorization_opens(quote):
@@ -202,6 +219,14 @@ class SharedCheckout:
             raise ValueError('Verbindlicher serverseitiger Preis und Regelversion erforderlich.')
         if 'deposit_timing' in quote and not deferred_deposit_quote(quote):
             raise ValueError('Unbekannter Zeitpunkt der Kartenreservierung.')
+        authorization_mode = quote.get('deposit_authorization_mode')
+        if authorization_mode is not None and (
+                authorization_mode != EXTENDED_DEPOSIT_MODE or not deferred_deposit_quote(quote)
+                or type(quote.get('days')) is not int or not 1 <= quote['days'] <= EXTENDED_DEPOSIT_MAX_DAYS):
+            raise ValueError('Ungültige Regel für die verlängerte Kreditkartenautorisierung.')
+        if (deferred_deposit_quote(quote) and type(quote.get('days')) is int
+                and quote['days'] > STANDARD_DEPOSIT_MAX_DAYS and not extended_deposit_quote(quote)):
+            raise ValueError('Mieten über fünf Tage benötigen eine bestätigte verlängerte Kreditkartenautorisierung; höchstens 28 Miettage.')
         payload = json.dumps({'customer': {'name': name, 'telefon': customer.get('telefon', ''),
                             'email': customer.get('email', '')}, 'quote': quote}, sort_keys=True)
         if _card_authorization_quote(quote):
@@ -241,6 +266,120 @@ class SharedCheckout:
             return dict(row) if row else None
         finally:
             db.close()
+
+    @staticmethod
+    def _deposit_attempt(db, hold_id):
+        row = db.execute('''SELECT * FROM miet_checkout_deposit_attempts
+            WHERE hold_id=? ORDER BY generation DESC LIMIT 1''', (hold_id,)).fetchone()
+        return dict(row) if row else None
+
+    def _journal_deposit(self, db, hold_id, intent=None):
+        """Mirror the current pointer under the vehicle lock; never delete history."""
+        record = dict(db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                                 (hold_id,)).fetchone())
+        attempt = self._deposit_attempt(db, hold_id)
+        if attempt and attempt['intent_id'] and attempt['intent_id'] != record['intent_id']:
+            raise ValueError('Kautionsversuch stimmt nicht mit der aktuellen Kartenreservierung überein.')
+        generation = attempt['generation'] if attempt else 1
+        if not attempt:
+            db.execute('''INSERT INTO miet_checkout_deposit_attempts
+                (hold_id,generation,intent_id,status,created_at,authorized_at,capture_before,reason)
+                VALUES (?,?,?,?,?,?,?,?) RETURNING generation''',
+                (hold_id,generation,record['intent_id'],record['status'],record['created_at'],
+                 record['authorized_at'],record['capture_before'],record['reason'])).fetchone()
+        db.execute('''UPDATE miet_checkout_deposit_attempts
+            SET intent_id=?,status=?,created_at=?,authorized_at=?,capture_before=?,reason=?
+            WHERE hold_id=? AND generation=?''',
+            (record['intent_id'],record['status'],record['created_at'],record['authorized_at'],
+             record['capture_before'],record['reason'],hold_id,generation))
+        if intent is not None:
+            if intent.get('id') != record['intent_id']:
+                raise ValueError('Anbieterstatus gehört nicht zum aktuellen Kautionsversuch.')
+            released = (intent.get('status') == 'canceled'
+                        and type(intent.get('amount_received')) is int and intent['amount_received'] == 0
+                        and type(intent.get('amount_capturable')) is int and intent['amount_capturable'] == 0)
+            db.execute('''UPDATE miet_checkout_deposit_attempts
+                SET provider_status=?,amount_received=?,released_verified_at=COALESCE(?,released_verified_at)
+                WHERE hold_id=? AND generation=?''',
+                (intent.get('status'),intent.get('amount_received'),
+                 datetime.now(timezone.utc).isoformat() if released else None,hold_id,generation))
+        return self._deposit_attempt(db, hold_id)
+
+    @staticmethod
+    def _deposit_operation_key(hold_id, generation, *, release=False):
+        key = ('mos-deposit-release-' if release else 'mos-deposit-') + hold_id
+        return key if generation == 1 else key + '-g' + str(generation)
+
+    def _canceled_deposit_verified(self, h, record):
+        intent = self.gateway.retrieve_deposit_intent(record['intent_id'])
+        self._validated_deposit(h, record, intent, enforce_coverage=False)
+        if (intent.get('status') != 'canceled'
+                or type(intent.get('amount_received')) is not int or intent['amount_received'] != 0
+                or type(intent.get('amount_capturable')) is not int or intent['amount_capturable'] != 0):
+            raise ValueError('Vor einem neuen Kartenversuch muss die bisherige Kaution sicher freigegeben sein.')
+        return intent
+
+    def can_retry_deposit(self, hold_id):
+        """Read-only eligibility; only a locally released paid hold calls Stripe."""
+        try:
+            h = self.read(hold_id)
+            record = self._deposit_record(hold_id)
+            if (not deferred_deposit_quote(json.loads(h['payload'])['quote'])
+                    or not record or record['status'] != 'released' or not record['intent_id']):
+                return False
+            with self.locked(h['mietfahrzeug_id']) as (db, _):
+                current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+                self._require_deferred_deposit_booking(db, current)
+            self._canceled_deposit_verified(h, record)
+            with self.locked(h['mietfahrzeug_id']) as (db, _):
+                current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+                self._require_deferred_deposit_booking(db, current)
+                latest = db.execute('SELECT intent_id,status FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                                    (hold_id,)).fetchone()
+                return latest['intent_id'] == record['intent_id'] and latest['status'] == 'released'
+        except Exception:
+            return False  # Unknown provider/booking state never permits a retry.
+
+    def retry_deposit(self, hold_id):
+        """Explicit correction after a verified canceled, never charged intent."""
+        h = self.read(hold_id)
+        with self.locked(h['mietfahrzeug_id']) as (db, _):
+            current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+            self._require_deferred_deposit_booking(db, current)
+            row = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone()
+            if not row:
+                raise ValueError('Es gibt keinen sicher freigegebenen Kartenversuch zu korrigieren.')
+            record = dict(row)
+            attempt = self._deposit_attempt(db, hold_id)
+            resume = (attempt and attempt['generation'] >= 2
+                      and attempt['intent_id'] == record['intent_id']
+                      and record['status'] in {'creating','awaiting_card','authorized'})
+            if not resume and (record['status'] != 'released' or not record['intent_id']):
+                raise ValueError('Unklarer Kartenstatus: kein neuer Kartenversuch erlaubt.')
+        if resume:
+            return self.prepare_deposit(hold_id)  # Replay the already durable generation.
+        canceled = self._canceled_deposit_verified(h, record)
+        with self.locked(h['mietfahrzeug_id']) as (db, _):
+            current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+            self._require_deferred_deposit_booking(db, current)
+            latest = dict(db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone())
+            if latest['intent_id'] != record['intent_id'] or latest['status'] != 'released':
+                attempt = self._deposit_attempt(db, hold_id)
+                if not (attempt and attempt['generation'] >= 2
+                        and attempt['intent_id'] == latest['intent_id']
+                        and latest['status'] in {'creating','awaiting_card','authorized'}):
+                    raise ValueError('Der Kartenstatus wurde geändert; bitte erneut prüfen.')
+            else:
+                previous = self._journal_deposit(db, hold_id, canceled)
+                generation = previous['generation'] + 1
+                now = int(time.time())
+                db.execute('''INSERT INTO miet_checkout_deposit_attempts
+                    (hold_id,generation,status,created_at) VALUES (?,?,'creating',?) RETURNING generation''',
+                    (hold_id,generation,now)).fetchone()
+                db.execute('''UPDATE miet_checkout_deposit_auths SET intent_id=NULL,status='creating',
+                    created_at=?,authorized_at=NULL,capture_before=NULL,reason='' WHERE hold_id=?''',
+                    (now,hold_id))
+        return self.prepare_deposit(hold_id)
 
     def _validated_deposit(self, h, record, intent, enforce_coverage=True):
         q = json.loads(h['payload'])['quote']
@@ -335,6 +474,7 @@ class SharedCheckout:
             record = dict(record)
             if record['status'] in {'releasing', 'released', 'review'}:
                 raise ValueError('Kartenautorisierung gesperrt; manuelle Prüfung erforderlich.')
+            attempt = self._journal_deposit(db, hold_id)
         if record['intent_id']:
             intent = self.gateway.retrieve_deposit_intent(record['intent_id'])
         else:
@@ -346,10 +486,16 @@ class SharedCheckout:
                       'payment_method_types': ['card'],
                       'metadata': {'hold_id': h['id'], 'quote_hash': h['fingerprint']},
                       'description': 'MOS Mietwagen – rückzahlbare Kaution als Kartenautorisierung'}
+            if extended_deposit_quote(q):
+                params['payment_method_options'] = {'card': {'request_extended_authorization': 'if_available'}}
+            key = self._deposit_operation_key(h['id'], attempt['generation'])
             if deferred and getattr(self.gateway, 'settlement_only', False):
-                intent = self.gateway.create_existing_deposit_intent(params, 'mos-deposit-' + h['id'], h)
+                if attempt['generation'] == 1:
+                    intent = self.gateway.create_existing_deposit_intent(params, key, h)
+                else:
+                    intent = self.gateway.create_existing_deposit_intent(params, key, h, attempt=attempt)
             else:
-                intent = self.gateway.create_deposit_intent(params, 'mos-deposit-' + h['id'])
+                intent = self.gateway.create_deposit_intent(params, key)
         ready = self._validated_deposit(h, record, intent, enforce_coverage=False)
         expired_after_confirmation = False
         authorization_needs_review = False
@@ -384,6 +530,7 @@ class SharedCheckout:
                     SET intent_id=?,status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
                     (intent['id'], 'authorized' if ready else 'awaiting_card', intent.get('capture_before'),
                      int(time.time()) if ready else None, hold_id))
+            self._journal_deposit(db, hold_id, intent)
         if authorization_needs_review:
             raise ValueError('Kartenautorisierung wurde während der Erstellung gesperrt; manuelle Prüfung erforderlich.')
         if expired_after_confirmation:
@@ -433,6 +580,7 @@ class SharedCheckout:
             if deposit and deposit['status'] not in {'released', 'review'}:
                 db.execute("UPDATE miet_checkout_deposit_auths SET status='releasing',reason=? WHERE hold_id=?",
                            (str(reason)[:200], h['id']))
+                self._journal_deposit(db, h['id'])
 
     def reconcile_deposit(self, hold_id):
         """Reload the provider; only a full, long-enough hold is ready for rent checkout."""
@@ -446,6 +594,24 @@ class SharedCheckout:
         intent = self.gateway.retrieve_deposit_intent(record['intent_id'])
         ready = self._validated_deposit(h, record, intent, enforce_coverage=False)
         if h['status'] == 'confirmed':
+            if (deferred_deposit_quote(q) and record['status'] == 'authorized'
+                    and intent.get('status') == 'canceled'
+                    and type(intent.get('amount_received')) is int and intent['amount_received'] == 0
+                    and type(intent.get('amount_capturable')) is int and intent['amount_capturable'] == 0):
+                # Before handover, a freshly verified expired/canceled intent
+                # may be mirrored locally. This never cancels the paid rental
+                # or creates/replaces an intent; correction still needs POST.
+                with self.locked(h['mietfahrzeug_id']) as (db, _):
+                    current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+                    self._require_deferred_deposit_booking(db, current, check_window=False)
+                    latest = db.execute('SELECT intent_id,status FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                                        (hold_id,)).fetchone()
+                    if latest['intent_id'] != intent['id'] or latest['status'] != 'authorized':
+                        raise ValueError('Kartenautorisierung wurde zwischenzeitlich geändert.')
+                    db.execute("UPDATE miet_checkout_deposit_auths SET status='released',capture_before=NULL,reason=? WHERE hold_id=?",
+                               ('Anbieter bestätigt abgelaufene oder beendete Kartenreservierung ohne Einzug.', hold_id))
+                    self._journal_deposit(db, hold_id, intent)
+                return {**intent, 'ready': False}
             if deferred_deposit_quote(q) and record['status'] != 'authorized':
                 # The customer confirms the later intent directly at Stripe.
                 # Persist that result without changing the paid rental or its
@@ -461,6 +627,7 @@ class SharedCheckout:
                         SET status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
                         ('authorized' if ready else 'awaiting_card', intent.get('capture_before'),
                          int(time.time()) if ready else None, hold_id))
+                    self._journal_deposit(db, hold_id, intent)
                 if intent['status'] == 'requires_capture' and not ready:
                     reason = ('Für die Kaution ist eine Kreditkarte erforderlich' if intent.get('card_funding') != 'credit'
                               else 'Kartenautorisierung reicht nicht bis nach der Rückgabe')
@@ -492,6 +659,7 @@ class SharedCheckout:
                 SET status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
                 ('authorized' if ready else 'awaiting_card', intent.get('capture_before'),
                  int(time.time()) if ready else None, hold_id))
+            self._journal_deposit(db, hold_id, intent)
         if expired_after_confirmation:
             self._release_unusable_authorization(hold_id, 'Reservierungsfrist ist abgelaufen')
         if intent['status'] == 'requires_capture' and not ready:
@@ -538,13 +706,16 @@ class SharedCheckout:
                             raise ValueError('Kartenreservierung nach Schlüsselübergabe nur nach dokumentierter unbeanstandeter oder geklärter Rückgabe freigeben.')
                 db.execute("UPDATE miet_checkout_deposit_auths SET status='releasing',reason=? WHERE hold_id=? AND status!='released'",
                            (str(reason)[:200], hold_id))
-            intent = self.gateway.cancel_deposit_intent(record['intent_id'], 'mos-deposit-release-' + h['id'])
+                attempt = self._journal_deposit(db, hold_id, intent)
+            intent = self.gateway.cancel_deposit_intent(record['intent_id'],
+                self._deposit_operation_key(h['id'], attempt['generation'], release=True))
             self._validated_deposit(h, record, intent, enforce_coverage=False)
         if intent['status'] != 'canceled':
             raise ValueError('Kaution nicht sicher freigegeben; manuelle Prüfung erforderlich.')
         with self.locked(h['mietfahrzeug_id']) as (db, _):
             db.execute('''UPDATE miet_checkout_deposit_auths SET status='released',capture_before=NULL,reason=?
                 WHERE hold_id=? AND intent_id=?''', (str(reason)[:200], hold_id, record['intent_id']))
+            self._journal_deposit(db, hold_id, intent)
         return 'released'
 
     def create_checkout(self, hold_id):

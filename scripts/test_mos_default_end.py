@@ -63,7 +63,7 @@ class DefaultEndTests(unittest.TestCase):
     def test_real_template_selects_one_default_in_live_and_test_mode(self):
         env=Environment(loader=FileSystemLoader(ROOT/'templates'),autoescape=True)
         env.filters['mos_slot']=lambda value:value
-        env.globals.update(url_for=lambda endpoint:'/'+endpoint,csrf_field=lambda:'')
+        env.globals.update(url_for=lambda endpoint,**values:'/'+endpoint+('/'+values['filename'] if 'filename' in values else ''),csrf_field=lambda:'')
         context={'config':{},'booking_config':{},'listings':{'i10':'Hyundai i10'},
                  'werkstatt_oeffentlich':public_workshop_contact(),
                  'weekly_schedule':True,'max_days':5}
@@ -83,7 +83,27 @@ class DefaultEndTests(unittest.TestCase):
             slots=[slots[0]],default_end=None,live=True,**context)
         end_select=re.search(r'<select\b[^>]*\bid="end-time"[^>]*>(.*?)</select>',rendered,re.S)[1]
         self.assertFalse(re.findall(r'<option value="16:00"[^>]*\bselected\b',end_select))
-        self.assertIn('Kein Übergabetermin verfügbar',rendered)
+        self.assertIn('<option value="" selected>Bitte Uhrzeit wählen</option>',end_select)
+        self.assertRegex(rendered,r'<select\b[^>]*id="end-time"[^>]*\brequired\b')
+        self.assertIn('/static/mos_booking_calendar.js',rendered)
+
+    def test_selection_explains_dynamic_duration_and_later_credit_card_requirement(self):
+        env=Environment(loader=FileSystemLoader(ROOT/'templates'),autoescape=True)
+        env.filters['mos_slot']=lambda value:value
+        env.globals.update(url_for=lambda endpoint,**values:'/'+endpoint,csrf_field=lambda:'')
+        slots=['2026-11-17T14:00:00+01:00','2026-11-18T14:00:00+01:00']
+        rendered=env.get_template('mos_public/index.html').render(
+            slots=slots,default_end=slots[1],live=True,config={},
+            booking_config={'deposit_method':'card_authorization_at_booking','deposit_timing':'before_pickup'},
+            listings={'i10':'Hyundai i10'},werkstatt_oeffentlich=public_workshop_contact(),
+            weekly_schedule=True,max_days=28)
+        self.assertIn('Online sind höchstens 28 Miettage möglich.',rendered)
+        self.assertIn('angefangene Miettage zählen voll',rendered)
+        self.assertIn('Zeitumstellungen',rendered)
+        self.assertIn('Reservierung von 500 € auf einer Kreditkarte',rendered)
+        self.assertIn('frühestens zwölf Stunden vor der Abholung',rendered)
+        self.assertIn('entsprechend lange Reservierung unterstützt',rendered)
+        self.assertLess(rendered.index('duration-deposit-help'),rendered.index('<button>'))
 
 
 if __name__=='__main__':unittest.main()

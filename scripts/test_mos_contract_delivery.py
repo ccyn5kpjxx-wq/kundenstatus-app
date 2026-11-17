@@ -1,6 +1,7 @@
 """Offline contract-delivery tests. SMTP is always replaced by a fake."""
 
 from base64 import b64encode
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 import json
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -18,6 +20,8 @@ from mos_contract_delivery import _message, deliver_one, enqueue, init_schema, p
 class Portal:
     def __init__(self, path):
         self.path = path
+        self.app = SimpleNamespace(secret_key='synthetic-mail-secret-' * 3,
+            config={'MOS_PUBLIC_BOOKING': {'origin': 'https://mos.example.test'}})
 
     def get_db(self):
         db = sqlite3.connect(self.path, timeout=5)
@@ -87,7 +91,8 @@ class DeliveryTests(unittest.TestCase):
         db.execute('CREATE TABLE miet_checkout_cancellations (id TEXT PRIMARY KEY)')
         db.execute('INSERT INTO miet_checkout_holds VALUES (?,?,?,?,?)',
                    (self.hold, 'confirmed', 'pi_synthetic', 7,
-                    json.dumps({'quote': {'test_only': False}})))
+                    json.dumps({'quote': {'test_only': False, 'owner_hash': 'a' * 64,
+                        'end_slot': (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()}})))
         canonical = json.dumps(self.contract, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
         db.execute('INSERT INTO miet_checkout_contracts VALUES (?,?,?,?,?,?,?)',
                    (self.hold, canonical, sha256(canonical.encode()).hexdigest(), b64encode(self.pdf).decode(),
@@ -181,6 +186,33 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn('Registergericht: Amtsgericht Mannheim', text)
         self.assertIn('Handelsregister: HRB 754425', text)
         self.assertIn('Geschäftsführer: Christopher Gärtner', text)
+
+    def test_legitimate_legacy_contract_mail_contains_fragment_management_link(self):
+        self.queue()
+        self.assertEqual(self.send_fake(),'sent')
+        from email import policy
+        from email.parser import BytesParser
+        import re
+        from mos_booking_access import validate_access_token
+        message = BytesParser(policy=policy.default).parsebytes(FakeSMTP.raw)
+        text = message.get_body(preferencelist=('plain',)).get_content()
+        token = re.search(r'https://mos\.example\.test/mieten/buchung-verwalten#([^\s]+)',text).group(1)
+        access = validate_access_token(self.portal,token)
+        self.assertEqual(access['hold_id'],self.hold)
+        self.assertEqual(access['scope'],'booking')
+        self.assertNotIn('customer@example.test',str(access))
+        self.assertIn('auch nach Ablauf der Browsersitzung',text)
+
+    def test_expired_historical_contract_is_still_mailed_without_an_expired_link(self):
+        db = self.portal.get_db()
+        payload = json.loads(db.execute('SELECT payload FROM miet_checkout_holds WHERE id=?',(self.hold,)).fetchone()['payload'])
+        payload['quote']['end_slot']=(datetime.now(timezone.utc)-timedelta(days=31)).isoformat()
+        db.execute('UPDATE miet_checkout_holds SET payload=? WHERE id=?',(json.dumps(payload),self.hold))
+        db.commit()
+        db.close()
+        self.queue()
+        self.assertEqual(self.send_fake(),'sent')
+        self.assertNotIn(b'buchung-verwalten',FakeSMTP.raw)
 
     def test_parallel_workers_do_not_submit_twice(self):
         self.queue()

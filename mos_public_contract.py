@@ -59,6 +59,11 @@ def snapshot(payload):
             or q.get('deposit_method') != 'card_authorization_at_booking'
             or q.get('deposit_authorized_cents') != 50000):
         raise ValueError('Unbekannter Zeitpunkt der Kreditkartenreservierung.')
+    if 'deposit_authorization_mode' in q and (
+            q['deposit_authorization_mode'] != 'extended_if_available'
+            or q.get('deposit_timing') != 'before_pickup'
+            or type(q.get('days')) is not int or not 1 <= q['days'] <= 28):
+        raise ValueError('Ungültige Regel für die verlängerte Kreditkartenautorisierung.')
     contract = {
         'lessor_name': LESSOR_NAME, 'lessor_address': LESSOR_ADDRESS,
         'offer_name': OFFER_NAME, 'customer_name': customer['name'],
@@ -76,7 +81,8 @@ def snapshot(payload):
     }
     # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
-    for key in ('deposit_authorized_cents', 'deposit_method', 'deposit_timing', 'cancellation_policy'):
+    for key in ('deposit_authorized_cents', 'deposit_method', 'deposit_timing',
+                'deposit_authorization_mode', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
     # Old signed quotes have no contact fields and must keep their original hash.

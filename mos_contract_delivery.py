@@ -55,7 +55,7 @@ def _single_address(value):
     return not name and address == value and address.count('@') == 1 and ' ' not in address
 
 
-def _message(hold_id, recipient, pdf, cancelled):
+def _message(hold_id, recipient, pdf, cancelled, management_url=None):
     message = EmailMessage()
     message['To'] = recipient
     message['Subject'] = 'Ihre MOS-Vertragskopie'
@@ -68,6 +68,13 @@ def _message(hold_id, recipient, pdf, cancelled):
     if cancelled:
         body += ('\nDie Buchung wurde inzwischen storniert. Diese Vertragskopie ist keine '
                  'erneute Buchungszusage; bitte beachten Sie den Storno- und Erstattungsstand.\n')
+    if management_url:
+        body += ('\nIhre Buchung sicher verwalten:\n' + management_url + '\n\n'
+                 'Über diesen persönlichen Link können Sie Ihren Buchungsstatus und Vertrag '
+                 'auch nach Ablauf der Browsersitzung öffnen und eine Stornierung nach den '
+                 'vereinbarten Bedingungen veranlassen. Der Zugang gilt für diese Buchung '
+                 'bis 30 Tage nach der vereinbarten Rückgabe. Bitte halten Sie den Link '
+                 'vertraulich und öffnen Sie ihn nur selbst.\n')
     message.set_content(body)
     message.add_attachment(pdf, maintype='application', subtype='pdf',
                            filename='MOS-Mietvertrag-' + hold_id + '.pdf')
@@ -157,7 +164,11 @@ def deliver_one(portal, hold_id, cfg, *, live, enabled):
             row, contract, pdf = _verified_row(db, hold_id)
             if row['status'] != 'queued':
                 return row['status']
-            message = _message(hold_id, row['recipient'], pdf, bool(row['cancellation_id']))
+            from mos_booking_access import access_url, AccessExpired
+            hold = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+            try:management_url = access_url(portal, hold)
+            except AccessExpired:management_url = None
+            message = _message(hold_id, row['recipient'], pdf, bool(row['cancellation_id']), management_url)
             message['From'] = formataddr((cfg.get('display_name', ''), cfg['from_address']))
             message['Message-ID'] = '<mos-contract-' + sha256(hold_id.encode()).hexdigest()[:32] + '@' + cfg['from_address'].rsplit('@', 1)[1] + '>'
         except (ValueError, KeyError, TypeError):
