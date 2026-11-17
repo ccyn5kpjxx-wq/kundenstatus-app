@@ -194,6 +194,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         if fixed_prices and bundle.get('reviewed_rim_width_registry') is not None:
             from shop_rim_width_candidates import released_width_pairs
             compatible_pairs = released_width_pairs(bundle, approved_ids=set(seeds['records']))
+        approved_postcodes = frozenset(bundle.get('delivery_postcodes', []))
+        freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
+            evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
+            destination_eligibility=lambda dest, ctx: (dest == 'workshop'
+                and ctx.get('workshop_delivery', 'collection') == 'collection'
+                or ctx.get('delivery', {}).get('postcode') in approved_postcodes))
         catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
             image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
             verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
@@ -201,7 +207,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
             product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
-            preferred_ids=set(seeds['records']) if fixed_prices else None)
+            preferred_ids=set(seeds['records']) if fixed_prices else None,
+            shipping_ready_ids=set(freight.classes) & procurement_ids)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -256,12 +263,6 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                         'required_fees': [], 'new_part': False, 'painting_eligible': False,
                         'diameter': int(diameter) if re.fullmatch(r'[0-9]{2}', diameter) else None,
                         'tyre_size': product['size']}
-            approved_postcodes = frozenset(bundle.get('delivery_postcodes', []))
-            freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
-                evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
-                destination_eligibility=lambda dest, ctx: (dest == 'workshop'
-                    and ctx.get('workshop_delivery', 'collection') == 'collection'
-                    or ctx.get('delivery', {}).get('postcode') in approved_postcodes))
             retail_quote = (lambda product, quantity: pricebook.checkout_quote(product, quantity, supplier.retail_quote)
                             if pricebook is not None else supplier.retail_quote(product, quantity))
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,

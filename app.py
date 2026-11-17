@@ -3207,6 +3207,11 @@ def restrict_public_site_service():
         "public_sitemap",
         "legacy_public_redirect",
     }
+    # The shop opens this existing persistent intake on the same public host.
+    # Its own explicit POST, CSRF, rate and contact validation remain in force.
+    if (not PUBLIC_SITE_ONLY and request.endpoint == "website_anfrage"
+            and request.method in {"GET", "HEAD", "POST"}):
+        return None
     # The stateless homepage only reads released products. On a persistent
     # portal (including its configured public hostname), the exact v2 handlers
     # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
@@ -46431,6 +46436,12 @@ def website_anfrage():
                 fahrzeug = fahrzeug or "Noch offen / Beratung gewünscht"
         bilder = request.files.getlist("bilder") + request.files.getlist("bild")
         errors = []
+        from shop_service_requests import ShopOfferError, parse_shop_offer_context
+        shop_offer_context = None
+        try:
+            shop_offer_context = parse_shop_offer_context(request.form)
+        except ShopOfferError:
+            errors.append("Die Shopauswahl konnte nicht vollständig übernommen werden. Bitte den Warenkorb erneut öffnen und als Angebot anfragen.")
 
         if anliegen not in WEBSITE_ANLIEGEN:
             errors.append("Bitte ein Anliegen auswählen.")
@@ -46620,8 +46631,11 @@ def website_anfrage():
                 beschreibungsteile.append(f"Mietbeginn: {mietbeginn}")
             if mietende:
                 beschreibungsteile.append(f"Mietende: {mietende}")
-        if nachricht:
+        if nachricht and (not shop_offer_context or nachricht != shop_offer_context['full_text'].strip()):
             beschreibungsteile.append(f"Nachricht: {nachricht}")
+        if shop_offer_context:
+            beschreibungsteile.append("Unverbindliche Shopauswahl des Kunden – Artikel, Fahrzeugpassung, Gesamtpreis und Versand noch zu prüfen:\n"
+                                      + shop_offer_context['full_text'])
 
         naechste_aktion = {
             "lackanfrage": "Lackanfrage prüfen und Kunden zurückrufen",
@@ -46642,6 +46656,8 @@ def website_anfrage():
             "felgenservice": "Felgenumfang und Termin klären",
             "dellenreparatur": "Dellenreparatur mit mobilem Dienstleister abstimmen",
         }.get(anliegen, "Kundenanfrage persönlich beantworten")
+        if shop_offer_context:
+            naechste_aktion = "Shop-Gesamtangebot einschließlich Fahrzeugpassung, Leistungen und Versand vor einer Zahlung prüfen"
         lead_payload = (
             {
                 "quelle": "website",
@@ -46659,6 +46675,7 @@ def website_anfrage():
                 "reifen_angebot_request_hash": anfrage_hash,
                 "portal_data": {
                     "anliegen": anliegen,
+                    **({'shop_anfrage': shop_offer_context} if shop_offer_context else {}),
                     "reifenangebot": reifenangebot_daten if ist_reifenangebot else {},
                     "fin": fin if anliegen == "bremsenservice" else "",
                     "bremsen_achse": bremsen_achse if anliegen == "bremsenservice" else "",

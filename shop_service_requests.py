@@ -7,8 +7,75 @@ views, confirmation notices and backups. Purchased-goods arrival is a separate
 concern; a shop cart must never trigger an appointment implicitly.
 """
 
+import json
+import unicodedata
+
 SERVICE_REQUEST_PATH = '/anfrage?anliegen=reifenservice'
 CART_REQUEST_PATH = '/anfrage?anliegen=allgemein&shop_anfrage=1'
+MAX_CART_REQUEST_BYTES = 32768
+
+
+class ShopOfferError(ValueError):
+    """A fixed validation error, without submitted text or personal data."""
+
+    def __init__(self):
+        super().__init__('invalid_shop_offer_context')
+
+
+def parse_shop_offer_context(form):
+    """Read bounded customer-reported selection text for an ordinary lead.
+
+    No catalogue, quote, order, payment, availability or compatibility is
+    confirmed here. The caller uses the existing explicit contact-form POST,
+    CSRF, rate limiting, validation and durable lead workflow unchanged.
+    A missing marker must never silently discard a submitted long selection.
+    """
+    marker, raw = form.get('shop_anfrage'), form.get('shop_auswahl')
+    if marker in (None, '') and raw in (None, ''):
+        return None
+    try:
+        if marker != '1' or form.get('anliegen') != 'allgemein':
+            raise ShopOfferError()
+        if hasattr(form, 'getlist') and any(len(form.getlist(key)) != 1
+                for key in ('shop_anfrage', 'shop_auswahl', 'anliegen')):
+            raise ShopOfferError()
+        if (not isinstance(raw, str) or not raw or len(raw) > MAX_CART_REQUEST_BYTES
+                or len(raw.encode('utf-8')) > MAX_CART_REQUEST_BYTES):
+            raise ShopOfferError()
+
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ShopOfferError()
+                result[key] = value
+            return result
+
+        def invalid_constant(_):
+            raise ShopOfferError()
+
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
+        if (not isinstance(value, dict) or set(value) != {
+                'version', 'created_at', 'message', 'full_text', 'position_count', 'omitted_count'}
+                or type(value['version']) is not int or value['version'] != 1
+                or type(value['created_at']) is not int or not 0 <= value['created_at'] <= 2**53 - 1
+                or type(value['position_count']) is not int or not 1 <= value['position_count'] <= 40
+                or type(value['omitted_count']) is not int
+                or not 0 <= value['omitted_count'] <= value['position_count']):
+            raise ShopOfferError()
+        for key, maximum in (('message', 2000), ('full_text', 32000)):
+            text = value[key]
+            if (not isinstance(text, str) or not text.strip() or len(text) > maximum
+                    or any((unicodedata.category(char) == 'Cc' and char not in '\n\t')
+                           or 0xD800 <= ord(char) <= 0xDFFF for char in text)):
+                raise ShopOfferError()
+        return {'version': 1, 'source': 'customer_reported_shop_selection',
+                'full_text': value['full_text'], 'position_count': value['position_count'],
+                'requires_manual_review': True, 'quote_confirmed': False}
+    except ShopOfferError:
+        raise
+    except (TypeError, ValueError, UnicodeError, RecursionError):
+        raise ShopOfferError() from None
 
 
 def prepare_service_request_links(portal, *, enabled=False):

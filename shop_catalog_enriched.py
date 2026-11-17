@@ -89,7 +89,7 @@ def _face(value):
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
-                 rsu_only_prices=False, preferred_ids=None, **kwargs):
+                 rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         rows = deepcopy(list(products))
@@ -99,6 +99,15 @@ class EnrichedPublicCatalog(PublicCatalog):
             raise CatalogError('invalid_procurement_ids')
         procurement = frozenset(procurement_ids or ())
         self._rsu_only_prices, self._procurement_ids = rsu_only_prices, procurement
+        if (shipping_ready_ids is not None and
+                (not isinstance(shipping_ready_ids, (set, frozenset, list, tuple))
+                 or any(not isinstance(i, str) for i in shipping_ready_ids)
+                 or not set(shipping_ready_ids) <= procurement
+                 or not set(shipping_ready_ids) <= self._rows.keys())):
+            raise CatalogError('invalid_shipping_ready_ids')
+        # The caller supplies IDs only after validating its private tariff.
+        # This says nothing about the buyer's address or a final shipping quote.
+        self._shipping_ready_ids = frozenset(shipping_ready_ids or ())
         if (preferred_ids is not None and (not isinstance(preferred_ids, (set, frozenset))
                 or not preferred_ids <= procurement or not preferred_ids <= self._rows.keys())):
             raise CatalogError('invalid_preferred_ids')
@@ -227,7 +236,28 @@ class EnrichedPublicCatalog(PublicCatalog):
         return super()._cached_entry(entry)
 
     def _browse_order(self, entry):
-        return (entry['public']['id'] not in self._preferred_ids, *super()._browse_order(entry))
+        return (entry['public']['id'] not in self._preferred_ids,
+                not bool(entry['public'].get('sale_dimensions')), *super()._browse_order(entry))
+
+    def _offer_rank(self, entry, now):
+        public = entry['public']
+        identifier = public['id']
+        if identifier not in self._procurement_ids:
+            return 4
+        price_rank = super()._offer_rank(entry, now)
+        if price_rank == 2:
+            return 3
+        if price_rank == 1:
+            return 2
+        if public['category'] == 'tyre':
+            docs = public.get('product_documents', {})
+            obligations = all(docs.get(key) for key in ('tyre_label_url', 'tyre_sheet_url'))
+        elif public['department'] == 'wheels':
+            obligations = bool(public.get('sale_dimensions'))
+        else:
+            # Vehicle-specific parts still need the customer's exact vehicle.
+            obligations = public['department'] != 'parts'
+        return 0 if obligations and identifier in self._shipping_ready_ids else 1
 
     def _project(self, entry, now, *, detail=True):
         product = super()._project(entry, now, detail=detail)
@@ -245,40 +275,29 @@ class EnrichedPublicCatalog(PublicCatalog):
     def page(self, *, group=None, studio=None, complete=None, **kwargs):
         if group not in (None, 'family') or studio not in (None, '1') or complete not in (None, '1'):
             raise CatalogError('invalid_filter')
-        # Base validation and filtering run before grouping. Bounded catalogue
-        # iteration is local only, never a provider crawl.
+        # Validate/filter/rank once, before either family grouping or pagination.
+        # Every cache access is local. A family uses its best matching variant,
+        # so a late representative swap cannot leave it on the wrong page.
         page, size = kwargs.get('page', 1), kwargs.get('page_size', 24)
-        result = super().page(**kwargs)
-        if group is None and studio is None and complete is None:
-            return result
-        matches, seen = [], {}
-        scan = {**kwargs, 'page_size': 48}
-        for number in range(1, (result['total'] + 47) // 48 + 1):
-            scan['page'] = number
-            for product in super().page(**scan)['items']:
-                if complete == '1' and not product.get('tyre_seasons'):
-                    continue
-                if studio == '1' and not product.get('photo_face'):
-                    continue
+        rows, current = self._page_entries(**kwargs)
+        matches, seen = [], set()
+        for entry in rows:
+            product = entry['public']
+            if complete == '1' and not product.get('tyre_seasons'):
+                continue
+            if studio == '1' and not product.get('photo_face'):
+                continue
+            if group == 'family':
                 key = self._family_for.get(product['id'], (product['id'],))
-                if group == 'family':
-                    if key in seen:
-                        # Show the actual RSU variant of a design when a sparse
-                        # display-only ALZURA row sorts first. Keep the exact
-                        # filtered variant's ID, price, image and geometry.
-                        old = matches[seen[key]]
-                        preferred = product['id'] in self._preferred_ids
-                        old_preferred = old['id'] in self._preferred_ids
-                        if (preferred and not old_preferred or preferred == old_preferred
-                                and product.get('sale_dimensions') and not old.get('sale_dimensions')):
-                            product['family'] = self._family(product, complete=complete == '1')
-                            matches[seen[key]] = product
-                        continue
-                    seen[key] = len(matches)
-                    product['family'] = self._family(product, complete=complete == '1')
-                matches.append(product)
-        offset = (page - 1) * size
-        return {**result, 'items': matches[offset:offset + size], 'total': len(matches), 'has_more': offset + size < len(matches)}
+                if key in seen:
+                    continue
+                seen.add(key)
+            matches.append(entry)
+        result = self._page_result(matches, current, page=page, page_size=size)
+        if group == 'family':
+            for product in result['items']:
+                product['family'] = self._family(product, complete=complete == '1')
+        return result
 
     def variants(self, identifier, *, page=1, page_size=24, diameter=None, complete=None):
         if type(page) is not int or not 1 <= page <= 10000 or type(page_size) is not int or not 1 <= page_size <= 48:
@@ -287,8 +306,7 @@ class EnrichedPublicCatalog(PublicCatalog):
             raise CatalogError('invalid_filter')
         if self.get(identifier) is None:
             return None
-        ids = sorted(self._families.get(self._family_for.get(identifier), [identifier]),
-                     key=lambda pid: (pid not in self._preferred_ids, not bool(self._rows[pid]['public'].get('sale_dimensions')), pid))
+        ids = self._families.get(self._family_for.get(identifier), [identifier])
         if complete == '1':
             ids = [i for i in ids if self._rows[i]['public'].get('tyre_seasons')]
         if diameter is not None:
@@ -296,8 +314,11 @@ class EnrichedPublicCatalog(PublicCatalog):
             if not isinstance(diameter, str) or not re.fullmatch(r'(?:[89]|[12][0-9]|30)', diameter):
                 raise CatalogError('invalid_filter')
             ids = [i for i in ids if self._rows[i]['public']['geometry'].get('diameter') == diameter]
+        current = self._now(None)
+        rows = [self._cached_entry(self._rows[i]) for i in ids]
+        rows.sort(key=lambda entry: self._ranked_order(entry, current))
         offset = (page - 1) * page_size
-        return {'items': [self.get(i) for i in ids[offset:offset + page_size]], 'page': page,
+        return {'items': [self._project(entry, current) for entry in rows[offset:offset + page_size]], 'page': page,
                 'page_size': page_size, 'total': len(ids), 'has_more': offset + page_size < len(ids)}
 
     def compatible_tyres(self, identifier, *, quantity=4, season=None, **filters):
@@ -313,13 +334,15 @@ class EnrichedPublicCatalog(PublicCatalog):
         # Validate vehicle filter syntax, but never infer a tyre's vehicle
         # approval from a rim-width candidate or filter presence.
         self.page(department='wheels', page_size=1, **filters)
-        candidates = sorted(self._candidate_tyres.get(identifier, []), key=lambda item: item[0] not in self._preferred_ids)
-        for tyre_id, canonical_season in candidates:
+        current = self._now(None)
+        candidates = []
+        for tyre_id, canonical_season in self._candidate_tyres.get(identifier, []):
             if season and canonical_season != season:
                 continue
-            tyre = self.get(tyre_id)
-            if tyre is None:
-                continue
+            candidates.append(self._cached_entry(self._rows[tyre_id]))
+        candidates.sort(key=lambda entry: self._ranked_order(entry, current))
+        for entry in candidates:
+            tyre = self._project(entry, current)
             result['items'].append(tyre)
             if len(result['items']) == 5:
                 break

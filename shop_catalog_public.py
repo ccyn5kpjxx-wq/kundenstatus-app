@@ -365,7 +365,22 @@ class PublicCatalog:
     def _browse_order(self, entry):
         return (_fold(entry['public']['name']), entry['public']['id'])
 
-    def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
+    def _offer_rank(self, entry, now):
+        """Local readable-offer priority, never an order/stock authorization.
+
+        A fixed merchant price remains readable when its stock observation is
+        older than the short Inquiry TTL. Checkout rechecks the actual amount.
+        A reported zero never becomes positive through ranking.
+        """
+        quote = entry['quote']
+        if not quote or not _stamp(quote['observed_at']) <= now < _stamp(quote['expires_at']):
+            return 2
+        return 0 if quote['stock_reported'] > 0 else 1
+
+    def _ranked_order(self, entry, now):
+        return (self._offer_rank(entry, now), *self._browse_order(entry))
+
+    def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
              width=None, ratio=None, diameter=None, now=None):
         if not _integer(page, 1, 10_000) or not _integer(page_size, 1, MAX_PAGE_SIZE):
@@ -423,9 +438,22 @@ class PublicCatalog:
                             and (hsn is None or (vehicle["hsn"], vehicle["tsn"]) == (hsn, tsn)))
                 if not any(matches(v) for v in public["fitment"]["vehicles"]):
                     continue
-            rows.append(entry)
-        rows.sort(key=self._browse_order)
+            # One cache-only snapshot per matching product. Grouped/family
+            # callers reuse this pass instead of rescanning every source page.
+            rows.append(self._cached_entry(entry))
+        rows.sort(key=lambda entry: self._ranked_order(entry, current))
+        return rows, current
+
+    def _page_result(self, rows, current, *, page, page_size):
         offset = (page - 1) * page_size
-        return {"items": [self._project(self._cached_entry(row), current, detail=False) for row in rows[offset:offset + page_size]],
+        return {"items": [self._project(row, current, detail=False) for row in rows[offset:offset + page_size]],
                 "page": page, "page_size": page_size, "total": len(rows),
                 "has_more": offset + page_size < len(rows), "as_of": current.isoformat()}
+
+    def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
+             make=None, model=None, year=None, hsn=None, tsn=None,
+             width=None, ratio=None, diameter=None, now=None):
+        rows, current = self._page_entries(page=page, page_size=page_size, q=q,
+            category=category, department=department, brand=brand, make=make, model=model,
+            year=year, hsn=hsn, tsn=tsn, width=width, ratio=ratio, diameter=diameter, now=now)
+        return self._page_result(rows, current, page=page, page_size=page_size)

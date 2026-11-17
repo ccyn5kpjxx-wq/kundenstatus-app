@@ -432,8 +432,12 @@
           <p class="info-note" data-anliegen-visible="kaufberatung" {% if ausgewaehltes_anliegen != 'kaufberatung' %}hidden{% endif %}>Beim Kaufcheck können Sie zusätzlich die Fahrzeuganzeige verlinken und zwischen einer Prüfung bei Gärtner oder einer Besichtigung vor Ort wählen.</p>
           <p class="info-note" data-anliegen-visible="leasingrueckgabe" {% if ausgewaehltes_anliegen != 'leasingrueckgabe' %}hidden{% endif %}>Bei einem Leasing-Check zeigen wir mögliche Aufbereitungs- und Reparaturmaßnahmen. Die endgültige Bewertung bleibt bei der Leasinggesellschaft.</p>
         </aside>
-        <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
+        <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" data-shop-offer-form="true" novalidate>
           {{ csrf_field()|safe }}
+          {% if formdata.get('shop_anfrage') or formdata.get('shop_auswahl') %}
+          <input type="hidden" name="shop_anfrage" value="{{ formdata.get('shop_anfrage','') }}">
+          <input type="hidden" name="shop_auswahl" value="{{ formdata.get('shop_auswahl','') }}">
+          {% endif %}
           {% if formdata.get("service_context") %}<input type="hidden" name="service_context" value="{{ formdata.get('service_context') }}"><p class="hint">Dem ausgewählten Firmenfahrzeug zugeordnet. <a href="/service">Zur Service-App</a>. Kostenfreigabe durch die zuständige Person.</p>{% endif %}
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>Was können wir für Sie tun?</h2>
