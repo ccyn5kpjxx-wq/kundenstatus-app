@@ -51,6 +51,12 @@ def launch_errors(cfg):
         for name in ('business_review','legal_review','finance_review'):
             if launch.get(name,{}).get('deposit_timing')!='before_pickup':
                 errors.append('Freigabe für Mietzahlung bei Buchung und spätere Kaution fehlt: '+name)
+    if cfg.get('max_days',5)>5:
+        extended=launch.get('finance_review',{}).get('extended_authorization',{})
+        if (cfg.get('max_days',0)>28 or timing!='before_pickup'
+                or cfg.get('deposit_authorization_mode')!='extended_if_available'
+                or extended.get('verified') is not True or not extended.get('evidence')):
+            errors.append('Für längere Direktmieten fehlt die belegte erweiterte Kreditkartenautorisierung (höchstens 28 Miettage).')
     terms=cfg.get('terms_text')
     if (not isinstance(terms,str) or not terms.strip() or
             legal.get('terms_sha256') != hashlib.sha256(terms.encode('utf-8')).hexdigest() or
@@ -124,25 +130,37 @@ class StripeLiveGateway(StripeTestGateway):
             raise ValueError('Bei deaktivierter Neubuchung darf keine neue Kautionsautorisierung entstehen.')
         return super().create_deposit_intent(params,key)
 
-    def create_existing_deposit_intent(self,params,key,hold):
+    def create_existing_deposit_intent(self,params,key,hold,*,attempt=None):
         """Settle one paid deferred booking while new bookings are paused.
 
         SharedCheckout checks the current rental and cancellation rows under its
         vehicle lock before calling this narrow entry point. The frozen hold
         is server data, never a browser-supplied booking or Stripe parameter.
         """
-        from mietwagen_checkout import deferred_deposit_quote, deposit_authorization_due
+        from mietwagen_checkout import deferred_deposit_quote, deposit_authorization_due, extended_deposit_quote
         from mos_public_contract import signed_payload
         try:
             payload=json.loads(hold['payload'])
             quote=payload['quote']
+            expected_options=({'card':{'request_extended_authorization':'if_available'}}
+                              if extended_deposit_quote(quote) else None)
+            expected_key='mos-deposit-'+hold['id']
+            if attempt is not None:
+                if (not isinstance(attempt,dict) or attempt.get('hold_id')!=hold['id']
+                        or type(attempt.get('generation')) is not int or attempt['generation']<2
+                        or attempt.get('status')!='creating' or attempt.get('intent_id') is not None
+                        or type(attempt.get('created_at')) is not int
+                        or not 0<=int(datetime.now(timezone.utc).timestamp())-attempt['created_at']<23*3600):
+                    raise ValueError('Neuer Kautionsversuch ist nicht dauerhaft und eindeutig vorgemerkt.')
+                expected_key+='-g'+str(attempt['generation'])
             if (hold['status']!='confirmed' or not hold['mietvorgang_id']
                     or not isinstance(hold['payment_intent'],str) or not hold['payment_intent'].startswith('pi_')
                     or not isinstance(hold['session_id'],str) or not hold['session_id'].startswith('cs_live_')
                     or quote.get('test_only') is not False or not deferred_deposit_quote(quote)
                     or not deposit_authorization_due(quote)
                     or params.get('metadata')!={'hold_id':hold['id'],'quote_hash':hold['fingerprint']}
-                    or key!='mos-deposit-'+hold['id']):
+                    or params.get('payment_method_options')!=expected_options
+                    or key!=expected_key):
                 raise ValueError('Kaution erfordert eine bestätigte bezahlte Vorausbuchung.')
             signed_payload(payload)
         except (KeyError,TypeError,json.JSONDecodeError) as exc:

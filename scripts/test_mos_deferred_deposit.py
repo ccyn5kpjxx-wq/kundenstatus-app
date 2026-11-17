@@ -69,20 +69,23 @@ class DeferredDepositTests(unittest.TestCase):
         image.save(output, 'PNG')
         self.signature = 'data:image/png;base64,' + b64encode(output.getvalue()).decode('ascii')
 
-    def hold(self, *, days_ahead=250, test_only=True, deferred=True):
+    def hold(self, *, days_ahead=250, test_only=True, deferred=True,
+             rental_days=1, authorization_mode=None):
         start = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).replace(second=0, microsecond=0)
-        end = start + timedelta(days=1)
-        quote = {'amount_cents': 3900, 'rental_cents': 3900, 'deposit_charged_cents': 0,
+        end = start + timedelta(days=rental_days)
+        quote = {'amount_cents': 3900 * rental_days, 'rental_cents': 3900 * rental_days, 'deposit_charged_cents': 0,
                  'deposit_authorized_cents': 50000, 'deposit_cents': 50000,
                  'deposit_method': 'card_authorization_at_booking', 'currency': 'eur',
                  'rules_version': 'synthetic-deferred-v1', 'vehicle_id': self.vehicle_id,
                  'vehicle_name': 'Synthetischer Vorausbuchungswagen', 'vehicle_plate': 'TEST-DEFERRED',
                  'vehicle_vin': '', 'start_slot': start.isoformat(), 'end_slot': end.isoformat(),
-                 'days': 1, 'daily_cents': 3900, 'deductible_cents': 100000,
-                 'included_km': 150, 'extra_km_cents': 25, 'terms_text': 'Nur synthetischer Test.',
+                 'days': rental_days, 'daily_cents': 3900, 'deductible_cents': 100000,
+                 'included_km': 150 * rental_days, 'extra_km_cents': 25, 'terms_text': 'Nur synthetischer Test.',
                  'test_only': test_only, 'cancellation_policy': 'free_48h_then_10pct_rent'}
         if deferred:
             quote['deposit_timing'] = 'before_pickup'
+        if authorization_mode is not None:
+            quote['deposit_authorization_mode'] = authorization_mode
         signed = presign_quote(quote, self.customer, self.signature)
         return self.service.reserve(uuid.uuid4().hex, self.vehicle_id, start.date().isoformat(),
                                     end.date().isoformat(), self.customer, signed)
@@ -210,8 +213,10 @@ class DeferredDepositTests(unittest.TestCase):
             self.gateway.authorize_deposit_intent(intent['id'], valid_for_seconds=7 * 86400)
             self.service.reconcile_deposit(paid['id'])
             self.clock += 8 * 86400
-            with self.assertRaisesRegex(ValueError, 'Admin-Prüfung'):
-                self.service.reconcile_deposit(paid['id'])
+            expired = self.service.reconcile_deposit(paid['id'])
+            self.assertEqual(expired['status'], 'canceled')
+            self.assertFalse(expired['ready'])
+            self.assertEqual(self.service._deposit_record(paid['id'])['status'], 'released')
         self.service.cancel_or_reconcile(paid['id'], cancel=True)
         self.assertEqual(self.service.read(paid['id'])['status'], 'confirmed')
         self.assertEqual(self.rental_status(paid), 'aktiv')

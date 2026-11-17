@@ -171,7 +171,10 @@ class ProductionTests(unittest.TestCase):
 
     def ready_config(self):
         cfg=json.loads(json.dumps(self.state['cfg']))
+        cfg.pop('deposit_timing',None)
+        cfg.pop('deposit_authorization_mode',None)
         cfg.update(mode='live',live_enabled=True,origin='https://booking.example.invalid',
+            max_days=5,
             terms_version='test-fixture-final-v1',deposit_method='card_authorization_at_booking',
             cancellation_policy=CANCELLATION_POLICY_48H_10_PERCENT,
             privacy_url='https://booking.example.invalid/privacy',merchant_name='Gärtner GmbH Karosserie + Lack',
@@ -224,6 +227,18 @@ class ProductionTests(unittest.TestCase):
         self.assertTrue(any('aktuellen Bedingungsfassung' in error for error in launch_errors(cfg)))
         cfg['deposit_timing']='unknown'
         self.assertTrue(any('Unbekannter Zeitpunkt' in error for error in launch_errors(cfg)))
+
+    def test_long_rentals_need_verified_extended_account_support(self):
+        cfg=self.ready_config()
+        cfg.update(max_days=28,deposit_timing='before_pickup',
+                   deposit_authorization_mode='extended_if_available')
+        for name in ('business_review','legal_review','finance_review'):
+            cfg['launch'][name]['deposit_timing']='before_pickup'
+        self.assertTrue(any('erweiterte Kreditkartenautorisierung' in e for e in launch_errors(cfg)))
+        cfg['launch']['finance_review']['extended_authorization']={'verified':True,'evidence':'SYNTHETIC TEST ONLY'}
+        self.assertEqual(launch_errors(cfg),[])
+        cfg['max_days']=29
+        self.assertTrue(any('höchstens 28' in e for e in launch_errors(cfg)))
 
     def test_signed_off_draft_terms_still_block_live_launch(self):
         base=self.ready_config()

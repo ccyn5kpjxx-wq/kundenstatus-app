@@ -1,0 +1,8 @@
+{% extends 'mos_public/base.html' %}
+{% block content %}
+<h1>Buchungszugang nicht verfügbar</h1>
+<section class="card">
+  <p>Buchungszugang abgelaufen oder nicht verfügbar. Öffne den persönlichen Link aus deiner Vertrags-E-Mail.</p>
+  <p>Falls du den Link nicht findest oder er nicht mehr funktioniert, kontaktiere bitte die Werkstatt unter <a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>.</p>
+</section>
+{% endblock %}

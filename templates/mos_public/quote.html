@@ -88,4 +88,4 @@
   });
 })();
 </script>
-<a href="{{ url_for('mos_public.index') }}">Auswahl ändern</a>{% endblock %}
+<a href="{{ change_url|default(url_for('mos_public.index')) }}">Auswahl ändern</a>{% endblock %}
