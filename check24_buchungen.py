@@ -541,7 +541,7 @@ class Check24Bookings:
             try:
                 known = {r['source_key'] for r in db.execute('SELECT source_key FROM check24_receipts').fetchall()}
                 attempts = {r['key']: int(r['value']) for r in db.execute(
-                    "SELECT key,value FROM check24_sync_state WHERE key LIKE 'parser_attempt:%'").fetchall()}
+                    'SELECT key,value FROM check24_sync_state WHERE key LIKE ?', ('parser_attempt:%',)).fetchall()}
                 for receipt in db.execute('''SELECT r.source_key,r.raw_hash,e.payload FROM check24_receipts r
                     JOIN check24_events e ON e.raw_hash=r.raw_hash WHERE e.state='review' ''').fetchall():
                     old_data = json.loads(receipt['payload'])

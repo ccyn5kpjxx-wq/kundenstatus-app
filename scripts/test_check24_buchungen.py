@@ -947,6 +947,8 @@ class Check24IntegrationTest(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import patch
         from check24_buchungen import Check24Bookings
+        from psycopg._queries import PostgresQuery
+        from psycopg.adapt import Transformer
 
         original_get_db = self.p.get_db
         statements = []
@@ -960,6 +962,10 @@ class Check24IntegrationTest(unittest.TestCase):
                 self.cursor.close()
             def execute(self, sql, params):
                 statements.append(sql)
+                # Use the installed production driver to validate the exact SQL
+                # and bound values emitted by PostgresConnection, before the
+                # disposable SQLite bridge executes its equivalent statement.
+                PostgresQuery(Transformer()).convert(sql, params)
                 sql = sql.replace('%s', '?').replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT')
                 self.cursor.execute(sql, params)
                 self.rowcount = self.cursor.rowcount
