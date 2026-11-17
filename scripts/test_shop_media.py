@@ -133,6 +133,46 @@ class MediaChecks(unittest.TestCase):
             with self.assertRaises(MediaError):
                 ReleasedMedia._validate(data)
 
+    def test_larger_parts_original_keeps_bytes_but_legacy_and_oversized_images_remain_blocked(self):
+        def jpeg(width, height):
+            stream = BytesIO()
+            with Image.new('RGB', (width, height), 'black') as picture:
+                picture.save(stream, 'JPEG')
+            return stream.getvalue()
+
+        original = jpeg(2500, 2500)
+        self.assertLess(len(original), MAX_IMAGE)
+
+        def reader(url, data=original, declared='image/jpeg'):
+            asset = sha256(data).hexdigest() + '.jpg'
+            response = SimpleNamespace(status_code=200, url=url, headers={'Content-Type': declared},
+                                       iter_content=lambda **kwargs: [data], close=Mock())
+            http = Mock()
+            http.get.return_value = response
+            return ReleasedMedia({asset: {'url': url}}, approved_assets={asset}, http=http, allow_network=True), asset
+
+        parts_url = 'https://cdn01.alzura.com/0253_PIC/1033106.JPG'
+        parts, asset = reader(parts_url)
+        self.assertEqual(parts.read(asset), (original, 'image/jpeg'))
+        legacy, asset = reader('https://media1.tyre-shopping.com/synthetic.jpg')
+        with self.assertRaisesRegex(MediaError, 'image_unavailable'):
+            legacy.read(asset)
+        with self.assertRaisesRegex(MediaError, 'image_unavailable'):
+            ReleasedMedia._validate(original)
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'large.jpg').write_bytes(original)
+            asset = sha256(original).hexdigest() + '.jpg'
+            local = ReleasedMedia({asset: {'file': 'large.jpg', 'sha256': sha256(original).hexdigest()}},
+                                  approved_assets={asset}, local_root=directory)
+            with self.assertRaisesRegex(MediaError, 'image_unavailable'):
+                local.read(asset)
+        for data, mime in ((jpeg(4097, 1), 'image/jpeg'), (jpeg(4001, 4000), 'image/jpeg'),
+                           (original, 'image/png'), (b'<html>not a photo</html>', 'image/jpeg'),
+                           (b'x' * (MAX_IMAGE + 1), 'image/jpeg')):
+            media, asset = reader(parts_url, data, mime)
+            with self.subTest(bytes=len(data), mime=mime), self.assertRaisesRegex(MediaError, 'image_unavailable'):
+                media.read(asset)
+
     def test_slow_cdn_does_not_block_cached_local_or_second_http_thread(self):
         started, finish = threading.Event(), threading.Event()
         remote = 'b' * 64 + '.png'

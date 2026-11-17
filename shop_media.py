@@ -27,6 +27,7 @@ ALZURA_PART_IMAGE_URL = re.compile(
 MIME = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
 MAX_IMAGE = 1024 * 1024
 MAX_PIXELS = 4_000_000
+MAX_PART_IMAGE_PIXELS = 16_000_000
 
 
 class MediaError(ValueError):
@@ -86,14 +87,15 @@ class ReleasedMedia:
         self.monotonic = monotonic or time.monotonic
 
     @staticmethod
-    def _validate(data):
-        if not isinstance(data, bytes) or not 0 < len(data) <= MAX_IMAGE:
+    def _validate(data, *, max_pixels=MAX_PIXELS):
+        if (not isinstance(data, bytes) or not 0 < len(data) <= MAX_IMAGE
+                or type(max_pixels) is not int or max_pixels not in (MAX_PIXELS, MAX_PART_IMAGE_PIXELS)):
             raise MediaError('image_unavailable')
         try:
             with Image.open(BytesIO(data)) as picture:
                 mime = MIME.get(picture.format)
                 if (mime is None or picture.width > 4096 or picture.height > 4096
-                        or picture.width * picture.height > MAX_PIXELS):
+                        or picture.width * picture.height > max_pixels):
                     raise ValueError()
                 picture.verify()
             return data, mime
@@ -138,7 +140,10 @@ class ReleasedMedia:
                 data.extend(chunk)
                 if len(data) > MAX_IMAGE or self.monotonic() > deadline:
                     raise MediaError('image_unavailable')
-            result = self._validate(bytes(data))
+            # Reviewed parts originals include 2500x2500 photos. The larger
+            # pixel allowance is source-bound; byte and edge limits stay fixed.
+            max_pixels = MAX_PART_IMAGE_PIXELS if ALZURA_PART_IMAGE_URL.fullmatch(source['url']) else MAX_PIXELS
+            result = self._validate(bytes(data), max_pixels=max_pixels)
             if result[1] != declared:
                 raise MediaError('image_unavailable')
             return result
