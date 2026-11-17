@@ -198,6 +198,59 @@ class ProviderTests(unittest.TestCase):
         self.assertFalse(provider._inquiry._authorize("654321", 21))
         self.assertIsNone(provider._inquiry._http._session)
 
+    def frozen_item(self,provider):
+        return {**product(),'mapping':provider.rsu_mapping(product())}
+
+    def test_fresh_private_inquiry_is_exact_bound_and_never_uses_retail_cache(self):
+        provider=self.provider()
+        provider.retail_quote(product(),1)
+        item=self.frozen_item(provider)
+        for quantity in (1,2,1):
+            result=provider.fresh_inquiry(item,quantity)
+            self.assertTrue(result['confirmed'])
+            self.assertEqual(result['quantity'],quantity)
+            self.assertEqual(result['supplier_article_id'],'654321')
+            self.assertEqual(result['mapping_evidence_id'],item['mapping']['evidence_id'])
+            self.assertEqual((result['expected_ean'],result['ean']),(EAN,EAN))
+            self.assertEqual(result['currency'],'EUR')
+            self.assertEqual(result['unit_net'],'95' if quantity==2 else '100')
+            self.assertEqual(result['observed_at'],NOW.isoformat())
+            self.assertEqual(result['expires_at'],(NOW+timedelta(minutes=15)).isoformat())
+            result['unit_net']='MUTATED'
+        self.assertEqual(self.inquiry.calls,[('654321',1),('654321',1),('654321',2),('654321',1)])
+
+    def test_fresh_private_inquiry_rejects_unapproved_changed_evidence_before_get(self):
+        provider=self.provider()
+        item=self.frozen_item(provider)
+        mutations=({'identity_hash':'f'*64},{'id':'tyre:'+'f'*24},
+                   {'mapping':{**item['mapping'],'evidence_id':'wrong'}},
+                   {'mapping':{**item['mapping'],'supplier_article_id':'123'}},{'mapping':None})
+        for change in mutations:
+            self.assertIsNone(provider.fresh_inquiry({**item,**change},1))
+        for quantity in (0,21,True,'1',1.0):self.assertIsNone(provider.fresh_inquiry(item,quantity))
+        self.assertIsNone(self.provider(approved=set()).fresh_inquiry(item,1))
+        self.assertIsNone(self.provider(policy=RSUQuotePolicy('test')).fresh_inquiry(item,1))
+        self.assertEqual(self.inquiry.calls,[])
+
+    def test_fresh_private_inquiry_rejects_stale_stock_and_response_identity(self):
+        provider=self.provider()
+        item=self.frozen_item(provider)
+        for change in ({'article_id':'654322'},{'ean':'4000000000006'},{'amount':2},{'configured_mode':'live'},
+                       {'stock':0},{'stock':True},{'price':Decimal('NaN')},{'price':Decimal('-1')},{'price':100.0},
+                       {'retrieved_at':NOW-timedelta(seconds=1)},{'retrieved_at':NOW+timedelta(seconds=1)},
+                       {'retrieved_at':NOW.replace(tzinfo=None)}):
+            with self.subTest(change=change):
+                self.inquiry.changes=change
+                self.assertIsNone(provider.fresh_inquiry(item,1))
+        self.inquiry.changes={}
+        old=self.inquiry.inquire
+        def slow(identifier,quantity):
+            result=old(identifier,quantity)
+            self.now+=timedelta(minutes=15)
+            return result
+        self.inquiry.inquire=slow
+        self.assertIsNone(provider.fresh_inquiry(item,1))
+
     def integrated_cart(self, *, freight_delay):
         provider = self.provider()
         old_inquire = self.inquiry.inquire

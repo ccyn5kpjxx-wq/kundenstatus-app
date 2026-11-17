@@ -45,6 +45,20 @@ class BuyerChecks(unittest.TestCase):
         self.temp.cleanup()
         self.network.stop()
 
+    def test_delivery_salutation_is_explicit_optional_and_strict_without_changing_billing(self):
+        for value in ('', 'Herr', 'Frau', 'Firma'):
+            payload = deepcopy(PAYLOAD)
+            payload['delivery'] = {**ADDRESS, 'salutation': value}
+            result = validate_context(payload)
+            self.assertEqual(result['delivery']['salutation'], value)
+            self.assertNotIn('salutation', result['billing'])
+        self.assertNotIn('salutation', validate_context(deepcopy(PAYLOAD))['delivery'])
+        for value in ('An', None, True, '<script>', 'Herr\n'):
+            payload = deepcopy(PAYLOAD)
+            payload['delivery'] = {**ADDRESS, 'salutation': value}
+            with self.subTest(value=value), self.assertRaises(BuyerError):
+                validate_context(payload)
+
     def make_app(self, buyer):
         app = Flask('synthetic-shop-buyer')
         app.config.update(TESTING=True, SECRET_KEY='synthetic-portal-unrelated', SHOP_BUYER_ENABLED=True)

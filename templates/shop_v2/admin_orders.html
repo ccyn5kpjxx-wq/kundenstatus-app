@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Shopbestellungen · Gärtner</title>
+  <style>
+    :root{font-family:Arial,sans-serif;color:#20303b;background:#f4f6f7;font-size:15px}*{box-sizing:border-box}body{margin:0}a{color:#205578;text-underline-offset:3px}header{background:#fff;border-bottom:1px solid #dce3e7;padding:20px max(24px,calc((100vw - 1320px)/2))}header a{font-weight:700}main{max-width:1368px;margin:auto;padding:32px 24px 56px}h1{font-size:30px;margin:0 0 10px}h2{font-size:20px;margin:0 0 18px}p{line-height:1.6}.muted{color:#5e6d77}.note{padding:14px 18px;background:#e9f0f4;border-radius:8px}.warning{background:#fff1d9;color:#6b4300}.card{background:#fff;border:1px solid #dce3e7;border-radius:12px;padding:24px;margin-top:24px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;text-align:left}th,td{padding:16px 12px;border-bottom:1px solid #e4e9ec;vertical-align:top;line-height:1.5}th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#596a75}td:first-child,th:first-child{padding-left:0}td:last-child,th:last-child{padding-right:0}.status{display:inline-block;border-radius:5px;background:#edf2f5;padding:4px 8px;font-weight:700;font-size:12px}.status.warning{background:#fff0cd}.stack>*{display:block;margin-bottom:5px}.small{font-size:12px}.money{white-space:nowrap;font-weight:700}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}.label{color:#596a75;font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}.value{font-weight:700;line-height:1.6}.order-id{overflow-wrap:anywhere;font-family:monospace;font-size:13px}.pagination{display:flex;justify-content:space-between;gap:20px;margin-top:24px}.service{margin:4px 0;font-size:13px;color:#596a75}.empty{padding:24px 0}.top-link{display:inline-block;margin-bottom:22px}ul{padding-left:20px;line-height:1.7}@media(max-width:760px){main{padding:24px 16px}.grid{grid-template-columns:1fr}.card{padding:18px}h1{font-size:25px}th,td{padding:12px 10px}header{padding:18px 16px}}
+  </style>
+</head>
+<body>
+<header><a href="/admin">Gärtner · Werkstattcockpit</a> · <a href="{{ url_for('shop_admin.orders') }}">Shopbestellungen</a> · <a href="{{ url_for('shop_admin.withdrawals') }}">Widerrufe{% if shop_withdrawal_pending %} ({{ shop_withdrawal_pending }}){% endif %}{% if shop_withdrawal_unavailable %} – Status prüfen{% endif %}</a></header>
+<main>
+{% if withdrawal_detail %}
+  <a class="top-link" href="{{ url_for('shop_admin.withdrawals') }}">← Alle Widerrufserklärungen</a>
+  <h1>Widerrufserklärung</h1><div class="order-id">{{ withdrawal_detail.id }}</div>
+  <p class="muted">{{ withdrawal_detail.created }} · {{ withdrawal_detail.mode }}</p>
+  <p class="note warning">Persönlich prüfen. Diese Kundenangaben sind noch nicht verifiziert. Die Anzeige löst keine Erstattung, Stornierung oder Lieferantenaktion aus.</p>
+  {% if withdrawal_detail.invalid %}<p class="note warning">Die gespeicherten Angaben konnten nicht sicher angezeigt werden. Bitte intern prüfen.</p>{% else %}
+  <section class="card grid"><div><div class="label">Name</div><p>{{ withdrawal_detail.name }}</p><div class="label">Bestätigungskontakt</div><p>{{ withdrawal_detail.email }}</p></div><div><div class="label">Vertrag / Bestellung laut Kunde</div><p class="order-id">{{ withdrawal_detail.reference }}</p>{% if withdrawal_detail.order_id %}<a href="{{ url_for('shop_admin.order_detail',order_id=withdrawal_detail.order_id) }}">Angegebene Bestellung ansehen</a>{% endif %}</div><div><div class="label">Bearbeitung</div><p>{{ withdrawal_detail.state }}</p><div class="label">Eingangsbestätigung</div><p>{{ withdrawal_detail.mail }}</p></div></section>
+  <section class="card"><h2>Betroffene Positionen laut Kunde</h2><p style="white-space:pre-wrap;overflow-wrap:anywhere">{{ withdrawal_detail.scope }}</p></section>{% endif %}
+{% elif withdrawal_page %}
+  <h1>Widerrufserklärungen</h1><p class="muted">Gespeicherte Erklärungen und ihre Eingangsbestätigungen · {% if withdrawal_order_filter %}zur angegebenen Bestellung{% else %}alle Referenzen, auch noch ohne Zuordnung{% endif %}</p>
+  <p class="note warning">Eine Eingangsbestätigung bestätigt den Zugang, nicht die rechtliche Prüfung. Angaben, Fristen, Warenrückgabe und Zahlungsbearbeitung persönlich prüfen. Diese Ansicht ist ausschließlich lesend.</p>
+  <section class="card">{% if withdrawals %}<div class="table-scroll"><table><thead><tr><th>Eingang</th><th>Kunde / Kontakt</th><th>Vertrag laut Kunde</th><th>Prüfung / Bestätigung</th></tr></thead><tbody>
+  {% for declaration in withdrawals %}<tr><td><a class="order-id" href="{{ url_for('shop_admin.withdrawal_detail',identifier=declaration.id) }}">{{ declaration.id }}</a><div class="small muted">{{ declaration.created }} · {{ declaration.mode }}</div></td><td>{% if declaration.invalid %}Angaben intern prüfen{% else %}{{ declaration.name }}<div class="small">{{ declaration.email }}</div>{% endif %}</td><td class="order-id">{{ declaration.reference }}{% if declaration.order_id %}<div><a href="{{ url_for('shop_admin.order_detail',order_id=declaration.order_id) }}">Bestellung ansehen</a></div>{% endif %}</td><td><span class="status warning">{{ declaration.state }}</span><div class="small">{{ declaration.mail }}</div></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="empty muted">Keine Widerrufserklärungen auf dieser Seite.</p>{% endif %}
+  <nav class="pagination" aria-label="Weitere Widerrufserklärungen"><span>{% if page>1 %}<a href="{{ url_for('shop_admin.withdrawals',page=page-1,per_page=per_page,order_id=withdrawal_order_filter) }}">← Neuere Erklärungen</a>{% endif %}</span><span class="muted small">Seite {{ page }}</span><span>{% if has_next %}<a href="{{ url_for('shop_admin.withdrawals',page=page+1,per_page=per_page,order_id=withdrawal_order_filter) }}">Ältere Erklärungen →</a>{% endif %}</span></nav></section>
+{% elif detail %}
+  <a class="top-link" href="{{ url_for('shop_admin.orders') }}">← Alle Shopbestellungen</a>
+  <h1>Bestellung</h1><div class="order-id">{{ detail.id }}</div>
+  <p class="muted">{{ detail.created }} · {{ detail.mode }}</p>
+  {% if detail.withdrawals %}<section class="card"><h2>Widerrufserklärungen zu dieser Kundenreferenz</h2><p class="note warning">Zuordnung nur anhand der unverifizierten Kundenangabe. Die Bestellung ist dadurch noch nicht storniert oder erstattet.</p><ul>{% for declaration in detail.withdrawals %}<li><a href="{{ url_for('shop_admin.withdrawal_detail',identifier=declaration.id) }}">{{ declaration.created }} · {{ declaration.name }}</a> · {{ declaration.mail }}</li>{% endfor %}</ul>{% if detail.more_withdrawals %}<a href="{{ url_for('shop_admin.withdrawals',order_id=detail.id) }}">Weitere Erklärungen ansehen</a>{% endif %}</section>{% endif %}
+  {% if detail.attention %}<p class="note warning" role="status">Manuelle Prüfung erforderlich. Unklare Lieferanten- oder Zahlungsantworten sind keine Bestätigung.</p>{% endif %}
+  <section class="card grid" aria-label="Bestellstatus">
+    <div><div class="label">Bestellung</div><div class="value">{{ detail.status }}</div><p class="money">{{ detail.amount }} <span class="small muted">inkl. MwSt.</span></p></div>
+    <div><div class="label">Zahlung</div><div class="value">{{ detail.payment }}</div>{% if detail.action %}<p>{{ detail.action }}</p>{% endif %}</div>
+    <div><div class="label">Bearbeitung</div><div class="value">{{ detail.workflow }}</div><p>{{ detail.fulfillment }}</p>{% if detail.uncertain_positions %}<p class="warning">{{ detail.uncertain_positions }} Lieferantenantwort(en) ungeklärt</p>{% endif %}</div>
+  </section>
+  <section class="card"><h2>Bestellte Artikel und Leistungen</h2>
+  {% if detail.snapshot_unavailable %}<p class="note warning">Die gespeicherten Artikeldaten konnten nicht sicher angezeigt werden. Bitte intern prüfen.</p>{% endif %}
+  {% if detail.lines %}<div class="table-scroll"><table><thead><tr><th>Artikel</th><th>Anzahl</th><th>Stückpreis</th><th>Artikel gesamt</th><th>Warenweg</th></tr></thead><tbody>
+  {% for line in detail.lines %}<tr><td><strong>{{ line.name }}</strong>{% for service in line.services %}<div class="service">{{ service.name }}: {{ service.price }}</div>{% endfor %}</td><td>{{ line.quantity }}</td><td class="money">{{ line.unit_price }}</td><td class="money">{{ line.items_price }}</td><td>{{ line.destination }}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+  {% for shipment in detail.shipments %}<p>{{ shipment.destination }} · Versand: <strong>{{ shipment.price }}</strong></p>{% endfor %}
+  <p class="muted small">Artikel, Leistungen und Warenwege entsprechen der gespeicherten Bestellung. Ein Montage- oder Servicetermin wird nach Wareneingang abgestimmt.</p></section>
+  <section class="card grid"><div><h2>Kundenbestätigungen</h2><ul>
+    <li>Eingang: {{ detail.receipts.get('received','Noch nicht erstellt') }}</li>
+    <li>Bestätigung: {{ detail.receipts.get('confirmed','Noch nicht erstellt') }}</li>
+    <li>Abbruch: {{ detail.receipts.get('cancelled','Noch nicht erstellt') }}</li>
+  </ul></div><div><h2>Rechnung</h2><p>{{ detail.invoice }}</p><p class="muted small">Bestell- und Statusbestätigungen sind keine Rechnung.</p></div><div><h2>Lieferstatus</h2><p>Noch keine Versand- oder Zustellbestätigung.</p><p class="muted small">Lieferantenannahme und Zahlungseinzug bestätigen keinen Wareneingang.</p></div></section>
+{% else %}
+  <h1>Shopbestellungen</h1>
+  <p class="muted">Reifen, Felgen, Ersatzteile und Zubehör · gespeicherte Bestellungen im Überblick</p>
+  <p class="note">Diese Ansicht zeigt den gespeicherten Bearbeitungsstand. Sie löst keine Bestellung, Zahlung oder Nachricht aus.</p>
+  <section class="card">
+  {% if orders %}<div class="table-scroll"><table><thead><tr><th>Bestellung</th><th>Gesamt</th><th>Zahlung</th><th>Bearbeitung</th><th>Bestätigungen / Rechnung</th></tr></thead><tbody>
+    {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a><span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="money">{{ order.amount }}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span></td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<p class="empty muted">Noch keine Shopbestellungen auf dieser Seite.</p>{% endif %}
+  <nav class="pagination" aria-label="Weitere Bestellungen"><span>{% if page>1 %}<a href="{{ url_for('shop_admin.orders',page=page-1,per_page=per_page) }}">← Neuere Bestellungen</a>{% endif %}</span><span class="muted small">Seite {{ page }}</span><span>{% if has_next %}<a href="{{ url_for('shop_admin.orders',page=page+1,per_page=per_page) }}">Ältere Bestellungen →</a>{% endif %}</span></nav>
+  </section>
+{% endif %}
+</main>
+</body></html>

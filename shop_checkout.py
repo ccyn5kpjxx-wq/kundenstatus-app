@@ -222,7 +222,7 @@ class ShopCheckout:
                 parsed = urlsplit(url)
                 if (parsed.scheme != 'https' or parsed.hostname != 'checkout.stripe.com'
                         or parsed.username or parsed.password or parsed.port not in (None, 443)
-                        or parsed.path not in ('/c/pay/' + sid, '/pay/' + sid)):
+                        or parsed.path not in ('/c/pay/' + sid, '/g/pay/' + sid, '/pay/' + sid)):
                     raise ValueError()
             except ValueError:
                 raise CheckoutError('checkout_url_rejected') from None

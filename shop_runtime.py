@@ -8,6 +8,8 @@ from shop_public_api import create_shop_public_blueprint
 from shop_buyer import create_shop_buyer_blueprint
 from shop_frontend import create_shop_frontend_blueprint
 from shop_media import create_shop_media_blueprint
+from shop_consumer import create_consumer_blueprint
+from shop_documents import create_shop_documents_blueprint
 
 
 FLAGS = ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_CART_QUOTE_ENABLED',
@@ -18,7 +20,7 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
                           authorize_quote=None, quote_context=None,
                           quote_sink=None, order_store=None, checkout_service=None,
                           buyer_service=None, feature_links=None, catalogue_warmup=None,
-                          media_service=None):
+                          media_service=None, consumer_service=None, documents_service=None):
     app = portal.app
     if 'shop_v2' in app.extensions:
         raise ValueError('shop_already_registered')
@@ -27,6 +29,13 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
     app.config.setdefault('SHOP_BUYER_ENABLED', False)
     app.config.setdefault('SHOP_FRONTEND_ENABLED', False)
     app.config.setdefault('SHOP_MEDIA_ENABLED', False)
+    app.config.setdefault('SHOP_CONSUMER_ENABLED', False)
+    app.config.setdefault('SHOP_DOCUMENTS_ENABLED', False)
+    try:
+        consumer_ready = consumer_service is not None and consumer_service.readiness()['checkout_ready'] is True
+    except Exception:
+        consumer_ready = False
+    app.config['SHOP_CONSUMER_ENABLED'] = app.config['SHOP_CONSUMER_ENABLED'] is True and consumer_ready
     media_requested = app.config['SHOP_MEDIA_ENABLED'] is True
     buyer_requested = app.config['SHOP_BUYER_ENABLED'] is True
     try:
@@ -43,7 +52,7 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
         'SHOP_CART_QUOTE_ENABLED': (quote_service is not None and callable(authorize_quote)
                                     and callable(quote_context) and callable(quote_sink)),
         'SHOP_ORDER_DRAFT_ENABLED': order_store is not None,
-        'SHOP_CHECKOUT_ENABLED': checkout_service is not None,
+        'SHOP_CHECKOUT_ENABLED': checkout_service is not None and app.config['SHOP_CONSUMER_ENABLED'],
     }
     # Later stages require all previous stages; no accidental order/payment
     # activation when a catalogue or trusted session/context adapter is absent.
@@ -59,13 +68,20 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
     app.config['SHOP_FRONTEND_ENABLED'] = (app.config['SHOP_FRONTEND_ENABLED'] is True
                                           and app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'])
     app.register_blueprint(create_shop_buyer_blueprint(buyer_service))
+    app.register_blueprint(create_consumer_blueprint(consumer_service, buyer=buyer_service))
     app.register_blueprint(create_shop_frontend_blueprint(feature_links=feature_links))
     app.config['SHOP_MEDIA_ENABLED'] = (media_requested and media_service is not None
                                         and app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'])
     app.register_blueprint(create_shop_media_blueprint(media_service))
-    state = {'enabled': {key: app.config[key] for key in (*FLAGS, 'SHOP_BUYER_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED')},
+    app.config['SHOP_DOCUMENTS_ENABLED'] = (app.config['SHOP_DOCUMENTS_ENABLED'] is True
+        and documents_service is not None and app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'])
+    app.register_blueprint(create_shop_documents_blueprint(documents_service))
+    state = {'enabled': {key: app.config[key] for key in (*FLAGS, 'SHOP_BUYER_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED', 'SHOP_CONSUMER_ENABLED', 'SHOP_DOCUMENTS_ENABLED')},
              'missing_dependencies': ([key for key in FLAGS if requested[key] and not prerequisites[key]]
                                       + (['SHOP_MEDIA_ENABLED'] if media_requested and media_service is None else [])),
              'startup_provider_calls': 0}
     app.extensions['shop_v2'] = state
+    starter = app.extensions.get('shop_production', {}).get('start_workflow')
+    if app.config['SHOP_CHECKOUT_ENABLED'] and callable(starter):
+        starter()
     return state

@@ -3163,7 +3163,7 @@ def configure_website_upload_limit():
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
     if (request.endpoint or "").startswith(("reifen_kauf.", "reifen_vertrag.")) and request.method == "POST":
         request.max_content_length = 262144 if request.endpoint == "reifen_kauf.webhook" else 16384
-    if (request.endpoint or "").startswith(("shop_public_v2.", "shop_buyer_v2.")) and request.method in {"POST", "PUT", "DELETE"}:
+    if (request.endpoint or "").startswith(("shop_public_v2.", "shop_buyer_v2.", "shop_consumer_v2.")) and request.method in {"POST", "PUT", "DELETE"}:
         request.max_content_length = 262144 if request.endpoint == "shop_public_v2.stripe_webhook" else 16384
 
 
@@ -3205,17 +3205,20 @@ def restrict_public_site_service():
     # The stateless homepage only reads released products. On a persistent
     # portal (including its configured public hostname), the exact v2 handlers
     # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
-    if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product", "shop_media_v2.image"} and request.method == "GET":
+    if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product", "shop_media_v2.image", "shop_documents.document",
+                            "shop_public_v2.product_variants", "shop_public_v2.compatible_tyres"} and request.method == "GET":
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {
             "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
             "shop_public_v2.order_status", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook",
-            "shop_buyer_v2.session_state", "shop_buyer_v2.address", "shop_buyer_v2.sign_out"}:
+            "shop_buyer_v2.session_state", "shop_buyer_v2.address", "shop_buyer_v2.sign_out",
+            "shop_consumer_v2.accept", "shop_consumer_v2.withdrawal_review", "shop_consumer_v2.withdrawal_confirm"}:
         return None
     if request.method == "GET" and request.endpoint in {
+            "shop_consumer_v2.terms", "shop_consumer_v2.legal_document", "shop_consumer_v2.withdrawal",
             "shop_frontend.home", "shop_frontend.felgen", "shop_frontend.reifen",
             "shop_frontend.komplettraeder", "shop_frontend.ersatzteile", "shop_frontend.zubehoer",
-            "shop_frontend.service", "shop_frontend.warenkorb",
+            "shop_frontend.service", "shop_frontend.warenkorb", "shop_frontend.felgenstudio",
             "shop_frontend.order_success", "shop_frontend.order_cancel"}:
         return None
     if (request.endpoint not in allowed_endpoints
@@ -3242,7 +3245,8 @@ def protect_csrf():
     if request.endpoint in {'mos_public.webhook', 'reifen_kauf.webhook', 'shop_public_v2.stripe_webhook'}:
         return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
     if request.endpoint in {'shop_public_v2.cart_quote', 'shop_public_v2.create_order_draft',
-                            'shop_public_v2.start_checkout', 'shop_buyer_v2.address', 'shop_buyer_v2.sign_out'}:
+                            'shop_public_v2.start_checkout', 'shop_buyer_v2.address', 'shop_buyer_v2.sign_out',
+                            'shop_consumer_v2.accept', 'shop_consumer_v2.withdrawal_review', 'shop_consumer_v2.withdrawal_confirm'}:
         # Exact handlers verify the separate opaque retail session, HTTPS
         # origin and buyer CSRF. Never substitute an admin/partner session.
         return None
@@ -8994,6 +8998,15 @@ def create_backup_package(reason="auto"):
                     includes_database_snapshot=not USE_POSTGRES,
                 )
                 export.update(original_coverage)
+                shop_storage = app.extensions.get('shop_production', {}).get('storage')
+                if shop_storage is None:
+                    from shop_production import existing_shop_backup_storage
+                    shop_storage = existing_shop_backup_storage(environ={'DATA_DIR': str(DATA_DIR.resolve())})
+                if shop_storage is not None:
+                    # Dedicated SQLite order/idempotency ledger, including its
+                    # WAL, belongs in the same authenticated backup package.
+                    # Never silently publish a portal-only "complete" backup.
+                    export['shop_v2'] = shop_storage.write_backup(archive)
                 archive.writestr(
                     "backup.json",
                     json.dumps(export, ensure_ascii=False, indent=2, default=str),
@@ -9011,6 +9024,7 @@ def create_backup_package(reason="auto"):
                             "binary_blob_count": len(export["binary_blobs"]),
                             "binary_blob_bytes": binary_blob_bytes,
                             **original_coverage,
+                            **({'shop_v2': export['shop_v2']} if 'shop_v2' in export else {}),
                             "keep": AUTO_BACKUP_KEEP,
                         },
                         ensure_ascii=False,
@@ -31019,6 +31033,12 @@ BESUCHER_WEBSITES = {
             "/shop": "Shop-Startseite",
             "/shop/felgen": "Shop · Felgen",
             "/shop/reifen": "Shop · Reifen",
+            "/shop/komplettraeder": "Shop · Kompletträder",
+            "/shop/ersatzteile": "Shop · Ersatzteile",
+            "/shop/zubehoer": "Shop · Zubehör",
+            "/shop/service": "Shop · Werkstattservice",
+            "/shop/warenkorb": "Shop · Warenkorb",
+            "/shop/felgenstudio": "Shop · Felgenstudio",
             "/leistungen": "Leistungen",
             "/portale": "Portale",
             "/team": "Team",
@@ -31069,6 +31089,34 @@ SHOP_NAV_KLICKS = {
     "nav-reifen": "Shop-Navigation · Reifen",
     "nav-homepage": "Zur Firmenhomepage",
     "nav-anrufen": "Telefonnummer anklicken",
+    "nav-komplettraeder": "Shop-Navigation · Kompletträder",
+    "nav-ersatzteile": "Shop-Navigation · Ersatzteile",
+    "nav-zubehoer": "Shop-Navigation · Zubehör",
+    "nav-service": "Shop-Navigation · Werkstattservice",
+    "nav-cart": "Warenkorb öffnen",
+    "nav-studio": "Felgenstudio öffnen",
+    "product-view": "Artikel ansehen",
+    "variant-view": "Ausführung ansehen",
+    "cart-add": "Artikel zum Warenkorb hinzufügen",
+    "cart-remove": "Artikel entfernen",
+    "quantity-change": "Anzahl ändern",
+    "catalogue-filter": "Katalog eingrenzen",
+    "vehicle-filter": "Fahrzeug eingrenzen",
+    "filter-reset": "Filter zurücksetzen",
+    "pagination-next": "Weitere Produkte ansehen",
+    "pagination-previous": "Vorherige Produkte ansehen",
+    "image-zoom": "Produktbild vergrößern",
+    "image-view": "Produktansicht wechseln",
+    "matching-tyres": "Passende Reifen suchen",
+    "tyre-choice": "Reifen auswählen",
+    "tyre-season": "Saison wählen",
+    "service-choice": "Werkstattleistung wählen",
+    "appointment-open": "Montagetermin auswählen",
+    "appointment-form": "Montage-Anfrageformular öffnen",
+    "appointment-check": "Terminwunsch prüfen",
+    "quote-request": "Gesamtpreis prüfen",
+    "checkout-start": "Zur Zahlung wechseln",
+    "document-open": "Produktdokument öffnen",
 }
 SHOP_KLICK_ELEMENTE = {
     "/": {
@@ -31095,6 +31143,8 @@ SHOP_KLICK_ELEMENTE = {
         "hero-reifen-angebot": "Reifenangebot anfragen",
         "other-felgen": "Auch Felgen ansehen",
     },
+    **{path: dict(SHOP_NAV_KLICKS) for path in ("/shop/komplettraeder", "/shop/ersatzteile",
+        "/shop/zubehoer", "/shop/service", "/shop/warenkorb", "/shop/felgenstudio")},
 }
 # Kampagnenschlüssel bleiben die Speicherkennung in google_ads_tageswerte.website.
 # Mehrere Kampagnen können zur selben Website gehören.
@@ -32198,7 +32248,8 @@ def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
                 "label": besucher_seiten_label("auto-lackierzentrum", seite),
                 "aufrufe": shop_aufrufe.get(seite, 0),
             }
-            for seite in ("/", "/shop", "/shop/felgen", "/shop/reifen")
+            for seite in ("/", "/shop", "/shop/felgen", "/shop/reifen", "/shop/komplettraeder",
+                          "/shop/ersatzteile", "/shop/zubehoer", "/shop/service", "/shop/warenkorb", "/shop/felgenstudio")
         ]
     website_lookup = {row["website"]: dict(row) for row in website_rows}
     websites = []
@@ -46768,7 +46819,11 @@ def public_sitemap():
     if not public_site_is_indexable_request():
         abort(404)
     urls = ("", "/leistungen", "/geschaeftspartner", "/team", "/portale", "/impressum", "/datenschutz")
-    urls += ("/shop", "/shop/felgen", "/shop/reifen")
+    if app.config.get('SHOP_FRONTEND_ENABLED') is True:
+        urls += ("/shop/", "/shop/felgen/", "/shop/reifen/", "/shop/komplettraeder/",
+                 "/shop/ersatzteile/", "/shop/zubehoer/", "/shop/service/", "/shop/felgenstudio/")
+    else:
+        urls += ("/shop", "/shop/felgen", "/shop/reifen")
     urls += tuple(f"/leistungen/{slug}" for slug in HOMEPAGE_LEISTUNGEN)
     entries = "".join(f"<url><loc>{escape(PUBLIC_BASE_URL + path)}</loc></url>" for path in urls)
     body = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
@@ -46963,6 +47018,8 @@ def homepage_jahreszeit(heute=None):
 
 
 @app.get("/shop", defaults={"shop_category": None})
+@app.get("/shop/felgen", defaults={"shop_category": "felgen"})
+@app.get("/shop/reifen", defaults={"shop_category": "reifen"})
 @app.get("/shop/<any(felgen,reifen):shop_category>")
 def oeffentlicher_shop(shop_category):
     """Independent public shop entry with the established offer request flow."""
@@ -50039,6 +50096,8 @@ def hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export):
 def extract_import_package_files(archive, names, tmp_path):
     export = read_backup_json_from_archive(archive, names)
     manifest = read_backup_manifest_from_archive(archive, names)
+    from shop_storage import reject_portal_only_restore
+    reject_portal_only_restore(export=export, manifest=manifest, names=names)
     validate_import_original_coverage(export, manifest, names)
     try:
         manifest_version = int(manifest.get("format_version") or 1)
@@ -50071,6 +50130,7 @@ def extract_import_package_files(archive, names, tmp_path):
         imported_db = tmp_path / "auftraege.db"
         with imported_db.open("wb") as target:
             copy_import_package_member(archive, "auftraege.db", target)
+        reject_portal_only_restore(imported_db=imported_db)
         if export is not None:
             hydrate_imported_sqlite_backup_blobs(imported_db, archive, names, export)
 
@@ -50201,6 +50261,8 @@ def normalize_import_value(value, column_type):
 
 @portal_originals_locked
 def import_backup_json_rows_into_current_database(export, archive, names):
+    from shop_storage import reject_portal_only_restore
+    reject_portal_only_restore(export=export, names=names)
     tables = (export or {}).get("tables")
     if not isinstance(tables, dict):
         raise ValueError("Datenpaket ungültig: backup.json enthält keine Tabellen.")
@@ -50288,6 +50350,8 @@ def import_backup_json_rows_into_current_database(export, archive, names):
 
 @portal_originals_locked
 def import_sqlite_rows_into_current_database(imported_db):
+    from shop_storage import reject_portal_only_restore
+    reject_portal_only_restore(imported_db=imported_db)
     source = sqlite3.connect(imported_db)
     source.row_factory = sqlite3.Row
     target = get_db()
@@ -60563,9 +60627,13 @@ BACKUP_SCHEMA_FEATURES += (REIFEN_ANBINDUNG_FEATURE,)
 configure_reifen_integrations(sys.modules[__name__])
 
 from shop_runtime import register_shop_runtime
-# No adapters/credentials/DB connections are inherited from the legacy tyre or
-# rental flows. All new shop stages remain off until explicitly wired/released.
-shop_runtime = register_shop_runtime(sys.modules[__name__])
+from shop_production import prepare_shop_runtime
+# A separately installed private release supplies only explicitly reviewed
+# adapters; no rental/legacy credentials or database connection are inherited.
+shop_runtime = register_shop_runtime(sys.modules[__name__],
+                                    **prepare_shop_runtime(sys.modules[__name__]))
+from shop_admin import register_shop_admin
+register_shop_admin(app, private_data_dir=DATA_DIR.resolve())
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)

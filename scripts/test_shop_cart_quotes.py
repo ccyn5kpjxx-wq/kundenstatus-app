@@ -134,6 +134,37 @@ class CartQuoteChecks(unittest.TestCase):
         q = self.f.quote([line(OIL,3)]).public()
         self.assertEqual(q['lines'][0]['items_gross_cent'],6843*3)
 
+    def test_manual_mixed_order_policy_blocks_payment_without_losing_real_totals(self):
+        result = self.f.quote([line(TYRE, 4), line(OIL)], manual_mixed_orders=True).public()
+        self.assertFalse(result['ready'])
+        self.assertIsNone(result['total_gross_cent'])
+        self.assertIsInstance(result['known_subtotal_gross_cent'], int)
+        self.assertIn('mixed_cart_manual_review_required', {r['code'] for r in result['blocked_reasons']})
+        self.assertTrue(self.f.quote([line(TYRE, 4)], manual_mixed_orders=True).public()['ready'])
+        split = self.f.quote([line(TYRE, 2), line(TYRE, 2, services={'mounting': True})], manual_mixed_orders=True)
+        self.assertIn('mixed_cart_manual_review_required', self.codes(split))
+
+    def test_live_default_requires_manual_mixed_offer_but_synthetic_test_mode_can_exercise_saga(self):
+        self.assertTrue(CartQuoteService(mode='live').manual_mixed_orders)
+        self.assertFalse(CartQuoteService(mode='test').manual_mixed_orders)
+        with self.assertRaisesRegex(ValueError, 'invalid_mixed_order_policy'):
+            CartQuoteService(manual_mixed_orders='false')
+
+    def test_direct_shipping_needs_supported_explicit_salutation_before_payment(self):
+        for salutation in (None, '', 'An', True, 'Herr', 'Frau', 'Firma'):
+            context = {'delivery': {'salutation': salutation}}
+            service = self.f.service_instance(require_delivery_salutation=True)
+            result = service.quote({'lines': [line(OIL)]}, customer_id=23, vehicle_ref='CAR-1', delivery_context=context)
+            self.assertEqual('delivery_salutation_required' in self.codes(result), salutation not in {'Herr', 'Frau', 'Firma'})
+        result = self.f.quote([line(TYRE, 4, services={'mounting': True})], require_delivery_salutation=True)
+        self.assertNotIn('delivery_salutation_required', self.codes(result))
+
+    def test_required_tyre_documents_cannot_be_asserted_through_cart_payload(self):
+        result = self.f.quote([line(TYRE)], require_tyre_documents=True)
+        self.assertIn('product_documents_unconfirmed', self.codes(result))
+        self.f.products[TYRE]['required_documents_confirmed'] = True
+        self.assertNotIn('product_documents_unconfirmed', self.codes(self.f.quote([line(TYRE)], require_tyre_documents=True)))
+
     def test_provider_observation_after_slow_io_uses_current_clock_and_final_creation(self):
         current = [NOW]
         def retail(p, count):
@@ -328,7 +359,8 @@ class CartQuoteChecks(unittest.TestCase):
         self.assertIsNone(empty.public()['known_subtotal_gross_cent'])
 
     def test_vehicle_fitment_cannot_be_asserted_by_browser_or_missing_metadata(self):
-        for alteration in ({'fitment_required':False},{'fitment':{'confirmed':True}},{'fitment_required':None}):
+        for alteration in ({'fitment':{'confirmed':True}},{'fitment_required':None}):
+            self.f = Fixture()
             self.f.products[TYRE].update(alteration)
             self.assertIn('fitment_unconfirmed',self.codes(self.f.quote([line(TYRE)])))
         self.f=Fixture()

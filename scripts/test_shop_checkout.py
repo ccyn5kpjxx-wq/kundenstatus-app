@@ -160,6 +160,18 @@ class CheckoutChecks(unittest.TestCase):
         self.assertEqual(first['session_id'], again['session_id'])
         self.assertEqual(len(self.gateway.created), 1)
 
+    def test_stripe_hosted_g_path_keeps_exact_session_and_host_binding(self):
+        original = self.gateway.create_session
+        def hosted(params, **kwargs):
+            result = original(params, **kwargs)
+            result['url'] = 'https://checkout.stripe.com/g/pay/' + result['id'] + '#synthetic'
+            self.gateway.sessions[result['id']] = deepcopy(result)
+            return result
+        self.gateway.create_session = hosted
+        result = self.start()
+        self.assertIn('/g/pay/cs_test_synthetic#', result['checkout_url'])
+        self.assertEqual(len(self.gateway.created), 1)
+
     def test_unknown_creation_zero_or_ambiguous_lookup_never_allows_a_new_post(self):
         self.gateway.timeout = True
         with self.assertRaisesRegex(CheckoutError, '^checkout_reconciliation_required$'):

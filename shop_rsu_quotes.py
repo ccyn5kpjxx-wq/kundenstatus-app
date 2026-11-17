@@ -78,6 +78,13 @@ def _binding(identifier, value):
             raise ValueError()
         candidate = value["mapping"]
         proof = candidate["evidence"]
+        if isinstance(proof, Mapping) and proof.get("rule") == "exact_ean_manufacturer_model_colour_rim_geometry_v1":
+            from shop_supplier_catalog import validate_rim_mapping
+            supplier = validate_rim_mapping(candidate, product_id=identifier,
+                category=value["category"], expected_ean=value["expected_ean"])
+            safe = {"product_id": identifier, "identity_hash": value["identity_hash"],
+                    "category": value["category"], "expected_ean": value["expected_ean"], **supplier}
+            return {**safe, "evidence_id": _hash(safe)}
         if (candidate.get("status") != "exact_sku_candidate"
                 or set(proof) != {"rule", "manufacturer", "mpn", "core", "alzura", "rsu"}
                 or proof["rule"] != "exact_manufacturer_mpn_and_full_tyre_core_v1"
@@ -214,6 +221,42 @@ class RSUQuoteProvider:
         return ({"confirmed": True, "product_id": value["product_id"], "identity_hash": value["identity_hash"],
                  "supplier": "RSU", "supplier_article_id": value["supplier_article_id"],
                  "evidence_id": value["evidence_id"]} if value else None)
+
+    def fresh_inquiry(self, item, exact_quantity):
+        """New private GET for an already frozen supplier position; no cache.
+
+        This method is deliberately separate from public display prices. It
+        returns the net amount only to the internal procurement saga.
+        """
+        if (not isinstance(item, Mapping) or not isinstance(item.get('id'), str)
+                or type(exact_quantity) is not int or not 1 <= exact_quantity <= 20):
+            return None
+        binding = self._bindings.get(item.get('id'))
+        mapping = item.get('mapping')
+        if (binding is None or item.get('identity_hash') != binding['identity_hash']
+                or not isinstance(mapping, Mapping) or mapping.get('evidence_id') != binding['evidence_id']
+                or mapping.get('supplier_article_id') != binding['supplier_article_id']
+                or self._policy.currency != 'EUR' or self._policy.net_unit_price_confirmed is not True):
+            return None
+        try:
+            before = _stamp(self._clock())
+            value = self._inquiry.inquire(binding['supplier_article_id'], exact_quantity)
+            now = _stamp(self._clock())
+            observed = _stamp(value.retrieved_at)
+            if (not isinstance(value, ArticleInquiry) or value.article_id != binding['supplier_article_id']
+                    or type(value.amount) is not int or value.amount != exact_quantity or value.ean != binding['expected_ean']
+                    or value.configured_mode != self._policy.mode or not isinstance(value.price, Decimal)
+                    or not Decimal('0') < value.price <= Decimal('100000')
+                    or type(value.stock) is not int or not exact_quantity <= value.stock <= 1_000_000_000
+                    or not before <= observed <= now < observed + TTL):
+                return None
+            return {'confirmed': True, 'product_id': binding['product_id'], 'identity_hash': binding['identity_hash'],
+                    'supplier_article_id': binding['supplier_article_id'], 'mapping_evidence_id': binding['evidence_id'],
+                    'expected_ean': binding['expected_ean'], 'ean': value.ean, 'quantity': exact_quantity,
+                    'unit_net': format(value.price, 'f'), 'currency': 'EUR', 'mode': self._policy.mode,
+                    'stock': value.stock, 'observed_at': observed.isoformat(), 'expires_at': (observed + TTL).isoformat()}
+        except Exception:
+            return None
 
     def _remember(self, key, quote, until):
         self._cache[key] = {"quote": deepcopy(quote), "until": until}

@@ -46,12 +46,15 @@ class PublicPriceCache:
     def __init__(self, products, *, approved_ids, provider, mode="live", enabled=False,
                  reads_approved=False, max_provider_reads_per_period=0, period_seconds=3600,
                  spacing_seconds=2, failure_backoff_seconds=60, max_queue=48, max_workers=1,
-                 max_cache_entries=512, clock=None, monotonic=None):
+                 max_cache_entries=512, clock=None, monotonic=None,
+                 source='RSU', require_procurement=True):
         if (not isinstance(products, Mapping) or len(products) > MAX_PRODUCTS
                 or not isinstance(approved_ids, (set, frozenset)) or len(approved_ids) > MAX_PRODUCTS
                 or any(not isinstance(v, str) or not ID.fullmatch(v) for v in approved_ids)
                 or not approved_ids <= products.keys() or not callable(getattr(provider, "retail_quote", None))
                 or mode not in {"test", "live"} or type(enabled) is not bool or type(reads_approved) is not bool
+                or source not in {'RSU', 'ALZURA'} or type(require_procurement) is not bool
+                or source == 'RSU' and require_procurement is not True
                 or type(max_provider_reads_per_period) is not int or not 0 <= max_provider_reads_per_period <= 100_000
                 or not _duration(period_seconds, 1, 2_678_400) or not _duration(spacing_seconds, 0.1, 3600)
                 or not _duration(failure_backoff_seconds, 1, 86400)
@@ -69,6 +72,7 @@ class PublicPriceCache:
                 raise PriceCacheError("invalid_product_identity")
             selected[pid] = {key: row[key] for key in ("id", "identity_hash", "category")}
         self._products, self._provider, self._mode = selected, provider, mode
+        self._source, self._require_procurement = source, require_procurement
         self._enabled, self._permission = enabled, reads_approved
         self._budget, self._period, self._spacing = max_provider_reads_per_period, period_seconds, spacing_seconds
         self._backoff_seconds, self._queue_limit, self._workers_max = failure_backoff_seconds, max_queue, max_workers
@@ -138,7 +142,9 @@ class PublicPriceCache:
 
     def _quote(self, product, quantity, value, now):
         if (not isinstance(value, Mapping) or value.get("confirmed") is not True
-                or value.get("procurement_confirmed") is not True or value.get("product_id") != product["id"]
+                or value.get('source', 'RSU' if self._source == 'RSU' else None) != self._source
+                or self._require_procurement and value.get("procurement_confirmed") is not True
+                or value.get("product_id") != product["id"]
                 or value.get("identity_hash") != product["identity_hash"] or value.get("mode") != self._mode
                 or value.get("currency") != "eur" or value.get("vat_percent") != "19.00"
                 or type(value.get("quantity")) is not int or value["quantity"] != quantity
@@ -148,9 +154,13 @@ class PublicPriceCache:
         observed, expires = _stamp(value.get("observed_at")), _stamp(value.get("expires_at"))
         if not timedelta(0) < expires - observed <= TTL or not observed <= now < expires:
             return None
-        return {"quantity": quantity, "unit_gross_cent": value["unit_gross_cent"],
+        result = {"quantity": quantity, "unit_gross_cent": value["unit_gross_cent"],
                 "items_gross_cent": quantity * value["unit_gross_cent"], "observed_at": observed,
                 "expires_at": expires, "stock": value["stock"]}
+        if (value.get('base_price_unit') == 'L' and type(value.get('base_price_gross_cent')) is int
+                and 1 <= value['base_price_gross_cent'] <= 10_000_000):
+            result.update(base_price_unit='L', base_price_gross_cent=value['base_price_gross_cent'])
+        return result
 
     def _fresh(self, key, now):
         value = self._entries.get(key)
@@ -327,12 +337,17 @@ class PublicPriceCache:
             values = [v for v in values if v["quantity"] <= stock]
             if not values:
                 return None
-            return {"source": "RSU", "currency": "EUR", "vat_percent": "19.00",
+            result = {"source": self._source, "currency": "EUR", "vat_percent": "19.00",
                     "observed_at": min(v["observed_at"] for v in values).isoformat(),
                     "expires_at": min(v["expires_at"] for v in values).isoformat(), "stock_reported": stock,
                     "prices_by_quantity": {str(v["quantity"]): {"quantity": v["quantity"],
-                        "unit_gross_cent": v["unit_gross_cent"], "items_gross_cent": v["items_gross_cent"]}
+                        "unit_gross_cent": v["unit_gross_cent"], "items_gross_cent": v["items_gross_cent"],
+                        "vat_percent": "19.00"}
                         for v in values}}
+            base = {(v.get('base_price_unit'), v.get('base_price_gross_cent')) for v in values}
+            if len(base) == 1 and next(iter(base))[0] == 'L':
+                result.update(base_price_unit='L', base_price_gross_cent=next(iter(base))[1])
+            return result
 
     def status(self):
         with self._condition:

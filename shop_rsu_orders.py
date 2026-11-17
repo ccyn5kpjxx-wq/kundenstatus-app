@@ -113,7 +113,8 @@ def freeze_order_request(value):
         address = value["delivery_address"]
         if (not isinstance(address, Mapping) or set(address) != _ADDRESS
                 or type(address["neutraldelivery"]) is not int or address["neutraldelivery"] != 1
-                or address["countrycode"] != "DE" or not isinstance(address["zipcode"], str)
+                or address["countrycode"] != "DE" or address.get('salutation') not in {'Firma', 'Herr', 'Frau'}
+                or not isinstance(address["zipcode"], str)
                 or not re.fullmatch(r"[0-9]{5}", address["zipcode"])):
             raise ValueError()
         address = dict(address)

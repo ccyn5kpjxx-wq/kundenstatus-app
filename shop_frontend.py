@@ -27,6 +27,8 @@ PAGES = {
                 'Reifenservice, Ölwechsel, Lackierung und Fahrzeugpflege in Mosbach.'),
     'warenkorb': ('Ihre Auswahl.', '', '',
                    'Produkte, Werkstattleistungen und Versand vor dem Abschluss gemeinsam prüfen.'),
+    'felgenstudio': ('Dein Auto. Deine nächste Felge.', '', '',
+                     'Seitenfoto wählen, echte Felgendesigns ausprobieren und näher ansehen.'),
 }
 NAV = [('felgen', 'Felgen'), ('reifen', 'Reifen'), ('komplettraeder', 'Kompletträder'),
        ('ersatzteile', 'Ersatzteile'), ('zubehoer', 'Zubehör'), ('service', 'Werkstattservice')]
@@ -50,16 +52,17 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
     SHOP_FRONTEND_ENABLED, SHOP_BUYER_ENABLED, SHOP_CART_QUOTE_ENABLED,
     SHOP_ORDER_DRAFT_ENABLED and SHOP_CHECKOUT_ENABLED must be literal True.
     Optional same-origin feature_links: studio, complete_wheels, account,
-    service_request, terms, privacy. Supply only actual reviewed routes.
+    service_request, cart_request, terms, privacy, withdrawal. Supply only actual reviewed routes.
     """
     prefix = _link(url_prefix).rstrip('/')
     if not prefix or '?' in prefix:
         raise ValueError('invalid_shop_prefix')
     company = _link(company_url)
     links = dict(feature_links or {})
-    if set(links) - {'studio', 'complete_wheels', 'account', 'service_request', 'terms', 'privacy'}:
+    if set(links) - {'studio', 'complete_wheels', 'account', 'service_request', 'cart_request', 'terms', 'privacy', 'withdrawal'}:
         raise ValueError('invalid_feature_link')
     links = {key: _link(value) for key, value in links.items()}
+    links.setdefault('studio', prefix + '/felgenstudio/')
     bp = Blueprint('shop_frontend', __name__, url_prefix=prefix, template_folder='templates')
 
     @bp.before_request
@@ -73,7 +76,7 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = (
-            "default-src 'none'; style-src 'self'; img-src 'self'; script-src 'self'; "
+            "default-src 'none'; style-src 'self'; img-src 'self' blob:; script-src 'self'; "
             "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         return response
 
@@ -91,12 +94,19 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
                                hero=values[2], description=values[3], navigation=NAV,
                                company_url=company, feature_links=links, csrf_token=token,
                                order_id=order_id, return_kind=return_kind,
+                               studio_config={'products': [], 'demo': {
+                                   'src': '/static/shop_v2/felgenstudio-demo.png',
+                                   'front': {'x': .7798145933014353, 'y': .693836344314559, 'r': .06578947368421052,
+                                             'face': {'rxRatio': .8165345454545454, 'ryRatio': .8508072727272727, 'rotation': 3.36}},
+                                   'rear': {'x': .2621471291866029, 'y': .6947927736450584, 'r': .06578947368421052,
+                                            'face': {'rxRatio': .8020872727272727, 'ryRatio': .83984, 'rotation': 2.71}}}},
                                indexable=(key not in {'warenkorb', 'order_status'}
                                           and current_app.config.get('SHOP_FRONTEND_INDEXABLE') is True),
                                buyer_enabled=current_app.config.get('SHOP_BUYER_ENABLED') is True,
                                quote_enabled=current_app.config.get('SHOP_CART_QUOTE_ENABLED') is True,
                                order_enabled=current_app.config.get('SHOP_ORDER_DRAFT_ENABLED') is True,
-                               checkout_enabled=current_app.config.get('SHOP_CHECKOUT_ENABLED') is True)
+                               checkout_enabled=current_app.config.get('SHOP_CHECKOUT_ENABLED') is True,
+                               consumer_enabled=current_app.config.get('SHOP_CONSUMER_ENABLED') is True)
 
     @bp.get('/')
     def home():

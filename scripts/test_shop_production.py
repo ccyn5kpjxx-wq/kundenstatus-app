@@ -1,0 +1,351 @@
+"""Synthetic release/bootstrap boundaries; temporary files and no network."""
+import ast
+from contextlib import ExitStack
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from io import BytesIO
+import json
+from pathlib import Path
+import socket
+import sys
+import tempfile
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from flask import Flask, abort, redirect, request
+from PIL import Image
+from shop_catalog_public import variant_fingerprint
+from shop_media import MediaError
+from shop_production import (ProductionError, _json, _private_file, _service_quote,
+                             existing_shop_backup_storage, prepare_shop_runtime)
+from shop_runtime import register_shop_runtime
+from shop_storage import ShopStorage, StorageError
+from test_shop_catalog_public import PHOTO, wheel
+
+FLAGS = ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED',
+         'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED')
+
+
+def write_json(path, value):
+    data = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).encode('utf-8')
+    path.write_bytes(data)
+    return {'file': path.name, 'sha256': sha256(data).hexdigest()}
+
+
+class ReleaseChecks(unittest.TestCase):
+    def setUp(self):
+        self.resources = ExitStack()
+        self.addCleanup(self.resources.close)
+        self.resources.enter_context(patch.object(socket, 'socket', side_effect=AssertionError('Network forbidden')))
+        self.resources.enter_context(patch('threading.Thread', side_effect=AssertionError('Background thread forbidden')))
+        self.data = Path(self.resources.enter_context(tempfile.TemporaryDirectory())).resolve()
+        self.root = self.data / 'shop-release'
+        self.root.mkdir()
+        (self.root / 'media').mkdir()
+        self.env = {'DATA_DIR': str(self.data), 'SHOP_RELEASE_ENABLED': '1'}
+        self.portal = SimpleNamespace(app=Flask(__name__, root_path=str(ROOT)),
+                                      get_db=Mock(side_effect=AssertionError('Portal DB forbidden')))
+        self.released = wheel(quote_public=None)
+        self.hidden = wheel('b', name='UNRELEASED_PRIVATE_NAME', quote_public=None)
+        image = BytesIO()
+        Image.new('RGB', (2, 2), 'white').save(image, format='PNG')
+        self.image = image.getvalue()
+        self.asset = sha256(self.image).hexdigest() + '.png'
+        (self.root / 'media' / self.asset).write_bytes(self.image)
+        self.bundle = {'products': [self.released, self.hidden],
+            'publication': {'released_ids': [self.released['selection_id']],
+                            'image_urls': {PHOTO: '/shop/media/' + self.asset}},
+            'media': {'resources': {self.asset: {'file': self.asset, 'sha256': sha256(self.image).hexdigest()}},
+                      'approved_assets': [self.asset]},
+            'private_evidence': 'PRIVATE_CANARY'}
+        self.descriptor = {'schema_version': 1, 'publication_approved': True, 'mode': 'live',
+                           'public_origin': 'https://shop.example.test', 'release_id': 'synthetic-release'}
+        self.install()
+
+    def install(self):
+        self.descriptor['bundle'] = write_json(self.root / 'bundle.json', self.bundle)
+        write_json(self.root / 'current.json', self.descriptor)
+
+    def prepare(self, **kwargs):
+        result = prepare_shop_runtime(self.portal, environ=self.env, background=False, **kwargs)
+        cache = self.portal.app.extensions.get('shop_production', {}).get('price_cache')
+        if cache:
+            self.addCleanup(cache.stop)
+        self.portal.get_db.assert_not_called()
+        return result
+
+    def assert_closed(self):
+        self.assertTrue(all(self.portal.app.config.get(flag) is False for flag in FLAGS))
+        self.assertEqual(self.portal.app.extensions['shop_production'],
+                         {'ready': False, 'reason': 'release_configuration_incomplete'})
+
+    def test_literal_enable_is_required_without_file_db_or_provider_access(self):
+        for value in (None, True, 'true', '0', 'yes'):
+            with self.subTest(value=value), patch('shop_production._json', side_effect=AssertionError('No file read')):
+                result = prepare_shop_runtime(self.portal, environ={'SHOP_RELEASE_ENABLED': value},
+                    provider_factory=Mock(side_effect=AssertionError('No provider construction')))
+                self.assertEqual(result, {})
+        self.assertFalse((self.data / 'shop-v2').exists())
+
+    def test_approved_browse_release_exposes_only_allowlisted_projection_and_original_image(self):
+        dependencies = self.prepare()
+        self.assertEqual(set(dependencies), {'catalogue', 'media_service', 'catalogue_warmup', 'feature_links'})
+        self.assertEqual(dependencies['feature_links'], {})
+        state = register_shop_runtime(self.portal, **dependencies)
+        self.assertTrue(state['enabled']['SHOP_PUBLIC_CATALOGUE_ENABLED'])
+        for flag in ('SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_BUYER_ENABLED'):
+            self.assertFalse(state['enabled'][flag])
+        client = self.portal.app.test_client()
+        response = client.get('/shop/api/v2/products')
+        self.assertEqual(response.status_code, 200)
+        page = response.get_json()
+        self.assertEqual(page['total'], 1)
+        self.assertIsNone(page['items'][0]['price'])
+        for text in ('PRIVATE_CANARY', 'UNRELEASED_PRIVATE_NAME', 'provider_id', 'identity_hash', 'net_price'):
+            self.assertNotIn(text, response.get_data(as_text=True))
+        self.assertEqual(client.get('/shop/media/' + self.asset).data, self.image)
+        self.assertEqual(client.post('/shop/api/v2/orders', json={}).status_code, 404)
+        self.assertFalse((self.data / 'shop-v2').exists())
+
+    def test_invalid_release_clears_preexisting_purchase_flags_and_hides_errors(self):
+        self.portal.app.config.update({flag: True for flag in FLAGS})
+        self.descriptor['publication_approved'] = 'PRIVATE_CANARY'
+        self.install()
+        with self.assertLogs(self.portal.app.logger, level='ERROR') as log:
+            self.assertEqual(self.prepare(), {})
+        self.assert_closed()
+        self.assertNotIn('PRIVATE_CANARY', '\n'.join(log.output))
+        self.assertFalse((self.data / 'shop-v2').exists())
+
+    def test_bundle_hash_mismatch_duplicate_fields_and_nonfinite_values_fail_closed(self):
+        original = (self.root / 'bundle.json').read_bytes()
+        (self.root / 'bundle.json').write_bytes(original + b' ')
+        self.assertEqual(self.prepare(), {})
+        self.assert_closed()
+        for content in (b'{"mode":"live","mode":"test"}', b'{"number":NaN}', b'{"number":Infinity}'):
+            with self.subTest(content=content):
+                (self.root / 'current.json').write_bytes(content)
+                self.assertEqual(self.prepare(), {})
+                self.assert_closed()
+
+    def test_private_file_rejects_escape_and_changed_hash(self):
+        record = write_json(self.root / 'private.json', {'token': 'PRIVATE_CANARY'})
+        self.assertEqual(_private_file(self.root, record), self.root / 'private.json')
+        for file in ('../private.json', '..', 'nested/private.json', str(self.root / 'private.json')):
+            with self.subTest(file=file), self.assertRaises(ProductionError):
+                _private_file(self.root, {**record, 'file': file})
+        with self.assertRaises(ProductionError):
+            _private_file(self.root, {**record, 'sha256': 'f' * 64})
+
+    def test_local_media_hash_is_verified_before_returning_file_bytes(self):
+        dependencies = self.prepare()
+        (self.root / 'media' / self.asset).write_bytes(b'PRIVATE_CANARY_NOT_AN_IMAGE')
+        with self.assertRaises(MediaError):
+            dependencies['media_service'].read(self.asset)
+
+    def test_read_approval_constructs_cache_without_io_then_uses_fake_exact_quantity(self):
+        self.descriptor.update(product_reads_approved=True,
+            provider_config=write_json(self.root / 'display-private.json', {'token': 'PRIVATE_CANARY'}))
+        self.install()
+        calls = []
+        class Provider:
+            def retail_quote(inner, product, quantity):
+                calls.append((deepcopy(product), quantity))
+                now = datetime.now(timezone.utc)
+                return {'confirmed': True, 'source': 'ALZURA', 'product_id': product['id'],
+                    'identity_hash': product['identity_hash'], 'mode': 'live', 'currency': 'eur',
+                    'vat_percent': '19.00', 'quantity': quantity, 'unit_gross_cent': 12345,
+                    'stock': 20, 'observed_at': now.isoformat(),
+                    'expires_at': (now + timedelta(minutes=10)).isoformat(), 'private': 'PRIVATE_CANARY'}
+        factory = Mock(return_value=Provider())
+        dependencies = self.prepare(provider_factory=factory)
+        self.assertTrue(dependencies)
+        factory.assert_called_once()
+        self.assertEqual(calls, [])
+        cache = self.portal.app.extensions['shop_production']['price_cache']
+        identifier = self.released['selection_id']
+        self.assertTrue(dependencies['catalogue_warmup']([identifier], quantities=(3,)))
+        self.assertEqual(calls, [])
+        self.assertTrue(cache.run_once())
+        self.assertEqual(calls, [({'id': identifier, 'identity_hash': variant_fingerprint(self.released),
+                                  'category': 'alloy_wheel'}, 3)])
+        product = dependencies['catalogue'].get(identifier)
+        self.assertEqual(product['price']['prices_by_quantity']['3']['items_gross_cent'], 37035)
+        self.assertNotIn('PRIVATE_CANARY', json.dumps(product))
+        self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+        self.assertFalse(self.portal.app.config['SHOP_ORDER_DRAFT_ENABLED'])
+
+    def test_quote_stage_creates_only_dedicated_storage_and_never_opens_orders_or_payments(self):
+        self.descriptor.update(buyer_and_quotes_enabled=True, initial_storage_creation=True, rsu_reads_approved=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {'token': 'PRIVATE_CANARY'}))
+        self.install()
+        provider = SimpleNamespace(retail_quote=Mock(side_effect=AssertionError('No Inquiry on startup')),
+                                   rsu_mapping=Mock(side_effect=AssertionError('No Inquiry on startup')))
+        with patch('shop_production.RSUQuoteProvider.from_config', return_value=provider) as construct:
+            dependencies = self.prepare()
+        construct.assert_called_once()
+        self.assertTrue(dependencies)
+        register_shop_runtime(self.portal, **dependencies)
+        self.assertTrue((self.data / 'shop-v2' / 'initialized').is_file())
+        self.assertTrue(self.portal.app.config['SHOP_BUYER_ENABLED'])
+        self.assertTrue(self.portal.app.config['SHOP_CART_QUOTE_ENABLED'])
+        self.assertFalse(self.portal.app.config['SHOP_ORDER_DRAFT_ENABLED'])
+        self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+        client = self.portal.app.test_client()
+        session = client.get('/shop/api/v2/buyer/session', base_url='https://shop.example.test')
+        self.assertEqual(session.status_code, 200)
+        self.assertFalse(session.get_json()['address_ready'])
+        self.assertIn('Secure', session.headers['Set-Cookie'])
+        self.assertEqual(client.post('/shop/api/v2/orders', json={}).status_code, 404)
+        provider.retail_quote.assert_not_called()
+        provider.rsu_mapping.assert_not_called()
+
+    def synthetic_provider(self, source, calls, unit):
+        def retail(product, quantity):
+            calls.append((product['id'], quantity))
+            now = datetime.now(timezone.utc)
+            return {'confirmed': True, 'source': source, 'procurement_confirmed': source == 'RSU',
+                'product_id': product['id'], 'identity_hash': product['identity_hash'], 'mode': 'live',
+                'currency': 'eur', 'vat_percent': '19.00', 'quantity': quantity, 'unit_gross_cent': unit,
+                'stock': 20, 'observed_at': now.isoformat(), 'expires_at': (now+timedelta(minutes=10)).isoformat()}
+        return SimpleNamespace(retail_quote=retail, rsu_mapping=Mock(side_effect=AssertionError('No mapping on startup')))
+
+    def test_rsu_display_read_stage_works_without_buyer_and_skips_alzura_for_bound_rows(self):
+        identifier = self.released['selection_id']
+        self.bundle['rsu_bindings'] = {identifier: {'synthetic': True}}
+        self.descriptor.update(rsu_reads_approved=True, product_reads_approved=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {'synthetic': True}))
+        self.install()
+        calls = []
+        supplier = self.synthetic_provider('RSU', calls, 23456)
+        market = Mock(side_effect=AssertionError('No ALZURA construction for exact RSU-only catalogue'))
+        with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier) as constructor:
+            dependencies = self.prepare(provider_factory=market)
+        constructor.assert_called_once()
+        self.assertEqual(constructor.call_args.kwargs['approved_ids'], {identifier})
+        market.assert_not_called()
+        self.assertEqual(calls, [])
+        self.assertTrue(dependencies['catalogue_warmup']([identifier], quantities=(3,)))
+        self.assertTrue(self.portal.app.extensions['shop_production']['price_cache'].run_once())
+        product = dependencies['catalogue'].get(identifier)
+        self.assertEqual(self.portal.app.extensions['shop_production']['price_cache'].get(identifier)['source'], 'RSU')
+        self.assertEqual(product['price']['prices_by_quantity']['3']['items_gross_cent'], 3*23456)
+        self.assertEqual(product['purchase_status'], 'supplier_check_required')
+        self.assertEqual(calls, [(identifier, 3)])
+        self.assertFalse((self.data / 'shop-v2').exists())
+        self.assertFalse(self.portal.app.config['SHOP_ORDER_DRAFT_ENABLED'])
+
+    def test_missing_rsu_read_approval_never_relabels_import_or_falls_back_to_alzura(self):
+        identifier = self.released['selection_id']
+        now = datetime.now(timezone.utc)
+        self.released['quote_public'] = {'source': 'ALZURA', 'currency': 'EUR', 'vat_percent': '19.00',
+            'observed_at': now.isoformat(), 'expires_at': (now+timedelta(minutes=10)).isoformat(),
+            'stock_reported': 20, 'prices_by_quantity': {'1': {'quantity': 1, 'unit_gross_cent': 77777, 'items_gross_cent': 77777, 'vat_percent': '19.00'}}}
+        self.bundle['rsu_bindings'] = {identifier: {'synthetic': True}}
+        self.descriptor['product_reads_approved'] = True
+        self.install()
+        factory = Mock(side_effect=AssertionError('No ALZURA fallback'))
+        with patch('shop_production.RSUQuoteProvider.from_config', side_effect=AssertionError('RSU reads not approved')) as supplier:
+            dependencies = self.prepare(provider_factory=factory)
+        supplier.assert_not_called()
+        factory.assert_not_called()
+        product = dependencies['catalogue'].get(identifier)
+        self.assertIsNone(product['price'])
+        self.assertEqual(product['price_status'], 'update_required')
+        self.assertEqual(product['purchase_status'], 'supplier_check_required')
+        self.assertFalse(dependencies['catalogue_warmup']([identifier], quantities=(1,)))
+
+    def test_mixed_browse_cache_uses_rsu_and_alzura_only_for_their_exact_scopes(self):
+        bound, market_id = self.released['selection_id'], self.hidden['selection_id']
+        self.bundle['publication']['released_ids'].append(market_id)
+        self.bundle['rsu_bindings'] = {bound: {'synthetic': True}}
+        self.descriptor.update(rsu_reads_approved=True, product_reads_approved=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {'synthetic': True}),
+            provider_config=write_json(self.root / 'market-private.json', {'synthetic': True}))
+        self.install()
+        rsu_calls, market_calls = [], []
+        supplier = self.synthetic_provider('RSU', rsu_calls, 11111)
+        market = self.synthetic_provider('ALZURA', market_calls, 22222)
+        with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
+            dependencies = self.prepare(provider_factory=Mock(return_value=market))
+        self.assertEqual(rsu_calls+market_calls, [])
+        self.assertTrue(dependencies['catalogue_warmup']([bound, market_id], quantities=(2,)))
+        cache = self.portal.app.extensions['shop_production']['price_cache']
+        self.assertTrue(cache.run_once())
+        self.assertTrue(cache.run_once())
+        self.assertEqual(rsu_calls, [(bound, 2)])
+        self.assertEqual(market_calls, [(market_id, 2)])
+        for identifier, source, status, unit in ((bound, 'RSU', 'supplier_check_required', 11111),
+                                               (market_id, 'ALZURA', 'inquiry_only', 22222)):
+            product = dependencies['catalogue'].get(identifier)
+            self.assertEqual(cache.get(identifier)['source'], source)
+            self.assertEqual(product['price']['prices_by_quantity']['2']['unit_gross_cent'], unit)
+            self.assertEqual(product['purchase_status'], status)
+        self.assertFalse((self.data / 'shop-v2').exists())
+
+    def test_quote_stage_requires_its_own_literal_rsu_read_approval(self):
+        for flag in (None, False, 'true', 1):
+            self.descriptor.update(buyer_and_quotes_enabled=True, rsu_reads_approved=flag)
+            self.install()
+            with patch('shop_production.RSUQuoteProvider.from_config', side_effect=AssertionError('No unauthorized read client')) as supplier:
+                self.assertEqual(self.prepare(), {})
+            supplier.assert_not_called()
+            self.assert_closed()
+
+    def test_storage_creation_requires_explicit_descriptor_not_implicit_empty_recovery(self):
+        self.descriptor.update(buyer_and_quotes_enabled=True, rsu_reads_approved=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {}))
+        self.install()
+        self.assertEqual(self.prepare(), {})
+        self.assert_closed()
+        self.assertFalse((self.data / 'shop-v2').exists())
+
+    def test_backup_resolver_works_with_release_disabled_and_never_creates_missing_ledger(self):
+        self.assertIsNone(existing_shop_backup_storage(environ={'DATA_DIR': str(self.data)}))
+        self.assertFalse((self.data / 'shop-v2').exists())
+        storage = ShopStorage(self.data).provision(create=True)
+        resolved = existing_shop_backup_storage(environ={'DATA_DIR': str(self.data), 'SHOP_RELEASE_ENABLED': '0'})
+        self.assertEqual(resolved.path, storage.path)
+        self.assertTrue(resolved.snapshot().startswith(b'SQLite format 3'))
+        storage.path.unlink()
+        with self.assertRaises(StorageError):
+            existing_shop_backup_storage(environ={'DATA_DIR': str(self.data)})
+
+    def test_mounting_tariff_counts_runflat_and_disposal_once_for_each_tyre(self):
+        product = {'id': 'tyre:' + 'a' * 24, 'identity_hash': 'a' * 64,
+                   'category': 'tyre', 'diameter': 18, '_mode': 'live'}
+        base = _service_quote('mounting', product, 4, {'runflat': False, 'disposal': False})
+        extras = _service_quote('mounting', product, 4, {'runflat': True, 'disposal': True})
+        self.assertEqual(base['gross_cent'], 10000)
+        self.assertEqual(extras['gross_cent'], 13600)
+        self.assertNotEqual(base['options_hash'], extras['options_hash'])
+        self.assertIsNone(_service_quote('mounting', product, 4, {'runflat': 'yes'}))
+        self.assertIsNone(_service_quote('painting', product, 4, {}))
+
+    def test_public_host_allows_new_browse_routes_without_opening_writes_or_portal(self):
+        tree = ast.parse((ROOT / 'app.py').read_text(encoding='utf-8-sig'))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'restrict_public_site_service')
+        function.decorator_list = []
+        module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
+        namespace = {'request': request, 'abort': abort, 'redirect': redirect,
+                     'is_public_site_request': lambda: True, 'PUBLIC_SITE_ONLY': True, 'PORTAL_BASE_URL': ''}
+        exec(compile(module, str(ROOT / 'app.py'), 'exec'), namespace)
+        app = Flask('public-enriched-gate')
+        app.before_request(namespace['restrict_public_site_service'])
+        for index, endpoint in enumerate(('shop_public_v2.product_variants', 'shop_public_v2.compatible_tyres',
+                                          'shop_frontend.felgenstudio', 'shop_public_v2.create_order_draft', 'internal_admin')):
+            app.add_url_rule('/' + str(index), endpoint, lambda: ('', 204), methods=['GET', 'POST'])
+        client = app.test_client()
+        for index in range(3):
+            self.assertEqual(client.get('/' + str(index)).status_code, 204)
+        for index in (3, 4):
+            self.assertEqual(client.post('/' + str(index)).status_code, 404)
+
+
+if __name__ == '__main__':
+    unittest.main()

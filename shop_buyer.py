@@ -89,9 +89,10 @@ def _text(value, maximum, *, minimum=1):
     return result
 
 
-def _address(value):
+def _address(value, *, delivery=False):
     fields = {'recipient', 'street', 'postcode', 'city', 'country'}
-    if not isinstance(value, dict) or set(value) != fields:
+    if (not isinstance(value, dict) or not fields <= set(value)
+            or set(value) - fields - ({'salutation'} if delivery else set())):
         raise BuyerError('invalid_address')
     result = {'recipient': _text(value['recipient'], 160, minimum=2),
               'street': _text(value['street'], 160, minimum=3),
@@ -101,6 +102,10 @@ def _address(value):
             or result['postcode'] == '00000' or not re.search(r'[0-9]', result['street'])
             or re.search(r'(?i)\b(?:postfach|packstation|paketstation|postfiliale)\b', result['street'])):
         raise BuyerError('unsupported_delivery_address')
+    if 'salutation' in value:
+        if not isinstance(value['salutation'], str) or value['salutation'] not in {'', 'Firma', 'Herr', 'Frau'}:
+            raise BuyerError('invalid_address')
+        result['salutation'] = value['salutation']
     return result
 
 
@@ -124,7 +129,7 @@ def validate_context(payload):
         if phone:
             result_contact['phone'] = phone
     billing = _address(payload['billing'])
-    delivery = deepcopy(billing) if payload['delivery'] is None else _address(payload['delivery'])
+    delivery = deepcopy(billing) if payload['delivery'] is None else _address(payload['delivery'], delivery=True)
     return {'contact': result_contact, 'billing': billing, 'delivery': delivery}
 
 

@@ -12,7 +12,7 @@ from flask import Blueprint, current_app, request, Response
 from shop_order_store import OrderStoreError
 
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
-                         'brand', 'make', 'model', 'year', 'hsn', 'tsn'})
+                         'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio'})
 MAX_REQUEST = 16384
 MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
@@ -164,6 +164,64 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
                 result['item'] = value
             result['prices_refreshing'] = pending
         return reply(result, maximum=MAX_DETAIL_RESPONSE)
+
+    @bp.get('/products/<string:product_id>/variants')
+    def product_variants(product_id):
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if not callable(getattr(catalogue, 'variants', None)):
+            return reply({'error': 'catalogue_unavailable'}, 503)
+        if set(request.args) - {'page', 'page_size', 'diameter'} or any(len(v) != 1 for _, v in request.args.lists()):
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            params = {}
+            for key, value in request.args.items():
+                if not re.fullmatch(r'[0-9]{1,5}', value):
+                    raise ValueError()
+                params[key] = value if key == 'diameter' else int(value)
+            result = catalogue.variants(product_id, **params)
+            if result is None:
+                return reply({'error': 'product_not_found'}, 404)
+            pending = warm_prices(result['items']) if callable(catalogue_warmup) else False
+            if not pending:
+                result = catalogue.variants(product_id, **params)
+            result['prices_refreshing'] = pending
+            return reply(result)
+        except ValueError:
+            return reply({'error': 'invalid_query'}, 400)
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
+
+    @bp.get('/products/<string:product_id>/compatible-tyres')
+    def compatible_tyres(product_id):
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if not callable(getattr(catalogue, 'compatible_tyres', None)):
+            return reply({'rim_id': product_id, 'items': [], 'scope': 'blocked',
+                          'reason': 'Passende Reifenausführungen werden geprüft.'})
+        if (set(request.args) - {'quantity', 'season', 'make', 'model', 'year', 'hsn', 'tsn'}
+                or any(len(v) != 1 for _, v in request.args.lists())
+                or any(len(v) > 160 for v in request.args.values())):
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            params = request.args.to_dict()
+            for key in ('quantity', 'year'):
+                if key in params:
+                    if not re.fullmatch(r'[0-9]{1,5}', params[key]):
+                        raise ValueError()
+                    params[key] = int(params[key])
+            result = catalogue.compatible_tyres(product_id, **params)
+            if result is None:
+                return reply({'error': 'product_not_found'}, 404)
+            pending = warm_prices(result['items'], quantities=(params.get('quantity', 4),)) if callable(catalogue_warmup) else False
+            if not pending:
+                result = catalogue.compatible_tyres(product_id, **params)
+            result['prices_refreshing'] = pending
+            return reply(result, maximum=MAX_DETAIL_RESPONSE)
+        except ValueError:
+            return reply({'error': 'invalid_query'}, 400)
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
 
     @bp.post('/cart/quote')
     def cart_quote():

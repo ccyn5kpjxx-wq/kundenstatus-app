@@ -139,10 +139,11 @@ def _quote(row):
     converted or relabelled as a different currency/tax treatment.
     """
     wheel = row.get("category") in {"tyre", "alloy_wheel", "steel_wheel"}
-    source = row.get("quote_public") if wheel else row.get("price")
+    tiered = wheel or isinstance(row.get('quote_public'), Mapping)
+    source = row.get("quote_public") if tiered else row.get("price")
     if not isinstance(source, Mapping) or row.get("price_status") == "review_pending":
         return None
-    if wheel and source.get("source") not in {"ALZURA", "RSU"}:
+    if tiered and source.get("source") not in {"ALZURA", "RSU"}:
         return None
     if ("currency" in source and source["currency"] not in ("EUR", "eur")
             or "vat_percent" in source and source["vat_percent"] != "19.00"):
@@ -151,21 +152,22 @@ def _quote(row):
         observed, expires = _stamp(source.get("observed_at")), _stamp(source.get("expires_at"))
     except CatalogError:
         return None
-    stock = source.get("stock_reported") if wheel else source.get("stock")
+    stock = source.get("stock_reported") if tiered else source.get("stock")
     if not timedelta(0) < expires - observed <= MAX_QUOTE_AGE or not _integer(stock, 0, 1_000_000):
         return None
     prices = {}
-    if wheel:
+    if tiered:
         supplied = source.get("prices_by_quantity")
         if not isinstance(supplied, Mapping):
             return None
-        for quantity in range(1, 5):
+        maximum_quantity = 4 if wheel else 20
+        for quantity in range(1, maximum_quantity + 1):
             line = supplied.get(str(quantity))
             if (not isinstance(line, Mapping) or type(line.get("quantity")) is not int
                     or line["quantity"] != quantity or line.get("vat_percent") != "19.00"
                     or "currency" in line and line["currency"] not in ("EUR", "eur")
                     or not _integer(line.get("unit_gross_cent"), 1, 10_000_000)
-                    or not _integer(line.get("items_gross_cent"), 1, 40_000_000)
+                    or not _integer(line.get("items_gross_cent"), 1, maximum_quantity * 10_000_000)
                     or line["items_gross_cent"] != quantity * line["unit_gross_cent"]):
                 continue
             prices[str(quantity)] = {"quantity": quantity, "unit_gross_cent": line["unit_gross_cent"],
@@ -192,7 +194,8 @@ class PublicCatalog:
     ``verified_fitments`` is separate from unreviewed provider vehicle hints.
     """
     def __init__(self, products: Iterable, *, released_ids, image_urls=None,
-                 document_urls=None, verified_fitments=None, clock=None, quote_lookup=None):
+                 document_urls=None, verified_fitments=None, clock=None, quote_lookup=None,
+                 quote_lookup_authoritative=False):
         if (isinstance(products, (str, bytes, Mapping)) or not isinstance(products, Iterable)
                 or isinstance(released_ids, (str, bytes)) or not isinstance(released_ids, (set, frozenset, list, tuple))
                 or len(released_ids) > MAX_PRODUCTS
@@ -205,9 +208,12 @@ class PublicCatalog:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         if quote_lookup is not None and not callable(quote_lookup):
             raise CatalogError('invalid_quote_lookup')
+        if type(quote_lookup_authoritative) is not bool:
+            raise CatalogError('invalid_quote_lookup')
         # This callback reads an already populated public-price cache only;
         # it must never perform supplier IO in the HTTP browsing thread.
         self._quote_lookup = quote_lookup
+        self._quote_lookup_authoritative = quote_lookup_authoritative
         self._rows = {}
         for count, row in enumerate(products, 1):
             if count > MAX_PRODUCTS:
@@ -288,13 +294,13 @@ class PublicCatalog:
 
     def _cached_entry(self, entry):
         if self._quote_lookup is None:
-            return entry
+            return {**entry, 'quote': None} if self._quote_lookup_authoritative else entry
         try:
             value = self._quote_lookup(entry['public']['id'])
             quote = _quote({'category': entry['public']['category'], 'quote_public': value})
-            return {**entry, 'quote': quote or entry['quote']}
+            return {**entry, 'quote': quote if self._quote_lookup_authoritative else quote or entry['quote']}
         except Exception:
-            return entry
+            return {**entry, 'quote': None} if self._quote_lookup_authoritative else entry
 
     @staticmethod
     def _project(entry, now, *, detail=True):

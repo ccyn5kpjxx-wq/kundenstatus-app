@@ -205,12 +205,24 @@ def restore_quote(snapshot, expected_hash, *, mode, now):
 class CartQuoteService:
     def __init__(self, catalogue_lookup=None, retail_quote=None, rsu_mapping=None,
                  service_quote=None, freight_quote=None, assembly_fitment=None,
-                 *, mode='test', clock=None):
+                 *, mode='test', clock=None, manual_mixed_orders=None, require_tyre_documents=None,
+                 require_delivery_salutation=None):
         if not isinstance(mode, str) or mode not in {'test', 'live'}:
             raise ValueError('invalid_quote_mode')
         self.catalogue_lookup, self.retail_quote, self.rsu_mapping = catalogue_lookup, retail_quote, rsu_mapping
         self.service_quote, self.freight_quote, self.assembly_fitment = service_quote, freight_quote, assembly_fitment
         self.mode, self.clock = mode, clock or (lambda: datetime.now(timezone.utc))
+        if manual_mixed_orders is not None and type(manual_mixed_orders) is not bool:
+            raise ValueError('invalid_mixed_order_policy')
+        # RSU dispatches each SKU/destination immediately. The operator has
+        # chosen a complete manual offer before payment for mixed baskets.
+        self.manual_mixed_orders = mode == 'live' if manual_mixed_orders is None else manual_mixed_orders
+        if require_tyre_documents is not None and type(require_tyre_documents) is not bool:
+            raise ValueError('invalid_document_policy')
+        self.require_tyre_documents = mode == 'live' if require_tyre_documents is None else require_tyre_documents
+        if require_delivery_salutation is not None and type(require_delivery_salutation) is not bool:
+            raise ValueError('invalid_delivery_policy')
+        self.require_delivery_salutation = mode == 'live' if require_delivery_salutation is None else require_delivery_salutation
 
     @staticmethod
     def _call(provider, *args):
@@ -298,6 +310,12 @@ class CartQuoteService:
             demand[row['id']] = demand.get(row['id'], 0) + row['quantity']
             key = (row['id'], destination)
             position_demand[key] = position_demand.get(key, 0) + row['quantity']
+        if self.manual_mixed_orders and len(position_demand) > 1:
+            block('mixed_cart_manual_review_required')
+        if self.require_delivery_salutation and 'customer' in destinations:
+            delivery = context.get('delivery') if isinstance(context, Mapping) else None
+            if not isinstance(delivery, Mapping) or delivery.get('salutation') not in {'Herr', 'Frau', 'Firma'}:
+                block('delivery_salutation_required')
         for identifier, count in sorted(demand.items()):
             p = call(self.catalogue_lookup, identifier)
             prefix = identifier.split(':', 1)[0]
@@ -309,12 +327,19 @@ class CartQuoteService:
                 continue
             # Only store fields used by this boundary; arbitrary provider payloads stay private.
             p = {key: p.get(key) for key in ('id', 'name', 'category', 'identity_hash', 'fitment_required',
-                 'fitment', 'new_part', 'painting_eligible', 'required_fees_confirmed', 'required_fees', 'diameter', 'tyre_size')}
+                 'fitment', 'new_part', 'painting_eligible', 'required_fees_confirmed', 'required_fees', 'diameter', 'tyre_size',
+                 'required_documents_confirmed')}
             products[identifier] = p
+            if self.require_tyre_documents and p['category'] == 'tyre' and p['required_documents_confirmed'] is not True:
+                block('product_documents_unconfirmed', product_id=identifier)
             if p['category'] in WHEELS and (type(p.get('diameter')) is not int or not 8 <= p['diameter'] <= 30):
                 block('product_dimensions_unconfirmed', product_id=identifier)
             fitment_required = p['fitment_required']
-            if type(fitment_required) is not bool or p['category'] in WHEELS | {'body_part'} and not fitment_required:
+            # A standalone tyre is sold by its exact operating description;
+            # this does not assert approval for an unspecified vehicle. Rims,
+            # body parts and every mounted rim/tyre assembly still require
+            # independent vehicle-bound evidence below.
+            if type(fitment_required) is not bool or p['category'] in RIMS | {'body_part'} and not fitment_required:
                 block('fitment_unconfirmed', product_id=identifier)
             elif fitment_required:
                 fitment = p.get('fitment')

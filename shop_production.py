@@ -1,0 +1,265 @@
+"""Reviewed shop bootstrap for the existing persistent portal.
+
+Nothing runs on import. An explicit SHOP_RELEASE_ENABLED=1 and a private,
+hash-verified release descriptor are required. Provider credentials stay in
+private files, never catalogue JSON responses or the Git repository. Shop
+failure leaves the workshop portal available and all purchasing gates closed.
+"""
+from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+import json
+import os
+from pathlib import Path
+import base64
+import re
+
+from shop_catalog_enriched import EnrichedPublicCatalog
+from shop_catalog_public import variant_fingerprint
+from shop_cart_quotes import CartQuoteService
+from shop_buyer import ShopBuyer
+from shop_freight import RSURetailFreight
+from shop_media import ReleasedMedia
+from shop_documents import ReleasedProductDocuments
+from shop_price_cache import PublicPriceCache
+from shop_price_hybrid import HybridPriceCache
+from shop_rsu_quotes import RSUQuotePolicy, RSUQuoteProvider
+from shop_storage import ShopStorage
+
+
+MAX_RELEASE_BYTES = 32 * 1024 * 1024
+
+
+class ProductionError(ValueError):
+    pass
+
+
+def _json(path, maximum=MAX_RELEASE_BYTES):
+    if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= maximum:
+        raise ProductionError('release_file_unavailable')
+    def unique(pairs):
+        result = {}
+        for k, v in pairs:
+            if k in result:
+                raise ValueError()
+            result[k] = v
+        return result
+    try:
+        return json.loads(path.read_bytes(), object_pairs_hook=unique,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    except Exception:
+        raise ProductionError('release_file_invalid') from None
+
+
+def _private_file(root, record):
+    if (not isinstance(record, Mapping) or set(record) != {'file', 'sha256'}
+            or not isinstance(record['file'], str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', record['file'])
+            or not isinstance(record['sha256'], str) or not re.fullmatch(r'[a-f0-9]{64}', record['sha256'])):
+        raise ProductionError('release_file_invalid')
+    path = root / record['file']
+    if path.resolve().parent != root.resolve() or path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_RELEASE_BYTES:
+        raise ProductionError('release_file_invalid')
+    if sha256(path.read_bytes()).hexdigest() != record['sha256']:
+        raise ProductionError('release_hash_mismatch')
+    return path
+
+
+def existing_shop_backup_storage(*, environ=None):
+    """Back up an installed order ledger even while the catalogue is disabled.
+
+    Missing/corrupt marked storage raises instead of advertising a complete
+    portal backup without its order/idempotency fences. Never creates a DB.
+    """
+    env = os.environ if environ is None else environ
+    data = Path(env.get('DATA_DIR', '/var/data'))
+    if not data.is_absolute():
+        raise ProductionError('persistent_root_unavailable')
+    if not (data / 'shop-v2').exists():
+        return None
+    return ShopStorage(data).provision(create=False)
+
+
+def _service_quote(code, product, quantity, options):
+    """Existing published tyre-service tariff; other services require a quote."""
+    if code not in {'mounting', 'runflat', 'disposal'} or product['category'] != 'tyre':
+        return None
+    diameter = product.get('diameter')
+    if type(diameter) is not int or not 13 <= diameter <= 20:
+        return None
+    unit = {'runflat': 500, 'disposal': 400}.get(code)
+    if code == 'mounting':
+        unit = 2250 if diameter <= 16 else 2500 if diameter <= 18 else 3000
+        if not isinstance(options, Mapping) or any(type(options.get(k, False)) is not bool for k in ('runflat', 'disposal')):
+            return None
+        unit += (500 if options.get('runflat') else 0) + (400 if options.get('disposal') else 0)
+    now = datetime.now(timezone.utc)
+    return {'confirmed': True, 'product_id': product['id'], 'identity_hash': product['identity_hash'],
+            'quantity': quantity, 'options_hash': sha256(json.dumps(options, ensure_ascii=False,
+                sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
+            'mode': 'live', 'currency': 'eur', 'vat_percent': '19.00',
+            'gross_cent': quantity * unit, 'observed_at': now.isoformat(),
+            'expires_at': (now + timedelta(minutes=15)).isoformat()}
+
+
+def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, background=True):
+    """Load one deliberately installed release; returns runtime keyword args.
+
+    Checkout is deliberately not inferred from a catalogue or provider login.
+    Until its required frozen legal/delivery/payment/workflow configuration is
+    fully supplied, this release serves real catalogue browsing and quotes only.
+    """
+    env = os.environ if environ is None else environ
+    if env.get('SHOP_RELEASE_ENABLED') != '1':
+        return {}
+    app = portal.app
+    # A failure cannot retain a previously requested purchasing flag.
+    for flag in ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED', 'SHOP_DOCUMENTS_ENABLED',
+                 'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED'):
+        app.config[flag] = False
+    try:
+        data = Path(env.get('DATA_DIR', '/var/data'))
+        if not data.is_absolute() or not data.is_dir():
+            raise ProductionError('persistent_root_unavailable')
+        root = data / 'shop-release'
+        if root.is_symlink() or not root.is_dir() or root.resolve().parent != data.resolve():
+            raise ProductionError('release_root_unavailable')
+        descriptor = _json(root / 'current.json', 65536)
+        if (not isinstance(descriptor, dict) or descriptor.get('schema_version') != 1
+                or descriptor.get('publication_approved') is not True or descriptor.get('mode') != 'live'):
+            raise ProductionError('release_not_approved')
+        bundle = _json(_private_file(root, descriptor.get('bundle')))
+        rows, publication = bundle['products'], bundle['publication']
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 100000 or not isinstance(publication, dict):
+            raise ProductionError('release_catalogue_invalid')
+        identities = {r.get('selection_id', r.get('id')): {'id': r.get('selection_id', r.get('id')),
+                        'identity_hash': variant_fingerprint(r), 'category': r.get('category')}
+                      for r in rows if isinstance(r, dict)}
+        released_ids = set(publication['released_ids'])
+        bindings = bundle.get('rsu_bindings', {})
+        if not isinstance(bindings, Mapping) or not set(bindings) <= released_ids:
+            raise ProductionError('procurement_bindings_invalid')
+        procurement_ids, market_ids = set(bindings), released_ids - set(bindings)
+        supplier_config, supplier, rsu_cache, market_cache = None, None, None, None
+        rsu_reads_approved = descriptor.get('rsu_reads_approved') is True
+        if descriptor.get('buyer_and_quotes_enabled') is True and not rsu_reads_approved:
+            raise ProductionError('supplier_reads_not_approved')
+        if rsu_reads_approved:
+            supplier_config = _json(_private_file(root, descriptor.get('rsu_config')), 65536)
+            supplier = RSUQuoteProvider.from_config(config=supplier_config, bindings=bindings,
+                approved_ids=procurement_ids, policy=RSUQuotePolicy(mode='live', currency='EUR',
+                    net_unit_price_confirmed=True, evidence_id='rsu-written-20261117-net-EUR'))
+            rsu_cache = PublicPriceCache(identities, approved_ids=procurement_ids, provider=supplier,
+                mode='live', enabled=True, reads_approved=True, max_provider_reads_per_period=300,
+                spacing_seconds=2.1, max_cache_entries=4096, source='RSU', require_procurement=True)
+        read_provider = None
+        if market_ids and descriptor.get('product_reads_approved') is True and provider_factory is None:
+            from shop_alzura_display import provider_factory
+        if market_ids and descriptor.get('product_reads_approved') is True and provider_factory is not None:
+            secrets_config = _json(_private_file(root, descriptor.get('provider_config')), 262144)
+            read_provider = provider_factory(bundle, secrets_config, root)
+            market_cache = PublicPriceCache(identities, approved_ids=market_ids, provider=read_provider,
+                mode='live', enabled=True, reads_approved=True, max_provider_reads_per_period=300,
+                spacing_seconds=2.1, max_cache_entries=4096, source='ALZURA', require_procurement=False)
+        cache = HybridPriceCache(identities, released_ids=released_ids, procurement_ids=procurement_ids,
+                                 rsu_cache=rsu_cache, market_cache=market_cache)
+        # A live browse price must come from the selected source's live cache.
+        # Never revive an imported ALZURA price when an RSU read is unavailable.
+        display_rows = [{**row, 'quote_public': None, 'price': None, 'sample_price_cents': None} for row in rows]
+        catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
+            image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
+            verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
+            compatible_pairs=bundle.get('compatible_pairs'), quote_lookup=cache.get,
+            quote_lookup_authoritative=True, procurement_ids=procurement_ids,
+            product_documents=bundle.get('product_documents'))
+        media_manifest = bundle['media']
+        media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
+                              local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
+                              max_network_reads=3, max_cache_bytes=64 * 1024 * 1024)
+        app.config.update(SHOP_PUBLIC_CATALOGUE_ENABLED=True, SHOP_FRONTEND_ENABLED=True,
+                          SHOP_MEDIA_ENABLED=True, SHOP_ORDER_MODE='live',
+                          SHOP_FRONTEND_INDEXABLE=descriptor.get('indexable') is True,
+                          SHOP_PUBLIC_ORIGIN=descriptor['public_origin'])
+        dependencies = {'catalogue': catalogue, 'media_service': media,
+                        'catalogue_warmup': cache.warmup if cache else None}
+        documents = None
+        if isinstance(bundle.get('documents'), Mapping):
+            manifest = bundle['documents']
+            documents = ReleasedProductDocuments(manifest['resources'], approved_assets=set(manifest['approved_assets']),
+                local_root=root / 'documents', enabled=True,
+                allow_network=descriptor.get('document_reads_approved') is True,
+                max_network_reads_per_period=5000, max_concurrent_reads=1, spacing_seconds=.2)
+            dependencies['documents_service'] = documents
+            app.config['SHOP_DOCUMENTS_ENABLED'] = True
+        from shop_service_requests import prepare_service_request_links
+        dependencies['feature_links'] = prepare_service_request_links(portal, enabled=True)
+        adapters = {'catalogue': catalogue, 'media': media, 'documents': documents, 'price_cache': cache,
+                    'read_provider': read_provider, 'release_id': descriptor.get('release_id', ''),
+                    'purchasing_enabled': False}
+        if supplier is not None:
+            adapters['supplier_quotes'] = supplier
+        app.extensions['shop_production'] = adapters
+        if descriptor.get('buyer_and_quotes_enabled') is True:
+            storage = ShopStorage(data).provision(create=descriptor.get('initial_storage_creation') is True)
+            store = storage.order_store()
+            buyer = ShopBuyer(storage.buyer_backend(), public_origin=descriptor['public_origin'], mode='live', enabled=True)
+            def lookup(identifier):
+                product = catalogue.get(identifier)
+                if product is None:
+                    return None
+                diameter = product['geometry'].get('diameter', '')
+                return {**identities[identifier], 'name': product['name'], '_mode': 'live',
+                        'fitment_required': product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'},
+                        'fitment': None, 'required_fees_confirmed': identifier in bindings,
+                        'required_documents_confirmed': (product['category'] != 'tyre' or
+                            documents is not None and all(product.get('product_documents', {}).get(k)
+                                for k in ('tyre_label_url', 'tyre_sheet_url'))),
+                        'required_fees': [], 'new_part': False, 'painting_eligible': False,
+                        'diameter': int(diameter) if re.fullmatch(r'[0-9]{2}', diameter) else None,
+                        'tyre_size': product['size']}
+            approved_postcodes = frozenset(bundle.get('delivery_postcodes', []))
+            freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
+                evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
+                destination_eligibility=lambda dest, ctx: dest == 'workshop' or ctx.get('delivery', {}).get('postcode') in approved_postcodes)
+            quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=supplier.retail_quote,
+                rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
+                assembly_fitment=lambda *a: None, mode='live')
+            def sink(quote, *, customer_id, delivery_context):
+                return store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
+                    customer_id=customer_id, mode='live', delivery_context=delivery_context)
+            dependencies.update(buyer_service=buyer, quote_service=quotes, quote_sink=sink, order_store=store)
+            app.config.update(SHOP_BUYER_ENABLED=True, SHOP_CART_QUOTE_ENABLED=True)
+            adapters.update(storage=storage, store=store, buyer=buyer, supplier_quotes=supplier, quotes=quotes)
+            if descriptor.get('checkout_requested') is True:
+                try:
+                    from shop_production_payments import prepare_production_payments
+                    profile = _json(_private_file(root, descriptor.get('payment_profile')), 65536)
+                    stripe_config = _json(_private_file(root, descriptor.get('stripe_config')), 65536)
+                    pack = _json(_private_file(root, descriptor.get('consumer_pack')), 4 * 1024 * 1024)
+                    attachments = []
+                    for attachment in pack.get('attachments', []):
+                        if not isinstance(attachment, dict) or set(attachment) != {'filename', 'mimetype', 'content_b64'}:
+                            raise ProductionError('consumer_pack_invalid')
+                        attachments.append({'filename': attachment['filename'], 'mimetype': attachment['mimetype'],
+                                            'content': base64.b64decode(attachment['content_b64'], validate=True)})
+                    pack['attachments'] = attachments
+                    payment_dependencies, starter = prepare_production_payments(portal, adapters, profile,
+                        pack=pack, supplier_config=supplier_config, stripe_config=stripe_config)
+                    dependencies.update(payment_dependencies)
+                    adapters['start_workflow'] = starter
+                    dependencies['feature_links'].update(terms='/shop/recht/agb', privacy='/shop/recht/datenschutz',
+                                                         withdrawal='/shop/widerruf/')
+                    app.config.update(SHOP_CONSUMER_ENABLED=True, SHOP_ORDER_DRAFT_ENABLED=True, SHOP_CHECKOUT_ENABLED=True)
+                except Exception:
+                    adapters['purchasing_enabled'] = False
+                    adapters['checkout_blocked_reason'] = 'payment_or_consumer_profile_incomplete'
+                    app.config.update(SHOP_CONSUMER_ENABLED=False, SHOP_ORDER_DRAFT_ENABLED=False, SHOP_CHECKOUT_ENABLED=False)
+        if cache:
+            cache.start(background=background)
+        return dependencies
+    except Exception:
+        for flag in ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED', 'SHOP_DOCUMENTS_ENABLED',
+                     'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED'):
+            app.config[flag] = False
+        app.extensions['shop_production'] = {'ready': False, 'reason': 'release_configuration_incomplete'}
+        app.logger.error('Shop release not activated: private release configuration incomplete')
+        return {}

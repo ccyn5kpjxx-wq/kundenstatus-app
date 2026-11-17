@@ -29,10 +29,12 @@ class MediaError(ValueError):
 
 class ReleasedMedia:
     def __init__(self, resources, *, approved_assets, local_root=None, allow_network=False,
-                 http=None, max_cache_bytes=32 * 1024 * 1024, monotonic=None):
+                 http=None, max_cache_bytes=32 * 1024 * 1024, monotonic=None, max_network_reads=1):
         if (not isinstance(resources, Mapping) or not isinstance(approved_assets, (set, frozenset))
                 or len(resources) > 100_000 or type(allow_network) is not bool
                 or type(max_cache_bytes) is not int or not MAX_IMAGE <= max_cache_bytes <= 128 * 1024 * 1024):
+            raise MediaError('invalid_media_release')
+        if type(max_network_reads) is not int or not 1 <= max_network_reads <= 3:
             raise MediaError('invalid_media_release')
         self.resources = {}
         root = Path(local_root).resolve() if local_root is not None else None
@@ -72,7 +74,7 @@ class ReleasedMedia:
         self.cache, self.failures = OrderedDict(), {}
         self.lock = threading.RLock()
         self.loading = set()
-        self.network_slot = threading.BoundedSemaphore(1)
+        self.network_slot = threading.BoundedSemaphore(max_network_reads)
         self.monotonic = monotonic or time.monotonic
 
     @staticmethod
@@ -101,18 +103,23 @@ class ReleasedMedia:
             return self._validate(data)
         if not self.allow_network:
             raise MediaError('image_unavailable')
-        response = None
+        response = owned_http = None
         try:
             if self.http is None:
                 import requests
-                self.http = requests.Session()
-                self.http.trust_env = False
-                self.http.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
-            response = self.http.get(source['url'], timeout=(3.05, 8), allow_redirects=False,
+                owned_http = requests.Session()
+                owned_http.trust_env = False
+                owned_http.mount('https://', requests.adapters.HTTPAdapter(max_retries=0))
+            http = self.http if self.http is not None else owned_http
+            response = http.get(source['url'], timeout=(3.05, 8), allow_redirects=False,
                                      stream=True, verify=True, headers={'Accept': 'image/jpeg,image/png,image/webp'})
             if response.status_code != 200 or response.url != source['url']:
                 raise MediaError('image_unavailable')
             declared = response.headers.get('Content-Type', '').split(';')[0].strip().lower()
+            if declared == 'image/jpg':
+                # This spelling is returned by the reviewed supplier CDN;
+                # byte-level Pillow verification still proves JPEG below.
+                declared = 'image/jpeg'
             if declared not in {'image/jpeg', 'image/png', 'image/webp'}:
                 raise MediaError('image_unavailable')
             content_length = response.headers.get('Content-Length')
@@ -132,6 +139,8 @@ class ReleasedMedia:
         finally:
             if response is not None:
                 response.close()
+            if owned_http is not None:
+                owned_http.close()
 
     def read(self, asset):
         if not isinstance(asset, str) or not ASSET.fullmatch(asset) or asset not in self.resources:

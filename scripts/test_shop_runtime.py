@@ -75,7 +75,10 @@ class ShopRuntimeChecks(unittest.TestCase):
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Name) and node.func.id == 'register_shop_runtime']
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0].keywords, [])
+        self.assertEqual(len(calls[0].keywords), 1)
+        self.assertIsNone(calls[0].keywords[0].arg)
+        self.assertIsInstance(calls[0].keywords[0].value, ast.Call)
+        self.assertEqual(calls[0].keywords[0].value.func.id, 'prepare_shop_runtime')
 
     def test_real_public_host_gate_separates_stateless_reads_from_persistent_v2_handlers(self):
         # Exercise the actual gate without starting portal workers/databases.
