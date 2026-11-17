@@ -78,13 +78,22 @@ def _binding(identifier, value):
             raise ValueError()
         candidate = value["mapping"]
         proof = candidate["evidence"]
+        from shop_rsu_rim_evidence import RULES, validate_expansion_mapping
+        if isinstance(proof, Mapping) and proof.get('rule') in RULES:
+            supplier = validate_expansion_mapping(candidate, product_id=identifier,
+                category=value['category'], expected_ean=value['expected_ean'], identity_hash=value['identity_hash'])
+            geometry = supplier.pop('rim_geometry')
+            safe = {'product_id':identifier,'identity_hash':value['identity_hash'],
+                    'category':value['category'],'expected_ean':value['expected_ean'],**supplier}
+            return {**safe,'evidence_id':_hash(safe),'rim_geometry':geometry}
         if isinstance(proof, Mapping) and proof.get("rule") == "exact_ean_manufacturer_model_colour_rim_geometry_v1":
             from shop_supplier_catalog import validate_rim_mapping
             supplier = validate_rim_mapping(candidate, product_id=identifier,
                 category=value["category"], expected_ean=value["expected_ean"])
             safe = {"product_id": identifier, "identity_hash": value["identity_hash"],
                     "category": value["category"], "expected_ean": value["expected_ean"], **supplier}
-            return {**safe, "evidence_id": _hash(safe)}
+            return {**safe, "evidence_id": _hash(safe),
+                    "rim_geometry": deepcopy(proof['alzura']['identity']['geometry'])}
         if (candidate.get("status") != "exact_sku_candidate"
                 or set(proof) != {"rule", "manufacturer", "mpn", "core", "alzura", "rsu"}
                 or proof["rule"] != "exact_manufacturer_mpn_and_full_tyre_core_v1"
@@ -221,6 +230,16 @@ class RSUQuoteProvider:
         return ({"confirmed": True, "product_id": value["product_id"], "identity_hash": value["identity_hash"],
                  "supplier": "RSU", "supplier_article_id": value["supplier_article_id"],
                  "evidence_id": value["evidence_id"]} if value else None)
+
+    def rim_geometry(self, product):
+        """Fingerprint-bound exact supplier dimensions. Cache-only, no GET."""
+        value = self._lookup(product)
+        geometry = value.get('rim_geometry') if value else None
+        if not value or value['category'] not in {'alloy_wheel','steel_wheel'} or not isinstance(geometry,Mapping):
+            return None
+        return {'confirmed':True,'product_id':value['product_id'],'identity_hash':value['identity_hash'],
+                'supplier':'RSU','evidence_id':value['evidence_id'],'geometry':deepcopy(dict(geometry)),
+                'model_photo_only':value.get('model_photo_only') is True}
 
     def fresh_inquiry(self, item, exact_quantity):
         """New private GET for an already frozen supplier position; no cache.

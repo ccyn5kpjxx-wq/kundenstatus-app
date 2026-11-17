@@ -12,7 +12,7 @@ from flask import Blueprint, current_app, request, Response
 from shop_order_store import OrderStoreError
 
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
-                         'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio'})
+                         'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete'})
 MAX_REQUEST = 16384
 MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
@@ -109,6 +109,8 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         params = request.args.to_dict()
         if any(len(value) > 160 for value in params.values()):
             return reply({'error': 'invalid_query'}, 400)
+        if 'complete' in params and params['complete'] != '1':
+            return reply({'error': 'invalid_query'}, 400)
         for field in ('page', 'page_size', 'year'):
             if field in params:
                 if not re.fullmatch(r'[0-9]{1,5}', params[field]):
@@ -171,11 +173,16 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'not_found'}, 404)
         if not callable(getattr(catalogue, 'variants', None)):
             return reply({'error': 'catalogue_unavailable'}, 503)
-        if set(request.args) - {'page', 'page_size', 'diameter'} or any(len(v) != 1 for _, v in request.args.lists()):
+        if set(request.args) - {'page', 'page_size', 'diameter', 'complete'} or any(len(v) != 1 for _, v in request.args.lists()):
             return reply({'error': 'invalid_query'}, 400)
         try:
             params = {}
             for key, value in request.args.items():
+                if key == 'complete':
+                    if value != '1':
+                        raise ValueError()
+                    params[key] = value
+                    continue
                 if not re.fullmatch(r'[0-9]{1,5}', value):
                     raise ValueError()
                 params[key] = value if key == 'diameter' else int(value)

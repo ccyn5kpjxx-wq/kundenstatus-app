@@ -367,6 +367,142 @@ class CartQuoteChecks(unittest.TestCase):
         q=self.f.service_instance().quote({'lines':[line(TYRE)]},customer_id=23,vehicle_ref='other-car')
         self.assertIn('fitment_unconfirmed',self.codes(q))
 
+    def standalone_rim(self, identifier=RIM):
+        product = self.f.products[identifier]
+        product['fitment'] = None
+        product['standalone_rim_geometry'] = {
+            'confirmed': True, 'product_id': identifier, 'identity_hash': product['identity_hash'],
+            'supplier': 'RSU', 'evidence_id': 'reviewed-independent-exact-geometry',
+            'geometry': {'width': '8', 'diameter': '18', 'offset': '45', 'bolt_count': '5',
+                         'pcd': '112', 'centre_bore': '66.6'}, 'private': 'PRIVATE_CANARY'}
+        return product['standalone_rim_geometry']
+
+    def standalone_quote(self, rows=None, **changes):
+        settings = {'allow_standalone_rims': True, **changes}
+        return self.f.service_instance(**settings).quote({'lines': rows or [line(RIM, 4)]},
+            customer_id=23, vehicle_ref='', delivery_context={'postcode': '74821'})
+
+    def test_standalone_rim_policy_is_explicit_boolean_and_disabled_by_default(self):
+        self.standalone_rim()
+        self.assertFalse(CartQuoteService().allow_standalone_rims)
+        self.assertFalse(CartQuoteService(mode='live').allow_standalone_rims)
+        self.assertIn('fitment_unconfirmed', self.codes(self.standalone_quote(allow_standalone_rims=False)))
+        for invalid in (None, 1, 'true', {}, []):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'invalid_standalone_rim_policy'):
+                CartQuoteService(allow_standalone_rims=invalid)
+
+    def test_opted_in_exact_alloy_or_steel_rims_need_no_vehicle_but_freeze_all_six_dimensions(self):
+        for category in ('alloy_wheel', 'steel_wheel'):
+            for quantity in (1, 4):
+                self.f = Fixture()
+                identifier = RIM if category == 'alloy_wheel' else 'steel_wheel:' + 'f' * 24
+                if identifier != RIM:
+                    self.f.products[identifier] = {**deepcopy(self.f.products[RIM]), 'id': identifier,
+                        'category': category, 'identity_hash': digest([identifier, 'exact-variant'])}
+                proof = self.standalone_rim(identifier)
+                quote = self.standalone_quote([line(identifier, quantity)])
+                with self.subTest(category=category, quantity=quantity):
+                    self.assertTrue(quote.public()['ready'])
+                    self.assertEqual(quote.snapshot()['vehicle_ref'], '')
+                    check = quote.snapshot()['product_checks'][identifier]
+                    self.assertIsNone(check['fitment_evidence_id'])
+                    self.assertEqual(check['standalone_rim_geometry']['geometry'], proof['geometry'])
+                    self.assertEqual(set(check['standalone_rim_geometry']['geometry']),
+                        {'width', 'diameter', 'offset', 'bolt_count', 'pcd', 'centre_bore'})
+                    self.assertEqual(quote.public()['lines'][0]['destination'], 'customer')
+                    self.assertNotIn('PRIVATE_CANARY', json.dumps(quote.snapshot()))
+                    self.assertNotIn('standalone_rim_geometry', json.dumps(quote.public()))
+
+    def test_standalone_geometry_requires_complete_finite_source_bound_confirmation(self):
+        def missing(key):
+            return lambda proof: proof['geometry'].pop(key)
+        mutations = [lambda p: p.update(confirmed=1), lambda p: p.update(product_id=RIM2),
+            lambda p: p.update(identity_hash='0' * 64), lambda p: p.update(supplier='OTHER'),
+            lambda p: p.update(evidence_id=''), lambda p: p.update(geometry={}),
+            *(missing(k) for k in ('width', 'diameter', 'offset', 'bolt_count', 'pcd', 'centre_bore')),
+            lambda p: p['geometry'].update(width='NaN'), lambda p: p['geometry'].update(width=True),
+            lambda p: p['geometry'].update(width='0'), lambda p: p['geometry'].update(offset='999'),
+            lambda p: p['geometry'].update(diameter='19'), lambda p: p['geometry'].update(diameter='18.5'),
+            lambda p: p['geometry'].update(bolt_count='5.5'), lambda p: p['geometry'].update(pcd='5x112'),
+            lambda p: p['geometry'].update(centre_bore='Infinity')]
+        for mutation in mutations:
+            self.f = Fixture(); proof = self.standalone_rim(); mutation(proof)
+            quote = self.standalone_quote()
+            self.assertFalse(quote.public()['ready'])
+            self.assertIn('fitment_unconfirmed', self.codes(quote))
+            self.assertNotIn('standalone_rim_geometry', quote.snapshot()['product_checks'][RIM])
+        self.f = Fixture(); self.standalone_rim(); self.f.products[RIM]['fitment_required'] = None
+        self.assertIn('fitment_unconfirmed', self.codes(self.standalone_quote()))
+
+    def test_standalone_policy_never_bypasses_services_assemblies_body_parts_or_mixed_offer(self):
+        for services, group in (({'mounting': True}, ''), ({'installation': True}, ''), ({}, 'set')):
+            self.f = Fixture(); self.standalone_rim()
+            quote = self.standalone_quote([line(RIM, 4, services=services, group=group)])
+            self.assertIn('fitment_unconfirmed', self.codes(quote))
+            self.assertNotIn('standalone_rim_geometry', quote.snapshot()['product_checks'][RIM])
+        self.f = Fixture(); self.standalone_rim(BODY)
+        self.assertIn('fitment_unconfirmed', self.codes(self.standalone_quote([line(BODY)])))
+        self.f = Fixture(); self.standalone_rim()
+        mixed = self.standalone_quote([line(RIM, 4), line(TYRE, 4)], manual_mixed_orders=True)
+        self.assertIn('mixed_cart_manual_review_required', self.codes(mixed))
+        self.assertIn('fitment_unconfirmed', self.codes(mixed))
+        assembly = self.standalone_quote([line(RIM, 4, group='set'),
+            line(TYRE, 4, group='set', services={'mounting': True})], assembly_fitment=None)
+        self.assertIn('assembly_fitment_unconfirmed', self.codes(assembly))
+        self.assertNotIn('standalone_rim_geometry', assembly.snapshot()['product_checks'][RIM])
+
+    def test_standalone_policy_keeps_supplier_price_stock_freight_and_all_required_fees(self):
+        for dependency in ('rsu_mapping', 'retail_quote', 'freight_quote'):
+            self.f = Fixture(); self.standalone_rim()
+            self.assertFalse(self.standalone_quote(**{dependency: None}).public()['ready'])
+        self.f = Fixture(); self.standalone_rim(); self.f.stock[RIM] = 3
+        self.assertIn('stock_insufficient_or_unconfirmed', self.codes(self.standalone_quote()))
+        self.f = Fixture(); self.standalone_rim(); self.f.products[RIM]['required_fees_confirmed'] = False
+        self.assertIn('required_fees_unconfirmed', self.codes(self.standalone_quote()))
+        self.f.products[RIM]['required_fees_confirmed'] = True
+        self.f.products[RIM]['required_fees'] = ['fasteners']
+        self.assertFalse(self.standalone_quote(service_quote=None).public()['ready'])
+        ready = self.standalone_quote().public()
+        self.assertTrue(ready['ready'])
+        self.assertEqual(ready['total_gross_cent'], 13090 * 4 + 500 * 4 + 500)
+
+    def test_standalone_geometry_is_immutable_hash_bound_and_not_accepted_from_browser(self):
+        proof = self.standalone_rim(); quote = self.standalone_quote()
+        before = quote.snapshot(); proof['geometry']['width'] = '9'
+        self.assertEqual(quote.snapshot(), before)
+        changed = deepcopy(before)
+        changed['product_checks'][RIM]['standalone_rim_geometry']['geometry']['pcd'] = '114.3'
+        with self.assertRaisesRegex(QuoteInputError, 'quote_binding_mismatch'):
+            restore_quote(changed, quote.quote_hash, mode='test', now=NOW)
+        for payload in ({'lines': [line(RIM)], 'allow_standalone_rims': True},
+                        {'lines': [{**line(RIM), 'standalone_rim_geometry': proof}]}):
+            with self.assertRaises(QuoteInputError):
+                self.f.service_instance(allow_standalone_rims=True).quote(payload, customer_id=23)
+        self.f = Fixture()
+        self.assertTrue(self.f.quote([line(RIM)], allow_standalone_rims=True).public()['ready'])
+
+    def test_standalone_proof_survives_durable_quote_and_order_without_becoming_vehicle_evidence(self):
+        from contextlib import closing
+        import sqlite3
+        import tempfile
+        from shop_order_store import OrderStore, init_schema
+        self.standalone_rim()
+        quote = self.standalone_quote()
+        with tempfile.TemporaryDirectory() as directory:
+            factory = lambda: sqlite3.connect(Path(directory) / 'synthetic.sqlite3')
+            with closing(factory()) as db:
+                init_schema(db)
+            store = OrderStore(factory, clock=lambda: NOW)
+            store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
+                customer_id='23', mode='test', delivery_context={'postcode': '74821'})
+            order = store.create_order(quote.quote_hash, customer_id='23', mode='test',
+                idempotency_key='SYNTHETIC-standalone-rim-only')
+            frozen = store.snapshot_for_order(order['id'], customer_id='23', mode='test')
+            self.assertEqual(frozen['product_checks'], quote.snapshot()['product_checks'])
+            self.assertEqual(frozen['vehicle_ref'], '')
+            self.assertIsNone(frozen['product_checks'][RIM]['fitment_evidence_id'])
+            self.assertEqual(order['amount_gross_cent'], quote.public()['total_gross_cent'])
+
     def test_complete_wheels_require_exact_size_proof_and_matching_quantities(self):
         rows=[line(TYRE,4,services={'mounting':True},group='set'),line(RIM,4,group='set')]
         self.assertTrue(self.f.quote(rows).public()['ready'])

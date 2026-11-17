@@ -209,6 +209,21 @@ assert.equal(logic.currentPrice({...product,price:{...product.price,prices_by_qu
 const selected=logic.normaliseCart([{id,quantity:4,services:{mounting:true},net_price:'PRIVATE_CANARY',provider_id:'PRIVATE_CANARY',price:1}]);
 assert.deepEqual(selected,[{id,quantity:4,services:{mounting:true}}]);
 const rimId='alloy_wheel:'+'b'.repeat(24),group='set|'+rimId+'|'+id,pair=[{id:rimId,quantity:4,services:{},assembly_group:group},{id,quantity:4,services:{mounting:true,runflat:true},assembly_group:group}];
+const exactDimensions={width:'8',diameter:'18',offset:'45',bolt_count:'5',pcd:'108',centre_bore:'63.4'};
+const modelNote='Modellfoto. Größe und genaue Ausführung können von der Abbildung abweichen.';
+assert.equal(logic.modelPhotoNote({category:'alloy_wheel',image_note:modelNote}),modelNote);
+assert.equal(logic.modelPhotoNote({category:'steel_wheel',image_note:modelNote}),modelNote);
+assert.equal(logic.modelPhotoNote({category:'alloy_wheel',caption:'RAW_PRIVATE_CAPTION',image_note:'Unreviewed caption'}),'');
+assert.equal(logic.modelPhotoNote({category:'alloy_wheel',caption:modelNote}),'');
+assert.equal(logic.modelPhotoNote({category:'tyre',image_note:modelNote}),'');
+assert.deepEqual(logic.rimDimensions({category:'alloy_wheel',sale_dimensions:exactDimensions}),[
+ ['Felgenbreite','8 Zoll'],['Durchmesser','18 Zoll'],['Einpresstiefe (ET)','45 mm'],['Lochzahl','5'],['Lochkreisdurchmesser','108 mm'],['Mittenloch','63,4 mm']]);
+assert.equal(logic.rimDimensions({category:'steel_wheel',sale_dimensions:exactDimensions}).length,6);
+assert.deepEqual(logic.rimDimensions({category:'alloy_wheel',geometry:exactDimensions}),[]);
+assert.deepEqual(logic.rimDimensions({category:'tyre',sale_dimensions:exactDimensions}),[]);
+for(const malformed of [{...exactDimensions,centre_bore:undefined},{...exactDimensions,pcd:'5x108'},
+ {...exactDimensions,width:8},{...exactDimensions,offset:'<script>'},Object.create(exactDimensions)])
+ assert.deepEqual(logic.rimDimensions({category:'alloy_wheel',sale_dimensions:malformed}),[]);
 assert.deepEqual(logic.removeCartLine(pair,0),[{id,quantity:4,services:{mounting:true,runflat:true}}]);
 assert.deepEqual(logic.removeCartLine(pair,1),[{id:rimId,quantity:4,services:{}}]);assert.equal(pair[0].assembly_group,group);assert.equal(pair[1].quantity,4);
 assert.equal(logic.removeCartLine([...pair,{id,quantity:4,services:{mounting:true,runflat:true}}],0),null);
@@ -225,6 +240,8 @@ assert.deepEqual(logic.vehicleQuery({keys:'0588BHT'}),{hsn:'0588',tsn:'BHT'});
 assert.equal(logic.vehicleQuery({make:'',model:'A3'}),null);
 assert.equal(logic.vehicleQuery({make:'Audi',year:'2016'}),null);
 assert.equal(logic.buildQuery({group:'family'},'wheels',1).get('group'),'family');
+assert.equal(logic.buildQuery({complete:'1'},'wheels',1).get('complete'),'1');
+assert.equal(logic.buildQuery({complete:'true'},'wheels',1).has('complete'),false);
 for (const bad of ['https://tracker.example/x.png','//tracker.example/x.png','/a/../x.png','/a//x.png','/x.svg']) assert.equal(logic.safeMedia(bad),false);
 assert.equal(logic.safeMedia('/shop/media/product.webp'),true);
 assert.equal(logic.inquiryOnly({purchase_status:'inquiry_only'}),true);assert.equal(logic.inquiryOnly({purchase_status:'supplier_check_required'}),false);assert.equal(logic.inquiryOnly({price_label:'Richtpreis'}),false);
@@ -467,8 +484,32 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  for(let retry=0;retry<5;retry++){image.onerror();assert.equal(images.clock.jobs.size,1);const job=[...images.clock.jobs.values()][0];assert.ok(job.delay>=400&&job.delay<=5300);await images.clock.next();}
  image.onerror();assert.equal(image.urls.length,6);assert.equal(images.clock.jobs.size,0);assert.equal(image.replacement.textContent,'Produktbild gerade nicht verfügbar');
  // Rim -> tyre -> mounting -> explicit atomic cart action; opening/searching adds nothing.
- const rimId='alloy_wheel:'+'c'.repeat(24),rim=(q=1)=>({...priced(rimId,q,10000),category:'alloy_wheel',name:'SYNTHETIC Rim',geometry:{diameter:'18'}});
+ const rimId='alloy_wheel:'+'c'.repeat(24),rim=(q=1)=>({...priced(rimId,q,10000),category:'alloy_wheel',name:'SYNTHETIC Rim',geometry:{diameter:'18'},tyre_seasons:['summer']});
+ // Standalone rim selection shows only the server-reviewed six exact dimensions.
+ const exactDimensions={width:'8',diameter:'18',offset:'45',bolt_count:'5',pcd:'108',centre_bore:'63.4'};
+ const modelNote='Modellfoto. Größe und genaue Ausführung können von der Abbildung abweichen.';
+ const standalone=await boot(url=>{const u=new URL('https://shop.test'+url),q=Number(u.searchParams.get('quantity')||1),item={...rim(q),purchase_status:'supplier_check_required',sale_dimensions:exactDimensions,image_note:modelNote,caption:'RAW_PRIVATE_CAPTION'};return u.pathname.endsWith('/products')?page(item,false):{item,prices_refreshing:false};},{mode:'felgen'});
+ assert.ok(walk(standalone.nodes['catalog-products']).some(n=>n.tagName==='SMALL'&&n.textContent===modelNote));
+ find(standalone.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();
+ assert.ok(walk(find(standalone.nodes['product-detail'],'shop-gallery')).some(n=>n.tagName==='SMALL'&&n.textContent===modelNote));
+ assert.equal(walk(standalone.nodes['catalog-products']).some(n=>n.textContent.includes('RAW_PRIVATE_CAPTION')),false);assert.equal(walk(standalone.nodes['product-detail']).some(n=>n.textContent.includes('RAW_PRIVATE_CAPTION')),false);
+ assert.ok(walk(standalone.nodes['product-detail']).some(n=>n.textContent==='Genaue Felgenausführung'));
+ for(const value of ['Felgenbreite','Durchmesser','Einpresstiefe (ET)','Lochzahl','Lochkreisdurchmesser','Mittenloch','63,4 mm'])assert.ok(walk(standalone.nodes['product-detail']).some(n=>n.textContent===value));
+ assert.ok(walk(standalone.nodes['product-detail']).some(n=>n.textContent==='Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.'));
+ assert.ok(walk(standalone.nodes['product-detail']).some(n=>n.textContent==='Verkauf nach den angegebenen Felgenmaßen. Fahrzeugpassung und Auflagen sind vor der Montage zu prüfen.'));
+ assert.deepEqual(JSON.parse(standalone.stored.at(-1)),[]);
+ const standaloneQuantity=find(find(standalone.nodes['product-detail'],'shop-options'),'shop-quantity');standaloneQuantity.value='3';standaloneQuantity.listeners.change();await flush();
+ walk(standalone.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Nur Felge in den Warenkorb').listeners.click();
+ assert.deepEqual(JSON.parse(standalone.stored.at(-1)),[{id:rimId,quantity:3,services:{}}]);
+ assert.ok(walk(standalone.nodes['product-detail']).some(n=>n.textContent==='63,4 mm'));
+ const standaloneCart=await boot(()=>({item:{...rim(3),purchase_status:'supplier_check_required',sale_dimensions:exactDimensions},prices_refreshing:false}),{mode:'warenkorb',cart:[{id:rimId,quantity:3,services:{}}]});
+ const cartDimensions=walk(standaloneCart.nodes['cart-items']).find(n=>n.textContent.startsWith('Ausführung: '));assert.ok(cartDimensions);
+ for(const value of ['Felgenbreite: 8 Zoll','Durchmesser: 18 Zoll','Einpresstiefe (ET): 45 mm','Lochzahl: 5','Lochkreisdurchmesser: 108 mm','Mittenloch: 63,4 mm'])assert.ok(cartDimensions.textContent.includes(value));
+ assert.ok(walk(standaloneCart.nodes['cart-items']).some(n=>n.textContent==='Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.'));
+ assert.deepEqual(JSON.parse(standaloneCart.stored.at(-1)),[{id:rimId,quantity:3,services:{}}]);
  const complete=await boot(url=>{const u=new URL('https://shop.test'+url),q=Number(u.searchParams.get('quantity')||1);if(u.pathname.endsWith('/products'))return page(rim(),false);if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[priced(A,q,3000)],scope:'approved',prices_refreshing:false};return {item:rim(q),prices_refreshing:false};},{mode:'komplettraeder'});
+ assert.equal(new URL('https://shop.test'+complete.calls[0].url).searchParams.get('complete'),'1');
+ assert.equal(new URL('https://shop.test'+standalone.calls[0].url).searchParams.has('complete'),false);
  find(complete.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();
  const completeForm=find(complete.nodes['product-detail'],'shop-options'),completeQty=find(completeForm,'shop-quantity');completeQty.value='4';completeQty.listeners.change();await flush();
  const bundle=find(complete.nodes['product-detail'],'shop-bundle-panel'),search=walk(bundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen'));
@@ -478,6 +519,15 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  const add=walk(bundle).find(n=>n.tagName==='BUTTON'&&n.textContent==='Felgen + Reifen in den Warenkorb');assert.equal(add.disabled,false);add.listeners.click();
  const pair=JSON.parse(complete.stored.at(-1));assert.equal(pair.length,2);assert.deepEqual(pair.map(row=>row.quantity),[4,4]);assert.equal(pair[0].id,rimId);assert.equal(pair[1].id,A);assert.equal(pair[0].assembly_group,pair[1].assembly_group);assert.deepEqual(pair[0].services,{});assert.deepEqual(pair[1].services,{mounting:true});
  assert.equal(complete.calls.some(call=>call.options.method!==undefined),false);
+ // A winter-only documented set must not offer a summer dead end.
+ const winterOnly=await boot(url=>{const u=new URL('https://shop.test'+url),item={...rim(),tyre_seasons:['winter','allseason','unreviewed']};if(u.pathname.endsWith('/products'))return page({...item,family:{variant_count:2,diameters:['18']}},false);if(u.pathname.endsWith('/variants'))return {items:[item],page:1,total:1,has_more:false};if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[priced(A,1,3000)],scope:'rim_width_candidate',prices_refreshing:false};return {item,prices_refreshing:false};},{mode:'komplettraeder'});
+ find(winterOnly.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();
+ assert.ok(winterOnly.calls.some(call=>call.url.includes('/variants?')&&new URL('https://shop.test'+call.url).searchParams.get('complete')==='1'));
+ walk(winterOnly.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Diese Felge ansehen').listeners.click();await flush();
+ const winterBundle=find(winterOnly.nodes['product-detail'],'shop-bundle-panel'),winterSeason=walk(winterBundle).find(n=>n.tagName==='SELECT');assert.deepEqual(winterSeason.children.map(n=>n.value),['winter','allseason']);assert.equal(winterSeason.value,'winter');
+ await walk(winterBundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen')).listeners.click();assert.ok(winterOnly.calls.some(call=>call.url.includes('/compatible-tyres?')&&new URL('https://shop.test'+call.url).searchParams.get('season')==='winter'));assert.ok(walk(winterBundle).some(n=>n.name==='bundle_tyre'));
+ const noCandidates=await boot(url=>new URL('https://shop.test'+url).pathname.endsWith('/products')?page({...rim(),tyre_seasons:[]},false):{item:{...rim(),tyre_seasons:[]},prices_refreshing:false},{mode:'felgen'});
+ find(noCandidates.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();const emptyBundle=find(noCandidates.nodes['product-detail'],'shop-bundle-panel'),emptySearch=walk(emptyBundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen'));assert.equal(emptySearch.disabled,true);await emptySearch.listeners.click();assert.equal(noCandidates.calls.some(call=>call.url.includes('/compatible-tyres')),false);
  // Candidate cards remain selectable during a price warmup. Updating that
  // exact selected tyre must unlock the explicit pair action without reselecting.
  const delayedPair=await boot(url=>{const u=new URL('https://shop.test'+url),q=Number(u.searchParams.get('quantity')||1);if(u.pathname.endsWith('/products'))return page({...rim(),purchase_status:'inquiry_only'},false);if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[{...pending(),purchase_status:'inquiry_only'}],scope:'rim_width_candidate',prices_refreshing:true};if(decodeURIComponent(u.pathname).endsWith('/products/'+A))return {item:{...priced(A,q,3000),purchase_status:'inquiry_only'},prices_refreshing:false};return {item:{...rim(q),purchase_status:'inquiry_only'},prices_refreshing:false};},{mode:'komplettraeder'});
@@ -492,7 +542,7 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  const familyCard=family.nodes['catalog-products'].children[0];assert.equal(find(familyCard,'shop-quantity'),undefined);find(familyCard,'shop-detail-link').listeners.click();await flush();
  assert.ok(family.calls.some(call=>call.url.includes('/variants?')&&call.url.includes('page_size=24')));assert.deepEqual(JSON.parse(family.stored.at(-1)),[]);
  const exact=walk(family.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Diese Felge ansehen');exact.listeners.click();await flush();assert.ok(find(family.nodes['product-detail'],'shop-bundle-panel'));
- for(const fixture of [f,bounded,changed,quantity,tiers,detail,closed,cart,hidden,paused,pausedTier,images,complete,delayedPair,family,market,bound,marketPoll,marketCart,documented,badDocs])assert.ok(fixture.calls.every(call=>call.options.method===undefined&&call.url.startsWith('/shop/api/v2/products')),'read-only product calls only');
+ for(const fixture of [f,bounded,changed,quantity,tiers,detail,closed,cart,hidden,paused,pausedTier,images,standalone,standaloneCart,complete,winterOnly,noCandidates,delayedPair,family,market,bound,marketPoll,marketCart,documented,badDocs])assert.ok(fixture.calls.every(call=>call.options.method===undefined&&call.url.startsWith('/shop/api/v2/products')),'read-only product calls only');
  console.log('Bounded price/image polling passed');
 })().catch(error=>{console.error(error);process.exit(1)});
 '''

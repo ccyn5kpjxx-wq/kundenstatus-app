@@ -52,6 +52,47 @@ class EnrichmentChecks(unittest.TestCase):
         self.assertIsNotNone(inquiry['price'])
         self.assertEqual(catalogue([a]).get(a['selection_id'])['purchase_status'], 'inquiry_only')
 
+    def test_exact_rim_dimensions_are_public_without_private_proof_or_vehicle_promise(self):
+        row = wheel()
+        identifier = row['selection_id']
+        geometry = {'width': '8', 'diameter': '18', 'offset': '45',
+                    'bolt_count': '5', 'pcd': '112', 'centre_bore': '66.6'}
+        proof = {'confirmed': True, 'product_id': identifier,
+                 'identity_hash': variant_fingerprint(row), 'supplier': 'RSU',
+                 'evidence_id': 'PRIVATE_PROOF_CANARY', 'geometry': geometry,
+                 'model_photo_only': True,
+                 'supplier_article_id': 'PRIVATE_SUPPLIER_CANARY'}
+        catalog = catalogue([row], procurement_ids={identifier}, standalone_rims={identifier: proof})
+        product = catalog.get(identifier)
+        self.assertEqual(product['sale_dimensions'], geometry)
+        self.assertEqual(product['image_note'], 'Modellfoto. Größe und genaue Ausführung können von der Abbildung abweichen.')
+        self.assertEqual(product['fitment']['status'], 'not_confirmed')
+        self.assertNotIn('PRIVATE_PROOF_CANARY', json.dumps(product))
+        self.assertNotIn('PRIVATE_SUPPLIER_CANARY', json.dumps(product))
+        for changed in ({'identity_hash': '0' * 64}, {'product_id': 'alloy_wheel:' + 'b' * 24},
+                        {'confirmed': False}, {'supplier': 'OTHER'}, {'geometry': {'diameter': '18'}}):
+            rejected = catalogue([row], procurement_ids={identifier},
+                                 standalone_rims={identifier: {**proof, **changed}})
+            self.assertNotIn('sale_dimensions', rejected.get(identifier))
+        self.assertNotIn('sale_dimensions', catalogue([row], standalone_rims={identifier: proof}).get(identifier))
+
+    def test_grouped_design_prefers_exact_procurement_variant_and_keeps_its_own_price(self):
+        first, sourced = wheel(), wheel('b')
+        sourced['quote_public']['prices_by_quantity']['1']['unit_gross_cent'] = 25000
+        sourced['quote_public']['prices_by_quantity']['1']['items_gross_cent'] = 25000
+        identifier = sourced['selection_id']
+        proof = {'confirmed': True, 'product_id': identifier,
+                 'identity_hash': variant_fingerprint(sourced), 'supplier': 'RSU',
+                 'evidence_id': 'synthetic-proof', 'geometry': {'width': '8', 'diameter': '18',
+                 'offset': '45', 'bolt_count': '5', 'pcd': '112', 'centre_bore': '66.6'}}
+        catalog = catalogue([first, sourced], procurement_ids={identifier}, standalone_rims={identifier: proof})
+        page = catalog.page(group='family')
+        self.assertEqual(page['total'], 1)
+        self.assertEqual(page['items'][0]['id'], identifier)
+        self.assertEqual(page['items'][0]['family']['variant_count'], 2)
+        self.assertEqual(page['items'][0]['price']['prices_by_quantity']['1']['unit_gross_cent'], 25000)
+        self.assertEqual(catalog.variants(first['selection_id'])['items'][0]['id'], identifier)
+
     def test_authoritative_cache_never_falls_back_to_imported_price(self):
         rim = wheel()
         for lookup in (None, lambda i: None, lambda i: {}, lambda i: 1 / 0):
@@ -60,6 +101,50 @@ class EnrichmentChecks(unittest.TestCase):
                     quote_lookup=lookup, quote_lookup_authoritative=True).get(rim['selection_id'])
                 self.assertIsNone(result['price'])
                 self.assertEqual(result['price_status'], 'update_required')
+
+    def test_complete_browse_and_family_variants_only_include_exact_documented_candidates(self):
+        a, no_pair, native = wheel(diameter='17'), wheel('b', diameter='20'), wheel('c', diameter='18')
+        summer, winter = tyre('d'), tyre('e', 'Winterreifen')
+        identifier = native['selection_id']
+        proof = {'confirmed': True, 'product_id': identifier, 'identity_hash': variant_fingerprint(native),
+                 'supplier': 'RSU', 'evidence_id': 'synthetic-proof', 'geometry': {'width': '8', 'diameter': '18',
+                 'offset': '45', 'bolt_count': '5', 'pcd': '112', 'centre_bore': '66.6'}}
+        catalog = catalogue([a, no_pair, native, summer, winter], procurement_ids={identifier},
+                            standalone_rims={identifier: proof}, compatible_pairs={
+                                a['selection_id']: [pair(a, summer)], identifier: [pair(native, winter)]})
+        self.assertEqual(catalog.page(department='wheels')['total'], 3)
+        self.assertEqual(catalog.page(department='wheels', group='family')['items'][0]['family']['variant_count'], 3)
+        result = catalog.page(department='wheels', group='family', complete='1')
+        self.assertEqual(result['total'], 1)
+        self.assertEqual(result['items'][0]['id'], identifier)
+        self.assertEqual(result['items'][0]['family'], {'variant_count': 2, 'diameters': ['17', '18']})
+        self.assertEqual(result['items'][0]['tyre_seasons'], ['winter'])
+        variants = catalog.variants(no_pair['selection_id'], complete='1')
+        self.assertEqual(variants['total'], 2)
+        self.assertEqual([item['id'] for item in variants['items']], [identifier, a['selection_id']])
+        self.assertEqual(catalog.variants(identifier, complete='1', diameter='20')['total'], 0)
+        self.assertEqual(catalog.variants(identifier)['total'], 3)
+
+    def test_complete_seasons_exclude_stale_unreleased_wrong_category_and_unknown_classification(self):
+        rim, stale, unknown, oil = wheel(), tyre(), tyre('e', None), part()
+        good = tyre('c', 'Ganzjahresreifen')
+        stale_pair = {**pair(rim, stale), 'tyre_identity': '0' * 64}
+        hidden = tyre('b', 'Winterreifen')
+        catalog = catalogue([rim, stale, unknown, oil, good, hidden],
+            released_ids=[r.get('selection_id', r.get('id')) for r in (rim, stale, unknown, oil, good)],
+            compatible_pairs={rim['selection_id']: [stale_pair, pair(rim, oil), pair(rim, hidden),
+                                                   pair(rim, unknown), pair(rim, good), pair(rim, good)]})
+        self.assertEqual(catalog.get(rim['selection_id'])['tyre_seasons'], ['allseason'])
+        self.assertEqual(len(catalog.compatible_tyres(rim['selection_id'], season='allseason')['items']), 1)
+        self.assertEqual(catalog.compatible_tyres(rim['selection_id'], season='summer')['items'], [])
+        without = catalogue([rim, stale, unknown], compatible_pairs={rim['selection_id']: [stale_pair, pair(rim, unknown)]})
+        self.assertEqual(without.page(department='wheels', complete='1')['total'], 0)
+        self.assertEqual(without.page(department='wheels')['total'], 1)
+        for value in ('0', '', True, 1):
+            with self.assertRaises(CatalogError):
+                catalog.page(complete=value)
+            with self.assertRaises(CatalogError):
+                catalog.variants(rim['selection_id'], complete=value)
 
     def test_original_tyre_documents_require_exact_variant_and_release_paths(self):
         tire = tyre()

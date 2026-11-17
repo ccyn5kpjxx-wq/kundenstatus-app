@@ -8,7 +8,11 @@ Provider contracts (only these whitelisted fields are retained):
 * catalogue_lookup(id): id, category, name, identity_hash; fitment_required,
   fitment={confirmed, identity_hash, vehicle_ref, evidence_id}; new_part,
   painting_eligible; required_fees_confirmed, required_fees (codes); diameter,
-  tyre_size (for wheel assembly).
+  tyre_size (for wheel assembly). Optional standalone_rim_geometry is a trusted
+  RSU proof {confirmed, product_id, identity_hash, supplier='RSU', evidence_id,
+  geometry={width, diameter, offset, bolt_count, pcd, centre_bore}}. Only an
+  explicit allow_standalone_rims policy can consume it for a sole rim SKU,
+  without services or an assembly. It never asserts vehicle approval.
 * retail_quote(product, procurement_quantity): confirmed, product_id,
   identity_hash, quantity, mode, currency='eur', unit_gross_cent, stock,
   observed_at, expires_at, vat_percent='19.00', procurement_confirmed=True.
@@ -52,6 +56,7 @@ MAX_CENTS = 100_000_000
 TTL = timedelta(minutes=15)
 SERVICE_FLAGS = {'mounting', 'runflat', 'disposal', 'installation', 'painting', 'oil_service'}
 SERVICE_FIELDS = SERVICE_FLAGS | {'paint_color', 'care'}
+RIM_GEOMETRY = {'width', 'diameter', 'offset', 'bolt_count', 'pcd', 'centre_bore'}
 
 
 class QuoteInputError(ValueError):
@@ -76,6 +81,36 @@ def _text(value, maximum=200):
 
 def _amount(value, *, zero=False):
     return type(value) is int and (0 if zero else 1) <= value <= MAX_CENTS
+
+
+def _standalone_rim_geometry(product):
+    """Whitelist an independent exact-variant RSU proof, never browser fields."""
+    proof = product.get('standalone_rim_geometry')
+    if (not isinstance(proof, Mapping) or proof.get('confirmed') is not True
+            or proof.get('product_id') != product['id'] or proof.get('identity_hash') != product['identity_hash']
+            or proof.get('supplier') != 'RSU' or not _text(proof.get('evidence_id'))
+            or not isinstance(proof.get('geometry'), Mapping) or set(proof['geometry']) != RIM_GEOMETRY):
+        return None
+    ranges = {'width': (2, 20), 'diameter': (8, 30), 'offset': (-200, 200),
+              'bolt_count': (3, 12), 'pcd': (50, 300), 'centre_bore': (30, 200)}
+    geometry = {}
+    try:
+        for key, raw in proof['geometry'].items():
+            if not isinstance(raw, str) or not re.fullmatch(r'-?[0-9]{1,3}(?:\.[0-9]{1,3})?', raw):
+                return None
+            number = Decimal(raw)
+            if not number.is_finite() or not ranges[key][0] <= number <= ranges[key][1]:
+                return None
+            if key in {'diameter', 'bolt_count'} and number != number.to_integral_value():
+                return None
+            text = format(number, 'f')
+            geometry[key] = (text.rstrip('0').rstrip('.') if '.' in text else text) if number else '0'
+        if type(product.get('diameter')) is not int or Decimal(geometry['diameter']) != product['diameter']:
+            return None
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return {'confirmed': True, 'product_id': product['id'], 'identity_hash': product['identity_hash'],
+            'supplier': 'RSU', 'evidence_id': proof['evidence_id'].strip(), 'geometry': geometry}
 
 
 def _stamp(value):
@@ -206,7 +241,7 @@ class CartQuoteService:
     def __init__(self, catalogue_lookup=None, retail_quote=None, rsu_mapping=None,
                  service_quote=None, freight_quote=None, assembly_fitment=None,
                  *, mode='test', clock=None, manual_mixed_orders=None, require_tyre_documents=None,
-                 require_delivery_salutation=None):
+                 require_delivery_salutation=None, allow_standalone_rims=False):
         if not isinstance(mode, str) or mode not in {'test', 'live'}:
             raise ValueError('invalid_quote_mode')
         self.catalogue_lookup, self.retail_quote, self.rsu_mapping = catalogue_lookup, retail_quote, rsu_mapping
@@ -223,6 +258,9 @@ class CartQuoteService:
         if require_delivery_salutation is not None and type(require_delivery_salutation) is not bool:
             raise ValueError('invalid_delivery_policy')
         self.require_delivery_salutation = mode == 'live' if require_delivery_salutation is None else require_delivery_salutation
+        if type(allow_standalone_rims) is not bool:
+            raise ValueError('invalid_standalone_rim_policy')
+        self.allow_standalone_rims = allow_standalone_rims
 
     @staticmethod
     def _call(provider, *args):
@@ -277,6 +315,7 @@ class CartQuoteService:
         now = clock_stamp()
         expiry = now + TTL
         reasons, products, mappings, prices, demand = [], {}, {}, {}, {}
+        standalone_rims = {}
 
         def tick():
             nonlocal now
@@ -328,7 +367,7 @@ class CartQuoteService:
             # Only store fields used by this boundary; arbitrary provider payloads stay private.
             p = {key: p.get(key) for key in ('id', 'name', 'category', 'identity_hash', 'fitment_required',
                  'fitment', 'new_part', 'painting_eligible', 'required_fees_confirmed', 'required_fees', 'diameter', 'tyre_size',
-                 'required_documents_confirmed')}
+                 'required_documents_confirmed', 'standalone_rim_geometry')}
             products[identifier] = p
             if self.require_tyre_documents and p['category'] == 'tyre' and p['required_documents_confirmed'] is not True:
                 block('product_documents_unconfirmed', product_id=identifier)
@@ -336,10 +375,19 @@ class CartQuoteService:
                 block('product_dimensions_unconfirmed', product_id=identifier)
             fitment_required = p['fitment_required']
             # A standalone tyre is sold by its exact operating description;
-            # this does not assert approval for an unspecified vehicle. Rims,
-            # body parts and every mounted rim/tyre assembly still require
-            # independent vehicle-bound evidence below.
-            if type(fitment_required) is not bool or p['category'] in RIMS | {'body_part'} and not fitment_required:
+            # the opt-in sole-rim policy likewise sells exact dimensions only.
+            # Body parts, services, mixed carts and assemblies retain the
+            # independent vehicle-bound evidence checks below.
+            standalone = None
+            if (self.allow_standalone_rims and p['category'] in RIMS and len(position_demand) == 1
+                    and all(row['id'] == identifier and not row['assembly_group']
+                            and not any(row['services'].values()) for row in rows)):
+                standalone = _standalone_rim_geometry(p)
+            if type(fitment_required) is not bool:
+                block('fitment_unconfirmed', product_id=identifier)
+            elif standalone is not None:
+                standalone_rims[identifier] = standalone
+            elif p['category'] in RIMS | {'body_part'} and not fitment_required:
                 block('fitment_unconfirmed', product_id=identifier)
             elif fitment_required:
                 fitment = p.get('fitment')
@@ -514,7 +562,9 @@ class CartQuoteService:
                  'ready': not reasons, 'known_subtotal_gross_cent': known if known_any else None, 'total_gross_cent': known if not reasons else None,
                  'blocked_reasons': reasons, 'lines': priced_lines, 'shipments': list(shipments.values()),
                  'assembly_evidence': valid_groups,
-                 'product_checks': {key: {'fitment_evidence_id': value['fitment'].get('evidence_id') if isinstance(value['fitment'], Mapping) and _text(value['fitment'].get('evidence_id')) else None,
-                                         'required_fees': value['required_fees']} for key, value in products.items()}}
+                 'product_checks': {key: {'fitment_evidence_id': value['fitment'].get('evidence_id') if key not in standalone_rims and isinstance(value['fitment'], Mapping) and _text(value['fitment'].get('evidence_id')) else None,
+                                         'required_fees': value['required_fees'],
+                                         **({'standalone_rim_geometry': standalone_rims[key]} if key in standalone_rims else {})}
+                                    for key, value in products.items()}}
         encoded = _json(value)
         return CartQuote(encoded, hashlib.sha256(encoded.encode('utf-8')).hexdigest())

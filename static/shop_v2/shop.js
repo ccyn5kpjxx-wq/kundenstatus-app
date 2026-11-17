@@ -7,7 +7,9 @@
   const CART_KEY = 'gaertner-shop-v2-selection';
   const MAX_PRICE_RETRIES = 8, MAX_IMAGE_RETRIES = 5;
   const TYRE_PURCHASE_NOTE = 'Reifengröße sowie Last- und Geschwindigkeitsindex vor dem Kauf prüfen. Fahrzeugpassung für Montage wird gesondert geprüft.';
+  const MODEL_PHOTO_NOTE = 'Modellfoto. Größe und genaue Ausführung können von der Abbildung abweichen.';
   const inquiryOnly = product => product && product.purchase_status === 'inquiry_only';
+  const modelPhotoNote = product => product && ['alloy_wheel', 'steel_wheel'].includes(product.category) && product.image_note === MODEL_PHOTO_NOTE ? MODEL_PHOTO_NOTE : '';
   const money = n => Number.isSafeInteger(n) && n >= 0 ? new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'}).format(n / 100) : 'Wird geprüft';
   const maxQuantity = id => id.startsWith('parts:') ? 20 : 4;
   function quotedPrice(product, quantity, now = Date.now()) {
@@ -27,6 +29,19 @@
     return price && price.stock >= quantity ? price : null;
   }
   const selectionPrice = (product, quantity) => inquiryOnly(product) ? quotedPrice(product, quantity) : currentPrice(product, quantity);
+  function rimDimensions(product) {
+    if (!product || !['alloy_wheel', 'steel_wheel'].includes(product.category)) return [];
+    // This projection is supplied only after the server verifies the exact
+    // supplier variant. Do not manufacture it from names or partial geometry.
+    const dimensions = product.sale_dimensions;
+    if (!dimensions || typeof dimensions !== 'object' || Array.isArray(dimensions)) return [];
+    const fields = [['width', 'Felgenbreite', ' Zoll'], ['diameter', 'Durchmesser', ' Zoll'],
+      ['offset', 'Einpresstiefe (ET)', ' mm'], ['bolt_count', 'Lochzahl', ''],
+      ['pcd', 'Lochkreisdurchmesser', ' mm'], ['centre_bore', 'Mittenloch', ' mm']];
+    if (fields.some(([key]) => !Object.hasOwn(dimensions, key) || typeof dimensions[key] !== 'string' ||
+      !(key === 'offset' ? /^[+-]?\d{1,3}(?:\.\d{1,3})?$/ : key === 'bolt_count' ? /^\d{1,2}$/ : /^\d{1,3}(?:\.\d{1,3})?$/).test(dimensions[key]))) return [];
+    return fields.map(([key, label, unit]) => [label, dimensions[key].replace('.', ',') + unit]);
+  }
   function qualityFacts(product) {
     const facts = product?.quality_facts || {}, result = [];
     if (/^[A-G]$/.test(facts.wet_grip || '')) result.push(['Nasshaftung', facts.wet_grip]);
@@ -117,6 +132,7 @@
     }
     if (values.group === 'family') query.set('group', 'family');
     if (values.studio === '1') query.set('studio', '1');
+    if (values.complete === '1') query.set('complete', '1');
     return query;
   }
   function vehicleQuery(values) {
@@ -145,7 +161,7 @@
       return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|g\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
     } catch (_) { return false; }
   }
-  const logic = {currentPrice, quotedPrice, inquiryOnly, qualityFacts, normaliseCart, removeCartLine, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
+  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
@@ -330,7 +346,9 @@
     const view = () => family ? openFamily(product) : openProduct(product.id);
     const node = el('article', null, 'shop-card'), media = button('', view, 'shop-card-media');
     media.setAttribute('aria-label', product.name + ' ansehen'); media.append(productImage(product, ''));
-    node.append(media, el('h3', product.name), el('p', [product.brand, product.size].filter(Boolean).join(' · '), 'shop-card-meta'));
+    node.append(media);
+    const imageNote = modelPhotoNote(product); if (imageNote) node.append(el('small', imageNote, 'shop-muted'));
+    node.append(el('h3', product.name), el('p', [product.brand, product.size].filter(Boolean).join(' · '), 'shop-card-meta'));
     let count = 1;
     const price = priceBox(product, count, {active}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
     if (family) {
@@ -394,7 +412,7 @@
     status.textContent = 'Sortiment wird geladen …';
     byId('previous-page').disabled = true; byId('next-page').disabled = true;
     try {
-      const expectedPage = page, query = buildQuery({...filters, ...vehicleFilters, ...(body.dataset.department === 'wheels' ? {group: 'family'} : {})}, body.dataset.department, page).toString();
+      const expectedPage = page, query = buildQuery({...filters, ...vehicleFilters, ...(body.dataset.department === 'wheels' ? {group: 'family'} : {}), ...(body.dataset.page === 'komplettraeder' ? {complete: '1'} : {})}, body.dataset.department, page).toString();
       const result = await requestJSON('/products?' + query);
       if (run !== sequence) return;
       if (!Array.isArray(result.items) || result.items.length > 24 || !Number.isInteger(result.total) || result.page !== page) throw new Error('invalid_catalogue');
@@ -447,6 +465,7 @@
     content.replaceChildren(el('p', 'Ausführungen werden geladen …')); if (!dialog.open) dialog.showModal();
     try {
       const query = new URLSearchParams({page: String(variantPage), page_size: '24'}); if (diameter) query.set('diameter', diameter);
+      if (body.dataset.page === 'komplettraeder') query.set('complete', '1');
       const result = await requestJSON('/products/' + encodeURIComponent(representative.id) + '/variants?' + query);
       if (run !== detailSequence || !dialog.open) return;
       if (!Array.isArray(result.items) || result.items.length > 24 || !Number.isInteger(result.total)) throw new Error('invalid_catalogue');
@@ -490,8 +509,10 @@
     panel.append(el('p', 'Komplettrad zusammenstellen', 'shop-eyebrow'), heading);
     const status = el('p', 'Reifen erst auf Ihren Wunsch suchen. Es wird noch nichts in den Warenkorb gelegt.', 'shop-muted'), choices = el('div', null, 'shop-bundle-choices');
     const seasonLabel = el('label', 'Welche Reifen möchten Sie?'), season = el('select', null, 'shop-quantity');
-    for (const [value, name] of [['summer', 'Sommerreifen'], ['winter', 'Winterreifen'], ['allseason', 'Ganzjahresreifen']]) { const option = el('option', name); option.value = value; season.append(option); }
-    season.value = 'summer';
+    const seasons = [['summer', 'Sommerreifen'], ['winter', 'Winterreifen'], ['allseason', 'Ganzjahresreifen']].filter(([value]) => Array.isArray(rim.tyre_seasons) && rim.tyre_seasons.includes(value));
+    for (const [value, name] of seasons) { const option = el('option', name); option.value = value; season.append(option); }
+    season.value = seasons.some(([value]) => value === 'summer') ? 'summer' : seasons[0]?.[0] || '';
+    if (!seasons.length) status.textContent = 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.';
     seasonLabel.append(season);
     let serial = 0, selected = null, scope = 'blocked';
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.name = 'bundle_mounting';
@@ -519,8 +540,9 @@
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrageauswahl' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
-    function clear() { serial++; selected = null; choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = false; status.textContent = 'Auswahl geändert. Bitte passende Reifen erneut suchen.'; }
+    function clear() { serial++; selected = null; choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
     const search = button('Passende Reifen zu dieser Felge suchen', async () => {
+      if (!seasons.some(([value]) => value === season.value)) return;
       const run = ++serial, quantity = getQuantity(); selected = null; choices.replaceChildren(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true;
       try {
         const query = new URLSearchParams({quantity: String(quantity), season: season.value, ...vehicleFilters});
@@ -546,6 +568,7 @@
       } catch (_) { if (run === serial && active()) status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.'; }
       finally { if (run === serial && active()) search.disabled = false; }
     });
+    search.disabled = !seasons.length;
     mounting.addEventListener('change', updateSummary); season.addEventListener('change', clear);
     panel.append(search, seasonLabel, status, choices, mountingLabel, summary, add, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
     return {node: panel, quantityChanged: clear, priceChanged: updateSummary};
@@ -561,6 +584,7 @@
       const isRim = ['alloy_wheel', 'steel_wheel'].includes(product.category);
       const grid = el('div', null, 'shop-detail-grid'), gallery = el('div', null, 'shop-gallery'), copy = el('div', null, 'shop-detail-copy');
       const mainImage = productImage(product, 'shop-detail-picture', false); gallery.append(mainImage);
+      const imageNote = modelPhotoNote(product); if (imageNote) gallery.append(el('small', imageNote, 'shop-muted'));
       if (mainImage.tagName === 'IMG') mainImage.addEventListener('click', () => mainImage.classList.toggle('shop-zoomed'));
       if (Array.isArray(product.images) && product.images.length > 1) {
         const thumbnails = el('div', null, 'shop-thumbnails');
@@ -571,6 +595,13 @@
         gallery.append(thumbnails);
       }
       const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', product.size, 'shop-muted'));
+      const dimensions = rimDimensions(product);
+      if (dimensions.length) {
+        const specification = el('dl', null, 'shop-specs');
+        for (const [label, value] of dimensions) specification.append(el('dt', label), el('dd', value));
+        copy.append(el('h3', 'Genaue Felgenausführung'), specification,
+          el('p', 'Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.', 'shop-muted'));
+      }
       let count = 1, bundle = null;
       const price = priceBox(product, count, {active: () => run === detailSequence && dialog.open, onUpdate: () => bundle?.priceChanged()}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
       const quantity = el('label', 'Anzahl'); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); })); form.append(quantity);
@@ -610,7 +641,9 @@
           const list = el('ul'); for (const condition of vehicle.conditions || []) list.append(el('li', condition)); fitment.append(list);
         }
         fitment.append(el('p', product.department === 'parts' ? 'Bestätigte Anbieterzuordnung. Motorisierung, Karosserieausführung und Artikelhinweise vor dem Kauf prüfen.' : 'Auflagen und genaue Ausführung vor der Montage prüfen. Die Zuordnung ersetzt keine Prüfung am Fahrzeug.'));
-      } else if (product.category !== 'tyre') fitment.append(el('p', 'Für diese Ausführung ist hier noch keine bestätigte Fahrzeugzuordnung mit Gutachten hinterlegt. Passung vor einer Bestellung prüfen lassen.'));
+      } else if (product.category !== 'tyre') fitment.append(el('p', dimensions.length ?
+        'Verkauf nach den angegebenen Felgenmaßen. Fahrzeugpassung und Auflagen sind vor der Montage zu prüfen.' :
+        'Für diese Ausführung ist hier noch keine bestätigte Fahrzeugzuordnung mit Gutachten hinterlegt. Passung vor einer Bestellung prüfen lassen.'));
       if (product.department === 'parts' || product.department === 'accessories') copy.append(el('p', 'Lieferzeit wird bestätigt. Gemeldeter Bestand ist keine Lieferzusage.', 'shop-muted'));
       copy.append(fitment);
       if (isRim) {
@@ -714,6 +747,12 @@
           const price = priceBox(product, row.quantity, {active: () => run === cartRun, onUpdate: refreshSubtotal});
           pendingPrice = price;
           article.append(productImage(product, '')); copy.append(el('h3', product.name), el('p', product.size, 'shop-muted'), price);
+          const dimensions = rimDimensions(product);
+          if (dimensions.length) {
+            copy.append(el('p', 'Ausführung: ' + dimensions.map(([label, value]) => label + ': ' + value).join(' · '), 'shop-card-meta'));
+            if (!row.assembly_group && !Object.keys(row.services).length) copy.append(
+              el('p', 'Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.', 'shop-muted'));
+          }
           subtotalItems.push({product, quantity: row.quantity});
           const current = selectionPrice(product, row.quantity); if (current) { subtotal += current.total; subtotalExpires = Math.min(subtotalExpires, current.expires); } else complete = false;
           const service = serviceDescription(row); if (service) copy.append(el('p', service, 'shop-muted'));

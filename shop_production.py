@@ -27,7 +27,9 @@ from shop_rsu_quotes import RSUQuotePolicy, RSUQuoteProvider
 from shop_storage import ShopStorage
 
 
-MAX_RELEASE_BYTES = 32 * 1024 * 1024
+# Reviewed 4,047-product catalogue plus fingerprint-bound tyre candidates is
+# 37.9 MB. Keep a finite bound with room for that measured release.
+MAX_RELEASE_BYTES = 48 * 1024 * 1024
 
 
 class ProductionError(ValueError):
@@ -162,6 +164,17 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 spacing_seconds=2.1, max_cache_entries=4096, source='ALZURA', require_procurement=False)
         cache = HybridPriceCache(identities, released_ids=released_ids, procurement_ids=procurement_ids,
                                  rsu_cache=rsu_cache, market_cache=market_cache)
+        # Merchant explicitly permits exact-variant rim sales without making a
+        # vehicle-fitment promise. Only independently reviewed RSU dimensions
+        # qualify; assemblies and services retain their separate proof gates.
+        allow_standalone_rims = descriptor.get('standalone_rim_sales_approved') is True
+        rim_sales = {}
+        if allow_standalone_rims and supplier is not None:
+            for identifier in procurement_ids:
+                if identities[identifier]['category'] in {'alloy_wheel', 'steel_wheel'}:
+                    proof = supplier.rim_geometry(identities[identifier])
+                    if proof is not None:
+                        rim_sales[identifier] = proof
         # A live browse price must come from the selected source's live cache.
         # Never revive an imported ALZURA price when an RSU read is unavailable.
         display_rows = [{**row, 'quote_public': None, 'price': None, 'sample_price_cents': None} for row in rows]
@@ -170,7 +183,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
             compatible_pairs=bundle.get('compatible_pairs'), quote_lookup=cache.get,
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
-            product_documents=bundle.get('product_documents'))
+            product_documents=bundle.get('product_documents'), standalone_rims=rim_sales)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -207,9 +220,16 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 if product is None:
                     return None
                 diameter = product['geometry'].get('diameter', '')
-                return {**identities[identifier], 'name': product['name'], '_mode': 'live',
+                name = product['name']
+                if identifier in rim_sales:
+                    g = rim_sales[identifier]['geometry']
+                    suffix = (f" · {g['width']}×{g['diameter']} Zoll · ET {g['offset']} · "
+                              f"{g['bolt_count']}×{g['pcd']} · ML {g['centre_bore']} mm")
+                    name = name + suffix if len(name + suffix) <= 180 else name[:178-len(suffix)].rstrip() + '…' + suffix
+                return {**identities[identifier], 'name': name, '_mode': 'live',
                         'fitment_required': product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'},
                         'fitment': None, 'required_fees_confirmed': identifier in bindings,
+                        'standalone_rim_geometry': rim_sales.get(identifier),
                         'required_documents_confirmed': (product['category'] != 'tyre' or
                             documents is not None and all(product.get('product_documents', {}).get(k)
                                 for k in ('tyre_label_url', 'tyre_sheet_url'))),
@@ -222,7 +242,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 destination_eligibility=lambda dest, ctx: dest == 'workshop' or ctx.get('delivery', {}).get('postcode') in approved_postcodes)
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=supplier.retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
-                assembly_fitment=lambda *a: None, mode='live')
+                assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims)
             def sink(quote, *, customer_id, delivery_context):
                 return store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
                     customer_id=customer_id, mode='live', delivery_context=delivery_context)

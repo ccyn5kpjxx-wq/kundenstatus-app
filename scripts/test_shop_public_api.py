@@ -115,6 +115,18 @@ class PublicApiChecks(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertNotIn(b'PRIVATE_PROVIDER_CANARY', response.data)
 
+    def test_complete_browse_flag_is_exact_and_preserved_for_page_and_variants(self):
+        self.enabled()
+        identifier = 'alloy_wheel:' + 'a' * 24
+        self.catalogue.variants.return_value = {'items': [], 'page': 1, 'total': 0, 'has_more': False}
+        self.assertEqual(self.client.get('/shop/api/v2/products?department=wheels&group=family&complete=1').status_code, 200)
+        self.catalogue.page.assert_called_once_with(department='wheels', group='family', complete='1')
+        self.assertEqual(self.client.get('/shop/api/v2/products/' + identifier + '/variants?complete=1&diameter=18').status_code, 200)
+        self.catalogue.variants.assert_any_call(identifier, complete='1', diameter='18')
+        for query in ('complete=0', 'complete=', 'complete=true', 'complete=1&complete=1'):
+            self.assertEqual(self.client.get('/shop/api/v2/products?' + query).status_code, 400)
+            self.assertEqual(self.client.get('/shop/api/v2/products/' + identifier + '/variants?' + query).status_code, 400)
+
     def test_quotes_require_exact_https_origin_and_host_session_csrf_authorization(self):
         self.enabled()
         for origin, base in (('https://attacker.example', self.origin), (None, self.origin),

@@ -215,6 +215,49 @@ class ReleaseChecks(unittest.TestCase):
                 'stock': 20, 'observed_at': now.isoformat(), 'expires_at': (now+timedelta(minutes=10)).isoformat()}
         return SimpleNamespace(retail_quote=retail, rsu_mapping=Mock(side_effect=AssertionError('No mapping on startup')))
 
+    def test_standalone_rim_policy_requires_private_literal_approval_and_reviewed_dimensions(self):
+        identifier = self.released['selection_id']
+        identity = variant_fingerprint(self.released)
+        geometry = {'width': '8', 'diameter': '18', 'offset': '45',
+                    'bolt_count': '5', 'pcd': '112', 'centre_bore': '66.6'}
+        proof = {'confirmed': True, 'product_id': identifier, 'identity_hash': identity,
+                 'supplier': 'RSU', 'evidence_id': 'synthetic-reviewed-rim', 'geometry': geometry}
+        self.bundle.update(rsu_bindings={identifier: {'synthetic': True}},
+                           shipping_classes={identifier: 'pkw_rim'}, delivery_postcodes=['74821'])
+        self.descriptor.update(buyer_and_quotes_enabled=True, initial_storage_creation=True,
+            rsu_reads_approved=True, rsu_config=write_json(self.root / 'rsu-private.json', {}))
+        for approved in (False, 'true', True):
+            with self.subTest(approved=approved):
+                self.descriptor['standalone_rim_sales_approved'] = approved
+                self.install()
+                calls = []
+                supplier = self.synthetic_provider('RSU', calls, 10000)
+                supplier.rim_geometry = Mock(return_value=proof)
+                supplier.rsu_mapping = lambda p: {'confirmed': True, 'product_id': identifier,
+                    'identity_hash': identity, 'supplier': 'RSU', 'supplier_article_id': '123',
+                    'evidence_id': 'synthetic-reviewed-mapping'}
+                with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
+                    dependencies = self.prepare()
+                self.assertEqual(calls, [])
+                product = dependencies['catalogue'].get(identifier)
+                service = self.portal.app.extensions['shop_production']['quotes']
+                self.assertEqual(service.allow_standalone_rims, approved is True)
+                quote = service.quote({'lines': [{'id': identifier, 'quantity': 4}]},
+                    customer_id='synthetic-customer', delivery_context={'delivery': {
+                        'salutation': 'Herr', 'postcode': '74821'}}).snapshot()
+                self.assertEqual(quote['ready'], approved is True)
+                if approved is True:
+                    self.assertEqual(product['sale_dimensions'], geometry)
+                    self.assertEqual(quote['total_gross_cent'], 40000)
+                    self.assertIn('8×18 Zoll · ET 45 · 5×112 · ML 66.6 mm', quote['lines'][0]['name'])
+                    self.assertEqual(quote['product_checks'][identifier]['standalone_rim_geometry'], proof)
+                    self.assertIsNone(quote['product_checks'][identifier]['fitment_evidence_id'])
+                else:
+                    supplier.rim_geometry.assert_not_called()
+                    self.assertNotIn('sale_dimensions', product)
+                    self.assertIn('fitment_unconfirmed', [r['code'] for r in quote['blocked_reasons']])
+                self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+
     def test_rsu_display_read_stage_works_without_buyer_and_skips_alzura_for_bound_rows(self):
         identifier = self.released['selection_id']
         self.bundle['rsu_bindings'] = {identifier: {'synthetic': True}}
