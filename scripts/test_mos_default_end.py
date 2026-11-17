@@ -9,6 +9,7 @@ from jinja2 import Environment, FileSystemLoader
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from mos_public_booking import default_end_slot, weekly_handover_slots
+from werkstatt_kontakt import public_workshop_contact
 from datetime import datetime
 
 
@@ -63,18 +64,26 @@ class DefaultEndTests(unittest.TestCase):
         env=Environment(loader=FileSystemLoader(ROOT/'templates'),autoescape=True)
         env.filters['mos_slot']=lambda value:value
         env.globals.update(url_for=lambda endpoint:'/'+endpoint,csrf_field=lambda:'')
+        context={'config':{},'booking_config':{},'listings':{'i10':'Hyundai i10'},
+                 'werkstatt_oeffentlich':public_workshop_contact(),
+                 'weekly_schedule':True,'max_days':5}
         slots=['2026-10-19T16:00:00+02:00','2026-10-20T16:00:00+02:00',
                '2026-10-24T20:00:00+02:00']
         for live in (False,True):
             with self.subTest(live=live):
                 rendered=env.get_template('mos_public/index.html').render(
                     slots=slots,default_end=default_end_slot(slots,5),live=live,
-                    config={},booking_config={},listings={'i10':'Hyundai i10'})
-                end_select=re.search(r'<select name="end" id="end">(.*?)</select>',rendered,re.S)[1]
-                self.assertEqual(re.findall(r'<option value="([^"]*)"[^>]*\bselected\b',end_select),[slots[1]])
+                    **context)
+                end_select=re.search(r'<select\b[^>]*\bid="end-time"[^>]*>(.*?)</select>',rendered,re.S)[1]
+                end_date=re.search(r'<input\b[^>]*\bid="end-date"[^>]*>',rendered)[0]
+                self.assertIn('value="2026-10-20"',end_date)
+                self.assertEqual(re.findall(r'<option value="([^"]*)"[^>]*\bselected\b',end_select),['16:00'])
+                self.assertNotIn('20:00',end_select)
         rendered=env.get_template('mos_public/index.html').render(
-            slots=[slots[0]],default_end=None,live=True,config={},booking_config={},listings={})
-        self.assertIn('<option value="" disabled selected>Bitte Rückgabetermin wählen</option>',rendered)
+            slots=[slots[0]],default_end=None,live=True,**context)
+        end_select=re.search(r'<select\b[^>]*\bid="end-time"[^>]*>(.*?)</select>',rendered,re.S)[1]
+        self.assertFalse(re.findall(r'<option value="16:00"[^>]*\bselected\b',end_select))
+        self.assertIn('Kein Übergabetermin verfügbar',rendered)
 
 
 if __name__=='__main__':unittest.main()

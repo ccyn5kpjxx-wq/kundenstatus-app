@@ -1,0 +1,26 @@
+{% extends 'mos_public/base.html' %}
+{% block content %}
+<h1>Deine Kaution online reservieren</h1>
+<section class="card">
+  <p>Öffne deinen geschützten Buchungsstatus, um die Kaution vor Abholung auf deiner Kreditkarte zu reservieren.</p>
+  <form method="post" id="booking-access">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="token" id="access-token" value="">
+    <button id="access-button" disabled>Geschützten Buchungsstatus öffnen</button>
+  </form>
+  <p id="access-message" class="small" role="status"></p>
+  <noscript><p>Bitte JavaScript aktivieren, um den geschützten Link zu öffnen, oder die Werkstatt kontaktieren.</p></noscript>
+</section>
+<script>
+(() => {
+  const token = window.location.hash.slice(1);
+  history.replaceState(null, '', window.location.pathname);
+  if (token) {
+    document.getElementById('access-token').value = token;
+    document.getElementById('access-button').disabled = false;
+  } else {
+    document.getElementById('access-message').textContent = 'Bitte den vollständigen Link aus deiner E-Mail öffnen.';
+  }
+})();
+</script>
+{% endblock %}

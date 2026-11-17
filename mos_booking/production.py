@@ -44,6 +44,13 @@ def launch_errors(cfg):
         if not (record.get('approved_by') and record.get('approved_at') and record.get('evidence')):
             errors.append('Freigabenachweis fehlt: '+name)
     legal=launch.get('legal_review',{})
+    timing=cfg.get('deposit_timing')
+    if timing not in (None,'before_pickup'):
+        errors.append('Unbekannter Zeitpunkt für die Kautionsreservierung.')
+    if timing=='before_pickup':
+        for name in ('business_review','legal_review','finance_review'):
+            if launch.get(name,{}).get('deposit_timing')!='before_pickup':
+                errors.append('Freigabe für Mietzahlung bei Buchung und spätere Kaution fehlt: '+name)
     terms=cfg.get('terms_text')
     if (not isinstance(terms,str) or not terms.strip() or
             legal.get('terms_sha256') != hashlib.sha256(terms.encode('utf-8')).hexdigest() or
@@ -115,6 +122,31 @@ class StripeLiveGateway(StripeTestGateway):
     def create_deposit_intent(self,params,key):
         if self.settlement_only:
             raise ValueError('Bei deaktivierter Neubuchung darf keine neue Kautionsautorisierung entstehen.')
+        return super().create_deposit_intent(params,key)
+
+    def create_existing_deposit_intent(self,params,key,hold):
+        """Settle one paid deferred booking while new bookings are paused.
+
+        SharedCheckout checks the current rental and cancellation rows under its
+        vehicle lock before calling this narrow entry point. The frozen hold
+        is server data, never a browser-supplied booking or Stripe parameter.
+        """
+        from mietwagen_checkout import deferred_deposit_quote, deposit_authorization_due
+        from mos_public_contract import signed_payload
+        try:
+            payload=json.loads(hold['payload'])
+            quote=payload['quote']
+            if (hold['status']!='confirmed' or not hold['mietvorgang_id']
+                    or not isinstance(hold['payment_intent'],str) or not hold['payment_intent'].startswith('pi_')
+                    or not isinstance(hold['session_id'],str) or not hold['session_id'].startswith('cs_live_')
+                    or quote.get('test_only') is not False or not deferred_deposit_quote(quote)
+                    or not deposit_authorization_due(quote)
+                    or params.get('metadata')!={'hold_id':hold['id'],'quote_hash':hold['fingerprint']}
+                    or key!='mos-deposit-'+hold['id']):
+                raise ValueError('Kaution erfordert eine bestätigte bezahlte Vorausbuchung.')
+            signed_payload(payload)
+        except (KeyError,TypeError,json.JSONDecodeError) as exc:
+            raise ValueError('Kaution erfordert eine bestätigte bezahlte Vorausbuchung.') from exc
         return super().create_deposit_intent(params,key)
 
     def capture_deposit_intent(self,intent_id,amount_cents,key):

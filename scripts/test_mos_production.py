@@ -213,6 +213,18 @@ class ProductionTests(unittest.TestCase):
         with patch('stripe.StripeClient') as client:
             StripeLiveGateway('rk_live_TEST_NOT_REAL',cfg);client.assert_called_once()
 
+    def test_deferred_deposit_needs_explicit_payment_plan_approvals(self):
+        cfg=self.ready_config()
+        cfg['deposit_timing']='before_pickup'
+        self.assertEqual(sum('spätere Kaution' in error for error in launch_errors(cfg)),3)
+        for name in ('business_review','legal_review','finance_review'):
+            cfg['launch'][name]['deposit_timing']='before_pickup'
+        self.assertEqual(launch_errors(cfg),[])
+        cfg['terms_text']+=' Geänderter Zahlungsplan.'
+        self.assertTrue(any('aktuellen Bedingungsfassung' in error for error in launch_errors(cfg)))
+        cfg['deposit_timing']='unknown'
+        self.assertTrue(any('Unbekannter Zeitpunkt' in error for error in launch_errors(cfg)))
+
     def test_signed_off_draft_terms_still_block_live_launch(self):
         base=self.ready_config()
         for marker in ('ENTWURF-2026-09-26-02', 'ENTWURF_2026-09-26',

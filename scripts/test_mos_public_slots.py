@@ -15,9 +15,11 @@ from PIL import Image, ImageDraw
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT));sys.path.insert(0,str(ROOT/'scripts'))
 from run_mos_public_test import build_test_app
-from mos_public_booking import (WEEKLY_HANDOVER, WEEKLY_SLOT_HORIZON_DAYS,
-                                init_slot_schema, local_slot_to_iso, selected_slots_open,
-                                weekly_handover_enabled, weekly_handover_slots)
+from mos_public_booking import (WEEKLY_HANDOVER, WEEKLY_SLOT_HORIZON_MONTHS,
+                                init_slot_schema, listed_slots, local_slot_to_iso,
+                                materialize_selected_weekly_slots, selected_slots_open,
+                                weekly_handover_enabled, weekly_handover_end_date,
+                                weekly_handover_slots)
 
 
 class SlotTests(unittest.TestCase):
@@ -87,8 +89,52 @@ class SlotTests(unittest.TestCase):
         self.assertNotIn('2026-09-28T21:00:00+02:00',slots)
         self.assertIn('2026-10-03T20:00:00+02:00',slots)
         self.assertFalse(any(s.startswith('2026-10-04') for s in slots))
-        self.assertFalse(any(datetime.fromisoformat(s).date() >=
-                             (monday.date()+timedelta(days=WEEKLY_SLOT_HORIZON_DAYS)) for s in slots))
+        self.assertTrue(all(datetime.fromisoformat(s).date() <=
+                            weekly_handover_end_date(monday) for s in slots))
+
+    def test_weekly_hours_cover_twelve_calendar_months_including_last_date(self):
+        now=datetime(2026,11,16,19,30,tzinfo=ZoneInfo('Europe/Berlin'))
+        slots=list(weekly_handover_slots(now))
+        self.assertEqual(WEEKLY_SLOT_HORIZON_MONTHS,12)
+        self.assertEqual(weekly_handover_end_date(now).isoformat(),'2027-11-16')
+        self.assertIn('2027-06-01T08:00:00+02:00',slots)
+        self.assertEqual(slots[-1],'2027-11-16T20:00:00+01:00')
+        self.assertFalse(any(s.startswith('2027-11-17') for s in slots))
+
+    def test_weekly_window_rolls_at_berlin_midnight_and_clamps_leap_day(self):
+        berlin=ZoneInfo('Europe/Berlin')
+        before=datetime(2026,11,16,23,59,tzinfo=berlin)
+        after=datetime(2026,11,16,23,1,tzinfo=timezone.utc)  # 17 November in Berlin
+        self.assertEqual(weekly_handover_end_date(before).isoformat(),'2027-11-16')
+        self.assertEqual(weekly_handover_end_date(after).isoformat(),'2027-11-17')
+        self.assertEqual(list(weekly_handover_slots(after))[0],'2026-11-17T08:00:00+01:00')
+        leap=datetime(2028,2,29,7,tzinfo=berlin)
+        self.assertEqual(weekly_handover_end_date(leap).isoformat(),'2029-02-28')
+        self.assertEqual(list(weekly_handover_slots(leap))[-1],'2029-02-28T20:00:00+01:00')
+        with self.assertRaisesRegex(ValueError,'Zeitzone'):
+            weekly_handover_end_date(datetime(2026,11,16))
+
+    def test_distant_closure_survives_regeneration_without_bulk_inserts(self):
+        now=datetime(2026,11,16,9,tzinfo=ZoneInfo('Europe/Berlin'))
+        start='2027-06-01T10:00:00+02:00'
+        end='2027-06-02T10:00:00+02:00'
+        closed='2027-06-03T10:00:00+02:00'
+        db=self.portal.get_db()
+        try:
+            self.assertTrue(selected_slots_open(db,start,end,weekly=True,now=now))
+            self.assertGreater(len(listed_slots(db,weekly=True,now=now)),4000)
+            self.assertEqual(db.execute('SELECT COUNT(*) AS n FROM miet_checkout_slots').fetchone()['n'],0)
+            stamp=now.isoformat()
+            db.execute('INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at) VALUES (?,0,?,?)',
+                       (closed,stamp,stamp))
+            init_slot_schema(db,[closed])
+            self.assertNotIn(closed,{row['slot'] for row in listed_slots(db,weekly=True,now=now)})
+            self.assertFalse(selected_slots_open(db,start,closed,weekly=True,now=now))
+            materialize_selected_weekly_slots(db,start,end,now)
+            materialize_selected_weekly_slots(db,start,end,now)
+            rows=db.execute('SELECT slot,active FROM miet_checkout_slots').fetchall()
+            self.assertEqual({row['slot']:row['active'] for row in rows},{start:1,end:1,closed:0})
+        finally:db.close()
 
     def test_weekly_rule_rejects_unconfirmed_hours(self):
         wrong=dict(WEEKLY_HANDOVER,first_hour=7)
@@ -162,7 +208,7 @@ class SlotTests(unittest.TestCase):
         now=datetime(2026,9,28,9,30,tzinfo=ZoneInfo('Europe/Berlin'))
         start='2026-09-28T10:00:00+02:00'
         end='2026-09-28T11:00:00+02:00'
-        too_far='2026-10-05T10:00:00+02:00'
+        too_far='2027-09-29T10:00:00+02:00'
         db=self.portal.get_db()
         try:
             self.assertTrue(selected_slots_open(db,start,end,weekly=True,now=now))

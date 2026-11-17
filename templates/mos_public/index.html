@@ -1,7 +1,93 @@
-{% extends 'mos_public/base.html' %}{% block content %}<h1>Auto wählen.<br>Termin prüfen.</h1><p>Aktuelle Abholadresse für Abholung und Rückgabe persönlich bei Gärtner: {{ werkstatt_oeffentlich.adresse }}. {% if not live %}Die angebotenen Termine sind ausdrücklich konfigurierte Testtermine.{% endif %}</p>
-<p class="card"><strong>Zahlung und Übergabe:</strong> {% if live %}Für die Kaution ist eine Kreditkarte nötig; Debit- und Prepaidkarten werden dafür nicht akzeptiert. Die Kaution wird online auf der Karte reserviert, ohne Abbuchung. Den Mietpreis bezahlst du anschließend online per Karte.{% else %}Im Test werden Kartenreservierung und Mietzahlung nur simuliert; es wird kein Geld bewegt.{% endif %} Vor Ort ist keine Zahlung vorgesehen. Eine Übergabe ist nur zu einem angezeigten Termin in {{ werkstatt_oeffentlich.ort }} möglich.</p>
-{% if slots %}<form class="card" method="post" action="{{ url_for('mos_public.preview') }}">{{ csrf_field()|safe }}
-<label for="vehicle">Fahrzeug</label><select id="vehicle" name="vehicle">{% for slug,name in listings.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}</select>
-<div class="grid"><div><label for="start">Abholtermin</label><select name="start" id="start">{% for slot in slots %}<option value="{{ slot }}">{{ slot|mos_slot }}</option>{% endfor %}</select></div>
-<div><label for="end">Rückgabetermin</label><select name="end" id="end">{% if not default_end %}<option value="" disabled selected>Bitte Rückgabetermin wählen</option>{% endif %}{% for slot in slots %}<option value="{{ slot }}" {% if slot==default_end %}selected{% endif %}>{{ slot|mos_slot }}</option>{% endfor %}</select></div></div>
-<button>{{ "Verfügbarkeit und Preis prüfen" if live else "Verfügbarkeit und Testpreis prüfen" }}</button></form>{% else %}<p class="card">Derzeit sind keine persönlichen Übergabetermine geöffnet. Bitte später erneut prüfen.</p>{% endif %}<p class="muted">Abholung und Rückgabe sind nur zu den angezeigten Terminen möglich. Auto-Abos und Werkstatt-Sondertarife bleiben individuelle Anfragen. Citroën C3 und Fiat sind hier nicht buchbar.</p>{% endblock %}
+{% extends 'mos_public/base.html' %}
+{% block content %}
+<h1>Auto wählen.<br>Termin prüfen.</h1>
+<p>Aktuelle Abholadresse für Abholung und Rückgabe persönlich bei Gärtner: {{ werkstatt_oeffentlich.adresse }}. {% if not live %}Die angebotenen Termine sind ausdrücklich konfigurierte Testtermine.{% endif %}</p>
+<p class="card"><strong>Zahlung und Übergabe:</strong> {% if live %}Für die Kaution ist eine Kreditkarte nötig; Debit- und Prepaidkarten werden dafür nicht akzeptiert. {% if booking_config.deposit_timing|default('') == 'before_pickup' %}Den Mietpreis bezahlst du bei der Buchung online. Die 500 € Kaution reservierst du erst kurz vor Abholung online auf deiner Kreditkarte, ohne Abbuchung. Dafür erhältst du rechtzeitig einen sicheren Link per E-Mail.{% else %}Die Kaution wird online auf der Karte reserviert, ohne Abbuchung. Den Mietpreis bezahlst du anschließend online per Karte.{% endif %}{% else %}Im Test werden Kartenreservierung und Mietzahlung nur simuliert; es wird kein Geld bewegt.{% endif %} Vor Ort ist keine Zahlung vorgesehen. Eine Übergabe ist nur zu einem angezeigten Termin in {{ werkstatt_oeffentlich.ort }} möglich.</p>
+{% if slots %}
+<form class="card" method="post" action="{{ url_for('mos_public.preview') }}" id="booking-dates">
+  {{ csrf_field()|safe }}
+  <label for="vehicle">Fahrzeug</label>
+  <select id="vehicle" name="vehicle">{% for slug,name in listings.items() %}<option value="{{ slug }}">{{ name }}</option>{% endfor %}</select>
+  {% if weekly_schedule %}<p class="small muted">Bis zu 12 Monate im Voraus · Montag bis Samstag, stündlich von 08:00 bis 20:00 Uhr. Mietdauer bis zu {{ max_days }} Tage, je nach Verfügbarkeit.</p>{% endif %}
+  <div class="grid">
+    <div>
+      <label for="start-date">Abholdatum</label>
+      <input type="date" id="start-date" name="start_date" min="{{ slots[0][:10] }}" max="{{ slots[-1][:10] }}" value="{{ slots[0][:10] }}" required>
+      <label for="start-time">Abholzeit</label>
+      <select id="start-time" name="start_time" required>{% for slot in slots if slot[:10] == slots[0][:10] %}<option value="{{ slot[11:16] }}">{{ slot[11:16] }} Uhr</option>{% endfor %}</select>
+    </div>
+    <div>
+      <label for="end-date">Rückgabedatum</label>
+      <input type="date" id="end-date" name="end_date" min="{{ slots[0][:10] }}" max="{{ slots[-1][:10] }}" value="{{ (default_end or slots[-1])[:10] }}" required>
+      <label for="end-time">Rückgabezeit</label>
+      <select id="end-time" name="end_time" required>{% for slot in slots if slot[:10] == (default_end or slots[-1])[:10] %}<option value="{{ slot[11:16] }}" {% if slot == default_end %}selected{% endif %}>{{ slot[11:16] }} Uhr</option>{% endfor %}</select>
+    </div>
+  </div>
+  <p class="small muted" id="date-message" role="status" aria-live="polite"></p>
+  <noscript><p>Bitte einen geöffneten Termin wählen. Die ausgewählten Zeiten werden bei der Preisprüfung nochmals geprüft.</p></noscript>
+  <button>{{ 'Verfügbarkeit und Preis prüfen' if live else 'Verfügbarkeit und Testpreis prüfen' }}</button>
+</form>
+<script id="booking-slots" type="application/json">{{ slots|tojson }}</script>
+<script>
+(() => {
+  const slots = JSON.parse(document.getElementById('booking-slots').textContent);
+  const byDate = new Map();
+  for (const slot of slots) {
+    const day = slot.slice(0, 10);
+    if (!byDate.has(day)) byDate.set(day, []);
+    byDate.get(day).push(slot);
+  }
+  const startDate = document.getElementById('start-date');
+  const startTime = document.getElementById('start-time');
+  const endDate = document.getElementById('end-date');
+  const endTime = document.getElementById('end-time');
+  const message = document.getElementById('date-message');
+  function fillTimes(date, select, after) {
+    const previous = select.value;
+    const available = (byDate.get(date.value) || []).filter(slot => !after || Date.parse(slot) > after);
+    select.replaceChildren();
+    for (const slot of available) {
+      const option = document.createElement('option');
+      option.value = slot.slice(11, 16);
+      option.textContent = option.value + ' Uhr';
+      select.append(option);
+    }
+    if (available.some(slot => slot.slice(11, 16) === previous)) select.value = previous;
+    if (!available.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Kein Übergabetermin verfügbar';
+      select.append(option);
+    }
+    select.setCustomValidity(available.length ? '' : 'Bitte ein Datum mit geöffnetem Übergabetermin wählen.');
+    return available;
+  }
+  function pickupChanged() {
+    const available = fillTimes(startDate, startTime);
+    const selected = available.find(slot => slot.slice(11, 16) === startTime.value);
+    endDate.min = startDate.value;
+    let nextTime = null;
+    if (selected && (!endDate.value || endDate.value < startDate.value ||
+        !(byDate.get(endDate.value) || []).some(slot => Date.parse(slot) > Date.parse(selected)))) {
+      const target = Date.parse(selected) + 86400000;
+      const next = slots.find(slot => Date.parse(slot) >= target) || slots.find(slot => Date.parse(slot) > Date.parse(selected));
+      if (next) { endDate.value = next.slice(0, 10); nextTime = next.slice(11, 16); }
+    }
+    returnChanged();
+    if (nextTime) endTime.value = nextTime;
+  }
+  function returnChanged() {
+    const start = (byDate.get(startDate.value) || []).find(slot => slot.slice(11, 16) === startTime.value);
+    const available = fillTimes(endDate, endTime, start ? Date.parse(start) : null);
+    message.textContent = !start ? 'An diesem Abholdatum ist kein Übergabetermin geöffnet. Bitte ein anderes Datum wählen.' :
+      !available.length ? 'Bitte einen geöffneten Rückgabetermin nach der Abholung wählen.' : '';
+  }
+  startDate.addEventListener('change', pickupChanged);
+  startTime.addEventListener('change', pickupChanged);
+  endDate.addEventListener('change', returnChanged);
+  pickupChanged();
+})();
+</script>
+{% else %}<p class="card">Derzeit sind keine persönlichen Übergabetermine geöffnet. Bitte später erneut prüfen.</p>{% endif %}
+<p class="muted">Abholung und Rückgabe sind nur zu den angezeigten Terminen möglich. Auto-Abos und Werkstatt-Sondertarife bleiben individuelle Anfragen. Citroën C3 und Fiat sind hier nicht buchbar.</p>
+{% endblock %}

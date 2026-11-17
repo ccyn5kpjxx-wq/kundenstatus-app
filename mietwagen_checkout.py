@@ -36,6 +36,27 @@ def _card_authorization_quote(quote):
     return quote.get('deposit_method') == 'card_authorization_at_booking'
 
 
+def deferred_deposit_quote(quote):
+    """Only a new, signed quote can defer its separate card authorization."""
+    return (_card_authorization_quote(quote)
+            and quote.get('deposit_timing') == 'before_pickup')
+
+
+def deposit_authorization_opens(quote):
+    start = datetime.fromisoformat(quote['start_slot'])
+    if start.tzinfo is None:
+        raise ValueError('Abholtermin ohne Zeitzone ist nicht verbindlich.')
+    return start.astimezone(timezone.utc) - timedelta(hours=12)
+
+
+def deposit_authorization_due(quote, now=None):
+    now = now or datetime.now(timezone.utc)
+    end = datetime.fromisoformat(quote['end_slot'])
+    if now.tzinfo is None or end.tzinfo is None:
+        raise ValueError('Kautionszeitpunkt braucht eine Zeitzone.')
+    return deposit_authorization_opens(quote) <= now.astimezone(timezone.utc) < end.astimezone(timezone.utc)
+
+
 def _checkout_disclosure(quote, *, test_mode):
     """Repeat the signed booking's key costs beside Stripe's final pay button."""
     def local_slot(value):
@@ -50,7 +71,10 @@ def _checkout_disclosure(quote, *, test_mode):
         f"{quote['extra_km_cents']/100:.2f} EUR/km. "
         f'Aktuelle Abholadresse für die persönliche Übergabe: Gärtner, {WORKSHOP_ADDRESS}.'
     )
-    deposit = ('500 EUR Kaution bereits separat auf der Kreditkarte reserviert, ohne Abbuchung. '
+    deposit = ('500 EUR Kaution vor Abholung online auf Kreditkarte reservieren '
+               '(frühestens 12 Stunden vorher), ohne Abbuchung. '
+               if deferred_deposit_quote(quote) else
+               '500 EUR Kaution bereits separat auf der Kreditkarte reserviert, ohne Abbuchung. '
                if _card_authorization_quote(quote) else
                'Eine rückzahlbare Kaution ist als eigener Posten ausgewiesen. ')
     cancellation = ''
@@ -176,6 +200,8 @@ class SharedCheckout:
         if (type(quote.get('amount_cents')) is not int or quote['amount_cents'] <= 0
                 or quote.get('currency') != 'eur' or not quote.get('rules_version')):
             raise ValueError('Verbindlicher serverseitiger Preis und Regelversion erforderlich.')
+        if 'deposit_timing' in quote and not deferred_deposit_quote(quote):
+            raise ValueError('Unbekannter Zeitpunkt der Kartenreservierung.')
         payload = json.dumps({'customer': {'name': name, 'telefon': customer.get('telefon', ''),
                             'email': customer.get('email', '')}, 'quote': quote}, sort_keys=True)
         if _card_authorization_quote(quote):
@@ -258,26 +284,49 @@ class SharedCheckout:
                 ready = True
         return ready
 
+    def _require_deferred_deposit_booking(self, db, h, *, check_window=True):
+        """A later authorization belongs only to an active, paid booking."""
+        q = json.loads(h['payload'])['quote']
+        if (not deferred_deposit_quote(q) or h['status'] != 'confirmed'
+                or not h['payment_intent'] or not h['session_id'] or not h['mietvorgang_id']):
+            raise ValueError('Kaution erst nach bestätigter Mietpreiszahlung reservieren.')
+        from mos_public_contract import signed_payload
+        signed_payload(json.loads(h['payload']))
+        canceled = db.execute('SELECT id FROM miet_checkout_cancellations WHERE id=?', (h['id'],)).fetchone()
+        rental = db.execute('SELECT mietfahrzeug_id,status,rueckgabe_datum FROM mietvorgaenge WHERE id=?',
+                            (h['mietvorgang_id'],)).fetchone()
+        handed_over = db.execute('SELECT hold_id FROM miet_checkout_handovers WHERE hold_id=?',
+                                 (h['id'],)).fetchone()
+        if (canceled or not rental or rental['mietfahrzeug_id'] != h['mietfahrzeug_id']
+                or rental['status'] != 'aktiv' or rental['rueckgabe_datum'] or handed_over):
+            raise ValueError('Für diese beendete oder bereits übergebene Buchung darf keine neue Kaution entstehen.')
+        if check_window and not deposit_authorization_due(q):
+            raise ValueError('Kaution frühestens zwölf Stunden vor Abholung und vor dem Rückgabetermin reservieren.')
+
     def prepare_deposit(self, hold_id):
         """Create one manual-capture card intent; uncertain outcomes retain stock."""
-        if not self._new_bookings_enabled():
-            raise ValueError('Gemeinsamer Checkout ist deaktiviert.')
         h = self.read(hold_id)
         q = json.loads(h['payload'])['quote']
-        if not _card_authorization_quote(q) or h['status'] != 'pending':
+        deferred = deferred_deposit_quote(q)
+        if not self._new_bookings_enabled() and not deferred:
+            raise ValueError('Gemeinsamer Checkout ist deaktiviert.')
+        if not _card_authorization_quote(q) or h['status'] != ('confirmed' if deferred else 'pending'):
             raise ValueError('Kartenautorisierung für diese Reservierung nicht möglich.')
-        if _pickup_passed(q):
+        if not deferred and _pickup_passed(q):
             self._release_unusable_authorization(hold_id, 'Der Abholtermin ist verstrichen')
-        if h['expires_at'] <= int(time.time()):
+        if not deferred and h['expires_at'] <= int(time.time()):
             self.cancel_or_reconcile(hold_id)
             raise ValueError('Die Reservierungsfrist ist abgelaufen. Bitte neu buchen.')
         from mos_public_contract import signed_payload
         signed_payload(json.loads(h['payload']))
         with self.locked(h['mietfahrzeug_id']) as (db, _):
             current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
-            if current['status'] != 'pending':
-                raise ValueError('Reservierung nicht offen.')
-            _require_open_public_slots(db, q, self.p.USE_POSTGRES)
+            if deferred:
+                self._require_deferred_deposit_booking(db, current)
+            else:
+                if current['status'] != 'pending':
+                    raise ValueError('Reservierung nicht offen.')
+                _require_open_public_slots(db, q, self.p.USE_POSTGRES)
             record = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone()
             if record is None:
                 db.execute('''INSERT INTO miet_checkout_deposit_auths (hold_id,status,created_at)
@@ -297,7 +346,10 @@ class SharedCheckout:
                       'payment_method_types': ['card'],
                       'metadata': {'hold_id': h['id'], 'quote_hash': h['fingerprint']},
                       'description': 'MOS Mietwagen – rückzahlbare Kaution als Kartenautorisierung'}
-            intent = self.gateway.create_deposit_intent(params, 'mos-deposit-' + h['id'])
+            if deferred and getattr(self.gateway, 'settlement_only', False):
+                intent = self.gateway.create_existing_deposit_intent(params, 'mos-deposit-' + h['id'], h)
+            else:
+                intent = self.gateway.create_deposit_intent(params, 'mos-deposit-' + h['id'])
         ready = self._validated_deposit(h, record, intent, enforce_coverage=False)
         expired_after_confirmation = False
         authorization_needs_review = False
@@ -306,15 +358,20 @@ class SharedCheckout:
             latest = dict(db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone())
             if latest['intent_id'] and latest['intent_id'] != intent['id']:
                 raise ValueError('Mehrdeutige Kartenautorisierung; manuelle Prüfung erforderlich.')
-            authorization_needs_review = (current['status'] != 'pending'
+            authorization_needs_review = (current['status'] != ('confirmed' if deferred else 'pending')
                                           or latest['status'] in {'releasing', 'released', 'review'})
+            if deferred and not authorization_needs_review:
+                try:
+                    self._require_deferred_deposit_booking(db, current)
+                except ValueError:
+                    authorization_needs_review = True
             if authorization_needs_review and not latest['intent_id']:
                 # The admin can close a slot while Stripe is creating an intent.
                 # Persist its ID before reporting a manual-review case.
                 db.execute('''UPDATE miet_checkout_deposit_auths
                     SET intent_id=?,status='review',capture_before=?,reason=? WHERE hold_id=?''',
                     (intent['id'], intent.get('capture_before'), 'authorization_created_after_close', hold_id))
-            if not authorization_needs_review and ready and latest['authorized_at'] is None:
+            if not deferred and not authorization_needs_review and ready and latest['authorized_at'] is None:
                 now = int(time.time())
                 if current['expires_at'] <= now:
                     expired_after_confirmation = True
@@ -342,6 +399,12 @@ class SharedCheckout:
     def _release_unusable_authorization(self, hold_id, reason):
         """Cancel an unusable card hold before rent is charged."""
         h = self.read(hold_id)
+        if h['status'] == 'confirmed' and deferred_deposit_quote(json.loads(h['payload'])['quote']):
+            # A paid future rental must remain booked when the customer supplies
+            # an unsuitable card or its authorization expires. Only release the
+            # separate intent; the workshop can resolve the card problem.
+            self.release_deposit(hold_id, reason)
+            raise ValueError(reason + '; Kartenreservierung freigegeben. Die bezahlte Buchung bleibt bestehen; bitte Werkstatt kontaktieren.')
         self._begin_release_without_session(h, reason)
         self.release_deposit(hold_id, reason)
         with self.locked(h['mietfahrzeug_id']) as (db, _):
@@ -383,6 +446,28 @@ class SharedCheckout:
         intent = self.gateway.retrieve_deposit_intent(record['intent_id'])
         ready = self._validated_deposit(h, record, intent, enforce_coverage=False)
         if h['status'] == 'confirmed':
+            if deferred_deposit_quote(q) and record['status'] != 'authorized':
+                # The customer confirms the later intent directly at Stripe.
+                # Persist that result without changing the paid rental or its
+                # expired pre-payment hold deadline.
+                with self.locked(h['mietfahrzeug_id']) as (db, _):
+                    current = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+                    latest = dict(db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?', (hold_id,)).fetchone())
+                    self._require_deferred_deposit_booking(db, current, check_window=False)
+                    if (latest['intent_id'] != intent['id']
+                            or latest['status'] in {'releasing', 'released', 'review'}):
+                        raise ValueError('Kartenautorisierung wurde zwischenzeitlich geändert.')
+                    db.execute('''UPDATE miet_checkout_deposit_auths
+                        SET status=?,capture_before=?,authorized_at=COALESCE(authorized_at,?) WHERE hold_id=?''',
+                        ('authorized' if ready else 'awaiting_card', intent.get('capture_before'),
+                         int(time.time()) if ready else None, hold_id))
+                if intent['status'] == 'requires_capture' and not ready:
+                    reason = ('Für die Kaution ist eine Kreditkarte erforderlich' if intent.get('card_funding') != 'credit'
+                              else 'Kartenautorisierung reicht nicht bis nach der Rückgabe')
+                    self._release_unusable_authorization(hold_id, reason)
+                if intent['status'] == 'canceled':
+                    self._release_unusable_authorization(hold_id, 'Kartenautorisierung wurde beendet')
+                return {**intent, 'ready': ready}
             # Monitoring a paid rental is read-only. It must never extend the
             # booking window, create another intent, or release a card hold.
             if not ready:
@@ -477,7 +562,7 @@ class SharedCheckout:
                     self.cancel_or_reconcile(hold_id, cancel=True)
                     raise ValueError('Der Abholtermin ist verstrichen. Bitte neu buchen.')
                 self._release_unusable_authorization(hold_id, 'Der Abholtermin ist verstrichen')
-            if not self.deposit_ready(hold_id):
+            if not deferred_deposit_quote(q) and not self.deposit_ready(hold_id):
                 raise ValueError('Die 500 EUR Kaution sind noch nicht vollständig auf der Karte reserviert.')
             # A newly confirmed card authorization can extend the unpaid hold.
             # Use the persisted deadline for Stripe's idempotent Checkout request;
@@ -525,7 +610,7 @@ class SharedCheckout:
                         db,h['mietfahrzeug_id'],date.fromisoformat(current['start_datum']),
                         date.fromisoformat(current['end_datum']),exclude_hold_id=hold_id):
                     raise ValueError('Fahrzeug ist für neue Zahlungen derzeit nicht freigegeben.')
-                if _card_authorization_quote(q):
+                if _card_authorization_quote(q) and not deferred_deposit_quote(q):
                     deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
                                          (hold_id,)).fetchone()
                     if not deposit or deposit['status'] != 'authorized':
@@ -616,7 +701,7 @@ class SharedCheckout:
         self.validate(h, session)
         q = json.loads(h['payload'])['quote']
         deposit_ok = True
-        if _card_authorization_quote(q):
+        if _card_authorization_quote(q) and not deferred_deposit_quote(q):
             if session.get('status') == 'complete' and session.get('payment_status') == 'paid':
                 try:
                     deposit_ok = self.deposit_ready(h['id'])
@@ -698,7 +783,9 @@ class SharedCheckout:
             if session.get('status') == 'expired' and session.get('payment_status') == 'unpaid' and h['status'] != 'review':
                 deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
                                      (h['id'],)).fetchone() if _card_authorization_quote(q) else None
-                if not _card_authorization_quote(q) or (deposit and deposit['status'] == 'released'):
+                if (not _card_authorization_quote(q)
+                        or deferred_deposit_quote(q) and not deposit
+                        or deposit and deposit['status'] == 'released'):
                     db.execute("UPDATE miet_checkout_holds SET status='released' WHERE id=?",(h['id'],))
             return None
 
@@ -735,6 +822,8 @@ class SharedCheckout:
             if session.get('status') == 'expired' and session.get('payment_status') == 'unpaid':
                 deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',
                                      (h['id'],)).fetchone() if _card_authorization_quote(q) else None
-                if not _card_authorization_quote(q) or (deposit and deposit['status'] == 'released'):
+                if (not _card_authorization_quote(q)
+                        or deferred_deposit_quote(q) and not deposit
+                        or deposit and deposit['status'] == 'released'):
                     db.execute("UPDATE miet_checkout_holds SET status='released' WHERE id=? AND status='pending'",(h['id'],))
         # Paid sessions wait for a signed webhook, including a cancellation/payment race.
