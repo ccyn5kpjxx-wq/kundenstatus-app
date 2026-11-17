@@ -3,10 +3,12 @@
 Run: python scripts/test_partner_lackierauftrag_reklamation.py
 """
 from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 import unittest
 from unittest.mock import patch
 
 import fitz
+from werkzeug.datastructures import FileStorage
 
 from flow_test import portal, with_csrf
 
@@ -233,6 +235,74 @@ class PartnerWorkflowTests(unittest.TestCase):
         self.assertEqual(postfach.status_code, 200)
         self.assertIn("mail-item-alarm", postfach.text)
         self.assertIn("Reklamation offen · Archiv", postfach.text)
+
+
+
+    def test_complaint_attachments_respect_partner_visibility(self):
+        order_id = portal.create_auftrag(
+            "autohaus", autohaus_id=self.partner["id"], fahrzeug="Synthetischer Testwagen",
+        )
+        complaint_id = portal.add_reklamation(order_id, "werkstatt", "Synthetische Nacharbeit")
+        filename = "interner-reklamationsanhang-synthetisch.txt"
+        portal.save_uploads(
+            order_id, [FileStorage(stream=BytesIO(b"Synthetic internal document"), filename=filename)],
+            "werkstatt", "reklamation", reklamation_id=complaint_id, analyze=False,
+        )
+        attachment = next(d for d in portal.list_dateien(order_id)
+                          if d.get("reklamation_id") == complaint_id)
+        db = portal.get_db()
+        db.execute(
+            "UPDATE dateien SET partner_sichtbar=0, sichtbarkeit_geprueft=1 WHERE id=?",
+            (attachment["id"],),
+        )
+        db.commit()
+        db.close()
+        detail_path = f"/partner/autohaus-pfaff/auftrag/{order_id}"
+        with portal.app.test_request_context():
+            from flask import url_for
+            attachment_paths = [url_for(endpoint, slug="autohaus-pfaff", datei_id=attachment["id"])
+                                for endpoint in ("partner_datei", "partner_datei_download")]
+        response = self.client.get(detail_path)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(filename, response.text)
+        for path in attachment_paths:
+            self.assertNotIn(path, response.text)
+            self.assertEqual(self.client.get(path).status_code, 404)
+        db = portal.get_db()
+        db.execute("UPDATE dateien SET partner_sichtbar=1 WHERE id=?", (attachment["id"],))
+        db.commit()
+        db.close()
+        response = self.client.get(detail_path)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(filename, response.text)
+        for path in attachment_paths:
+            self.assertIn(path, response.text)
+            download = self.client.get(path)
+            self.assertEqual(download.status_code, 200)
+            download.close()
+
+    def test_individual_archive_preserves_open_complaint_and_allows_reactivation(self):
+        order_id = portal.create_auftrag(
+            "autohaus", autohaus_id=self.partner["id"], fahrzeug="Synthetischer Testwagen",
+        )
+        complaint_id = portal.add_reklamation(order_id, "autohaus", "Synthetische Nacharbeit")
+        path = f"/partner/autohaus-pfaff/auftrag/{order_id}/archivieren"
+        response = self.post("/partner/autohaus-pfaff/auftraege/sammelaktion", {
+            "aktion": "archivieren", "auftrag_ids": str(order_id),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(portal.get_auftrag(order_id)["archiviert"])
+        response = self.post(path, {})
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(portal.get_auftrag(order_id)["archiviert"])
+        self.assertTrue(portal.auftrag_has_offene_reklamation(order_id))
+        portal.set_reklamation_status(complaint_id, True)
+        self.assertEqual(self.post(path, {}).status_code, 302)
+        self.assertTrue(portal.get_auftrag(order_id)["archiviert"])
+        portal.add_reklamation(order_id, "autohaus", "Synthetische erneute Nacharbeit")
+        self.assertEqual(self.post(path, {}).status_code, 302)
+        self.assertFalse(portal.get_auftrag(order_id)["archiviert"])
+        self.assertTrue(portal.auftrag_has_offene_reklamation(order_id))
 
 
 if __name__ == "__main__":
