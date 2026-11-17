@@ -28,14 +28,16 @@ def existing(db, hold_id):
     return dict(row) if row else None
 
 
-def record(db, service, hold_id, provider_intent, *, operator_name, odometer_km,
+def record(db, service, hold_id, provider_intent=None, *, payment_evidence=None,
+           operator_name, odometer_km,
            protocol_ref, receipt_confirmed, license_checked, fuel_full,
            condition_recorded, now=None):
     """Fail closed, then persist once; caller must hold the vehicle DB lock.
 
-    ``provider_intent`` is the freshly retrieved Stripe intent, validated again
-    against the locked hold and persisted deposit. No provider request is made
-    while holding the transaction open.
+    ``provider_intent`` is the freshly retrieved Stripe authorization for the
+    historical/short rental flow. Marked long rentals instead require fresh
+    ``payment_evidence`` for their fully captured rent and refundable deposit.
+    No provider request is made while holding the transaction open.
     """
     prior = existing(db, hold_id)
     if prior:
@@ -55,10 +57,12 @@ def record(db, service, hold_id, provider_intent, *, operator_name, odometer_km,
     if not hold or row['cancellation_id'] or row['status'] != 'sent' or not row['accepted_at']:
         raise ValueError('Übergabe gesperrt: Vertragskopie oder Buchungsstatus muss geprüft werden.')
     quote = json.loads(hold['payload'])['quote']
+    from mietwagen_checkout import is_long_rental_paid_deposit
+    paid_deposit = is_long_rental_paid_deposit(quote)
     if (quote.get('test_only') is not False or contract.get('test_only') is not False
-            or quote.get('deposit_method') != 'card_authorization_at_booking'
-            or quote.get('deposit_authorized_cents') != 50000):
-        raise ValueError('Übergabe nur für echte MOS-Direktbuchungen mit 500-EUR-Kartenreservierung.')
+            or (not paid_deposit and (quote.get('deposit_method') != 'card_authorization_at_booking'
+                                     or quote.get('deposit_authorized_cents') != 50000))):
+        raise ValueError('Übergabe nur für echte MOS-Direktbuchungen mit passender 500-EUR-Kaution.')
     try:
         start = datetime.fromisoformat(quote['start_slot'])
         end = datetime.fromisoformat(quote['end_slot'])
@@ -110,22 +114,13 @@ def record(db, service, hold_id, provider_intent, *, operator_name, odometer_km,
                 legacy_start = None
         if legacy_start is None or legacy_start <= local_today:
             raise ValueError('Schlüsselübergabe gesperrt: Eine andere Vormiete ist noch offen.')
-    deposit = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?',
-                         (hold_id,)).fetchone()
     if (not rental or rental['mietfahrzeug_id'] != hold['mietfahrzeug_id']
-            or rental['status'] != 'aktiv' or rental['rueckgabe_datum']
-            or not deposit or deposit['status'] != 'authorized'
-            or not deposit['capture_before'] or not provider_intent
-            or provider_intent.get('livemode') is not True
-            or provider_intent.get('capture_before') != deposit['capture_before']
-            or provider_intent.get('status') != 'requires_capture'):
-        raise ValueError('Übergabe gesperrt: Mietvorgang oder Kartenreservierung muss geprüft werden.')
-    if not service._validated_deposit(dict(hold), dict(deposit), provider_intent,
-                                      enforce_coverage=True):
-        raise ValueError('500-EUR-Kartenreservierung ist nicht mehr gültig.')
-    until = datetime.fromisoformat(deposit['capture_before'].replace('Z', '+00:00'))
-    if until.tzinfo is None or until <= now or until <= end + timedelta(hours=24):
-        raise ValueError('500-EUR-Kartenreservierung endet vor der geplanten Rückgabe.')
+            or rental['status'] != 'aktiv' or rental['rueckgabe_datum']):
+        raise ValueError('Übergabe gesperrt: Aktiven Mietvorgang prüfen.')
+    if paid_deposit:
+        _paid_deposit_ready(db, service, dict(hold), quote, contract, payment_evidence, now)
+    else:
+        _authorized_deposit_ready(db, service, dict(hold), provider_intent, end, now)
 
     db.execute('''INSERT INTO miet_checkout_handovers
         (hold_id,mietvorgang_id,handed_at,operator_name,odometer_km,protocol_ref,
@@ -134,3 +129,56 @@ def record(db, service, hold_id, provider_intent, *, operator_name, odometer_km,
         (hold_id, hold['mietvorgang_id'], now.isoformat(), operator_name.strip(),
          odometer_km, protocol_ref.strip()))
     return existing(db, hold_id)
+
+
+def _authorized_deposit_ready(db, service, hold, provider_intent, end, now):
+    deposit = db.execute('SELECT * FROM miet_checkout_deposit_auths WHERE hold_id=?',
+                         (hold['id'],)).fetchone()
+    if (not deposit or deposit['status'] != 'authorized'
+            or not deposit['capture_before'] or not provider_intent
+            or provider_intent.get('livemode') is not True
+            or provider_intent.get('capture_before') != deposit['capture_before']
+            or provider_intent.get('status') != 'requires_capture'):
+        raise ValueError('Übergabe gesperrt: Mietvorgang oder Kartenreservierung muss geprüft werden.')
+    if not service._validated_deposit(hold, dict(deposit), provider_intent,
+                                      enforce_coverage=True):
+        raise ValueError('500-EUR-Kartenreservierung ist nicht mehr gültig.')
+    until = datetime.fromisoformat(deposit['capture_before'].replace('Z', '+00:00'))
+    if until.tzinfo is None or until <= now or until <= end + timedelta(hours=24):
+        raise ValueError('500-EUR-Kartenreservierung endet vor der geplanten Rückgabe.')
+
+
+
+def _paid_deposit_ready(db, service, hold, quote, contract, evidence, now):
+    """Recheck fresh provider evidence and all local refund gates under lock."""
+    from mietwagen_checkout import validate_long_rental_paid_deposit
+    validate_long_rental_paid_deposit(quote)
+    if (type(quote.get('days')) is not int or not 5 < quote['days'] <= 30
+            or quote.get('deposit_charged_cents') != 50000
+            or quote.get('deposit_authorized_cents') != 0
+            or quote.get('checkout_deposit') is not True or 'deposit_timing' in quote
+            or type(quote.get('rental_cents')) is not int or quote['rental_cents'] <= 0
+            or quote.get('amount_cents') != quote['rental_cents'] + 50000
+            or contract.get('long_rental_deposit_policy') != 'paid_at_booking_v1'
+            or contract.get('deposit_method') != quote['deposit_method']
+            or contract.get('deposit_charged_cents') != 50000
+            or contract.get('amount_cents') != quote['amount_cents']):
+        raise ValueError('Übergabe gesperrt: Vereinbarte Langmiet-Kaution muss geprüft werden.')
+    if (db.execute('SELECT id FROM miet_checkout_refunds WHERE hold_id=? LIMIT 1', (hold['id'],)).fetchone()
+            or db.execute('SELECT hold_id FROM miet_checkout_review_refunds WHERE hold_id=?', (hold['id'],)).fetchone()):
+        raise ValueError('Übergabe gesperrt: Erstattung oder Zahlungsprüffall vorhanden.')
+    if (not isinstance(evidence, dict) or service.gateway.livemode is not True
+            or evidence.get('livemode') is not True or evidence.get('object') != 'checkout.session'
+            or evidence.get('mode') != 'payment' or evidence.get('status') != 'complete'
+            or evidence.get('payment_status') != 'paid'
+            or evidence.get('amount_total') != quote['amount_cents']
+            or evidence.get('deposit_net_cents') != 50000 or evidence.get('refunded_cents') != 0
+            or evidence.get('payment_intent') != hold['payment_intent']):
+        raise ValueError('Übergabe gesperrt: Miete und 500-EUR-Kaution nicht vollständig bestätigt.')
+    try:
+        checked_at = datetime.fromisoformat(evidence['verified_at'])
+        if checked_at.tzinfo is None or not timedelta(0) <= now - checked_at <= timedelta(seconds=60):
+            raise ValueError('Veraltete Zahlungsprüfung.')
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError('Übergabe gesperrt: Frische Zahlungsprüfung erforderlich.') from exc
+    service.validate(hold, evidence)

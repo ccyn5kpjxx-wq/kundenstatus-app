@@ -51,7 +51,16 @@ def launch_errors(cfg):
         for name in ('business_review','legal_review','finance_review'):
             if launch.get(name,{}).get('deposit_timing')!='before_pickup':
                 errors.append('Freigabe für Mietzahlung bei Buchung und spätere Kaution fehlt: '+name)
-    if cfg.get('max_days',5)>5:
+    long_method=cfg.get('long_rental_deposit_method')
+    if long_method not in (None,'charge_with_rent_refund_after_return'):
+        errors.append('Unbekanntes Kautionsverfahren für längere Mieten.')
+    if long_method=='charge_with_rent_refund_after_return':
+        if cfg.get('max_days',0)>30 or timing!='before_pickup':
+            errors.append('Die kombinierte Kautionsregel benötigt höchstens 30 Miettage und die spätere Kartenreservierung für kurze Mieten.')
+        for name in ('business_review','legal_review','finance_review'):
+            if launch.get(name,{}).get('long_rental_deposit_method')!=long_method:
+                errors.append('Freigabe für bezahlte rückzahlbare Kaution ab sechs Miettagen fehlt: '+name)
+    elif cfg.get('max_days',5)>5:
         extended=launch.get('finance_review',{}).get('extended_authorization',{})
         if (cfg.get('max_days',0)>28 or timing!='before_pickup'
                 or cfg.get('deposit_authorization_mode')!='extended_if_available'
@@ -170,9 +179,8 @@ class StripeLiveGateway(StripeTestGateway):
     def capture_deposit_intent(self,intent_id,amount_cents,key):
         raise ValueError('Eine MOS-Kautionsautorisierung darf nicht als Zahlung eingezogen werden.')
 
-    def refund(self,payment_intent,amount,key):
-        return self.client.v1.refunds.create({'payment_intent':payment_intent,'amount':amount},
-                    options={'idempotency_key':key}).to_dict()
+    def refund(self,payment_intent,amount,key,*,metadata=None):
+        return super().refund(payment_intent,amount,key,metadata=metadata)
 
     def retrieve_refund(self,refund_id):
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
@@ -233,17 +241,25 @@ class RefundLedger:
         session=self.s.gateway.retrieve(h['session_id'])
         self.s.validate(h,session)
         q=json.loads(h['payload'])['quote']
+        from mietwagen_checkout import is_long_rental_paid_deposit
+        charged=is_long_rental_paid_deposit(q)
+        total=q['amount_cents'] if charged else q.get('rental_cents')
+        if charged:
+            db=self.s.p.get_db()
+            try:previous_audit=db.execute('SELECT hold_id FROM miet_checkout_review_refunds WHERE hold_id=?',(hold_id,)).fetchone()
+            finally:db.close()
+            if not previous_audit:
+                self.s._validated_charged_payment(h,session,self.s.gateway.retrieve_payment(session.get('payment_intent')))
         pi=session.get('payment_intent')
         if (h['status']!='review' or h['mietvorgang_id']
                 or session.get('object')!='checkout.session'
                 or session.get('status')!='complete' or session.get('payment_status')!='paid'
                 or not isinstance(pi,str) or not pi.startswith('pi_')
                 or h['payment_intent'] not in (None,pi)
-                or q.get('deposit_method')!='card_authorization_at_booking'
-                or q.get('deposit_charged_cents')!=0
-                or q.get('deposit_authorized_cents')!=50000
+                or (not charged and (q.get('deposit_method')!='card_authorization_at_booking'
+                    or q.get('deposit_charged_cents')!=0 or q.get('deposit_authorized_cents')!=50000))
                 or type(q.get('rental_cents')) is not int or q['rental_cents']<=0
-                or q.get('amount_cents')!=q['rental_cents']):
+                or (not charged and q.get('amount_cents')!=q['rental_cents'])):
             raise ValueError('Prüffall und verifizierte Mietpreiszahlung stimmen nicht überein.')
         rid='review-full-'+hold_id
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
@@ -260,7 +276,7 @@ class RefundLedger:
                            (hold_id,)).fetchone()
             if old:
                 if (old['refund_id']!=rid or old['session_id']!=session['id']
-                        or old['payment_intent']!=pi or old['amount_cents']!=q['rental_cents']):
+                        or old['payment_intent']!=pi or old['amount_cents']!=total):
                     raise ValueError('Prüffall hat abweichenden Erstattungsauftrag.')
                 return rid
             if db.execute('SELECT id FROM miet_checkout_refunds WHERE hold_id=?',
@@ -272,11 +288,11 @@ class RefundLedger:
             note=('Vollerstattung einer bezahlten, nicht bestätigten Buchung; '
                   'Prüfung durch '+operator_name+'; Stripe-Session '+session['id']+
                   '; PaymentIntent '+pi+'; Grund: '+reason)
-            self._enqueue(db,current,q['rental_cents'],'review_full_refund',note,rid)
+            self._enqueue(db,current,total,'review_full_refund',note,rid)
             db.execute('''INSERT INTO miet_checkout_review_refunds
                 (hold_id,refund_id,session_id,payment_intent,amount_cents,verified_at,operator_name,reason)
                 VALUES (?,?,?,?,?,?,?,?)''',
-                (hold_id,rid,session['id'],pi,q['rental_cents'],
+                (hold_id,rid,session['id'],pi,total,
                  datetime.now(timezone.utc).isoformat(),operator_name,reason))
             db.execute("UPDATE miet_checkout_holds SET payment_intent=? WHERE id=?",
                        (pi,hold_id))
@@ -285,6 +301,10 @@ class RefundLedger:
     def close_review_refund(self,hold_id):
         """Free inventory only after both the rent refund and card release."""
         h=self.s.read(hold_id)
+        from mietwagen_checkout import is_long_rental_paid_deposit, validate_long_rental_paid_deposit
+        q=json.loads(h['payload'])['quote']
+        charged=is_long_rental_paid_deposit(q)
+        if charged:validate_long_rental_paid_deposit(q)
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
             current=db.execute('SELECT status,grund,mietvorgang_id FROM miet_checkout_holds WHERE id=?',
                                (hold_id,)).fetchone()
@@ -301,8 +321,9 @@ class RefundLedger:
             if (not audit or not refund or refund['status']!='succeeded'
                     or refund['kind']!='review_full_refund'
                     or refund['amount_cents']!=audit['amount_cents']
-                    or refund['provider_id'] is None or not deposit
-                    or deposit['status']!='released'):
+                    or refund['provider_id'] is None
+                    or (charged and audit['amount_cents']!=q['amount_cents'])
+                    or (not charged and (not deposit or deposit['status']!='released'))):
                 raise ValueError('Erstattung oder Kautionsfreigabe noch nicht belegt; Prüffall bleibt gesperrt.')
             db.execute("UPDATE miet_checkout_holds SET status='released',grund='review_full_refund_completed' WHERE id=?",
                        (hold_id,))
@@ -381,11 +402,101 @@ class RefundLedger:
 
     def deposit(self,hold_id,reason):
         h=self.s.read(hold_id);q=json.loads(h['payload'])['quote']
+        from mietwagen_checkout import is_long_rental_paid_deposit, validate_long_rental_paid_deposit
+        charged=is_long_rental_paid_deposit(q)
+        if charged:
+            validate_long_rental_paid_deposit(q)
+            with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+                current,old=self._long_deposit_refund_hold(db,h)
+                if old:return old['id']
+            # Recheck the provider before the first refund. A refund performed
+            # outside this ledger must not be repeated from the rent balance.
+            checkout=self.s.gateway.retrieve(current['session_id'])
+            payment=self.s.gateway.retrieve_payment(current['payment_intent'])
+            self.s._validated_charged_payment(current,checkout,payment)
+            with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+                current,old=self._long_deposit_refund_hold(db,h)
+                if old:return old['id']
+                return self._enqueue(db,current,50000,'deposit_return',reason,'deposit-'+hold_id)
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
             rental=db.execute('SELECT status FROM mietvorgaenge WHERE id=?',(h['mietvorgang_id'],)).fetchone()
             if not rental or rental['status']!='zurueck' or q.get('deposit_charged_cents',0)<=0:
                 raise ValueError('Kaution erst nach protokollierter Rückgabe freigeben.')
             return self._enqueue(db,h,q['deposit_charged_cents'],'deposit_return',reason,'deposit-'+hold_id)
+
+    def _long_deposit_refund_hold(self,db,h):
+        from mietwagen_checkout import validate_long_rental_paid_deposit
+        from mos_return import deposit_release_eligible
+        current=dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',(h['id'],)).fetchone())
+        validate_long_rental_paid_deposit(json.loads(current['payload'])['quote'])
+        if (current['status']!='confirmed' or not current['payment_intent'] or not current['session_id']
+                or not current['mietvorgang_id'] or current['payload']!=h['payload']
+                or current['payment_intent']!=h['payment_intent'] or current['session_id']!=h['session_id']
+                or current['mietvorgang_id']!=h['mietvorgang_id']
+                or db.execute('SELECT id FROM miet_checkout_cancellations WHERE id=?',(h['id'],)).fetchone()
+                or db.execute('SELECT hold_id FROM miet_checkout_review_refunds WHERE hold_id=?',(h['id'],)).fetchone()):
+            raise ValueError('Stornierte, geänderte oder zu prüfende Miete darf keine neue Kautionserstattung erhalten.')
+        if not deposit_release_eligible(db,h['id'],current['mietvorgang_id']):
+            raise ValueError('Kaution erst nach ordnungsgemäßer oder vollständig geklärter Rückgabe erstatten.')
+        rows=db.execute('SELECT * FROM miet_checkout_refunds WHERE hold_id=?',(h['id'],)).fetchall()
+        own=None
+        for row in rows:
+            if (row['id']!='deposit-'+h['id'] or row['kind']!='deposit_return' or row['amount_cents']!=50000
+                    or row['status'] not in {'queued','submitted','succeeded'}):
+                raise ValueError('Andere oder unklare Erstattung vorhanden; Kaution manuell abgleichen.')
+            own=dict(row)
+        return current,own
+
+    @staticmethod
+    def _long_refund_metadata(r):
+        return {'mos_refund_id':r['id'],'hold_id':r['hold_id'],'refund_kind':'deposit_return'}
+
+    def _validate_long_refund(self,result,r,h):
+        if (not isinstance(result,dict) or result.get('object')!='refund'
+                or not isinstance(result.get('id'),str) or not result['id'].startswith('re_')
+                or result.get('payment_intent')!=h['payment_intent']
+                or type(result.get('amount')) is not int or result['amount']!=50000
+                or result.get('currency')!='eur'
+                or result.get('status') not in {'pending','requires_action','succeeded','failed','canceled'}
+                or result.get('metadata')!=self._long_refund_metadata(r)):
+            raise ValueError('Andere oder unklare Erstattung beim Anbieter; Kaution manuell abgleichen.')
+
+    def _process_long_deposit(self,r,h):
+        """Adopt only our proven refund; never spend rent after an external refund."""
+        with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            current,own=self._long_deposit_refund_hold(db,h)
+            if not own or own['id']!=r['id']:
+                raise ValueError('Kautionserstattung stimmt nicht mit dem Auftrag überein.')
+        page=self.s.gateway.list_refunds(current['payment_intent'])
+        if (not isinstance(page,dict) or page.get('object')!='list' or page.get('has_more') is not False
+                or not isinstance(page.get('data'),list) or len(page['data'])>100):
+            raise ValueError('Unvollständige Erstattungsliste; Kaution manuell abgleichen.')
+        # A second, unrelated refund (including pending/failed attempts) is an
+        # ambiguous financial event. Only one exact server-owned refund is safe.
+        if len(page['data'])>1:
+            raise ValueError('Mehrere Erstattungen beim Anbieter; Kaution manuell abgleichen.')
+        result=page['data'][0] if page['data'] else None
+        if result:self._validate_long_refund(result,r,current)
+        checkout=self.s.gateway.retrieve(current['session_id'])
+        payment=self.s.gateway.retrieve_payment(current['payment_intent'])
+        self.s._validated_charged_payment(current,checkout,payment,
+            expected_refunded_cents=50000 if result and result['status']=='succeeded' else 0)
+        with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            current,own=self._long_deposit_refund_hold(db,h)
+            if not own or own['id']!=r['id']:
+                raise ValueError('Kautionserstattung wurde zwischenzeitlich geändert.')
+            provider_id=own['provider_id']
+            if result and provider_id not in (None,result['id']):
+                raise ValueError('Abweichende Erstattungsreferenz; Kaution manuell abgleichen.')
+        if result:return result
+        if provider_id:
+            result=self.s.gateway.retrieve_refund(provider_id)
+            self._validate_long_refund(result,r,current)
+            return result
+        if (datetime.now(timezone.utc)-datetime.fromisoformat(r['created_at'])).total_seconds()>23*3600:
+            raise ValueError('Unklare Erstattung außerhalb des sicheren Wiederholungsfensters: manuell abgleichen.')
+        return self.s.gateway.refund(current['payment_intent'],50000,'mos-refund-'+r['id'],
+            metadata=self._long_refund_metadata(r))
 
     def process(self,refund_id):
         db=self.s.p.get_db()
@@ -396,11 +507,16 @@ class RefundLedger:
         finally:db.close()
         if r['status'] in {'succeeded','failed'}:return r['status']
         h=self.s.read(r['hold_id'])
+        from mietwagen_checkout import is_long_rental_paid_deposit
+        long_deposit=(r['kind']=='deposit_return'
+            and is_long_rental_paid_deposit(json.loads(h['payload'])['quote']))
         # On network uncertainty the same immutable request/idempotency key is retried.
-        if not r['provider_id'] and (datetime.now(timezone.utc)-datetime.fromisoformat(r['created_at'])).total_seconds()>23*3600:
+        if not long_deposit and not r['provider_id'] and (datetime.now(timezone.utc)-datetime.fromisoformat(r['created_at'])).total_seconds()>23*3600:
             raise ValueError('Unklarer Erstattungsauftrag außerhalb des sicheren Wiederholungsfensters: manuell mit Stripe abgleichen, nicht neu senden.')
         result=(self.s.gateway.retrieve_refund(r['provider_id']) if r['provider_id'] else
+                self._process_long_deposit(r,h) if long_deposit else
                 self.s.gateway.refund(h['payment_intent'],r['amount_cents'],'mos-refund-'+r['id']))
+        if long_deposit:self._validate_long_refund(result,r,h)
         if (result.get('payment_intent')!=h['payment_intent'] or result.get('amount')!=r['amount_cents']
             or (r['provider_id'] and result.get('id')!=r['provider_id'])
             or result.get('currency')!='eur' or result.get('object')!='refund'

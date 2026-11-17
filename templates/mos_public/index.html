@@ -2,7 +2,8 @@
 {% block content %}
 <h1>Auto wählen.<br>Termin prüfen.</h1>
 <p>Aktuelle Abholadresse für Abholung und Rückgabe persönlich bei Gärtner: {{ werkstatt_oeffentlich.adresse }}. {% if not live %}Die angebotenen Termine sind ausdrücklich konfigurierte Testtermine.{% endif %}</p>
-<p class="card"><strong>Zahlung und Übergabe:</strong> {% if live %}Für die Kaution ist eine Kreditkarte nötig; Debit- und Prepaidkarten werden dafür nicht akzeptiert. {% if booking_config.deposit_timing|default('') == 'before_pickup' %}Den Mietpreis bezahlst du bei der Buchung online. Die 500 € Kaution reservierst du erst kurz vor Abholung online auf deiner Kreditkarte, ohne Abbuchung. Dafür erhältst du rechtzeitig einen sicheren Link per E-Mail.{% else %}Die Kaution wird online auf der Karte reserviert, ohne Abbuchung. Den Mietpreis bezahlst du anschließend online per Karte.{% endif %}{% else %}Im Test werden Kartenreservierung und Mietzahlung nur simuliert; es wird kein Geld bewegt.{% endif %} Vor Ort ist keine Zahlung vorgesehen. Eine Übergabe ist nur zu einem angezeigten Termin in {{ werkstatt_oeffentlich.ort }} möglich.</p>
+{% set mixed_deposit = booking_config.long_rental_deposit_method|default('') == 'charge_with_rent_refund_after_return' and max_days|default(5) > 5 %}
+<p class="card"><strong>Zahlung und Übergabe:</strong> {% if live and mixed_deposit %}Den Mietpreis bezahlst du bei der Buchung online. Bis zu fünf berechnete Miettage werden 500 € Kaution erst kurz vor der Abholung auf einer Kreditkarte reserviert. Bei sechs bis {{ max_days }} berechneten Miettagen bezahlst du 500 € rückzahlbare Kaution zusammen mit der Miete. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe veranlassen wir die Erstattung. {% elif live %}Für die Kaution ist eine Kreditkarte nötig; Debit- und Prepaidkarten werden dafür nicht akzeptiert. {% if booking_config.deposit_timing|default('') == 'before_pickup' %}Den Mietpreis bezahlst du bei der Buchung online. Die 500 € Kaution reservierst du erst kurz vor Abholung online auf deiner Kreditkarte, ohne Abbuchung. Dafür erhältst du rechtzeitig einen sicheren Link per E-Mail.{% else %}Die Kaution wird online auf der Karte reserviert, ohne Abbuchung. Den Mietpreis bezahlst du anschließend online per Karte.{% endif %}{% else %}Im Test werden Kartenreservierung und Mietzahlung nur simuliert; es wird kein Geld bewegt.{% endif %} Vor Ort ist keine Zahlung vorgesehen. Eine Übergabe ist nur zu einem angezeigten Termin in {{ werkstatt_oeffentlich.ort }} möglich.</p>
 {% if slots %}
 {% set chosen = selection|default({}, true) %}
 {% set pickup_day = chosen.get('start_date', slots[0][:10]) %}
@@ -41,7 +42,13 @@
     </div>
   </div>
   <p class="small muted" id="date-message" role="status" aria-live="polite"></p>
-  {% if live and booking_config.deposit_method|default('') == 'card_authorization_at_booking' %}
+  {% if live and mixed_deposit %}
+  <section class="small" id="duration-deposit-help" aria-labelledby="deposit-choice-heading">
+    <h2 id="deposit-choice-heading">So funktioniert die Kaution</h2>
+    <p><strong>Bis fünf berechnete Miettage:</strong> 500 € auf einer Kreditkarte reservieren, ohne Abbuchung. Das bestätigst du selbst online, frühestens zwölf Stunden vor der Abholung. Die Reservierung muss länger als 24 Stunden nach der Rückgabe gültig bleiben. Debit- und Prepaidkarten sind für diese Reservierung nicht geeignet.</p>
+    <p><strong>Sechs bis {{ max_days }} berechnete Miettage:</strong> 500 € Kaution bei der Buchung zusammen mit der Miete bezahlen. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe veranlassen wir die Erstattung innerhalb von zwei Werktagen. Die Gutschrift auf deinem Kartenkonto kann später erfolgen. Zusätzliche Forderungen werden getrennt geprüft; es gibt keine automatische weitere Kartenbelastung.</p>
+  </section>
+  {% elif live and booking_config.deposit_method|default('') == 'card_authorization_at_booking' %}
   <p class="small" id="duration-deposit-help"><strong>Kaution auch bei längeren Mieten:</strong> Für die Abholung ist eine gültige Reservierung von 500 € auf einer Kreditkarte erforderlich, ohne Abbuchung. {% if booking_config.deposit_timing|default('') == 'before_pickup' %}Du bestätigst sie selbst online, frühestens zwölf Stunden vor der Abholung. {% endif %}Die Kartenreservierung muss die gesamte Mietzeit und mehr als 24 Stunden nach der Rückgabe abdecken. Bei längeren Mieten benötigst du eine Kreditkarte, die eine entsprechend lange Reservierung unterstützt. Die tatsächlich mögliche Frist wird nach der Kartenbestätigung geprüft. Ohne ausreichend gültige Reservierung ist keine Schlüsselübergabe möglich.</p>
   {% endif %}
   <noscript><p>Für die Auswahl anderer Tage und Uhrzeiten bitte JavaScript aktivieren. Die ausgewählten Zeiten und die maximale Mietdauer werden bei der Preisprüfung nochmals geprüft.</p></noscript>

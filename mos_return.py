@@ -80,7 +80,129 @@ def deposit_release_eligible(db, hold_id, rental_id):
                         (rental_id,)).fetchone()
     if not rental or rental['status'] != 'zurueck':
         return False
-    return bool(returned['no_objection'] or existing_clearance(db, hold_id))
+    clearance = existing_clearance(db, hold_id)
+    eligible = bool(returned['no_objection'] or clearance)
+    hold = db.execute('SELECT payload FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone()
+    quote = json.loads(hold['payload'])['quote'] if hold else {}
+    if quote.get('long_rental_deposit_policy') != 'paid_at_booking_v1':
+        return eligible  # Preserve all historical release decisions.
+    from mietwagen_checkout import is_long_rental_paid_deposit
+    if not eligible or not is_long_rental_paid_deposit(quote) or quote.get('test_only') is not False:
+        return False
+    # The new paid-deposit policy requires an actual documented handover and
+    # explicit operator decision; a vehicle-readiness release is insufficient.
+    handover = db.execute('SELECT mietvorgang_id FROM miet_checkout_handovers WHERE hold_id=?',
+                          (hold_id,)).fetchone()
+    if not handover or handover['mietvorgang_id'] != rental_id:
+        return False
+    if (not 2 <= len(returned['operator_name'].strip()) <= 100
+            or not 3 <= len(returned['protocol_ref'].strip()) <= 100
+            or returned['condition_recorded'] != 1):
+        return False
+    if returned['no_objection']:
+        return bool(returned['fuel_full'] == 1 and returned['damage_free'] == 1
+                    and (not (returned['late_review_cents'] or returned['extra_km_review_cents'])
+                         or (returned['charges_resolved'] == 1 and len(returned['note'].strip()) >= 3)))
+    return bool(clearance and all(clearance[name] == 1 for name in
+                ('fuel_resolved', 'damage_resolved', 'time_km_resolved'))
+                and 2 <= len(clearance['operator_name'].strip()) <= 100
+                and 3 <= len(clearance['evidence_ref'].strip()) <= 100
+                and 5 <= len(clearance['note'].strip()) <= 1000)
+
+
+def queue_qualified_charged_deposit_refunds(portal, ledger, *, limit=100):
+    """Enqueue only the new marked policy after qualified factual return.
+
+    ``ledger.deposit`` repeats the return/cancellation checks under the vehicle
+    lock, reads fresh payment evidence before the first enqueue, and uses its
+    immutable ``deposit-<hold>`` refund reference. The actual refund request is
+    left to the existing ledger processor.
+    """
+    from mietwagen_checkout import is_long_rental_paid_deposit
+    result = {'examined': 0, 'queued': 0, 'errors': 0, 'capped': False}
+    db = portal.get_db()
+    try:
+        rows = db.execute('''SELECT h.id,h.payload,h.mietvorgang_id FROM miet_checkout_holds h
+            JOIN miet_checkout_returns ret ON ret.hold_id=h.id
+            LEFT JOIN miet_checkout_return_clearances clearance ON clearance.hold_id=h.id
+            WHERE h.status='confirmed' AND (ret.no_objection=1 OR clearance.hold_id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM miet_checkout_cancellations c WHERE c.id=h.id)
+              AND NOT EXISTS (SELECT 1 FROM miet_checkout_refunds refund
+                    WHERE refund.hold_id=h.id AND refund.kind='deposit_return' AND refund.status='succeeded')
+            ORDER BY ret.recorded_at,h.id''').fetchall()
+        candidates = []
+        for row in rows:
+            try:
+                quote = json.loads(row['payload'])['quote']
+                if not is_long_rental_paid_deposit(quote) or quote.get('test_only') is not False:
+                    continue
+                result['examined'] += 1
+                if not deposit_release_eligible(db, row['id'], row['mietvorgang_id']):
+                    result['errors'] += 1
+                    continue
+                candidates.append(row['id'])
+            except (ValueError, KeyError, TypeError):
+                result['errors'] += 1
+        bounded = max(1, min(int(limit), 100))
+        result['capped'] = len(candidates) > bounded
+        candidates = candidates[:bounded]
+    finally:
+        db.close()
+    for hold_id in candidates:
+        try:
+            ledger.deposit(hold_id, 'Automatische Kautionsrückzahlung nach qualifiziert dokumentierter Rückgabe.')
+            result['queued'] += 1
+        except Exception:
+            result['errors'] += 1  # Never log customer data or provider details.
+    return result
+
+
+def charged_deposit_refund_status(portal, *, now=None):
+    """Report outstanding new-policy refunds without reinterpreting old quotes."""
+    from mietwagen_checkout import is_long_rental_paid_deposit
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError('Erstattungsprüfung braucht eine Zeitzone.')
+    result = {'pending': 0, 'failed': 0, 'overdue': 0, 'errors': 0}
+    db = portal.get_db()
+    try:
+        rows = db.execute('''SELECT h.id,h.payload,h.mietvorgang_id,ret.returned_at,
+            clearance.cleared_at FROM miet_checkout_holds h
+            JOIN miet_checkout_returns ret ON ret.hold_id=h.id
+            LEFT JOIN miet_checkout_return_clearances clearance ON clearance.hold_id=h.id
+            WHERE h.status='confirmed' AND (ret.no_objection=1 OR clearance.hold_id IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM miet_checkout_cancellations c WHERE c.id=h.id)''').fetchall()
+        for row in rows:
+            try:
+                quote = json.loads(row['payload'])['quote']
+                if not is_long_rental_paid_deposit(quote) or quote.get('test_only') is not False:
+                    continue
+                if not deposit_release_eligible(db, row['id'], row['mietvorgang_id']):
+                    result['errors'] += 1
+                    continue
+                refund = db.execute('SELECT * FROM miet_checkout_refunds WHERE id=?',
+                                    ('deposit-' + row['id'],)).fetchone()
+                if refund and (refund['kind'] != 'deposit_return' or refund['amount_cents'] != 50000
+                               or refund['hold_id'] != row['id']):
+                    result['errors'] += 1
+                    continue
+                if refund and refund['status'] == 'succeeded':
+                    continue
+                result['pending'] += 1
+                if refund and refund['status'] == 'failed':
+                    result['failed'] += 1
+                elif refund and refund['status'] not in {'queued', 'submitted'}:
+                    result['errors'] += 1
+                decision = datetime.fromisoformat(row['cleared_at'] or row['returned_at'])
+                if decision.tzinfo is None:
+                    raise ValueError('Rückgabezeit ohne Zeitzone.')
+                if now > release_review_deadline(decision, portal.bw_feiertage):
+                    result['overdue'] += 1
+            except (ValueError, TypeError, KeyError):
+                result['errors'] += 1
+    finally:
+        db.close()
+    return result
 
 
 def late_review_cents(scheduled_return, actual_return, daily_cents):

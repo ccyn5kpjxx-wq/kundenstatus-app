@@ -310,6 +310,13 @@ def register(portal):
         if cfg.get('deposit_authorization_mode')=='extended_if_available' and (cfg['max_days']>28
                 or cfg.get('deposit_timing')!='before_pickup'):
             raise ValueError('Längere Online-Mieten benötigen die spätere erweiterte Kreditkartenreservierung und sind auf 28 Miettage begrenzt.')
+        if cfg.get('long_rental_deposit_method') not in (None,'charge_with_rent_refund_after_return'):
+            raise ValueError('Unbekanntes Kautionsverfahren für längere Mieten.')
+        if cfg.get('long_rental_deposit_method') and (cfg['max_days']>30
+                or cfg.get('deposit_method')!='card_authorization_at_booking'
+                or cfg.get('deposit_timing')!='before_pickup'
+                or cfg.get('deposit_authorization_mode')):
+            raise ValueError('Die kombinierte Kautionsregel benötigt bis zu 30 Miettage und die spätere Kartenreservierung für kurze Mieten.')
         for slot in cfg['slots']:
             dt=datetime.fromisoformat(slot)
             if dt.tzinfo is None or dt.astimezone(BERLIN).isoformat()!=slot:
@@ -460,8 +467,11 @@ def register(portal):
         except Exception:
             db.rollback();raise
         finally:db.close()
-        authorization=cfg.get('deposit_method')=='card_authorization_at_booking'
-        charged=cfg['mode'] in {'live','stripe_test'} and not authorization
+        deposit_method=(cfg['long_rental_deposit_method'] if days>5 and cfg.get('long_rental_deposit_method')
+                        else cfg.get('deposit_method',''))
+        authorization=deposit_method=='card_authorization_at_booking'
+        charged=(deposit_method=='charge_with_rent_refund_after_return'
+                 or (cfg['mode'] in {'live','stripe_test'} and not authorization))
         quoted={'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
             'portal_vehicle_name':vehicle['bezeichnung'],
             'vehicle_plate':vehicle['kennzeichen'] or '', 'vehicle_vin':vehicle['fin_nummer'] or '',
@@ -471,7 +481,7 @@ def register(portal):
             'amount_cents':days*rate+(50000 if charged else 0),'currency':'eur',
             'deposit_charged_cents':50000 if charged else 0,
             'deposit_authorized_cents':50000 if authorization else 0,
-            'deposit_method':cfg.get('deposit_method',''),
+            'deposit_method':deposit_method,
             'checkout_deposit':charged,
             'included_km':days*cfg['included_km_day'],'extra_km_cents':cfg['extra_km_cents'],
             'deposit_cents':cfg['deposit_cents'],'deductible_cents':cfg['deductible_cents'],
@@ -481,6 +491,8 @@ def register(portal):
             'lessor_email':cfg.get('merchant_email',''),'lessor_phone':cfg.get('merchant_phone','')}
         if cfg.get('cancellation_policy'):
             quoted['cancellation_policy']=cfg['cancellation_policy']
+        if days>5 and cfg.get('long_rental_deposit_method'):
+            quoted['long_rental_deposit_policy']='paid_at_booking_v1'
         if authorization and cfg.get('deposit_timing')=='before_pickup':
             quoted['deposit_timing']='before_pickup'
             if cfg.get('deposit_authorization_mode')=='extended_if_available':
@@ -581,10 +593,15 @@ def register(portal):
         text+='\nMieter: '+p['customer']['name']+'\nE-Mail: '+p['customer']['email']
         text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt."
         if q.get('deposit_authorized_cents'):
-            text+=f"\nKaution bei Buchung auf Kreditkarte autorisiert, nicht abgebucht: {q['deposit_authorized_cents']/100:.2f} EUR"
+            if deferred_deposit_quote(q):
+                text+=f"\nKaution separat vor Abholung auf Kreditkarte zu reservieren, nicht abgebucht: {q['deposit_authorized_cents']/100:.2f} EUR"
+            else:
+                text+=f"\nKaution bei Buchung auf Kreditkarte autorisiert, nicht abgebucht: {q['deposit_authorized_cents']/100:.2f} EUR"
             text+=f"\nGezahlter Mietpreis: {q['amount_cents']/100:.2f} EUR"
         else:
             text+=f"\nKaution eingezogen: {q.get('deposit_charged_cents',0)/100:.2f} EUR\nGesamtzahlung: {q['amount_cents']/100:.2f} EUR"
+            if q.get('long_rental_deposit_policy')=='paid_at_booking_v1':
+                text+='\nDie bezahlte Kaution wird nach dokumentierter unbeanstandeter Rückgabe vollständig auf das ursprünglich verwendete Zahlungsmittel erstattet. Den Bearbeitungsstatus findest du im Buchungsstatus.'
         text+='\nAktuelle Abholadresse (persönliche Schlüsselübergabe): Gärtner, '+WORKSHOP_ADDRESS+'.'
         text+='\nVermieter und Vertragspartner: '+q.get('lessor_name',LESSOR_NAME)+', '+q.get('lessor_address',LESSOR_ADDRESS)
         if q.get('lessor_email') or q.get('lessor_phone'):
@@ -817,9 +834,13 @@ def register(portal):
                       ('receipt_confirmed','license_checked','fuel_full','condition_recorded')}
         if not all(attestations.values()):
             raise ValueError('Alle Übergabeprüfungen müssen ausdrücklich bestätigt werden.')
-        intent=state['service'].reconcile_deposit(hold_id)  # fresh, read-only provider check
+        from mietwagen_checkout import is_long_rental_paid_deposit
+        paid_deposit=is_long_rental_paid_deposit(q)
+        payment_evidence=(state['service'].verify_charged_deposit(hold_id) if paid_deposit else None)
+        intent=(None if paid_deposit else state['service'].reconcile_deposit(hold_id))
         with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
             record_handover(db,state['service'],hold_id,intent,
+                            payment_evidence=payment_evidence,
                             operator_name=request.form.get('operator_name',''),
                             odometer_km=odometer,protocol_ref=request.form.get('protocol_ref',''),
                             **attestations)
@@ -1045,12 +1066,15 @@ def register(portal):
     @app.cli.command('mos-booking-reconcile')
     def reconcile_jobs():
         """Provider-only reconciliation; no confirmation without signed Checkout event."""
-        state=setup();db=portal.get_db()
+        state=setup()
+        from mos_return import queue_qualified_charged_deposit_refunds, charged_deposit_refund_status
+        charged_refund_queue=queue_qualified_charged_deposit_refunds(portal,state['ledger'])
+        db=portal.get_db()
         try:
             holds=[r['id'] for r in db.execute("SELECT id FROM miet_checkout_holds WHERE status='pending'").fetchall()]
             refunds=[r['id'] for r in db.execute("SELECT id FROM miet_checkout_refunds WHERE status IN ('queued','submitted')").fetchall()]
         finally:db.close()
-        errors=0
+        errors=charged_refund_queue['errors']+int(charged_refund_queue['capped'])
         for hid in holds:
             try:state['service'].cancel_or_reconcile(hid)
             except Exception:errors+=1
@@ -1108,6 +1132,10 @@ def register(portal):
         except Exception:
             errors+=1
             deferred_deposit_overdue=0
+        try:charged_refunds=charged_deposit_refund_status(portal)
+        except Exception:
+            errors+=1
+            charged_refunds={'pending':0,'failed':0,'overdue':0,'errors':1}
         paid_without_webhook=0
         for pending in pending_sessions:
             try:
@@ -1164,9 +1192,13 @@ def register(portal):
                    f'unklare Checkout-Aufträge: {uncertain_checkouts}; ungeklärte Kartenreservierungen: {unresolved_deposits}; '
                    f'Prüffälle: {review_count}; fehlgeschlagene Erstattungen: {failed_refunds}; '
                    f'Kautionsfreigaben nach internem Prüftermin: {clear_return_overdue}; '
-                   f'Kaution nach Abholzeit noch offen: {deferred_deposit_overdue}')
+                   f'Kaution nach Abholzeit noch offen: {deferred_deposit_overdue}; '
+                   f'bezahlte Kautionsrückzahlungen vorgemerkt: {charged_refund_queue["queued"]}; '
+                   f'bezahlte Kautionsrückzahlungen offen: {charged_refunds["pending"]}; '
+                   f'davon fehlgeschlagen/überfällig/unklar: {charged_refunds["failed"]}/{charged_refunds["overdue"]}/{charged_refunds["errors"]}')
         if (errors or paid_without_webhook or uncertain_checkouts or unresolved_deposits
-                or review_count or failed_refunds or clear_return_overdue or deferred_deposit_overdue):
+                or review_count or failed_refunds or clear_return_overdue or deferred_deposit_overdue
+                or charged_refunds['failed'] or charged_refunds['overdue'] or charged_refunds['errors']):
             raise click.ClickException('Offene Zahlungs- oder Prüffälle; Admin-Prüfung erforderlich.')
 
     @bp.post('/quote')
