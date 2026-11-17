@@ -930,12 +930,17 @@ def register(portal):
             raise click.ClickException('Verschlüsselter Werkstatt-Mailversand ist nicht eingerichtet.')
         # The same monitored worker sends due deposit links. No card is
         # authorized or charged by this background job.
-        setup()
+        # Do not call setup(): the mail-only starter deliberately removes all
+        # Stripe credentials. Initialize database tables without a gateway.
+        from mietwagen_checkout import init_schema as init_checkout_schema
+        from mos_booking.production import init_refund_schema
+        db=portal.get_db()
+        try:
+            init_checkout_schema(db);init_refund_schema(db)
+            init_contract_schema(db);init_order_receipt_schema(db);db.commit()
+        finally:db.close()
         from mos_deposit_reminder import run_cycle as deposit_reminder_cycle
         reminders=deposit_reminder_cycle(portal,mail_cfg,live=True,enabled=True)
-        db=portal.get_db()
-        try:init_contract_schema(db);init_order_receipt_schema(db);db.commit()
-        finally:db.close()
         errors=0
         for hold_id in order_receipt_pending_ids(portal):
             try:
