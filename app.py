@@ -267,6 +267,11 @@ elif os.environ.get("RENDER"):
     DB = pathlib.Path(os.environ.get("SQLITE_DB_PATH", str(DATA_DIR / "auftraege.db")))
     UPLOAD_DIR = pathlib.Path(os.environ.get("UPLOAD_DIR", str(DATA_DIR / "uploads")))
 
+# The shop keeps its own persistent SQLite even when the portal uses Postgres.
+# In that case DATA_DIR above remains the legacy local portal directory.
+SHOP_PRIVATE_DATA_DIR = pathlib.Path(os.environ.get(
+    "DATA_DIR", "/var/data" if os.environ.get("RENDER") else str(DATA_DIR))).resolve()
+
 
 def env_flag(name, default=False):
     value = os.environ.get(name)
@@ -9002,7 +9007,7 @@ def create_backup_package(reason="auto"):
                 shop_storage = app.extensions.get('shop_production', {}).get('storage')
                 if shop_storage is None:
                     from shop_production import existing_shop_backup_storage
-                    shop_storage = existing_shop_backup_storage(environ={'DATA_DIR': str(DATA_DIR.resolve())})
+                    shop_storage = existing_shop_backup_storage(environ={'DATA_DIR': str(SHOP_PRIVATE_DATA_DIR)})
                 if shop_storage is not None:
                     # Dedicated SQLite order/idempotency ledger, including its
                     # WAL, belongs in the same authenticated backup package.
@@ -60638,7 +60643,7 @@ from shop_production import prepare_shop_runtime
 shop_runtime = register_shop_runtime(sys.modules[__name__],
                                     **prepare_shop_runtime(sys.modules[__name__]))
 from shop_admin import register_shop_admin
-register_shop_admin(app, private_data_dir=DATA_DIR.resolve())
+register_shop_admin(app, private_data_dir=SHOP_PRIVATE_DATA_DIR)
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)
