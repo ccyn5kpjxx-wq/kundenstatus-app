@@ -76,8 +76,16 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = 'same-origin'
         response.headers['Content-Security-Policy'] = (
-            "default-src 'none'; style-src 'self'; img-src 'self' blob:; script-src 'self'; "
-            "connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+            "default-src 'none'; style-src 'self'; "
+            "img-src 'self' blob: https://www.googletagmanager.com https://www.googleadservices.com "
+            "https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com "
+            "https://www.google.com https://www.google.de; "
+            "script-src 'self' https://www.googletagmanager.com https://www.googleadservices.com https://www.google.com; "
+            "connect-src 'self' https://www.googletagmanager.com https://www.googleadservices.com "
+            "https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com "
+            "https://ad.doubleclick.net https://www.google.com https://www.google.de; "
+            "frame-src https://www.googletagmanager.com; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         return response
 
     def page(key, *, order_id='', return_kind=''):

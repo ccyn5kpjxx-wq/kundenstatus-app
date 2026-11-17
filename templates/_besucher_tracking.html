@@ -36,5 +36,6 @@
   })();
 </script>
 {% if not besucher_ohne_google_ads %}
-<script src="{{ url_for('static', filename='google_ads_tracking.js') }}" data-privacy-url="{{ url_for('datenschutz_seite') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='google_ads_tracking.css') }}">
+<script src="{{ url_for('static', filename='google_ads_tracking.js') }}" data-privacy-url="{{ url_for('datenschutz_seite') }}" data-shop-lead-label="AW-18349808556/lupOCKyYvLodEKy3761E"></script>
 {% endif %}

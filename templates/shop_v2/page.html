@@ -8,6 +8,9 @@
   <link rel="icon" href="{{ url_for('static', filename='shop_v2/logo.webp') }}" type="image/webp">
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/modern-shared.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/shop.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='google_ads_tracking.css') }}">
+  <script src="{{ url_for('static', filename='google_ads_tracking.js') }}" data-privacy-url="{{ feature_links.privacy or '/datenschutz' }}" data-purchase-label="AW-18349808556/6QSkCKmYvLodEKy3761E" data-shop-lead-label="AW-18349808556/lupOCKyYvLodEKy3761E" defer></script>
+  <script src="{{ url_for('static', filename='shop_v2/conversions.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/studio.css') }}">{% endif %}
   {% if page_key == 'komplettraeder' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/complete.css') }}">{% endif %}
   <script src="{{ url_for('static', filename='shop_v2/shop.js') }}" defer></script>
@@ -17,6 +20,7 @@
 </head>
 <body class="modern-shop catalog-page{{ ' wheel-studio' if page_key == 'felgenstudio' else '' }}" data-page="{{ page_key }}" data-department="{{ department }}"
       data-api="/shop/api/v2" data-order-id="{{ order_id }}" data-return-kind="{{ return_kind }}"
+      data-measurement-url="{{ '/shop/api/v2/orders/' + order_id + '/measurement' if order_id else '' }}"
       data-complete-url="{{ url_for('shop_frontend.komplettraeder') }}" data-studio-url="{{ feature_links.studio }}"
       data-service-request-url="{{ feature_links.service_request }}"
       data-cart-request-url="{{ feature_links.cart_request }}"

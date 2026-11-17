@@ -469,7 +469,7 @@
     </section>
   </main>
   {% include "_besucher_tracking.html" %}
-  {% if gesendet %}<script>window.gaertnerAdsTrack?.('form');</script>{% endif %}
+  {% if gesendet and ads_event %}<span hidden data-shop-lead-id="{{ ads_event.id }}" data-ads-event-kind="{{ ads_event.kind }}"></span><script src="{{ url_for('static', filename='shop_v2/conversions.js') }}" defer></script>{% endif %}
   <script src="{{ url_for('static', filename='homepage-anfrage-upload.js') }}" defer></script>
   {% if not gesendet %}<script src="{{ url_for('static', filename='shop_v2/offer-request.js') }}" defer></script>{% endif %}
   {% if ist_reifenangebot and not gesendet %}<script src="{{ url_for('static', filename='homepage-reifen-suche.js') }}" defer></script>{% endif %}

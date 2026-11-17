@@ -374,6 +374,16 @@ class OrderStore:
         with self._connection() as db:
             return self._public_order(self._row(db, order_id, customer_id, mode))
 
+    def purchase_conversion(self, order_id, *, customer_id, mode):
+        """Read verified sale evidence for this owner; never reconcile or pay."""
+        from shop_measurement import purchase_projection
+        with self._connection() as db:
+            # One read snapshot keeps order status, paid event and capture
+            # journal mutually consistent while the payment worker advances.
+            db.execute('BEGIN')
+            row = self._row(db, order_id, customer_id, mode)
+            return purchase_projection(db, row)
+
     def lookup_payment_owner(self, order_id, *, mode):
         """Internal signed-webhook resolver, NEVER expose as an HTTP lookup.
 

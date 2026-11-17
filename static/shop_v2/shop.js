@@ -992,6 +992,8 @@
         if (draft.payment_enabled !== true || draft.order.quote_hash !== hash || draft.order.amount_gross_cent !== frozenQuote.total_gross_cent) throw new Error('checkout_unavailable');
         const result = await requestJSON('/orders/' + orderId + '/checkout', {method: 'POST', body: '{}'});
         if (!result.checkout || result.checkout.order_id !== orderId || result.checkout.currency !== 'eur' || result.checkout.amount_gross_cent !== frozenQuote.total_gross_cent || !safeCheckout(result.checkout.checkout_url) || result.checkout.capture_triggered !== false || result.checkout.supplier_order_created !== false) throw new Error('checkout_unavailable');
+        // Remember consent only; this is not a conversion or a payment confirmation.
+        try { root.gaertnerAdsRememberCheckout?.(orderId); } catch (_) { /* Measurement must not block payment navigation. */ }
         root.location.assign(result.checkout.checkout_url);
       } catch (error) {
         if (!orderId && ['terms_acceptance_required', 'terms_changed_new_quote_required', 'legal_terms_unavailable', 'consumer_unavailable'].includes(error && error.message)) { invalidateQuote(); checkoutInProgress = false; byId('quote-status').textContent = errorText(error); return; }

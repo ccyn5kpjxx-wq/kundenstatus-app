@@ -81,7 +81,8 @@ class ActualIntakeChecks(unittest.TestCase):
         self.app.config.update(SERVER_NAME='shop.example.test',PREFERRED_URL_SCHEME='https')
         def render(**kwargs):
             return jsonify({'form':dict(kwargs.get('formdata') or {}),'errors':kwargs.get('errors',[]),
-                            'submitted':kwargs.get('gesendet',False)}),kwargs.get('status_code',200)
+                            'submitted':kwargs.get('gesendet',False),
+                            'ads_event':kwargs.get('ads_event')}),kwargs.get('status_code',200)
         def get_lead(identifier):
             db=db_connect()
             try:row=dict(db.execute('SELECT * FROM leads WHERE id=?',(identifier,)).fetchone())

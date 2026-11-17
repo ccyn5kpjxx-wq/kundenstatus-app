@@ -127,9 +127,36 @@ class FrontendChecks(unittest.TestCase):
             for tag, attrs in parsed.tags:
                 source = attrs.get('src') if tag in ('script', 'img') else attrs.get('href') if tag == 'link' else None
                 if source:
-                    self.assertTrue(source.startswith('/static/shop_v2/'), source)
+                    self.assertTrue(source.startswith('/static/shop_v2/') or source in {
+                        '/static/google_ads_tracking.js', '/static/google_ads_tracking.css'}, source)
                     with self.client.get(source) as asset:
                         self.assertEqual(asset.status_code, 200, source)
+
+    def test_optional_google_measurement_has_only_bounded_external_csp_allowance(self):
+        self.app.config['SHOP_FRONTEND_ENABLED'] = True
+        response = self.client.get('/shop/felgen/')
+        directives = {parts[0]: set(parts[1:]) for text in response.headers['Content-Security-Policy'].split(';')
+                      if (parts := text.split())}
+        self.assertEqual(directives['default-src'], {"'none'"})
+        self.assertEqual(directives['style-src'], {"'self'"})
+        self.assertEqual(directives['script-src'], {"'self'", 'https://www.googletagmanager.com',
+                         'https://www.googleadservices.com', 'https://www.google.com'})
+        self.assertEqual(directives['connect-src'], {"'self'", 'https://www.googletagmanager.com',
+                         'https://www.googleadservices.com', 'https://googleads.g.doubleclick.net',
+                         'https://pagead2.googlesyndication.com', 'https://ad.doubleclick.net',
+                         'https://www.google.com', 'https://www.google.de'})
+        self.assertEqual(directives['frame-src'], {'https://www.googletagmanager.com'})
+        self.assertEqual(directives['form-action'], {"'self'"})
+        self.assertEqual(directives['base-uri'], {"'none'"})
+        self.assertEqual(directives['frame-ancestors'], {"'none'"})
+        self.assertNotIn('*', response.headers['Content-Security-Policy'])
+        self.assertNotIn('unsafe-inline', response.headers['Content-Security-Policy'])
+        self.assertNotIn('unsafe-eval', response.headers['Content-Security-Policy'])
+        self.assertNotIn('google-analytics.com', response.headers['Content-Security-Policy'])
+        for tag, attrs in Markup(response.get_data(as_text=True)).tags:
+            if tag == 'script':
+                self.assertTrue(attrs['src'].startswith('/static/'))
+                self.assertNotIn('http', attrs['src'])
 
     def test_studio_and_parts_keep_approved_flow_without_embedded_products(self):
         self.app.config['SHOP_FRONTEND_ENABLED'] = True

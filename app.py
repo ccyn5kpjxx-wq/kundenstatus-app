@@ -3220,7 +3220,7 @@ def restrict_public_site_service():
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {
             "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
-            "shop_public_v2.order_status", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook",
+            "shop_public_v2.order_status", "shop_public_v2.order_measurement", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook",
             "shop_buyer_v2.session_state", "shop_buyer_v2.address", "shop_buyer_v2.sign_out",
             "shop_consumer_v2.accept", "shop_consumer_v2.withdrawal_review", "shop_consumer_v2.withdrawal_confirm"}:
         return None
@@ -46279,7 +46279,7 @@ def reifen_buchung_termin(lead_id):
         db.close()
     return redirect(url_for("admin_reifentermine"))
 
-def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200):
+def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200, ads_event=None):
     formdata = formdata or {}
     ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
     if ausgewaehltes_anliegen == "reifenangebot":
@@ -46310,6 +46310,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             formdata=formdata,
             errors=errors or [],
             gesendet=bool(gesendet),
+            ads_event=ads_event if gesendet else None,
             bremsen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "bremsenservice"),
             bremsen_achsen=BREMSEN_ACHSEN,
             teile_qualitaeten=TEILE_QUALITAETEN,
@@ -46707,7 +46708,7 @@ def website_anfrage():
             if not hmac.compare_digest(existing.get("reifen_angebot_request_hash") or "", anfrage_hash):
                 return render_website_anfrage(formdata=request.form, errors=[
                     "Dieses Formular wurde bereits mit anderen Angaben gesendet. Bitte ein neues Reifenformular öffnen."], status_code=409)
-            return bestaetige_reifenangebot_anfrage(exc.lead_id)
+            return bestaetige_reifenangebot_anfrage(exc.lead_id, ads_measurement=False)
         except ReifenSlotBelegt as exc:
             return render_website_anfrage(formdata=request.form, errors=[str(exc)], status_code=409)
         try:
@@ -46776,6 +46777,12 @@ def website_anfrage():
         if ist_reifenangebot:
             return bestaetige_reifenangebot_anfrage(lead_id)
         session["website_anfrage_gesendet"] = int(lead_id)
+        # Only the successfully persisted request creates a one-use receipt.
+        # It contains neither the lead ID nor contact/form information.
+        session["website_anfrage_ads_event"] = {
+            "kind": "shop_lead" if shop_offer_context else "form",
+            "id": "lead_ads_" + secrets.token_hex(32),
+        }
         session["website_anfrage_art"] = anliegen
         session["website_reifentermin"] = f"{format_date(wunschdatum)} · {wunschzeit} Uhr" if anliegen == "reifenservice" else ""
         return redirect(url_for("website_anfrage", gesendet=1))
@@ -46791,6 +46798,13 @@ def website_anfrage():
     bestaetigt = bool(request.args.get("gesendet")) and bool(
         session.pop("website_anfrage_gesendet", 0)
     )
+    ads_event = session.pop("website_anfrage_ads_event", None)
+    if (not bestaetigt or not isinstance(ads_event, dict)
+            or set(ads_event) != {"kind", "id"}
+            or ads_event.get("kind") not in {"form", "shop_lead"}
+            or not isinstance(ads_event.get("id"), str)
+            or not re.fullmatch(r"lead_ads_[a-f0-9]{64}", ads_event["id"])):
+        ads_event = None
     if bestaetigt and session.get("website_anfrage_art") == "reifenangebot":
         vorauswahl = "reifenangebot"
     mechanik_vorauswahl = list(dict.fromkeys(
@@ -46802,16 +46816,21 @@ def website_anfrage():
                   "mechanik_kategorie": mechanik_vorauswahl,
                   "leistungsart": clean_text(request.args.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.args.get("leistungsart")), {}).get("anliegen") == vorauswahl else ""},
         gesendet=bestaetigt,
+        ads_event=ads_event,
     )
 
 
-def bestaetige_reifenangebot_anfrage(lead_id):
+def bestaetige_reifenangebot_anfrage(lead_id, *, ads_measurement=True):
     """PRG confirmation is session-bound; repeated POSTs reuse the same lead."""
     lead = get_lead(lead_id)
     if not lead or not lead.get("ist_reifenangebot"):
         abort(404)
     session["website_anfrage_kundenlink"] = lead["kunden_status_url"]
     session["website_anfrage_gesendet"] = int(lead_id)
+    if ads_measurement:
+        session["website_anfrage_ads_event"] = {
+            "kind": "form", "id": "lead_ads_" + secrets.token_hex(32),
+        }
     session["website_anfrage_art"] = "reifenangebot"
     session.pop("reifenangebot_token", None)
     return redirect(url_for("website_anfrage", anliegen="reifenangebot", gesendet=1))

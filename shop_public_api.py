@@ -349,6 +349,39 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except Exception:
             return reply({'error': 'order_unavailable'}, 503)
 
+    @bp.get('/orders/<string:order_id>/measurement')
+    def order_measurement(order_id):
+        if not orders_enabled():
+            return reply({'error': 'not_found'}, 404)
+        principal, error = authorized_principal(require_origin=False)
+        if error is not None:
+            return error
+        mode = current_app.config.get('SHOP_ORDER_MODE')
+        if (order_store is None or mode not in {'test', 'live'}
+                or not callable(getattr(order_store, 'purchase_conversion', None))):
+            return reply({'error': 'measurement_unavailable'}, 503)
+        if request.args:
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            purchase = order_store.purchase_conversion(order_id, customer_id=principal, mode=mode)
+            # Only the bounded projection may cross the HTTP boundary. Never
+            # expose payment IDs, a quote snapshot or a provider response.
+            if purchase is not None:
+                if (mode != 'live' or not isinstance(purchase, dict)
+                        or set(purchase) != {'transaction_id', 'value', 'currency'}
+                        or not isinstance(purchase['transaction_id'], str)
+                        or not re.fullmatch(r'shop_ads_[a-f0-9]{64}', purchase['transaction_id'])
+                        or type(purchase['value']) not in (int, float)
+                        or not 0 < purchase['value'] <= 1_000_000 or purchase['currency'] != 'EUR'):
+                    raise ValueError()
+            return reply({'purchase': purchase})
+        except OrderStoreError as error:
+            if error.code == 'order_not_found':
+                return reply({'error': 'order_not_found'}, 404)
+            return reply({'error': 'measurement_unavailable'}, 503)
+        except Exception:
+            return reply({'error': 'measurement_unavailable'}, 503)
+
     @bp.post('/orders/<string:order_id>/checkout')
     def start_checkout(order_id):
         if not checkout_enabled():
