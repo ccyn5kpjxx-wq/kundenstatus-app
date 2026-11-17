@@ -18,6 +18,12 @@ from flask import Blueprint, Response, current_app
 from PIL import Image
 
 ASSET = re.compile(r'[a-f0-9]{64}\.(?:jpg|jpeg|png|webp)')
+# Original parts photos from the licensed catalogue. Only the observed CDN,
+# two path components and literal/explicitly observed filename escapes qualify.
+# In particular, encoded separators, dots and double encoding cannot pass.
+ALZURA_PART_IMAGE_URL = re.compile(
+    r'https://cdn01\.alzura\.com/[0-9]{4}_PIC/'
+    r'(?:[A-Za-z0-9_.-]|%20|%23|%28|%29){1,160}\.(?:JPG|PNG)')
 MIME = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
 MAX_IMAGE = 1024 * 1024
 MAX_PIXELS = 4_000_000
@@ -50,9 +56,11 @@ class ReleasedMedia:
                     parsed = urlsplit(url)
                     valid = (isinstance(url, str) and len(url) <= 2000 and '\\' not in url
                              and not any(ord(c) < 33 for c in url) and parsed.scheme == 'https'
-                             and re.fullmatch(r'media[1-5]\.tyre-shopping\.com', parsed.hostname or '')
-                             and not parsed.username and not parsed.password and parsed.port in (None, 443)
-                             and not parsed.query and not parsed.fragment and parsed.path.startswith('/'))
+                             and not parsed.username and not parsed.password
+                             and not parsed.query and not parsed.fragment
+                             and ((re.fullmatch(r'media[1-5]\.tyre-shopping\.com', parsed.hostname or '')
+                                   and parsed.port in (None, 443) and parsed.path.startswith('/'))
+                                  or ALZURA_PART_IMAGE_URL.fullmatch(url)))
                 except (TypeError, ValueError):
                     valid = False
                 if not valid:

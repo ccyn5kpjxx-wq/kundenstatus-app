@@ -12,7 +12,7 @@ from unittest.mock import Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 from flask import Flask
-from shop_media import ReleasedMedia, MediaError, create_shop_media_blueprint
+from shop_media import ReleasedMedia, MediaError, create_shop_media_blueprint, MAX_IMAGE
 
 
 class MediaChecks(unittest.TestCase):
@@ -64,6 +64,69 @@ class MediaChecks(unittest.TestCase):
         self.assertIs(http.get.call_args.kwargs['allow_redirects'], False)
         self.assertNotIn('auth', http.get.call_args.kwargs)
         response.close.assert_called_once()
+
+    def test_licensed_parts_cdn_accepts_only_observed_original_filename_shapes(self):
+        for path in ('/0253_PIC/1033106.JPG', '/4555_PIC/6504-04-0030311Q_%231.JPG',
+                     '/0021_PIC/ULTRASON%20SENSOR_890010_04.JPG',
+                     '/0094_PIC/0901129_%282%29.JPG', '/0133_PIC/88759%230.JPG',
+                     '/0253_PIC/1033106.PNG'):
+            with self.subTest(path=path):
+                url = 'https://cdn01.alzura.com' + path
+                http = Mock()
+                media = ReleasedMedia({self.asset: {'url': url}}, approved_assets={self.asset}, http=http)
+                with self.assertRaisesRegex(MediaError, 'image_unavailable'):
+                    media.read(self.asset)
+                http.get.assert_not_called()
+
+    def test_parts_cdn_rejects_other_hosts_ports_queries_encoded_traversal_and_unobserved_files(self):
+        base = 'https://cdn01.alzura.com'
+        urls = ['http://cdn01.alzura.com/0253_PIC/1033106.JPG',
+                'https://cdn02.alzura.com/0253_PIC/1033106.JPG',
+                'https://sub.cdn01.alzura.com/0253_PIC/1033106.JPG',
+                'https://cdn01.alzura.com.evil.test/0253_PIC/1033106.JPG',
+                'https://cdn01.alzura.com@evil.test/0253_PIC/1033106.JPG',
+                'https://user:PRIVATE@cdn01.alzura.com/0253_PIC/1033106.JPG',
+                'https://cdn01.alzura.com:443/0253_PIC/1033106.JPG']
+        urls += [base + path for path in ('/253_PIC/1033106.JPG', '/0253_PIC/nested/a.JPG',
+                 '/0253_PIC/../1033106.JPG', '/0253_PIC/%2e%2e.JPG', '/0253_PIC/a%2Fb.JPG',
+                 '/0253_PIC/a%2fb.JPG', '/0253_PIC/a%5Cb.JPG', '/0253_PIC/a%252e.JPG',
+                 '/0253_PIC/a%00.JPG', '/0253_PIC/a%26.JPG', '/0253_PIC/1033106.jpg',
+                 '/0253_PIC/1033106.SVG', '/0253_PIC/1033106.JPG?token=PRIVATE',
+                 '/0253_PIC/1033106.JPG?', '/0253_PIC/1033106.JPG#fragment',
+                 '/0253_PIC/1033106.JPG#')]
+        for url in urls:
+            with self.subTest(url=url), self.assertRaisesRegex(MediaError, 'invalid_media_release'):
+                ReleasedMedia({self.asset: {'url': url}}, approved_assets={self.asset})
+
+    def test_parts_cdn_serves_original_jpeg_cached_with_existing_tls_mime_and_size_guards(self):
+        stream = BytesIO()
+        Image.new('RGB', (2, 2), 'black').save(stream, 'JPEG')
+        original = stream.getvalue()
+        asset = sha256(original).hexdigest() + '.jpg'
+        url = 'https://cdn01.alzura.com/0253_PIC/1033106.JPG'
+        response = SimpleNamespace(status_code=200, url=url, headers={'Content-Type': 'image/jpg'},
+                                   iter_content=lambda **kwargs: [original], close=Mock())
+        http = Mock()
+        http.get.return_value = response
+        media = ReleasedMedia({asset: {'url': url}}, approved_assets={asset}, http=http, allow_network=True)
+        self.assertEqual(media.read(asset), (original, 'image/jpeg'))
+        self.assertEqual(media.read(asset), (original, 'image/jpeg'))
+        self.assertEqual(http.get.call_count, 1)
+        self.assertEqual(http.get.call_args.args, (url,))
+        self.assertIs(http.get.call_args.kwargs['verify'], True)
+        self.assertIs(http.get.call_args.kwargs['allow_redirects'], False)
+        self.assertNotIn('auth', http.get.call_args.kwargs)
+        response.close.assert_called_once()
+        for changed in ({'status_code': 302}, {'url': url + '?redirected=1'},
+                        {'headers': {'Content-Type': 'text/html'}},
+                        {'headers': {'Content-Type': 'image/jpeg', 'Content-Length': str(MAX_IMAGE + 1)}}):
+            rejected = SimpleNamespace(**{**vars(response), **changed})
+            http = Mock()
+            http.get.return_value = rejected
+            with self.subTest(changed=changed), self.assertRaisesRegex(MediaError, 'image_unavailable'):
+                ReleasedMedia({asset: {'url': url}}, approved_assets={asset}, http=http, allow_network=True).read(asset)
+        with self.assertRaisesRegex(MediaError, 'image_unavailable'):
+            ReleasedMedia._validate(b'x' * (MAX_IMAGE + 1))
 
     def test_html_svg_and_invalid_image_payload_never_served_as_image(self):
         for data in (b'<html>PRIVATE</html>', b'<svg></svg>', b'not an image'):
