@@ -277,9 +277,10 @@ class PublicCatalog:
                 return blank
             make, model = _text(vehicle.get("make"), 80), _text(vehicle.get("model"), 120)
             start, end = vehicle.get("year_from"), vehicle.get("year_to")
+            known_years = _integer(start, 1900, 2100) and _integer(end, start, 2100)
             hsn, tsn = vehicle.get("hsn", ""), vehicle.get("tsn", "")
             conditions = vehicle.get("conditions", [])
-            if (not make or not model or not _integer(start, 1900, 2100) or not _integer(end, start, 2100)
+            if (not make or not model or not (known_years or start is None and end is None)
                     or not isinstance(hsn, str) or not isinstance(tsn, str)
                     or bool(hsn) != bool(tsn) or (hsn and (not re.fullmatch(r"[0-9]{4}", hsn) or not re.fullmatch(r"[A-Z0-9]{3}", tsn)))
                     or not isinstance(conditions, list) or len(conditions) > 20
@@ -358,7 +359,8 @@ class PublicCatalog:
                 def matches(vehicle):
                     return ((make is None or _fold(vehicle["make"]) == _fold(make.strip()))
                             and (model is None or _fold(vehicle["model"]) == _fold(model.strip()))
-                            and (year is None or vehicle["year_from"] <= year <= vehicle["year_to"])
+                            and (year is None or type(vehicle["year_from"]) is int and type(vehicle["year_to"]) is int
+                                 and vehicle["year_from"] <= year <= vehicle["year_to"])
                             and (hsn is None or (vehicle["hsn"], vehicle["tsn"]) == (hsn, tsn)))
                 if not any(matches(v) for v in public["fitment"]["vehicles"]):
                     continue

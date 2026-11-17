@@ -64,6 +64,20 @@ def verified(row):
 
 
 class PublicCatalogueTests(unittest.TestCase):
+    def test_reviewed_model_types_without_years_never_match_a_year_or_unproven_keys(self):
+        row = wheel()
+        evidence = verified(row)
+        vehicle = evidence['vehicles'][0]
+        vehicle.update(year_from=None, year_to=None, hsn='', tsn='')
+        c = catalogue([row], verified_fitments={row['selection_id']: evidence}, document_urls={'REPORT': '/report.pdf'})
+        self.assertEqual(c.page(make='Audi', model='A3')['total'], 1)
+        self.assertEqual(c.page(make='Audi', model='A3', year=2016)['total'], 0)
+        self.assertEqual(c.page(hsn='0588', tsn='BHT')['total'], 0)
+        self.assertIsNone(c.get(row['selection_id'])['fitment']['vehicles'][0]['year_from'])
+        vehicle['year_from'] = 2013
+        c = catalogue([row], verified_fitments={row['selection_id']: evidence}, document_urls={'REPORT': '/report.pdf'})
+        self.assertEqual(c.page(make='Audi')['total'], 0)
+
     def test_cache_only_rsu_retail_projection_is_current_and_never_exposes_private_fields(self):
         row = wheel(quote_public=None)
         quote = wheel()['quote_public']

@@ -60,6 +60,25 @@ class HTTP:
 
 
 class DocumentTests(unittest.TestCase):
+    def test_reviewed_wheel_report_is_hash_bound_local_only_and_keeps_original_pages(self):
+        stream=BytesIO();writer=PdfWriter()
+        for _ in range(30):writer.add_blank_page(width=100,height=100)
+        writer.write(stream);data=stream.getvalue();digest=sha256(data).hexdigest();asset=digest+'.pdf'
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();(root/asset).write_bytes(data)
+            resource={'kind':'wheel_report','file':asset,'sha256':digest}
+            service=ReleasedProductDocuments({asset:resource},approved_assets={asset},enabled=True,local_root=root)
+            self.assertEqual(service.read(asset),(data,'application/pdf'))
+            self.assertEqual(service.read(asset)[0],data)
+            for invalid in ({**resource,'file':'../'+asset},{**resource,'sha256':'f'*64},
+                            {**resource,'kind':'unreviewed_report'},{**resource,'url':SHEET}):
+                with self.subTest(invalid=invalid),self.assertRaises(DocumentError):
+                    ReleasedProductDocuments({asset:invalid},approved_assets={asset},enabled=True,local_root=root)
+            (root/asset).write_bytes(b'changed')
+            fresh=ReleasedProductDocuments({asset:resource},approved_assets={asset},enabled=True,local_root=root)
+            with self.assertRaises(DocumentError):fresh.read(asset)
+        with self.assertRaises(DocumentError):ReleasedProductDocuments._validate(data,PDF_ASSET)
+
     def setUp(self):
         self.now=0.
         self.http=HTTP()

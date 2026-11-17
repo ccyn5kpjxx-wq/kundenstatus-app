@@ -122,6 +122,14 @@ class ReleasedProductDocuments:
         for asset in approved_assets:
             if not isinstance(asset,str) or not ASSET.fullmatch(asset) or asset not in resources:raise DocumentError('invalid_document_release')
             source=resources[asset]
+            if isinstance(source,Mapping) and set(source)=={'kind','file','sha256'}:
+                # Previously reviewed original rim reports are installed as
+                # hash-named private files. They have no network fallback.
+                if (source.get('kind')!='wheel_report' or root is None or not asset.endswith('.pdf')
+                        or source.get('file')!=asset or source.get('sha256')!=asset[:-4]):
+                    raise DocumentError('invalid_document_release')
+                selected[asset]={'file':root/asset,'sha256':source['sha256'],'wheel_report':True}
+                continue
             if not isinstance(source,Mapping) or 'url' not in source or document_asset(source['url'])!=asset:
                 raise DocumentError('invalid_document_release')
             expected={'url'}
@@ -158,7 +166,7 @@ class ReleasedProductDocuments:
         return now
 
     @staticmethod
-    def _validate(data,asset):
+    def _validate(data,asset,*,wheel_report=False):
         maximum=MAX_PDF if asset.endswith('.pdf') else MAX_IMAGE
         if not isinstance(data,bytes) or not 0<len(data)<=maximum:raise DocumentError('document_unavailable')
         try:
@@ -166,7 +174,7 @@ class ReleasedProductDocuments:
                 if not re.match(rb'%PDF-(?:1\.[0-7]|2\.0)\b',data[:16]) or b'%%EOF' not in data[-1024:]:raise ValueError()
                 from pypdf import PdfReader
                 reader=PdfReader(BytesIO(data),strict=True)
-                if reader.is_encrypted or not 1<=len(reader.pages)<=20:raise ValueError()
+                if reader.is_encrypted or not 1<=len(reader.pages)<=(300 if wheel_report else 20):raise ValueError()
                 # Product sheets have no executable/document-attachment role.
                 if re.search(rb'/(?:JavaScript|JS|Launch|EmbeddedFile|RichMedia|XFA)\b',data):raise ValueError()
                 return data,'application/pdf'
@@ -188,7 +196,7 @@ class ReleasedProductDocuments:
                     or not path.is_file() or path.stat().st_size>maximum):raise DocumentError('document_unavailable')
             data=path.read_bytes()
             if sha256(data).hexdigest()!=source['sha256']:raise DocumentError('document_unavailable')
-            return self._validate(data,asset)
+            return self._validate(data,asset,wheel_report=source.get('wheel_report') is True)
         response=owned=None
         try:
             if self.http is None:

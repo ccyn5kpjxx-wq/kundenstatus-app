@@ -92,6 +92,8 @@ def _freeze_pack(pack):
         seller = {key: _text(seller.get(key), 500) for key in ANBIETER}
         value = {'version': version, 'status': 'approved', 'approved': True, 'scope': 'mixed_retail',
                  'seller': seller, 'texts': texts, 'attachments': attachments}
+        if 'bestellhinweis' in pack['texts']:
+            value['before_order_notice'] = _text(pack['texts']['bestellhinweis'], 4000)
         encoded = _json(value)
         if len(encoded.encode('utf-8')) > 4 * 1024 * 1024:
             return None
@@ -185,7 +187,8 @@ class ShopConsumer:
             raise ConsumerError('legal_terms_unavailable')
         pack = json.loads(self.pack_json)
         return {'version': pack['version'], 'pack_hash': self.pack_hash, 'texts': pack['texts'],
-                'seller': pack['seller'], 'consumer_only': True}
+                'seller': pack['seller'], 'consumer_only': True,
+                'before_order_notice': pack.get('before_order_notice', '')}
 
     def accept_quote(self, quote_hash, *, customer_id, pack_hash, terms_accepted, consumer=True):
         if (not self.readiness()['legal_ready'] or pack_hash != self.pack_hash

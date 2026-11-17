@@ -606,7 +606,7 @@
       if (product.fitment && (product.fitment.status === 'reviewed_with_conditions' || product.department === 'parts' && product.fitment.status === 'provider_vehicle')) {
         for (const url of (product.fitment.reports || []).filter(url => safeMedia(url, true))) { const link = el('a', 'Gutachten zur Ausführung öffnen ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br')); }
         for (const vehicle of (product.fitment.vehicles || []).slice(0, 128)) {
-          fitment.append(el('p', [vehicle.label || [vehicle.make, vehicle.model].filter(Boolean).join(' '), vehicle.year_from && vehicle.year_to && vehicle.year_from + '–' + vehicle.year_to, vehicle.hsn && vehicle.hsn + '/' + vehicle.tsn].filter(Boolean).join(' · ')));
+          fitment.append(el('p', [vehicle.label || [vehicle.make, vehicle.model].filter(Boolean).join(' '), vehicle.year_from && vehicle.year_to ? vehicle.year_from + '–' + vehicle.year_to : 'Baujahr nicht belegt · genaue Ausführung im Gutachten prüfen', vehicle.hsn && vehicle.hsn + '/' + vehicle.tsn].filter(Boolean).join(' · ')));
           const list = el('ul'); for (const condition of vehicle.conditions || []) list.append(el('li', condition)); fitment.append(list);
         }
         fitment.append(el('p', product.department === 'parts' ? 'Bestätigte Anbieterzuordnung. Motorisierung, Karosserieausführung und Artikelhinweise vor dem Kauf prüfen.' : 'Auflagen und genaue Ausführung vor der Montage prüfen. Die Zuordnung ersetzt keine Prüfung am Fahrzeug.'));
@@ -758,6 +758,10 @@
     return {contact, billing, delivery};
   }
   const BLOCKED = {mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.', fitment_unconfirmed: 'Fahrzeugpassung noch nicht bestätigt', rsu_mapping_unconfirmed: 'Lieferantenartikel noch nicht sicher abgeglichen', freight_unconfirmed: 'Versandkosten noch nicht bestätigt', assembly_fitment_unconfirmed: 'Rad-Reifen-Kombination noch nicht freigegeben', service_unconfirmed: 'Servicepreis noch nicht bestätigt', stock_insufficient_or_unconfirmed: 'Bestand für diese Menge noch nicht bestätigt', procurement_price_unconfirmed: 'Lieferantenpreis noch nicht bestätigt'};
+  Object.assign(BLOCKED, {
+    delivery_salutation_required: 'Für den Direktversand bitte eine Lieferanrede wählen oder ein persönliches Versandangebot anfragen.',
+    product_documents_unconfirmed: 'Die erforderlichen Originalunterlagen für diesen Reifen sind noch nicht vollständig bestätigt.'
+  });
   async function consumerTerms(frozenQuote) {
     const checkout = byId('checkout-button'); checkout.hidden = true; checkout.disabled = true; consumerState = null;
     if (body.dataset.consumerEnabled !== 'true') { byId('checkout-note').textContent = 'Der Abschluss ist noch nicht freigeschaltet. Vertragsunterlagen und Kundenbestätigung müssen zuerst verfügbar sein.'; return; }
@@ -766,6 +770,7 @@
     const documents = {agb: 'Allgemeine Geschäftsbedingungen', widerruf: 'Widerrufsbelehrung', widerrufsformular: 'Muster-Widerrufsformular', lieferung: 'Lieferung und Leistungen', datenschutz: 'Datenschutzhinweise'};
     if (!terms || !/^[a-f0-9]{64}$/.test(terms.pack_hash) || typeof terms.version !== 'string' || !terms.version || terms.version.length > 100 || terms.consumer_only !== true || !terms.texts || Object.keys(documents).some(key => typeof terms.texts[key] !== 'string' || !terms.texts[key] || terms.texts[key].length > 65536)) throw new Error('legal_terms_unavailable');
     const section = el('section', null, 'shop-consumer-review'); section.append(el('h3', 'Vor dem Abschluss'), el('p', 'Vertragsunterlagen · Version ' + terms.version, 'shop-muted'));
+    if (typeof terms.before_order_notice === 'string' && terms.before_order_notice.length > 0 && terms.before_order_notice.length <= 4000) section.append(el('p', terms.before_order_notice, 'shop-review-note'));
     for (const [key, title] of Object.entries(documents)) { const details = el('details'), summary = el('summary', title), text = el('div', terms.texts[key], 'shop-legal-text'); details.append(summary, text); section.append(details); }
     const warranty = el('section', null, 'shop-warranty-notice'), warrantyLink = el('a'), warrantyImage = el('img');
     warrantyLink.href = '/static/recht/reifen-gewaehrleistung-de.jpg'; warrantyLink.target = '_blank'; warrantyLink.rel = 'noopener';
@@ -804,7 +809,8 @@
       const list = el('ul', null, 'shop-errors'), reasons = new Set();
       for (const item of value.blocked_reasons || []) reasons.add(BLOCKED[item.code] || 'Ein Preis-, Service- oder Lieferdetail muss noch bestätigt werden.');
       for (const reason of reasons) list.append(el('li', reason)); review.append(list);
-      if ((value.blocked_reasons || []).some(item => item.code === 'mixed_cart_manual_review_required')) offerButton(review, 'Gemischten Warenkorb als Gesamtangebot anfragen');
+      const mixed = (value.blocked_reasons || []).some(item => item.code === 'mixed_cart_manual_review_required');
+      offerButton(review, mixed ? 'Gemischten Warenkorb als Gesamtangebot anfragen' : 'Auswahl als persönliches Angebot anfragen');
       byId('quote-status').textContent = 'Es wurde keine Bestellung angelegt.';
     }
     review.scrollIntoView?.({block:'start',behavior:'smooth'});
