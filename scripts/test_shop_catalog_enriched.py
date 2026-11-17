@@ -139,6 +139,35 @@ class EnrichmentChecks(unittest.TestCase):
         catalog = catalogue([rim, tire, oil], compatible_pairs={rim['selection_id']: [bad, pair(rim, oil), good]})
         self.assertEqual([p['id'] for p in catalog.compatible_tyres(rim['selection_id'])['items']], [tire['selection_id']])
 
+    def test_full_export_group_supplies_exact_season_without_changing_pair_identity_or_approval(self):
+        rim = wheel()
+        tyres = [tyre(letter, None) for letter in ('d', 'e', 'f')]
+        for row, label in zip(tyres, ('Sommerreifen', 'Winterreifen', 'Ganzjahresreifen')):
+            row['group'] = label
+        originals = {row['selection_id']: variant_fingerprint(row) for row in tyres}
+        catalog = catalogue([rim, *tyres], compatible_pairs={rim['selection_id']: [pair(rim, row) for row in tyres]})
+        for row, season in zip(tyres, ('summer', 'winter', 'allseason')):
+            result = catalog.compatible_tyres(rim['selection_id'], season=season)
+            self.assertEqual([item['id'] for item in result['items']], [row['selection_id']])
+            self.assertEqual(result['scope'], 'rim_width_candidate')
+            self.assertNotIn('season', result['items'][0]['geometry'])
+            self.assertEqual(variant_fingerprint(catalog._source_row(row['selection_id'])), originals[row['selection_id']])
+            self.assertFalse(result['items'][0]['order_enabled'])
+
+    def test_missing_unknown_or_conflicting_classification_never_infers_season_from_model_name(self):
+        rim = wheel()
+        missing = tyre('d', None)
+        missing['name'] = 'Synthetic winter summer allseason model'
+        unknown = tyre('e', None)
+        unknown['group'] = 'Unknown source class'
+        conflict = tyre('f', 'Winterreifen')
+        conflict['group'] = 'Sommerreifen'
+        catalog = catalogue([rim, missing, unknown, conflict],
+                            compatible_pairs={rim['selection_id']: [pair(rim, row) for row in (missing, unknown, conflict)]})
+        for season in ('summer', 'winter', 'allseason'):
+            self.assertEqual(catalog.compatible_tyres(rim['selection_id'], season=season)['items'], [])
+        self.assertEqual(len(catalog.compatible_tyres(rim['selection_id'])['items']), 3)
+
     def test_compatibility_input_is_detached_from_later_caller_mutation(self):
         rim, tire = wheel(), tyre()
         pairs = {rim['selection_id']: [pair(rim, tire)]}

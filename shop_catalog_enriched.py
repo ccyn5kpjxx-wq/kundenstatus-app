@@ -17,6 +17,24 @@ def _norm(value):
     return ' '.join(unicodedata.normalize('NFKC', value).split()).casefold()
 
 
+def _tyre_season(product, source):
+    """Use the exact released row's classification, never model-name guesses.
+
+    Full exports carry the season in ``group`` while older detail snapshots
+    use ``season``. Keep source geometry/fingerprints unchanged. Conflicting
+    explicit classifications cannot satisfy a season filter.
+    """
+    seasons = {'Sommerreifen': 'summer', 'Winterreifen': 'winter',
+               'Ganzjahresreifen': 'allseason', 'all_season': 'allseason',
+               'summer': 'summer', 'winter': 'winter', 'allseason': 'allseason'}
+    explicit = product.get('geometry', {}).get('season')
+    classified = seasons.get(source.get('group'))
+    if explicit:
+        canonical = seasons.get(explicit)
+        return canonical if canonical and classified in (None, canonical) else None
+    return classified
+
+
 def _face(value):
     if not isinstance(value, Mapping) or value.get('reviewed') is not True:
         return None
@@ -207,9 +225,7 @@ class EnrichedPublicCatalog(PublicCatalog):
             if (not tyre or tyre.get('category') != 'tyre' or pair.get('rim_identity') != variant_fingerprint(self._source_row(identifier))
                     or pair.get('tyre_identity') != variant_fingerprint(self._source_row(tyre['id']))):
                 continue
-            canonical_season = {'Sommerreifen': 'summer', 'Winterreifen': 'winter',
-                                'Ganzjahresreifen': 'allseason', 'all_season': 'allseason'}.get(
-                                    tyre['geometry'].get('season'), tyre['geometry'].get('season'))
+            canonical_season = _tyre_season(tyre, self._source_row(tyre['id']))
             if season and canonical_season != season:
                 continue
             result['items'].append(tyre)

@@ -142,7 +142,7 @@
     if (typeof value !== 'string' || value.length > 5000 || /[\s\\]/.test(value)) return false;
     try {
       const u = new URL(value);
-      return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
+      return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|g\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
     } catch (_) { return false; }
   }
   const logic = {currentPrice, quotedPrice, inquiryOnly, qualityFacts, normaliseCart, removeCartLine, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
