@@ -49,6 +49,26 @@ def synthetic_mail(body=BODY, *, sender="montagepartner@check24.de", date="Mon, 
 
 
 class Check24MailParserTest(unittest.TestCase):
+    def test_vehicle_section_is_not_a_second_customer_name(self):
+        body = BODY.replace('Gebuchter Termin\n', 'Fahrzeugdaten\nKennzeichen: TEST-AB 123\nGebuchter Termin\n')
+        for html in (False, True):
+            with self.subTest(html=html):
+                content = ''.join('<p>' + line + '</p>' for line in body.splitlines()) if html else body
+                raw = synthetic_mail(content, html=html)
+                result = parse_check24_mail(raw)
+                self.assertTrue(result['valid'], result['errors'])
+                self.assertEqual(result['customer_name'], 'Erika Beispiel')
+                self.assertEqual(result['provider_id'], 'TEST9001')
+                self.assertEqual(result['start_at'], '2026-10-30T08:00:00+01:00')
+                self.assertEqual(result['total_gross'], '45.00')
+                import hashlib
+                self.assertEqual(result['raw_sha256'], hashlib.sha256(raw).hexdigest())
+        for suffix in ('Termin storniert.', 'Termin verschoben.'):
+            self.assertFalse(parse_check24_mail(synthetic_mail(body + suffix))['valid'])
+        self.assertFalse(parse_check24_mail(synthetic_mail(body.replace('TEST9001', 'TEST9002')))['valid'])
+        ambiguous = body.replace('Erika Beispiel\n', 'Erika Beispiel\nAndere Person\n')
+        self.assertFalse(parse_check24_mail(synthetic_mail(ambiguous))['valid'])
+
     def test_service_booking_without_tire_delivery_is_supported(self):
         body = BODY.replace('Montagetermin', 'Servicetermin').replace(
             'Voraussichtliche Zustellung: Do. 29. Oktober\n', '').replace(
@@ -220,6 +240,7 @@ class Check24IntegrationTest(unittest.TestCase):
         db.execute('INSERT INTO check24_worker_state(id) VALUES(1)')
         for table in ('check24_bookings', 'check24_events', 'check24_receipts', 'reifen_termin_slots'):
             db.execute('DELETE FROM ' + table)
+        db.execute("DELETE FROM check24_sync_state WHERE key LIKE 'parser_attempt:%'")
         db.execute("DELETE FROM status_log WHERE auftrag_id IN (SELECT id FROM auftraege WHERE quelle='check24')")
         db.execute("DELETE FROM auftraege WHERE quelle='check24'")
         db.commit()
@@ -252,7 +273,7 @@ class Check24IntegrationTest(unittest.TestCase):
             def raw(self, client, uid):
                 calls.append(('FETCH', uid))
                 if on_raw: on_raw(cfg, uid)
-                return raw_bytes if raw_bytes is not None else synthetic_mail(), ''
+                return (raw_bytes(uid) if callable(raw_bytes) else raw_bytes) if raw_bytes is not None else synthetic_mail(), ''
         with patch('check24_buchungen.Mailbox', FakeMailbox), patch.object(self.p, 'get_werkstatt_imap_config', return_value=cfg):
             yield cfg, calls
 
@@ -353,6 +374,101 @@ class Check24IntegrationTest(unittest.TestCase):
             self.assertEqual(self.count_orders(), 1)
             self.assertEqual(len([c for c in calls if c[0]=='FETCH']), 2)
 
+    def test_old_invalid_new_booking_refresh_keeps_hash_and_reserves_once(self):
+        import json
+        import hashlib
+        from unittest.mock import patch
+        from check24_mail import PARSER_VERSION
+        raw = synthetic_mail(BODY.replace('Gebuchter Termin\n',
+            'Fahrzeugdaten\nKennzeichen: TEST-AB 123\nGebuchter Termin\n'))
+        with self.fake_sync_mailbox(raw_bytes=raw) as (cfg, calls), patch('check24_buchungen.ionos_verified', return_value=True):
+            self.service.sync(auto_apply=False)
+            db = self.p.get_db()
+            row = db.execute('SELECT id,payload,raw_hash FROM check24_events').fetchone()
+            old = json.loads(row['payload'])
+            old.update(kind='new', valid=False, customer_name='',
+                       errors=['Kundenname ist nicht eindeutig.'], parser_version=PARSER_VERSION-1)
+            db.execute('UPDATE check24_events SET payload=? WHERE id=?', (json.dumps(old), row['id']))
+            db.commit(); db.close()
+            # Uploading the same bytes, even with caller-supplied trust, cannot
+            # upgrade a previously stored invalid payload.
+            self.service.ingest(raw, verified=True, auto_apply=True)
+            self.assertEqual(self.count_orders(), 0)
+            self.assertFalse(self.service.rows()[0]['data']['valid'])
+            self.assertEqual(self.service.sync(auto_apply=True), 1)
+            db = self.p.get_db()
+            event = db.execute('SELECT * FROM check24_events').fetchone()
+            booking = db.execute('SELECT * FROM check24_bookings').fetchone()
+            self.assertEqual(event['id'], row['id'])
+            self.assertEqual(event['raw_hash'], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(json.loads(event['payload'])['raw_sha256'], event['raw_hash'])
+            self.assertEqual(event['state'], 'applied')
+            self.assertEqual(booking['provider_id'], 'TEST9001')
+            self.assertEqual(booking['event_id'], row['id'])
+            self.assertTrue(self.service.native_slot_blocked(db, '2026-10-30', '08:00'))
+            db.close()
+            order = self.p.get_auftrag(booking['order_id'])
+            self.assertEqual(order['kunde_name'], 'Erika Beispiel')
+            self.assertFalse(order.get('lexware_invoice_id'))
+            self.assertEqual(self.service.sync(auto_apply=True), 0)
+            self.assertEqual(self.count_orders(), 1)
+
+    def test_parser_refresh_does_not_reopen_valid_applied_or_resolved_events(self):
+        import json
+        from unittest.mock import patch
+        from check24_mail import PARSER_VERSION
+        for state, valid in (('review', True), ('applied', False), ('resolved', False)):
+            with self.subTest(state=state, valid=valid):
+                db = self.p.get_db()
+                db.execute('DELETE FROM check24_receipts')
+                db.execute('DELETE FROM check24_events')
+                db.commit(); db.close()
+                with self.fake_sync_mailbox() as (cfg, calls), patch('check24_buchungen.ionos_verified', return_value=True):
+                    self.service.sync(auto_apply=False)
+                    db = self.p.get_db()
+                    row = db.execute('SELECT id,payload FROM check24_events').fetchone()
+                    old = json.loads(row['payload'])
+                    old.update(kind='new', valid=valid, parser_version=PARSER_VERSION-1)
+                    payload = json.dumps(old)
+                    db.execute('UPDATE check24_events SET payload=?,state=?,note=? WHERE id=?',
+                               (payload, state, 'Bestehende Prüfung', row['id']))
+                    db.commit(); db.close()
+                    self.assertEqual(self.service.sync(auto_apply=True), 0)
+                    current = self.service.rows()[0]
+                    self.assertEqual(current['payload'], payload)
+                    self.assertEqual(current['note'], 'Bestehende Prüfung')
+                    self.assertEqual(current['state'], state)
+                    self.assertEqual(self.count_orders(), 0)
+
+    def test_refreshed_cancellation_stays_in_review_and_existing_booking_is_not_duplicated(self):
+        import json
+        from unittest.mock import patch
+        from check24_mail import PARSER_VERSION
+        self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)
+        for raw in (synthetic_mail(BODY + '\nTermin storniert.'),
+                    synthetic_mail().replace(b'<synthetic-booking@example.invalid>', b'<repeat@example.invalid>')):
+            with self.subTest(cancelled=b'storniert' in raw):
+                with self.fake_sync_mailbox(raw_bytes=raw) as (cfg, calls), patch('check24_buchungen.ionos_verified', return_value=True):
+                    event_id = self.service.ingest(raw)
+                    db = self.p.get_db()
+                    row = db.execute('SELECT payload FROM check24_events WHERE id=?', (event_id,)).fetchone()
+                    old = json.loads(row['payload'])
+                    old.update(kind='new', valid=False, parser_version=PARSER_VERSION-1)
+                    db.execute('UPDATE check24_events SET payload=? WHERE id=?', (json.dumps(old), event_id))
+                    db.execute('DELETE FROM check24_receipts')
+                    db.commit(); db.close()
+                    self.service.sync(auto_apply=True)
+                    self.assertEqual(self.count_orders(), 1)
+                    event = next(item for item in self.service.rows() if item['id']==event_id)
+                    self.assertIn(event['state'], ('review', 'duplicate'))
+                    if b'storniert' in raw:
+                        self.assertEqual(event['state'], 'review')
+                        self.assertFalse(event['data']['valid'])
+                    db = self.p.get_db()
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_bookings').fetchone()[0], 1)
+                    self.assertTrue(self.service.native_slot_blocked(db, '2026-10-30', '08:00'))
+                    db.close()
+
     def test_reifenportal_surfaces_pending_check24_review(self):
         self.service.ingest(synthetic_mail(BODY + '\nTermin storniert.'), auto_apply=True)
         client = self.p.app.test_client()
@@ -381,8 +497,41 @@ class Check24IntegrationTest(unittest.TestCase):
                 self.assertEqual(self.service.sync(auto_apply=True), 1)
             self.assertEqual(self.count_orders(), 0)
             self.assertFalse(self.service.rows()[0]['verified'])
-            self.assertTrue(self.service.rows()[0]['data']['valid'])
+            self.assertFalse(self.service.rows()[0]['data']['valid'])
+            self.assertNotIn('parser_version', self.service.rows()[0]['data'])
             self.assertEqual(self.service.sync(auto_apply=True), 0)
+
+    def test_failed_auth_refresh_batch_does_not_starve_newer_booking(self):
+        import json
+        from unittest.mock import patch
+        from check24_mail import PARSER_VERSION
+        def raw_for(uid):
+            provider = 'TEST' + str(9000 + int(uid))
+            return synthetic_mail(BODY.replace('TEST9001', provider),
+                subject='Neue CHECK24 Terminbuchung (Bestellnummer: ' + provider + ')')
+        with self.fake_sync_mailbox(count=50, raw_bytes=raw_for), patch('check24_buchungen.ionos_verified', return_value=True):
+            self.assertEqual(self.service.sync(auto_apply=False), 50)
+        db = self.p.get_db()
+        for row in db.execute('SELECT id,payload FROM check24_events').fetchall():
+            old = json.loads(row['payload'])
+            old.update(kind='new', valid=False, parser_version=PARSER_VERSION-1)
+            db.execute('UPDATE check24_events SET payload=? WHERE id=?', (json.dumps(old), row['id']))
+        db.commit(); db.close()
+        with self.fake_sync_mailbox(count=51, raw_bytes=raw_for) as (cfg, calls):
+            with patch('check24_buchungen.ionos_verified', return_value=False):
+                self.assertEqual(self.service.sync(auto_apply=True), 50)
+                self.assertEqual(self.count_orders(), 0)
+            with patch('check24_buchungen.ionos_verified', return_value=True):
+                self.assertEqual(self.service.sync(auto_apply=True), 1)
+                self.assertEqual(self.service.sync(auto_apply=True), 0)
+            self.assertEqual(self.count_orders(), 1)
+            self.assertEqual([call for call in calls if call[0]=='FETCH'],
+                             [('FETCH', str(uid)) for uid in range(1,52)])
+            db = self.p.get_db()
+            self.assertEqual(db.execute('SELECT provider_id FROM check24_bookings').fetchone()[0], 'TEST9051')
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM check24_sync_state WHERE key LIKE 'parser_attempt:%'").fetchone()[0], 50)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM check24_events WHERE state='review' AND verified=0").fetchone()[0], 50)
+            db.close()
 
     def test_resolved_old_unknown_is_not_reopened(self):
         import json
@@ -798,6 +947,8 @@ class Check24IntegrationTest(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import patch
         from check24_buchungen import Check24Bookings
+        from psycopg._queries import PostgresQuery
+        from psycopg.adapt import Transformer
 
         original_get_db = self.p.get_db
         statements = []
@@ -811,6 +962,10 @@ class Check24IntegrationTest(unittest.TestCase):
                 self.cursor.close()
             def execute(self, sql, params):
                 statements.append(sql)
+                # Use the installed production driver to validate the exact SQL
+                # and bound values emitted by PostgresConnection, before the
+                # disposable SQLite bridge executes its equivalent statement.
+                PostgresQuery(Transformer()).convert(sql, params)
                 sql = sql.replace('%s', '?').replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT')
                 self.cursor.execute(sql, params)
                 self.rowcount = self.cursor.rowcount

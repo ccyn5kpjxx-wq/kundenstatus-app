@@ -28,6 +28,12 @@ class Check24SyncBusy(RuntimeError):
     """Another process is already scanning this mailbox."""
 
 
+def _needs_parser_refresh(data, attempted_version=0):
+    """Only unresolved invalid new/unknown templates may use a newer parser."""
+    return (data.get('kind') in {'new', 'unknown'} and not data.get('valid')
+            and max(data.get('parser_version', 0), attempted_version) < PARSER_VERSION)
+
+
 def ionos_verified(raw, config):
     """Only call for bytes fetched from this configured TLS mailbox, never uploads.
 
@@ -204,14 +210,23 @@ class Check24Bookings:
                 (data['raw_sha256'], source_key, data['provider_id'], json.dumps(data, ensure_ascii=False), self.p.now_str(), int(verified)))
             event = db.execute('SELECT * FROM check24_events WHERE raw_hash=?', (data['raw_sha256'],)).fetchone()
             previous_data = json.loads(event['payload'])
-            if (_sync_claim and event['state'] == 'review' and previous_data.get('kind') == 'unknown'
-                    and not previous_data.get('valid')
-                    and previous_data.get('parser_version', 0) < PARSER_VERSION):
+            attempt_key = 'parser_attempt:' + event['raw_hash']
+            attempt = db.execute('SELECT value FROM check24_sync_state WHERE key=?', (attempt_key,)).fetchone()
+            if (_sync_claim and event['state'] == 'review'
+                    and _needs_parser_refresh(previous_data, int(attempt['value']) if attempt else 0)):
                 # Re-read the identical original through the configured mailbox;
-                # never upgrade uploaded headers or rewrite an applied/resolved event.
-                db.execute('''UPDATE check24_events SET payload=?,provider_id=?,verified=?,note=''
-                    WHERE id=?''', (json.dumps(data, ensure_ascii=False), data['provider_id'],
-                                    int(verified), event['id']))
+                # never upgrade uploads, failed receiver authentication or a
+                # previously applied/resolved/valid event. raw_hash is immutable.
+                if verified:
+                    db.execute('''UPDATE check24_events SET payload=?,provider_id=?,verified=1,note=''
+                        WHERE id=?''', (json.dumps(data, ensure_ascii=False), data['provider_id'], event['id']))
+                else:
+                    db.execute('UPDATE check24_events SET verified=0 WHERE id=?', (event['id'],))
+                    # A failed authentication is not a successful reparse, but
+                    # retrying it every batch could starve newer bookings.
+                    db.execute('''INSERT INTO check24_sync_state(key,value) VALUES(?,?)
+                        ON CONFLICT(key) DO UPDATE SET value=excluded.value RETURNING key''',
+                        (attempt_key, str(PARSER_VERSION))).fetchall()
                 event = db.execute('SELECT * FROM check24_events WHERE id=?', (event['id'],)).fetchone()
             if source_key != 'upload':
                 db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key',
@@ -525,11 +540,12 @@ class Check24Bookings:
             db = self.p.get_db()
             try:
                 known = {r['source_key'] for r in db.execute('SELECT source_key FROM check24_receipts').fetchall()}
-                for receipt in db.execute('''SELECT r.source_key,e.payload FROM check24_receipts r
+                attempts = {r['key']: int(r['value']) for r in db.execute(
+                    'SELECT key,value FROM check24_sync_state WHERE key LIKE ?', ('parser_attempt:%',)).fetchall()}
+                for receipt in db.execute('''SELECT r.source_key,r.raw_hash,e.payload FROM check24_receipts r
                     JOIN check24_events e ON e.raw_hash=r.raw_hash WHERE e.state='review' ''').fetchall():
                     old_data = json.loads(receipt['payload'])
-                    if (old_data.get('kind') == 'unknown' and not old_data.get('valid')
-                            and old_data.get('parser_version', 0) < PARSER_VERSION):
+                    if _needs_parser_refresh(old_data, attempts.get('parser_attempt:' + receipt['raw_hash'], 0)):
                         known.discard(receipt['source_key'])
             finally:
                 db.close()

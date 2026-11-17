@@ -58616,7 +58616,7 @@ def partner_auftrag(slug, auftrag_id):
             fertigbilder=fertigbilder,
             dokument_pruefung=list_document_review_items(auftrag_id, auftrag, audience='partner'),
             benachrichtigungen=list_benachrichtigungen(auftrag_id, nur_ungelesen=True),
-            reklamationen=list_reklamationen(auftrag_id),
+            reklamationen=list_reklamationen(auftrag_id, dateien=sichtbare_dateien),
             verzoegerungen=list_verzoegerungen(auftrag_id),
             transport_arten=TRANSPORT_ARTEN,
             statusliste=STATUSLISTE,
@@ -58702,6 +58702,10 @@ def partner_archivieren(slug, auftrag_id):
     auftrag = get_auftrag(auftrag_id)
     if not auftrag or auftrag.get("autohaus_id") != autohaus["id"]:
         abort(404)
+
+    if not auftrag["archiviert"] and auftrag_has_offene_reklamation(auftrag_id):
+        flash("Auftrag mit offener Reklamation kann nicht archiviert werden.", "warning")
+        return redirect(url_for("partner_dashboard", slug=slug))
 
     archive_auftrag(auftrag_id, 0 if auftrag["archiviert"] else 1)
     flash(

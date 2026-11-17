@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 
 MAX_MAIL_BYTES = 5 * 1024 * 1024
-PARSER_VERSION = 2
+PARSER_VERSION = 3
 BERLIN = ZoneInfo("Europe/Berlin")
 MONTHS = {name: index for index, name in enumerate((
     "januar", "februar", "märz", "april", "mai", "juni", "juli", "august",
@@ -254,7 +254,7 @@ def parse_check24_mail(raw_bytes):
         except ValueError as exc:
             errors.append("Lieferdatum: " + str(exc))
 
-    customer = _section(text, r"Kunde", r"Gebuchter Termin|Gebuchte Leistungen|Bestellnummer")
+    customer = _section(text, r"Kunde", r"Fahrzeugdaten|Gebuchter Termin|Gebuchte Leistungen|Bestellnummer")
     lines = customer.splitlines()
     names = [line for line in lines if not EMAIL.search(line) and
              not re.search(r"\d", line) and not re.fullmatch(r"[-_=* ]+", line) and
