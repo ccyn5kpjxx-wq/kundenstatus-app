@@ -134,6 +134,51 @@ class CartQuoteChecks(unittest.TestCase):
         q = self.f.quote([line(OIL,3)]).public()
         self.assertEqual(q['lines'][0]['items_gross_cent'],6843*3)
 
+    def test_provider_observation_after_slow_io_uses_current_clock_and_final_creation(self):
+        current = [NOW]
+        def retail(p, count):
+            current[0] += timedelta(seconds=2)
+            return {**self.f.retail(p, count), 'observed_at': current[0].isoformat(),
+                    'expires_at': (current[0] + timedelta(minutes=15)).isoformat()}
+        def freight(group, context):
+            current[0] += timedelta(seconds=3)
+            return {**self.f.freight(group, context), 'observed_at': current[0].isoformat(),
+                    'expires_at': (current[0] + timedelta(minutes=15)).isoformat()}
+        q = self.f.quote([line(OIL)], retail_quote=retail, freight_quote=freight,
+                         clock=lambda: current[0]).public()
+        self.assertTrue(q['ready'])
+        self.assertEqual(q['created_at'], (NOW + timedelta(seconds=5)).isoformat())
+        self.assertEqual(q['expires_at'], (NOW + timedelta(minutes=15)).isoformat())
+
+    def test_later_slow_dependency_cannot_make_expired_inquiry_payable(self):
+        current = [NOW]
+        def retail(p, count):
+            current[0] += timedelta(seconds=1)
+            return {**self.f.retail(p, count), 'observed_at': current[0].isoformat(),
+                    'expires_at': (current[0] + timedelta(seconds=2)).isoformat()}
+        def freight(group, context):
+            current[0] += timedelta(seconds=3)
+            return {**self.f.freight(group, context), 'observed_at': current[0].isoformat(),
+                    'expires_at': (current[0] + timedelta(minutes=15)).isoformat()}
+        q = self.f.quote([line(OIL)], retail_quote=retail, freight_quote=freight,
+                         clock=lambda: current[0]).public()
+        self.assertFalse(q['ready'])
+        self.assertIsNone(q['total_gross_cent'])
+        self.assertIn('quote_expired', {r['code'] for r in q['blocked_reasons']})
+        self.assertEqual(q['created_at'], (NOW + timedelta(seconds=4)).isoformat())
+        self.assertEqual(q['expires_at'], (NOW + timedelta(seconds=3)).isoformat())
+
+    def test_clock_moving_backwards_or_losing_timezone_after_io_fails_closed(self):
+        for target, reason in ((NOW - timedelta(seconds=1), 'clock_moved_backwards'),
+                               (NOW.replace(tzinfo=None), 'aware_clock_required')):
+            with self.subTest(target=target):
+                current = [NOW]
+                def retail(p, count):
+                    current[0] = target
+                    return self.f.retail(p, count)
+                with self.assertRaisesRegex(ValueError, reason):
+                    self.f.quote([line(OIL)], retail_quote=retail, clock=lambda: current[0])
+
     def test_browser_price_and_unknown_fields_cannot_enter_quote(self):
         service = self.f.service_instance()
         values = [ {'lines':[line(OIL)],'total_gross_cent':1},
@@ -153,17 +198,62 @@ class CartQuoteChecks(unittest.TestCase):
         with self.assertRaisesRegex(QuoteInputError,'duplicate_line'):
             self.f.quote([line(OIL),line(OIL)])
 
-    def test_same_sku_configurations_share_total_stock_and_price_demand(self):
+    def test_same_sku_destinations_use_exact_position_quantities_and_global_stock(self):
         self.f.stock[OIL]=4
-        q = self.f.quote([line(OIL,3),line(OIL,2,services={'oil_service':True})])
+        q = self.f.quote([line(OIL,2),line(OIL,3,services={'oil_service':True})])
         self.assertIn('stock_insufficient_or_unconfirmed',self.codes(q))
-        self.assertEqual(self.f.calls['retail'],[(OIL,5)])
+        self.assertEqual(self.f.calls['retail'],[(OIL,2),(OIL,3)])
         self.assertIsNone(q.public()['total_gross_cent'])
         self.f.stock[OIL]=5
-        q = self.f.quote([line(OIL,3),line(OIL,2,services={'oil_service':True})])
+        q = self.f.quote([line(OIL,2),line(OIL,3,services={'oil_service':True})])
         self.assertTrue(q.public()['ready'])
         self.assertEqual({g['id']:g['items'] for g in q.public()['shipments']},
-                         {'customer':[{'id':OIL,'quantity':3}],'workshop':[{'id':OIL,'quantity':2}]})
+                         {'customer':[{'id':OIL,'quantity':2}],'workshop':[{'id':OIL,'quantity':3}]})
+
+    def test_split_destinations_keep_their_different_price_tiers(self):
+        def retail(product, quantity):
+            self.assertIn(quantity, (2,3))
+            return {**self.f.retail(product,quantity), 'unit_gross_cent':{2:8211,3:7527}[quantity], 'stock':5}
+        q=self.f.quote([line(OIL,2),line(OIL,3,services={'oil_service':True})],retail_quote=retail)
+        public=q.public()
+        self.assertTrue(public['ready'])
+        self.assertEqual(self.f.calls['retail'],[(OIL,2),(OIL,3)])
+        self.assertEqual([(v['destination'],v['quantity'],v['unit_gross_cent'],v['items_gross_cent']) for v in public['lines']],
+                         [('customer',2,8211,16422),('workshop',3,7527,22581)])
+        self.assertEqual(public['total_gross_cent'],49203)
+        private=q.snapshot()['shipments']
+        self.assertEqual({v['destination']:v['private_items'][0]['quantity'] for v in private},
+                         {'customer':2,'workshop':3})
+
+    def test_minimum_reported_stock_must_cover_both_destinations(self):
+        for stock_by_quantity in ({2:4,3:50},{2:50,3:4}):
+            with self.subTest(stock_by_quantity=stock_by_quantity):
+                self.f=Fixture()
+                def retail(product,quantity):
+                    return {**self.f.retail(product,quantity),'stock':stock_by_quantity[quantity]}
+                q=self.f.quote([line(OIL,2),line(OIL,3,services={'oil_service':True})],retail_quote=retail)
+                self.assertEqual(self.f.calls['retail'],[(OIL,2),(OIL,3)])
+                self.assertIn('stock_insufficient_or_unconfirmed',self.codes(q))
+                self.assertFalse(q.public()['ready'])
+                self.assertIsNone(q.public()['total_gross_cent'])
+
+    def test_same_sku_configurations_in_one_destination_share_one_exact_price_read(self):
+        rows=[line(BODY,services={'painting':True,'paint_color':'RAL 9005'}),
+              line(BODY,services={'painting':True,'paint_color':'RAL 9010'})]
+        q=self.f.quote(rows)
+        self.assertTrue(q.public()['ready'])
+        self.assertEqual(self.f.calls['retail'],[(BODY,2)])
+        self.assertEqual([v['unit_gross_cent'] for v in q.public()['lines']],[6843,6843])
+        self.assertEqual(q.snapshot()['shipments'][0]['private_items'][0]['quantity'],2)
+        self.assertEqual(len(q.snapshot()['shipments'][0]['private_items']),1)
+
+    def test_a_cart_wide_price_echo_cannot_replace_an_exact_destination_quote(self):
+        def retail(product,quantity):
+            return {**self.f.retail(product,quantity),'quantity':5}
+        q=self.f.quote([line(OIL,2),line(OIL,3,services={'oil_service':True})],retail_quote=retail)
+        self.assertEqual(self.f.calls['retail'],[(OIL,2),(OIL,3)])
+        self.assertIn('price_identity_unconfirmed',self.codes(q))
+        self.assertIsNone(q.public()['total_gross_cent'])
 
     def test_two_complete_sets_share_tyre_stock_and_charge_each_mounting_and_freight_once(self):
         rows=[line(TYRE,4,services={'mounting':True},group='first'),line(RIM,4,group='first'),

@@ -48,6 +48,21 @@ class ShopRuntimeChecks(unittest.TestCase):
         self.assertEqual(self.portal.app.test_client().get('/shop/api/v2/products').status_code, 200)
         self.assertEqual(self.portal.app.test_client().post('/shop/api/v2/orders', json={}).status_code, 404)
 
+    def test_released_media_needs_both_its_explicit_flag_and_catalogue(self):
+        asset = 'a' * 64 + '.png'
+        media = Mock()
+        media.read.return_value = (b'SYNTHETIC_IMAGE_BYTES', 'image/png')
+        self.portal.app.config['SHOP_MEDIA_ENABLED'] = True
+        state = register_shop_runtime(self.portal, media_service=media)
+        self.assertFalse(state['enabled']['SHOP_MEDIA_ENABLED'])
+        self.assertEqual(self.portal.app.test_client().get('/shop/media/' + asset).status_code, 404)
+        media.read.assert_not_called()
+        other = SimpleNamespace(app=Flask('released-media'))
+        other.app.config.update(SHOP_PUBLIC_CATALOGUE_ENABLED=True, SHOP_MEDIA_ENABLED=True)
+        state = register_shop_runtime(other, catalogue=Mock(), media_service=media)
+        self.assertTrue(state['enabled']['SHOP_MEDIA_ENABLED'])
+        self.assertEqual(other.app.test_client().get('/shop/media/' + asset).data, b'SYNTHETIC_IMAGE_BYTES')
+
     def test_strict_flags_and_sequential_prerequisites_prevent_partial_activation(self):
         self.portal.app.config.update({key: 'true' for key in FLAGS})
         state = register_shop_runtime(self.portal, catalogue=Mock(), order_store=Mock(), checkout_service=Mock())
@@ -81,9 +96,11 @@ class ShopRuntimeChecks(unittest.TestCase):
             methods = ['GET'] if name in {'products', 'product', 'order_status'} else ['POST']
             app.add_url_rule('/' + name, 'shop_public_v2.' + name, lambda: ('', 204), methods=methods)
         app.add_url_rule('/admin', 'internal_admin', lambda: ('', 204))
+        app.add_url_rule('/media', 'shop_media_v2.image', lambda: ('', 204))
         client = app.test_client()
         self.assertEqual(client.get('/products').status_code, 204)
         self.assertEqual(client.get('/product').status_code, 204)
+        self.assertEqual(client.get('/media').status_code, 204)
         self.assertEqual(client.get('/order_status').status_code, 404)
         for name in ('cart_quote', 'create_order_draft', 'start_checkout', 'stripe_webhook'):
             self.assertEqual(client.post('/' + name).status_code, 404)

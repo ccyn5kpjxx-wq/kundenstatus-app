@@ -1,0 +1,110 @@
+"""Reviewed retail shipping tariff derived from RSU, plus 15% on shipping.
+
+Goods markups are unaffected. This is our published customer shipping charge,
+not a claim of a supplier reservation or final supplier invoice. Tax basis,
+product shipping classes and destination eligibility require explicit server
+configuration; unclassified goods/destinations never silently become free.
+Each private shipment item is one already aggregated supplier SKU/destination
+and therefore one RSU API order. Thresholds never combine different SKUs.
+No network, credentials, supplier orders or payment operations live here.
+"""
+from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from hashlib import sha256
+import json
+import re
+
+SHIPPING_CLASSES = {'pkw_tyre', 'pkw_rim', 'complete_wheel', 'rdks_sensor',
+                    'centring_ring', 'mounting_supply', 'parts_standard', 'parts_bulky', 'free'}
+MAX_CENTS = 1_000_000
+
+
+def shipping_gross_cent(base_cent, *, basis):
+    """Apply the user's 15% shipping markup and correct gross rounding once."""
+    if type(base_cent) is not int or not 0 <= base_cent <= MAX_CENTS or basis not in {'net', 'gross'}:
+        raise ValueError('invalid_shipping_price')
+    factor = Decimal('1.15') * (Decimal('1.19') if basis == 'net' else Decimal('1'))
+    result = int((Decimal(base_cent) * factor).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    if result > MAX_CENTS:
+        raise ValueError('invalid_shipping_price')
+    return result
+
+
+def _hash(value):
+    return sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                             separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+
+
+def _stamp(value):
+    try:
+        value = datetime.fromisoformat(value.replace('Z', '+00:00')) if isinstance(value, str) else value
+        if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError()
+        return value.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError('invalid_shipping_policy') from None
+
+
+class RSURetailFreight:
+    def __init__(self, shipping_classes, *, mode, basis=None, evidence_id, checked_at,
+                 destination_eligibility=None, clock=None):
+        if (not isinstance(shipping_classes, Mapping) or mode not in {'test', 'live'}
+                or basis not in {'net', 'gross', None} or not isinstance(evidence_id, str)
+                or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,160}', evidence_id)
+                or any(not isinstance(key, str) or not re.fullmatch(r'(?:tyre|alloy_wheel|steel_wheel|parts):[a-f0-9]{24}', key)
+                       or value not in SHIPPING_CLASSES for key, value in shipping_classes.items())):
+            raise ValueError('invalid_shipping_policy')
+        self.classes = dict(shipping_classes)
+        self.mode, self.basis, self.evidence_id = mode, basis, evidence_id
+        self.checked_at = _stamp(checked_at)
+        self.eligibility = destination_eligibility
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def __call__(self, shipment, context):
+        try:
+            now = _stamp(self.clock())
+            if (self.basis is None or not self.checked_at <= now < self.checked_at + timedelta(days=30)
+                    or not isinstance(shipment, Mapping) or not isinstance(context, Mapping)
+                    or shipment.get('destination') not in {'workshop', 'customer'}
+                    or shipment.get('context_hash') != _hash(context)):
+                return None
+            expected = {key: shipment[key] for key in ('id', 'destination', 'private_items', 'context_hash')}
+            if shipment.get('shipment_hash') != _hash(expected):
+                return None
+            # Eligibility is separate from address input validation, e.g. the
+            # operator's confirmed mainland/island delivery areas.
+            if not callable(self.eligibility) or self.eligibility(shipment['destination'], context) is not True:
+                return None
+            rows = shipment['private_items']
+            if not isinstance(rows, list) or not 1 <= len(rows) <= 40:
+                return None
+            base, seen = 0, set()
+            for row in rows:
+                if (not isinstance(row, Mapping) or row.get('id') not in self.classes
+                        or row['id'] in seen or type(row.get('quantity')) is not int
+                        or not 1 <= row['quantity'] <= 20):
+                    return None
+                seen.add(row['id'])
+                category = self.classes[row['id']]
+                quantity = row['quantity']
+                # One position per API order: a different SKU creates another
+                # fee/threshold even when both orders go to the same address.
+                if category in {'pkw_tyre', 'pkw_rim', 'complete_wheel'} and quantity == 1:
+                    base += 600
+                elif category in {'rdks_sensor', 'centring_ring'} and quantity < 4:
+                    base += 600
+                elif category in {'mounting_supply', 'parts_standard'}:
+                    base += 600
+                elif category == 'parts_bulky':
+                    base += 6000
+            # Our retail shipment line rounds once after summing the supplier
+            # order charges. No per-position gross-cent rounding is spliced in.
+            gross = shipping_gross_cent(base, basis=self.basis)
+            return {'confirmed': True, 'shipment_hash': shipment['shipment_hash'],
+                    'context_hash': shipment['context_hash'], 'mode': self.mode,
+                    'currency': 'eur', 'vat_percent': '19.00', 'gross_cent': gross,
+                    'observed_at': now.isoformat(), 'expires_at': (now + timedelta(minutes=15)).isoformat(),
+                    'retail_tariff_evidence': self.evidence_id, 'shipping_markup_percent': '15.00'}
+        except Exception:
+            return None

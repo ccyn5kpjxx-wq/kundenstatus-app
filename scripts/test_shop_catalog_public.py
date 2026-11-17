@@ -64,6 +64,20 @@ def verified(row):
 
 
 class PublicCatalogueTests(unittest.TestCase):
+    def test_cache_only_rsu_retail_projection_is_current_and_never_exposes_private_fields(self):
+        row = wheel(quote_public=None)
+        quote = wheel()['quote_public']
+        quote['source'] = 'RSU'
+        cached = lambda identifier: quote
+        c = catalogue([row], quote_lookup=cached)
+        result = c.get(row['selection_id'])
+        self.assertEqual(result['price_status'], 'current')
+        self.assertEqual(result['price']['prices_by_quantity']['1']['unit_gross_cent'], 12345)
+        self.assertNotIn('PRIVATE_CANARY', json.dumps(result))
+        self.assertNotIn('net_purchase', json.dumps(result))
+        quote['expires_at'] = NOW.isoformat()
+        self.assertEqual(c.get(row['selection_id'])['price_status'], 'update_required')
+
     def test_publication_allowlist_is_exact_and_hides_counts_and_search(self):
         first, private = wheel(), wheel('b', name='Unreleased private search term')
         c = catalogue([first, private], released_ids={first['selection_id']})

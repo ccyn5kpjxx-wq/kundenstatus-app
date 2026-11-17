@@ -13,6 +13,56 @@ from shop_order_store import OrderStoreError
 class PublicApiChecks(unittest.TestCase):
     origin = 'https://shop.example.test'
 
+    def test_price_completed_during_warmup_is_reprojected_before_polling_stops(self):
+        identifier = 'tyre:' + 'a' * 24
+        for detail in (False, True):
+            with self.subTest(detail=detail):
+                app = Flask('cache-completion-race')
+                state = {'complete': False}
+                def item():
+                    return {'id': identifier, 'category': 'tyre',
+                            'price': {'unit_gross_cent': 12345} if state['complete'] else None}
+                cat = Mock()
+                cat.page.side_effect = lambda **kwargs: {'items': [item()], 'page': 1, 'total': 1}
+                cat.get.side_effect = lambda value: item()
+                def warmup(ids, *, quantities):
+                    state['complete'] = True
+                    return False
+                app.register_blueprint(create_shop_public_blueprint(catalogue=cat, catalogue_warmup=warmup))
+                app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
+                path = '/shop/api/v2/products' + ('/' + identifier + '?quantity=2' if detail else '')
+                result = app.test_client().get(path).get_json()
+                self.assertIs(result['prices_refreshing'], False)
+                projected = result['item'] if detail else result['items'][0]
+                self.assertEqual(projected['price']['unit_gross_cent'], 12345)
+
+    def test_public_warmup_only_queues_returned_ids_and_exact_bounded_quantity(self):
+        app = Flask('price-warmup')
+        cat = Mock()
+        identifier = 'tyre:' + 'a' * 24
+        cat.page.return_value = {'items': [{'id': identifier}], 'page': 1, 'total': 1}
+        cat.get.return_value = {'id': identifier, 'category': 'tyre'}
+        warmup = Mock(return_value=1)
+        app.register_blueprint(create_shop_public_blueprint(catalogue=cat, catalogue_warmup=warmup))
+        app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
+        client = app.test_client()
+        result = client.get('/shop/api/v2/products')
+        self.assertTrue(result.get_json()['prices_refreshing'])
+        warmup.assert_called_once_with([identifier], quantities=(1, 4))
+        warmup.reset_mock()
+        result = client.get('/shop/api/v2/products/' + identifier + '?quantity=2')
+        self.assertEqual(result.status_code, 200)
+        warmup.assert_called_once_with([identifier], quantities=(2,))
+        warmup.reset_mock()
+        for query in ('quantity=5', 'quantity=0', 'quantity=1&quantity=2', 'quantity=2&provider_url=x'):
+            self.assertEqual(client.get('/shop/api/v2/products/' + identifier + '?' + query).status_code, 400)
+        warmup.assert_not_called()
+        warmup.side_effect = RuntimeError('PRIVATE_CANARY')
+        result = client.get('/shop/api/v2/products/' + identifier)
+        self.assertEqual(result.status_code, 200)
+        self.assertFalse(result.get_json()['prices_refreshing'])
+        self.assertNotIn(b'PRIVATE_CANARY', result.data)
+
     def setUp(self):
         self.catalogue = Mock()
         self.catalogue.page.return_value = {'items': [], 'page': 1, 'page_size': 24, 'total': 0}

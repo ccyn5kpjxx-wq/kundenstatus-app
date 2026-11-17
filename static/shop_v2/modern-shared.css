@@ -1,0 +1,299 @@
+/* Load after the existing catalog/service/selection styles. Presentation only. */
+.modern-shop {
+  --ink: #181b20;
+  --muted: #65707a;
+  --paper: #ffffff;
+  --line: #dfe4e8;
+  --red: #d92826;
+  --teal: #283d4b;
+  --display: Arial, Helvetica, sans-serif;
+  --service-brown: #1d2228;
+  --service-cream: #f3f5f6;
+  --service-line: #dfe4e8;
+  background: #fff;
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.modern-shop *, .modern-shop *::before, .modern-shop *::after { box-sizing: border-box; }
+.modern-shop [hidden] { display: none !important; }
+.modern-shop .wrap, .modern-shop .modern-wrap { width: min(1360px, calc(100% - 72px)); margin-inline: auto; }
+.modern-shop button, .modern-shop input, .modern-shop select { font-family: inherit; }
+.modern-shop a, .modern-shop button, .modern-shop summary { -webkit-tap-highlight-color: transparent; }
+.modern-shop :is(a, button, input, select, summary):focus-visible { outline: 3px solid var(--red); outline-offset: 4px; }
+.modern-shop .skip-link { position: fixed; left: 16px; top: -90px; z-index: 100; padding: 12px 18px; background: var(--red); color: #fff; text-decoration: none; }
+.modern-shop .skip-link:focus { top: 10px; }
+.modern-shop .modern-utility { height: 28px; background: #181b20; color: #cbd0d5; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.modern-shop .modern-utility > div { height: 100%; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.modern-shop .modern-utility span:first-child { display: flex; align-items: center; gap: 8px; }
+.modern-shop .modern-utility i { height: 5px; width: 5px; border-radius: 50%; background: #f05249; }
+.modern-shop .modern-header { position: relative; z-index: 10; background: #fff; border-bottom: 1px solid #e6e9ec; }
+.modern-shop .modern-header-inner { display: flex; min-height: 78px; align-items: center; justify-content: space-between; gap: 28px; }
+.modern-shop .modern-brand { flex: 0 0 auto; display: block; }
+.modern-shop .modern-brand img { display: block; width: 154px; height: 60px; object-fit: contain; }
+.modern-shop .modern-navigation { display: flex; align-items: center; gap: 30px; font-size: 13px; font-weight: 700; }
+.modern-shop .modern-navigation a { position: relative; padding: 27px 0; color: #242a30; text-decoration: none; white-space: nowrap; }
+.modern-shop .modern-navigation a::after { position: absolute; content: ""; bottom: 18px; left: 0; height: 2px; width: 0; background: var(--red); transition: width .15s; }
+.modern-shop .modern-navigation a:hover::after, .modern-shop .modern-navigation a[aria-current=page]::after { width: 100%; }
+.modern-shop .modern-vehicle-link { display: flex; max-width: 260px; min-height: 42px; align-items: center; gap: 10px; padding: 9px 14px; border: 1px solid #ccd3d9; border-radius: 5px; color: #222a31; font-size: 12px; font-weight: 700; text-decoration: none; }
+.modern-shop .modern-vehicle-link:hover { border-color: var(--red); }
+.modern-shop .modern-vehicle-link [data-shop-vehicle-label] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modern-shop .modern-vehicle-symbol { font-size: 19px; font-weight: 400; }
+.modern-shop .modern-footer { margin: 0; padding: 34px 0; background: #191d22; color: #fff; border: 0; }
+.modern-shop .modern-footer > div { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+.modern-shop .modern-footer-brand { color: #fff; font-size: 17px; font-weight: 700; letter-spacing: -.035em; text-decoration: none; }
+.modern-shop .modern-footer-brand span { margin-left: 7px; color: #9da7b0; font-weight: 400; }
+.modern-shop .modern-footer p { color: #a4adb5; font-size: 11px; line-height: 1.6; margin: 9px 0 0; }
+.modern-shop .modern-footer nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 24px; }
+.modern-shop .modern-footer nav a { color: #cbd1d6; font-size: 11px; text-decoration: none; }
+.modern-shop .modern-footer nav a:hover { color: #fff; }
+.modern-shop .modern-footer .modern-footer-note { grid-column: 1/-1; padding-top: 17px; margin-top: 0; border-top: 1px solid #363d44; font-size: 10px; }
+
+/* Catalog: less decoration, more product and a clear filter hierarchy. */
+.catalog-page.modern-shop .shop-intro { margin-top: 24px; border: 0; border-radius: 10px; background: #20252a; color: #fff; grid-template-columns: 1fr 1fr; }
+.catalog-page.modern-shop .preview-hero-content { padding: 35px 42px; }
+.catalog-page.modern-shop .preview-hero-eyebrow { color: #c0c7cd; font-size: 10px; letter-spacing: .14em; }
+.catalog-page.modern-shop .preview-hero-eyebrow::before { height: 2px; width: 25px; background: #ee4c45; }
+.catalog-page.modern-shop .shop-intro h1 { margin: 16px 0 12px; color: #fff; font: 700 clamp(3rem, 5vw, 4.7rem)/1 Arial, Helvetica, sans-serif; letter-spacing: -.055em; }
+.catalog-page.modern-shop .shop-intro p { color: #cbd1d6; font-size: 14px; line-height: 1.6; }
+.catalog-page.modern-shop .preview-hero-media { min-height: 265px; background: #1a1e22; }
+.catalog-page.modern-shop .preview-hero-actions { margin-top: 22px; gap: 10px; }
+.catalog-page.modern-shop .preview-hero-actions a { min-height: 42px; padding: 11px 15px; border-radius: 4px; font-size: 12px; }
+.catalog-page.modern-shop .preview-hero-actions .preview-primary { background: var(--red); color: #fff; }
+.catalog-page.modern-shop .preview-hero-actions .preview-primary:hover { background: #b92120; }
+.catalog-page.modern-shop .preview-hero-actions .preview-hero-secondary { border-color: #71808c; color: #fff; }
+.catalog-page.modern-shop .preview-service-strip { margin-top: 15px; background: #f4f6f7; border-color: #dfe4e8; color: #4b5661; border-radius: 7px; }
+.catalog-page.modern-shop .preview-service-strip strong { color: #27313b; }
+.catalog-page.modern-shop .preview-service-strip a { color: #293a49; }
+.catalog-page.modern-shop .preview-service-strip small { color: #67737e; }
+.catalog-page.modern-shop .preview-catalog-strip { min-height: 49px; border-color: #dfe4e8; color: #66717d; font-size: 11px; }
+.catalog-page.modern-shop .shop-results { padding-top: 13px; padding-bottom: 35px; }
+.catalog-page.modern-shop .shop-results h2 { margin: 0 0 18px; font: 700 clamp(1.7rem, 2.7vw, 2.5rem)/1.1 Arial, Helvetica, sans-serif; letter-spacing: -.04em; }
+.catalog-page.modern-shop .vehicle-filter { padding: 21px 24px; margin: 0 0 18px; background: #f2f5f7; border: 1px solid #dbe2e8; border-radius: 8px; }
+.catalog-page.modern-shop .vehicle-filter legend { color: #27333d; font-size: 13px; font-weight: 700; }
+.catalog-page.modern-shop .vehicle-filter p { color: #63717e; }
+.catalog-page.modern-shop .sample-filters { gap: 14px; margin-top: 14px; }
+.catalog-page.modern-shop .sample-filters label { color: #4e5d68; font-size: 12px; font-weight: 600; }
+.catalog-page.modern-shop .sample-filters :is(input,select), .catalog-page.modern-shop .preview-product-controls select { min-height: 43px; background: #fff; border: 1px solid #cfd7df; border-radius: 5px; color: #23313d; font: 400 13px Arial, Helvetica, sans-serif; }
+.catalog-page.modern-shop .sample-filters :is(input,select):disabled { background: #edf1f4; color: #788590; opacity: 1; }
+.catalog-page.modern-shop .preview-reset, .catalog-page.modern-shop #vehicle-clear { min-height: 43px; border: 1px solid #cfd7df; border-radius: 5px; background: #fff; color: #354551; font-size: 12px; }
+.catalog-page.modern-shop :is(.preview-reset,#vehicle-clear):hover { border-color: var(--red); }
+.catalog-page.modern-shop .preview-season-bar button, .catalog-page.modern-shop .preview-model-shortcuts button { border-color: #ccd6de; border-radius: 5px; color: #405362; background: #fff; }
+.catalog-page.modern-shop .preview-season-bar button[aria-pressed=true], .catalog-page.modern-shop .preview-model-shortcuts button[aria-pressed=true] { background: #222d36; color: #fff; border-color: #222d36; }
+.catalog-page.modern-shop .tire-search-status { color: #61707d; font-size: 12px; }
+.catalog-page.modern-shop .shop-results .tire-search-results { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 18px; }
+.catalog-page.modern-shop .shop-results .tire-result { padding: 13px; border: 1px solid #dce2e7; border-radius: 8px; background: #fff; box-shadow: none; gap: 12px; min-width: 0; }
+.catalog-page.modern-shop .shop-results .tire-result .tire-result-image-box { min-height: 0; aspect-ratio: 1.08; background: #f1f4f5; border-radius: 6px; overflow: hidden; }
+.catalog-page.modern-shop .shop-results .tire-result .tire-result-image { display: block; width: 100%; height: 100%; padding: 17px; object-fit: contain; mix-blend-mode: multiply; }
+.catalog-page.modern-shop .shop-results .tire-result h3 { color: #202c36; font: 700 14px/1.35 Arial, Helvetica, sans-serif; letter-spacing: -.02em; }
+.catalog-page.modern-shop .shop-results .tire-result-meta { color: #73808b; font-size: 11px; }
+.catalog-page.modern-shop .sample-price strong { color: #1d2b36; font-size: 23px; font-weight: 700; letter-spacing: -.035em; }
+.catalog-page.modern-shop .sample-price small { color: #73808b; font-size: 10px; line-height: 1.5; }
+.catalog-page.modern-shop .tire-result-select, .catalog-page.modern-shop .preview-product-dialog .tire-result-select { min-height: 43px; background: var(--red); color: #fff; border-color: var(--red); border-radius: 5px; font: 700 12px Arial, Helvetica, sans-serif; }
+.catalog-page.modern-shop .tire-result-select:hover, .catalog-page.modern-shop .preview-product-dialog .tire-result-select:hover { background: #b92120; border-color: #b92120; }
+.catalog-page.modern-shop .preview-card-links button, .catalog-page.modern-shop .preview-detail-button { color: #385061; }
+.catalog-page.modern-shop .more { margin: 28px auto 5px; padding: 12px 24px; background: #202b35; color: #fff; border: 0; border-radius: 5px; font-size: 13px; }
+.catalog-page.modern-shop .preview-empty { border-color: #d6dfe6; background: #f4f7f9; color: #495e6f; }
+.catalog-page.modern-shop .sample-approval { background: #eaf1f5; color: #35546c; }
+.catalog-page.modern-shop .approval-note, .catalog-page.modern-shop .approval-detail { color: #5c7080; border-color: #dbe2e8; }
+.catalog-page.modern-shop .approval-detail a { color: #365e7a; }
+
+/* Shared remembered vehicle, without turning a selection into a fitment promise. */
+.modern-shop .shop-vehicle-context { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 20px 0; padding: 17px 20px; background: #edf3f7; border: 1px solid #cfdee8; border-radius: 7px; color: #304a5d; }
+.modern-shop .shop-vehicle-label { font-size: 14px; font-weight: 700; color: #273d4e; }
+.modern-shop .shop-vehicle-note { flex: 1 1 270px; color: #586f80; font-size: 11px; line-height: 1.55; }
+.modern-shop .shop-vehicle-review, .modern-shop .shop-vehicle-clear { padding: 8px 10px; color: #3c5e75; background: #fff; border: 1px solid #bfd0dd; border-radius: 4px; font-size: 11px; text-decoration: none; cursor: pointer; }
+.modern-shop .shop-vehicle-clear { background: transparent; }
+.modern-shop .shop-vehicle-copy { flex: 1 1 320px; min-width: 0; }
+.modern-shop .shop-vehicle-copy p { margin: 5px 0 0; }
+.modern-shop .shop-vehicle-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.modern-shop .shop-vehicle-change { color: #304e64; font-size: 12px; font-weight: 700; text-underline-offset: 3px; }
+.modern-home main > .shop-vehicle-context { width: min(1360px, calc(100% - 72px)); margin-inline: auto; }
+.modern-shop .preview-set-price { display: block; margin-top: 7px; font-size: 12px; color: #566673; }
+.modern-shop .preview-price-assumption { margin-bottom: 30px; color: #667783; font-size: 12px; }
+.modern-shop .live-image-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 18px; color: #5e7485; font-size: 11px; }
+.modern-shop .live-image-filter input { accent-color: var(--red); }
+.modern-shop .live-image-filter span { color: #798c99; font-size: 10px; }
+.modern-shop .product-variant-badge { display: inline-block; margin: 6px 5px 0 0; padding: 4px 7px; border-radius: 4px; color: #775229; background: #f4eadc; font-size: 10px; font-weight: 700; }
+
+/* Product dialogs and the local selection keep one consistent type scale. */
+.modern-shop .preview-product-dialog, .modern-shop .service-summary-dialog, .modern-shop .local-selection-dialog { border: 1px solid #d9e1e7; background: #fff; color: #25323d; border-radius: 10px; box-shadow: 0 25px 100px #15263530; }
+.modern-shop :is(.preview-product-dialog,.service-summary-dialog,.local-selection-dialog)::backdrop { background: #111a23b8; }
+.modern-shop .preview-product-dialog h2, .modern-shop .service-summary-dialog h2, .modern-shop .local-selection-dialog h2 { font: 700 clamp(1.7rem,3vw,2.3rem)/1.1 Arial, Helvetica, sans-serif; letter-spacing: -.045em; color: #24313d; }
+.modern-shop .detail-photo, .modern-shop .preview-product-hero, .modern-shop .detail-gallery-thumbnails button, .modern-shop .local-selection-item img { background: #f0f4f6; border-color: #d8e1e8; }
+.modern-shop .detail-photo img { object-fit: contain; mix-blend-mode: multiply; }
+.modern-shop .detail-gallery-thumbnails button[aria-pressed=true] { border-color: var(--red); }
+.modern-shop .local-selection-launcher { background: #1d2b36; border: 1px solid #fff; border-radius: 6px; padding: 13px 20px; color: #fff; font: 700 13px Arial, Helvetica, sans-serif; box-shadow: 0 5px 18px #172a3d33; }
+.modern-shop .local-selection-eyebrow, .modern-shop .local-selection-note, .modern-shop .local-selection-price-note, .modern-shop .local-selection-item p { color: #667987; }
+.modern-shop .local-selection-item { border-color: #dde5eb; }
+.modern-shop .local-selection-item h3 { color: #263845; }
+.modern-shop .local-selection-item-controls select { background: #fff; border-color: #cbd7e1; }
+.modern-shop .local-selection-item-controls button, .modern-shop .local-selection-clear { color: #526d80; }
+.modern-shop .local-selection-close { background: #f3f6f8; border-color: #d7e1e8; color: #294457; }
+.modern-shop .local-selection-combination { border-color: #cbdbe7; background: #eff5f9; color: #416379; }
+.modern-shop .local-selection-total { font-size: 25px; font-weight: 700; color: #1a2f40; }
+.modern-shop .local-selection-links a { color: #37586f; background: #f7fafc; border-color: #c8d9e6; }
+.modern-shop .local-selection-service { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* Service and package: clear choices, predictable totals, no new price rules. */
+.modern-shop.service-preview .service-config-page { padding-top: 38px; }
+.modern-shop.service-preview .service-page-intro h1 { margin: 13px 0 15px; font: 700 clamp(2.5rem,4.6vw,4.4rem)/1.04 Arial, Helvetica, sans-serif; letter-spacing: -.055em; color: #1d2b36; }
+.modern-shop.service-preview .service-page-intro > p:last-child { color: #6d7a85; font-size: 14px; }
+.modern-shop .service-eyebrow { color: #687d8e; font-size: 10px; letter-spacing: .13em; }
+.modern-shop .service-config-layout { grid-template-columns: minmax(0,1fr) 370px; gap: 26px; margin-top: 28px; }
+.modern-shop .service-form { border-color: #dce4ea; border-radius: 8px; background: #fff; padding: 30px; }
+.modern-shop .service-form fieldset { border-color: #e2e8ed; }
+.modern-shop .service-form legend { color: #243747; font-size: 14px; }
+.modern-shop .service-form legend > span { color: var(--red); }
+.modern-shop .service-choice { border-color: #d6e0e7; border-radius: 6px; background: #fff; }
+.modern-shop .service-choice:has(input:checked) { background: #eef4f8; border-color: #7395ae; }
+.modern-shop .service-choice strong { color: #2a3e4d; font-size: 13px; }
+.modern-shop .service-choice small, .modern-shop .service-checkbox small { color: #6b7f8e; font-size: 12px; }
+.modern-shop .service-choice input, .modern-shop .service-checkbox input { accent-color: var(--red); }
+.modern-shop .service-fields label, .modern-shop .service-checkbox { color: #3b5365; font-size: 12px; }
+.modern-shop .service-fields select { border-color: #cbd8e2; background: #fff; color: #2c4559; border-radius: 5px; font: 400 13px Arial, Helvetica, sans-serif; }
+.modern-shop .service-fields select:disabled { background: #edf2f5; color: #788b99; }
+.modern-shop .service-fields small, .modern-shop .service-details { color: #6a8091; }
+.modern-shop .service-details summary, .modern-shop .service-text-link { color: #395c75; }
+.modern-shop .service-quote { top: 20px; border-color: #d4e0e9; border-radius: 8px; background: #f0f5f8; color: #294356; }
+.modern-shop .service-quote h2 { color: #233e52; font: 700 29px/1.1 Arial, Helvetica, sans-serif; letter-spacing: -.04em; }
+.modern-shop #quote-description { color: #667e90; font-size: 12px; }
+.modern-shop .service-quote-lines { font-size: 12px; }
+.modern-shop .service-quote-lines dt { color: #5d778b; }
+.modern-shop .service-quote-lines dd { color: #2f5069; }
+.modern-shop .service-quote-total { border-color: #c9d9e5; }
+.modern-shop .service-quote-total > span { color: #627e93; }
+.modern-shop .service-quote-total output { color: #213b50; font: 700 clamp(1.8rem,2.5vw,2.5rem)/1.15 Arial, Helvetica, sans-serif; letter-spacing: -.04em; }
+.modern-shop .service-small-note, .modern-shop .service-local-note, .modern-shop #selected-product-size, .modern-shop .service-product-condition, .modern-shop .service-product-package { color: #6b8294; }
+.modern-shop .service-button { border-radius: 5px; font: 700 12px/1.4 Arial, Helvetica, sans-serif; }
+.modern-shop .service-button-dark { background: var(--red); color: #fff; }
+.modern-shop .service-button-dark:hover { background: #b92120; }
+.modern-shop .service-product-selection { border-color: #d9e3eb; background: #f8fafb; border-radius: 8px; }
+.modern-shop .service-product-selection h2 { color: #29465b; }
+.modern-shop .service-quiet-button { color: #54758e; }
+.modern-shop .service-catalog-return { border-color: #d8e3eb; }
+.modern-shop .service-catalog-return p { color: #73899b; }
+.modern-shop .service-summary-notice { border-color: #cedfe9; background: #f0f6fa; color: #52748d; }
+.modern-shop #summary-content .service-summary-price { font: 700 30px/1.2 Arial, Helvetica, sans-serif; color: #294b65; }
+.modern-shop .service-dialog-close { color: #4e718b; }
+.modern-shop #package-total-panel { margin-top: 22px; padding: 19px 0 0; border-top: 1px solid #c8d9e7; color: #345b77; }
+.modern-shop #package-total-panel :is(h2,h3) { margin: 0 0 12px; color: #203e56; font-family: Arial, Helvetica, sans-serif; font-weight: 700; letter-spacing: -.025em; }
+.modern-shop #package-total-panel p { font-size: 12px; line-height: 1.6; color: #668298; }
+.modern-shop #package-total-panel dl { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px 15px; margin: 15px 0; font-size: 12px; line-height: 1.5; }
+.modern-shop #package-total-panel dt { margin: 0; color: #58768c; }
+.modern-shop #package-total-panel dd { margin: 0; color: #284d69; text-align: right; font-weight: 700; }
+.modern-shop #package-total-panel strong, .modern-shop #package-total-panel output { color: #213f57; }
+.modern-shop #package-total-panel button, .modern-shop #package-total-panel a { font-family: Arial, Helvetica, sans-serif; }
+.modern-shop #package-total-panel .package-mode-options { display: grid; gap: 8px; margin: 16px 0; padding: 0; border: 0; }
+.modern-shop #package-total-panel .package-mode-options legend { padding: 0 0 9px; font-size: 11px; font-weight: 700; }
+.modern-shop #package-total-panel .package-mode-options label { display: flex; align-items: center; gap: 9px; min-height: 39px; padding: 10px 12px; border: 1px solid #c5d4df; border-radius: 5px; font-size: 12px; cursor: pointer; }
+.modern-shop #package-total-panel .package-mode-options label:has(input:checked) { background: #fff; border-color: #54758d; }
+.modern-shop #package-total-panel .package-mode-options input { margin: 0; accent-color: var(--red); }
+.modern-shop #package-total-panel .package-total-amount { display: grid; gap: 7px; margin-top: 20px; padding: 18px 0 3px; border-top: 1px solid #c5d4df; }
+.modern-shop #package-total-panel .package-total-amount span { max-width: 250px; font-size: 12px; line-height: 1.5; }
+.modern-shop #package-total-panel .package-total-amount strong { display: block; font: 700 34px/1.15 Arial, Helvetica, sans-serif; letter-spacing: -.04em; }
+.modern-shop #package-total-panel .package-open-costs { padding: 11px 12px; border-left: 2px solid #879eae; background: #e7eff5; }
+.modern-shop #package-total-panel .package-price-assumption { font-size: 10px; line-height: 1.5; }
+.modern-shop #package-total-panel .package-vehicle-note { font-size: 10px; }
+.modern-shop.modern-home .price-caption { margin-block: 6px; color: #62717d; font-size: 10px; line-height: 1.45; }
+.modern-shop.modern-home .sample-note { color: #697a87; font-size: 11px; line-height: 1.6; }
+
+@media (max-width: 1150px) {
+  .modern-shop .wrap, .modern-shop .modern-wrap { width: calc(100% - 48px); }
+  .modern-home main > .shop-vehicle-context { width: calc(100% - 48px); }
+  .modern-shop .modern-header-inner { gap: 18px; }
+  .modern-shop .modern-navigation { gap: 21px; font-size: 12px; }
+  .modern-shop .modern-vehicle-link { max-width: 210px; font-size: 11px; padding-inline: 12px; }
+  .catalog-page.modern-shop .shop-results .tire-search-results { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 15px; }
+  .catalog-page.modern-shop .preview-hero-content { padding: 30px 32px; }
+  .modern-shop .service-config-layout { grid-template-columns: minmax(0,1fr) 330px; gap: 20px; }
+  .modern-shop .service-form, .modern-shop .service-quote { padding: 24px; }
+}
+@media (max-width: 850px) {
+  .modern-shop .modern-header-inner { flex-wrap: wrap; gap: 8px 18px; padding-top: 7px; }
+  .modern-shop .modern-brand img { width: 132px; height: 48px; }
+  .modern-shop .modern-vehicle-link { margin-left: auto; max-width: min(270px,55vw); }
+  .modern-shop .modern-navigation { order: 3; width: 100%; border-top: 1px solid #edf0f2; justify-content: space-between; gap: 12px; font-size: 12px; }
+  .modern-shop .modern-navigation a { padding: 15px 0; }
+  .modern-shop .modern-navigation a::after { bottom: 7px; }
+  .catalog-page.modern-shop .shop-results .tire-search-results { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+  .catalog-page.modern-shop .preview-hero-content { padding: 28px; }
+  .catalog-page.modern-shop .preview-hero-media { min-height: 235px; }
+  .catalog-page.modern-shop .sample-extra-filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .modern-shop .service-config-layout { grid-template-columns: 1fr; }
+  .modern-shop .service-quote { position: static; }
+  .modern-shop .modern-footer nav { gap: 17px; }
+}
+@media (max-width: 600px) {
+  .modern-shop .wrap, .modern-shop .modern-wrap { width: calc(100% - 32px); }
+  .modern-home main > .shop-vehicle-context { width: calc(100% - 32px); }
+  .modern-shop .modern-utility { height: 24px; font-size: 7px; letter-spacing: .06em; }
+  .modern-shop .modern-header-inner { min-height: 75px; padding-top: 5px; }
+  .modern-shop .modern-brand img { width: 118px; height: 43px; }
+  .modern-shop .modern-vehicle-link { min-height: 36px; gap: 7px; padding: 8px 10px; font-size: 10px; max-width: 51vw; }
+  .modern-shop .modern-vehicle-symbol { font-size: 17px; }
+  .modern-shop .modern-navigation { font-size: 10px; gap: 8px; }
+  .modern-shop .modern-navigation a { padding: 13px 0; }
+  .catalog-page.modern-shop .shop-intro { margin-top: 18px; border-radius: 8px; grid-template-columns: 1fr; }
+  .catalog-page.modern-shop .preview-hero-content { padding: 27px; }
+  .catalog-page.modern-shop .shop-intro h1 { font-size: 47px; margin-block: 13px 10px; }
+  .catalog-page.modern-shop .shop-intro p { font-size: 12px; }
+  .catalog-page.modern-shop .preview-hero-media { min-height: 180px; }
+  .catalog-page.modern-shop .preview-hero-actions a { font-size: 11px; padding: 10px 13px; min-height: 40px; }
+  .catalog-page.modern-shop .preview-service-strip { padding: 14px 16px; }
+  .catalog-page.modern-shop .preview-service-strip strong { font-size: 13px; }
+  .catalog-page.modern-shop .preview-service-strip span, .catalog-page.modern-shop .preview-service-strip small { font-size: 10px; line-height: 1.55; }
+  .catalog-page.modern-shop .preview-catalog-strip { font-size: 10px; gap: 6px; padding-block: 13px; }
+  .catalog-page.modern-shop .shop-results h2 { font-size: 27px; margin-bottom: 17px; }
+  .catalog-page.modern-shop .vehicle-filter { padding: 17px; margin-bottom: 17px; }
+  .catalog-page.modern-shop .sample-filters { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; }
+  .catalog-page.modern-shop .sample-filters label:first-child { grid-column: 1/-1; }
+  .catalog-page.modern-shop .sample-extra-filters label:first-child { grid-column: auto; }
+  .catalog-page.modern-shop .sample-filters label { font-size: 11px; }
+  .catalog-page.modern-shop .sample-filters :is(input,select) { min-height: 42px; font-size: 12px; width: 100%; min-width: 0; }
+  .catalog-page.modern-shop .vehicle-filter .sample-filters { grid-template-columns: 1fr; }
+  .catalog-page.modern-shop .vehicle-filter .sample-filters label:first-child { grid-column: auto; }
+  .catalog-page.modern-shop .shop-results .tire-search-results { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+  .catalog-page.modern-shop .shop-results .tire-result { padding: 9px; gap: 9px; border-radius: 7px; }
+  .catalog-page.modern-shop .shop-results .tire-result .tire-result-image-box { aspect-ratio: 1; }
+  .catalog-page.modern-shop .shop-results .tire-result .tire-result-image { padding: 8px; }
+  .catalog-page.modern-shop .shop-results .tire-result h3 { font-size: 12px; }
+  .catalog-page.modern-shop .shop-results .tire-result-meta { font-size: 10px; }
+  .catalog-page.modern-shop .sample-price strong { font-size: 20px; }
+  .catalog-page.modern-shop .sample-price small { font-size: 9px; }
+  .catalog-page.modern-shop .preview-product-controls { grid-template-columns: 53px minmax(0,1fr); gap: 7px; }
+  .catalog-page.modern-shop .preview-product-controls label { font-size: 10px; }
+  .catalog-page.modern-shop .preview-product-controls select { min-height: 40px; padding: 7px; width: 100%; }
+  .catalog-page.modern-shop .tire-result-select, .catalog-page.modern-shop .preview-product-dialog .tire-result-select { min-height: 40px; font-size: 10px; padding: 9px 7px; }
+  .modern-shop .shop-vehicle-context { gap: 9px 12px; margin-block: 16px; padding: 15px 16px; }
+  .modern-shop .shop-vehicle-label { font-size: 12px; }
+  .modern-shop .shop-vehicle-note { flex-basis: 100%; font-size: 10px; }
+  .modern-shop .shop-vehicle-review, .modern-shop .shop-vehicle-clear { font-size: 10px; padding: 7px 9px; }
+  .modern-shop.service-preview .service-config-page { padding-top: 28px; }
+  .modern-shop.service-preview .service-page-intro h1 { font-size: 39px; }
+  .modern-shop.service-preview .service-page-intro > p:last-child { font-size: 12px; line-height: 1.6; }
+  .modern-shop .service-form, .modern-shop .service-quote { padding: 21px; }
+  .modern-shop .service-form legend { font-size: 13px; }
+  .modern-shop .service-choice { padding: 14px; }
+  .modern-shop .service-choice strong { font-size: 12px; }
+  .modern-shop .service-choice small { font-size: 11px; }
+  .modern-shop .service-fields { gap: 13px; }
+  .modern-shop .service-quote h2 { font-size: 27px; }
+  .modern-shop .local-selection-launcher { right: 12px; bottom: 12px; font-size: 11px; padding: 11px 15px; }
+  .modern-shop .modern-footer { padding-block: 28px; }
+  .modern-shop .modern-footer > div { grid-template-columns: 1fr; gap: 20px; }
+  .modern-shop .modern-footer nav { justify-content: flex-start; gap: 20px; }
+  .modern-shop .modern-footer p, .modern-shop .modern-footer nav a { font-size: 10px; }
+  .modern-shop .modern-footer .modern-footer-note { font-size: 9px; }
+}
+@media (max-width: 340px) {
+  .catalog-page.modern-shop .shop-results .tire-search-results { grid-template-columns: 1fr; }
+  .modern-shop .modern-navigation { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modern-shop * { transition: none !important; scroll-behavior: auto !important; }
+}
+
+.modern-shop .modern-header-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}.modern-shop .modern-cart-link{display:inline-flex;align-items:center;gap:8px;min-height:42px;background:#202a32;color:#fff;padding:9px 12px;border-radius:5px;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap}.modern-shop .modern-cart-link [data-shop-cart-count]{display:grid;place-items:center;min-width:20px;min-height:20px;background:#fff;color:#202a32;border-radius:50%;font-size:10px}@media(max-width:1200px){.modern-shop .modern-header-inner{flex-wrap:wrap;gap:8px 16px;padding-top:7px}.modern-shop .modern-header-actions{margin-left:auto}.modern-shop .modern-navigation{order:3;width:100%;justify-content:space-between;border-top:1px solid #edf0f2}.modern-shop .modern-navigation a{padding:14px 0}.modern-shop .modern-navigation a:after{bottom:7px}}@media(max-width:600px){.modern-shop .modern-header-actions{gap:7px}.modern-shop .modern-cart-word{display:none}.modern-shop .modern-cart-link{min-height:36px;padding:8px;gap:5px}.modern-shop .modern-vehicle-link{max-width:32vw}.modern-shop .modern-vehicle-link [data-shop-vehicle-label]{max-width:23vw}}
+
+.modern-shop .local-selection-launcher[hidden]{display:none!important}

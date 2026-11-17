@@ -9,9 +9,12 @@ Provider contracts (only these whitelisted fields are retained):
   fitment={confirmed, identity_hash, vehicle_ref, evidence_id}; new_part,
   painting_eligible; required_fees_confirmed, required_fees (codes); diameter,
   tyre_size (for wheel assembly).
-* retail_quote(product, aggregate_quantity): confirmed, product_id,
+* retail_quote(product, procurement_quantity): confirmed, product_id,
   identity_hash, quantity, mode, currency='eur', unit_gross_cent, stock,
   observed_at, expires_at, vat_percent='19.00', procurement_confirmed=True.
+  Called once per exact product/destination aggregate (one supplier position),
+  not once for the cart-wide quantity. Every reported stock must cover the
+  product's total demand across destinations; a split never duplicates stock.
 * rsu_mapping(product): confirmed, product_id, identity_hash, supplier='RSU',
   supplier_article_id, evidence_id.
 * service_quote(code, product, quantity, options): confirmed, product_id,
@@ -149,6 +152,12 @@ def normalize_cart(payload):
     return result
 
 
+def _destination(row):
+    options = row['services']
+    return 'workshop' if (row['assembly_group'] or any(options[k] for k in
+        ('mounting', 'painting', 'installation', 'oil_service')) or options['care']) else 'customer'
+
+
 @dataclass(frozen=True)
 class CartQuote:
     _json_snapshot: str
@@ -247,12 +256,31 @@ class CartQuoteService:
             context = json.loads(context_json)
         except (TypeError, ValueError):
             raise QuoteInputError('invalid_delivery_context') from None
-        now = self.clock()
-        if not isinstance(now, datetime) or now.tzinfo is None:
-            raise ValueError('aware_clock_required')
-        now = now.astimezone(timezone.utc)
+        def clock_stamp():
+            value = self.clock()
+            if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError('aware_clock_required')
+            return value.astimezone(timezone.utc)
+
+        now = clock_stamp()
         expiry = now + TTL
         reasons, products, mappings, prices, demand = [], {}, {}, {}, {}
+
+        def tick():
+            nonlocal now
+            current = clock_stamp()
+            if current < now:
+                raise ValueError('clock_moved_backwards')
+            now = current
+            return current
+
+        def call(provider, *args):
+            response = self._call(provider, *args)
+            # Provider IO may finish after the request-start clock. Validate
+            # actual observations against the current clock without backdating
+            # the provider or extending the original maximum quote lifetime.
+            tick()
+            return response
 
         def block(code, **where):
             item = {'code': code, **where}
@@ -264,10 +292,14 @@ class CartQuoteService:
             if stamp is not None:
                 expiry = min(expiry, stamp)
 
-        for row in rows:
+        position_demand = {}
+        destinations = [_destination(row) for row in rows]
+        for row, destination in zip(rows, destinations):
             demand[row['id']] = demand.get(row['id'], 0) + row['quantity']
+            key = (row['id'], destination)
+            position_demand[key] = position_demand.get(key, 0) + row['quantity']
         for identifier, count in sorted(demand.items()):
-            p = self._call(self.catalogue_lookup, identifier)
+            p = call(self.catalogue_lookup, identifier)
             prefix = identifier.split(':', 1)[0]
             if (not p or p.get('id') != identifier or not isinstance(p.get('category'), str) or p.get('category') not in CATEGORIES
                     or (p['category'] != prefix if prefix != 'parts' else p['category'] in WHEELS)
@@ -296,29 +328,34 @@ class CartQuoteService:
                     or len(set(fees)) != len(fees)):
                 block('required_fees_unconfirmed', product_id=identifier)
                 p['required_fees'] = []
-            mapping = self._call(self.rsu_mapping, p)
+            mapping = call(self.rsu_mapping, p)
             if (not mapping or mapping.get('confirmed') is not True or mapping.get('product_id') != identifier
                     or mapping.get('identity_hash') != p['identity_hash'] or mapping.get('supplier') != 'RSU'
                     or not _text(mapping.get('supplier_article_id'), 100) or not _text(mapping.get('evidence_id'))):
                 block('rsu_mapping_unconfirmed', product_id=identifier)
             else:
                 mappings[identifier] = {key: mapping[key] for key in ('supplier_article_id', 'evidence_id')}
-            price = self._call(self.retail_quote, p, count)
-            until, error = self._current(price, now)
-            if error:
-                block(error, product_id=identifier, dependency='retail_quote')
-            elif (price.get('product_id') != identifier or price.get('identity_hash') != p['identity_hash']
-                    or type(price.get('quantity')) is not int or price['quantity'] != count):
-                block('price_identity_unconfirmed', product_id=identifier)
-            elif not _amount(price.get('unit_gross_cent')) or not _amount(price['unit_gross_cent'] * count):
-                block('price_amount_unconfirmed', product_id=identifier)
-            elif type(price.get('stock')) is not int or not count <= price['stock'] <= 1_000_000_000:
-                block('stock_insufficient_or_unconfirmed', product_id=identifier)
-            elif price.get('procurement_confirmed') is not True:
-                block('procurement_price_unconfirmed', product_id=identifier)
-            else:
-                prices[identifier] = {'unit_gross_cent': price['unit_gross_cent'], 'stock': price['stock']}
-                shorten(until)
+            for (product_id, destination), position_count in sorted(position_demand.items()):
+                if product_id != identifier:
+                    continue
+                price = call(self.retail_quote, p, position_count)
+                until, error = self._current(price, now)
+                if error:
+                    block(error, product_id=identifier, destination=destination, dependency='retail_quote')
+                elif (price.get('product_id') != identifier or price.get('identity_hash') != p['identity_hash']
+                        or type(price.get('quantity')) is not int or price['quantity'] != position_count):
+                    block('price_identity_unconfirmed', product_id=identifier, destination=destination)
+                elif not _amount(price.get('unit_gross_cent')) or not _amount(price['unit_gross_cent'] * position_count):
+                    block('price_amount_unconfirmed', product_id=identifier, destination=destination)
+                elif type(price.get('stock')) is not int or not count <= price['stock'] <= 1_000_000_000:
+                    # count is global demand, not just this position's quantity:
+                    # min(all actual reported stocks) must cover both shipments.
+                    block('stock_insufficient_or_unconfirmed', product_id=identifier, destination=destination)
+                elif price.get('procurement_confirmed') is not True:
+                    block('procurement_price_unconfirmed', product_id=identifier, destination=destination)
+                else:
+                    prices[(identifier, destination)] = {'unit_gross_cent': price['unit_gross_cent'], 'stock': price['stock']}
+                    shorten(until)
 
         procurement = {}
         for identifier, mapping in mappings.items():
@@ -341,7 +378,7 @@ class CartQuoteService:
                      and members[0]['quantity'] == members[1]['quantity']
                      and type(rim.get('diameter')) is int and rim['diameter'] == tyre.get('diameter'))
             if valid:
-                proof = self._call(self.assembly_fitment, rim, tyre, vehicle_ref)
+                proof = call(self.assembly_fitment, rim, tyre, vehicle_ref)
                 tyre_size = tyre.get('tyre_size')
                 size = re.fullmatch(r'[0-9]{3}/[0-9]{2,3}\s*R([0-9]{2})(?:\s+[A-Za-z0-9 +./()\-]+)?', tyre_size or '') if isinstance(tyre_size, str) else None
                 valid = (proof is not None and proof.get('confirmed') is True and bool(vehicle_ref)
@@ -364,11 +401,11 @@ class CartQuoteService:
         priced_lines, shipments = [], {}
         known, known_any = 0, False
         for index, row in enumerate(rows):
-            p, price = products.get(row['id']), prices.get(row['id'])
+            destination = destinations[index]
+            p, price = products.get(row['id']), prices.get((row['id'], destination))
             options = row['services']
             if not p:
                 continue
-            destination = 'workshop' if (row['assembly_group'] or any(options[k] for k in ('mounting', 'painting', 'installation', 'oil_service')) or options['care']) else 'customer'
             item = {'id': row['id'], 'identity_hash': p['identity_hash'], 'name': p['name'].strip(),
                     'category': p['category'], 'quantity': row['quantity'], 'destination': destination,
                     'unit_gross_cent': price['unit_gross_cent'] if price else None,
@@ -403,7 +440,7 @@ class CartQuoteService:
                     requests.append((code, request_options))
             requests.extend(('required:' + code, {}) for code in p['required_fees'])
             for code, service_options in requests:
-                response = self._call(self.service_quote, code, p, row['quantity'], service_options)
+                response = call(self.service_quote, code, p, row['quantity'], service_options)
                 until, error = self._current(response, now)
                 if error or (response.get('product_id') != p['id'] or response.get('identity_hash') != p['identity_hash']
                              or type(response.get('quantity')) is not int or response['quantity'] != row['quantity']
@@ -431,7 +468,7 @@ class CartQuoteService:
             shipment['items'] = [{'id': item['id'], 'quantity': item['quantity']} for item in shipment['private_items']]
             shipment['context_hash'] = _hash(context)
             shipment['shipment_hash'] = _hash({key: shipment[key] for key in ('id', 'destination', 'private_items', 'context_hash')})
-            response = self._call(self.freight_quote, json.loads(_json(shipment)), json.loads(context_json)) if all(item['mapping'] for item in shipment['private_items']) else None
+            response = call(self.freight_quote, json.loads(_json(shipment)), json.loads(context_json)) if all(item['mapping'] for item in shipment['private_items']) else None
             until, error = self._current(response, now)
             if error or (response.get('shipment_hash') != shipment['shipment_hash'] or response.get('context_hash') != shipment['context_hash']
                          or not _amount(response.get('gross_cent'), zero=True)):
@@ -441,6 +478,9 @@ class CartQuoteService:
                 shipment['gross_cent'] = response['gross_cent']
                 known += response['gross_cent']
                 known_any = True
+        tick()
+        if expiry <= now:
+            block('quote_expired')
         if not _amount(known, zero=True):
             block('total_exceeds_limit')
             known = None

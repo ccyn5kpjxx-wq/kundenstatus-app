@@ -3163,7 +3163,7 @@ def configure_website_upload_limit():
         request.max_content_length = (WEBSITE_ANFRAGE_MAX_GESAMT_MB + 1) * 1024 * 1024
     if (request.endpoint or "").startswith(("reifen_kauf.", "reifen_vertrag.")) and request.method == "POST":
         request.max_content_length = 262144 if request.endpoint == "reifen_kauf.webhook" else 16384
-    if (request.endpoint or "").startswith("shop_public_v2.") and request.method == "POST":
+    if (request.endpoint or "").startswith(("shop_public_v2.", "shop_buyer_v2.")) and request.method in {"POST", "PUT", "DELETE"}:
         request.max_content_length = 262144 if request.endpoint == "shop_public_v2.stripe_webhook" else 16384
 
 
@@ -3205,11 +3205,18 @@ def restrict_public_site_service():
     # The stateless homepage only reads released products. On a persistent
     # portal (including its configured public hostname), the exact v2 handlers
     # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
-    if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product"} and request.method == "GET":
+    if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product", "shop_media_v2.image"} and request.method == "GET":
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {
             "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
-            "shop_public_v2.order_status", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook"}:
+            "shop_public_v2.order_status", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook",
+            "shop_buyer_v2.session_state", "shop_buyer_v2.address", "shop_buyer_v2.sign_out"}:
+        return None
+    if request.method == "GET" and request.endpoint in {
+            "shop_frontend.home", "shop_frontend.felgen", "shop_frontend.reifen",
+            "shop_frontend.komplettraeder", "shop_frontend.ersatzteile", "shop_frontend.zubehoer",
+            "shop_frontend.service", "shop_frontend.warenkorb",
+            "shop_frontend.order_success", "shop_frontend.order_cancel"}:
         return None
     if (request.endpoint not in allowed_endpoints
             and not (request.endpoint or '').startswith(('mos_public.', 'mos_termination.'))):
@@ -3234,6 +3241,11 @@ def protect_csrf():
         return None
     if request.endpoint in {'mos_public.webhook', 'reifen_kauf.webhook', 'shop_public_v2.stripe_webhook'}:
         return None  # Exact endpoint verifies raw Stripe signature, never a browser action.
+    if request.endpoint in {'shop_public_v2.cart_quote', 'shop_public_v2.create_order_draft',
+                            'shop_public_v2.start_checkout', 'shop_buyer_v2.address', 'shop_buyer_v2.sign_out'}:
+        # Exact handlers verify the separate opaque retail session, HTTPS
+        # origin and buyer CSRF. Never substitute an admin/partner session.
+        return None
     if request.path.startswith("/webhooks/whatsapp"):
         return None
     if request.path == "/api/klick":
@@ -46953,6 +46965,8 @@ def homepage_jahreszeit(heute=None):
 @app.get("/shop/<any(felgen,reifen):shop_category>")
 def oeffentlicher_shop(shop_category):
     """Independent public shop entry with the established offer request flow."""
+    if app.config.get('SHOP_FRONTEND_ENABLED') is True:
+        return redirect(url_for('shop_frontend.' + (shop_category or 'home')), code=302)
     shop_path = url_for("oeffentlicher_shop", shop_category=shop_category)
     anfrage_url = homepage_portal_links()["anfrage"]
     return render_template(

@@ -18,7 +18,7 @@ MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
 
 
-def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None):
+def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None, catalogue_warmup=None):
     """Return an unregistered blueprint; all features default off.
 
     ``authorize_quote(request)`` must verify the host session and CSRF token and
@@ -88,6 +88,16 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             raise ValueError()
         return payload
 
+    def warm_prices(items, *, quantities=(1, 4)):
+        if not callable(catalogue_warmup):
+            return False
+        identifiers = [row['id'] for row in items[:24] if isinstance(row, dict)
+                       and isinstance(row.get('id'), str)]
+        try:
+            return bool(catalogue_warmup(identifiers, quantities=quantities))
+        except Exception:
+            return False
+
     @bp.get('/products')
     def products():
         if not catalogue_enabled():
@@ -105,7 +115,15 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
                     return reply({'error': 'invalid_query'}, 400)
                 params[field] = int(params[field])
         try:
-            return reply(catalogue.page(**params))
+            result = catalogue.page(**params)
+            if callable(catalogue_warmup) and isinstance(result, dict) and isinstance(result.get('items'), list):
+                pending = warm_prices(result['items'])
+                if not pending:
+                    # The background worker may have completed between the
+                    # initial cache projection and the warmup decision.
+                    result = catalogue.page(**params)
+                result['prices_refreshing'] = pending
+            return reply(result)
         except ValueError:
             return reply({'error': 'invalid_query'}, 400)
         except Exception:
@@ -117,7 +135,11 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'not_found'}, 404)
         if catalogue is None:
             return reply({'error': 'catalogue_unavailable'}, 503)
-        if request.args or len(product_id) > 100:
+        if (set(request.args) - {'quantity'} or any(len(v) != 1 for _, v in request.args.lists())
+                or len(product_id) > 100):
+            return reply({'error': 'invalid_query'}, 400)
+        quantity = request.args.get('quantity')
+        if quantity is not None and (not re.fullmatch(r'[0-9]{1,2}', quantity) or not 1 <= int(quantity) <= 20):
             return reply({'error': 'invalid_query'}, 400)
         try:
             value = catalogue.get(product_id)
@@ -125,7 +147,23 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'invalid_product_id'}, 400)
         except Exception:
             return reply({'error': 'catalogue_unavailable'}, 503)
-        return reply({'item': value}, maximum=MAX_DETAIL_RESPONSE) if value is not None else reply({'error': 'product_not_found'}, 404)
+        if value is None:
+            return reply({'error': 'product_not_found'}, 404)
+        if quantity is not None and value.get('category') in {'tyre', 'alloy_wheel', 'steel_wheel'} and int(quantity) > 4:
+            return reply({'error': 'invalid_query'}, 400)
+        result = {'item': value}
+        if callable(catalogue_warmup):
+            pending = warm_prices([value], quantities=(int(quantity),) if quantity else (1, 4))
+            if not pending:
+                try:
+                    value = catalogue.get(product_id)
+                except Exception:
+                    return reply({'error': 'catalogue_unavailable'}, 503)
+                if value is None:
+                    return reply({'error': 'product_not_found'}, 404)
+                result['item'] = value
+            result['prices_refreshing'] = pending
+        return reply(result, maximum=MAX_DETAIL_RESPONSE)
 
     @bp.post('/cart/quote')
     def cart_quote():

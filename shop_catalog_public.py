@@ -142,7 +142,7 @@ def _quote(row):
     source = row.get("quote_public") if wheel else row.get("price")
     if not isinstance(source, Mapping) or row.get("price_status") == "review_pending":
         return None
-    if wheel and source.get("source") != "ALZURA":
+    if wheel and source.get("source") not in {"ALZURA", "RSU"}:
         return None
     if ("currency" in source and source["currency"] not in ("EUR", "eur")
             or "vat_percent" in source and source["vat_percent"] != "19.00"):
@@ -192,7 +192,7 @@ class PublicCatalog:
     ``verified_fitments`` is separate from unreviewed provider vehicle hints.
     """
     def __init__(self, products: Iterable, *, released_ids, image_urls=None,
-                 document_urls=None, verified_fitments=None, clock=None):
+                 document_urls=None, verified_fitments=None, clock=None, quote_lookup=None):
         if (isinstance(products, (str, bytes, Mapping)) or not isinstance(products, Iterable)
                 or isinstance(released_ids, (str, bytes)) or not isinstance(released_ids, (set, frozenset, list, tuple))
                 or len(released_ids) > MAX_PRODUCTS
@@ -203,6 +203,11 @@ class PublicCatalog:
         documents = document_urls if isinstance(document_urls, Mapping) else {}
         verified = verified_fitments if isinstance(verified_fitments, Mapping) else {}
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        if quote_lookup is not None and not callable(quote_lookup):
+            raise CatalogError('invalid_quote_lookup')
+        # This callback reads an already populated public-price cache only;
+        # it must never perform supplier IO in the HTTP browsing thread.
+        self._quote_lookup = quote_lookup
         self._rows = {}
         for count, row in enumerate(products, 1):
             if count > MAX_PRODUCTS:
@@ -281,6 +286,16 @@ class PublicCatalog:
     def _now(self, supplied):
         return _stamp(self._clock() if supplied is None else supplied)
 
+    def _cached_entry(self, entry):
+        if self._quote_lookup is None:
+            return entry
+        try:
+            value = self._quote_lookup(entry['public']['id'])
+            quote = _quote({'category': entry['public']['category'], 'quote_public': value})
+            return {**entry, 'quote': quote or entry['quote']}
+        except Exception:
+            return entry
+
     @staticmethod
     def _project(entry, now, *, detail=True):
         product = deepcopy(entry["public"])
@@ -303,7 +318,7 @@ class PublicCatalog:
             raise CatalogError("invalid_product_id")
         current = self._now(now)
         entry = self._rows.get(product_id)
-        return self._project(entry, current) if entry else None
+        return self._project(self._cached_entry(entry), current) if entry else None
 
     def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None, now=None):
@@ -344,6 +359,6 @@ class PublicCatalog:
             rows.append(entry)
         rows.sort(key=lambda entry: (_fold(entry["public"]["name"]), entry["public"]["id"]))
         offset = (page - 1) * page_size
-        return {"items": [self._project(row, current, detail=False) for row in rows[offset:offset + page_size]],
+        return {"items": [self._project(self._cached_entry(row), current, detail=False) for row in rows[offset:offset + page_size]],
                 "page": page, "page_size": page_size, "total": len(rows),
                 "has_more": offset + page_size < len(rows), "as_of": current.isoformat()}
