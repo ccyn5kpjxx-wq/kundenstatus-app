@@ -190,10 +190,14 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         # Only a currently bound RSU quote can supply a price. Unbound rows
         # remain visible with their released media, without numeric Richtpreise.
         display_rows = [{**row, 'quote_public': None, 'price': None, 'sample_price_cents': None} for row in rows]
+        compatible_pairs = bundle.get('compatible_pairs')
+        if fixed_prices and bundle.get('reviewed_rim_width_registry') is not None:
+            from shop_rim_width_candidates import released_width_pairs
+            compatible_pairs = released_width_pairs(bundle, approved_ids=set(seeds['records']))
         catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
             image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
             verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
-            compatible_pairs=bundle.get('compatible_pairs'), quote_lookup=cache.get,
+            compatible_pairs=compatible_pairs, quote_lookup=cache.get,
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
             product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
