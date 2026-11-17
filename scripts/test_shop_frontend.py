@@ -91,10 +91,10 @@ class FrontendChecks(unittest.TestCase):
         source = self.client.get('/shop/warenkorb/').get_data(as_text=True)
         self.assertIn('id="buyer-address"', source)
         selects = [attrs for tag, attrs in Markup(source).tags if tag == 'select']
-        self.assertEqual(selects, [{'name': 'delivery_salutation', 'autocomplete': 'off'}])
+        self.assertEqual(selects, [{'name': 'delivery_salutation', 'autocomplete': 'off'}, {'name': 'workshop_delivery'}])
         options = [attrs for tag, attrs in Markup(source).tags if tag == 'option']
-        self.assertEqual([attrs.get('value') for attrs in options], ['', 'Herr', 'Frau', 'Firma'])
-        self.assertFalse(any('selected' in attrs for attrs in options))
+        self.assertEqual([attrs.get('value') for attrs in options], ['', 'Herr', 'Frau', 'Firma', 'collection', 'customer_reshipment'])
+        self.assertEqual([attrs.get('value') for attrs in options if 'selected' in attrs], ['collection'])
         self.assertIn('data-checkout-enabled="true"', source)
         self.assertIn('data-consumer-enabled="true"', source)
         self.assertIn('id="checkout-button"', source)
@@ -201,6 +201,17 @@ const product = {id, category:'tyre', name:'SYNTHETIC tyre', size:'205/55 R16', 
  currency:'EUR',vat_percent:'19.00',observed_at:'2026-11-17T11:59:00Z',expires_at:'2026-11-17T12:10:00Z',stock_reported:8,
  prices_by_quantity:{'1':{quantity:1,unit_gross_cent:12345,items_gross_cent:12345},'4':{quantity:4,unit_gross_cent:12000,items_gross_cent:48000}}}};
 assert.equal(logic.currentPrice(product,4,now).total,48000);
+const published={...product,price:{...product.price,source:'RSU',kind:'merchant_pricebook',
+ observed_at:'2026-11-15T12:00:00Z',expires_at:'2026-11-22T12:00:00Z',
+ stock_observed_at:'2026-11-15T12:00:00Z',stock_expires_at:'2026-11-15T12:15:00Z'}};
+assert.equal(logic.currentPrice(published,4,now).total,48000);
+assert.equal(logic.currentPrice(published,4,now).stockCurrent,false);
+assert.equal(logic.currentPrice({...published,price:{...published.price,stock_reported:0}},4,now).total,48000);
+assert.equal(logic.currentPrice({...published,price:{...published.price,source:'ALZURA'}},4,now),null);
+assert.equal(logic.currentPrice({...published,price:{...published.price,kind:'supplier_quote'}},4,now),null);
+assert.equal(logic.currentPrice({...published,price:{...published.price,expires_at:'2026-11-23T12:00:00Z'}},4,now),null);
+assert.equal(logic.quotedPrice({...product,purchase_status:'inquiry_only'},4,now),null);
+assert.equal(logic.currentPrice({...product,purchase_status:'inquiry_only'},4,now),null);
 assert.equal(logic.currentPrice(product,4,Date.parse('2026-11-17T12:10:00Z')),null);
 assert.equal(logic.currentPrice({...product,price_status:'update_required'},1,now),null);
 assert.equal(logic.currentPrice({...product,price:{...product.price,currency:'USD'}},1,now),null);
@@ -234,6 +245,9 @@ assert.deepEqual(logic.normaliseCart([{id,quantity:1,services:{mounting:'true'}}
 assert.equal(logic.buildQuery({q:'205/55 R16',page_size:'9999',token:'PRIVATE_CANARY',tsn:'bht'},'tyres',2).get('page_size'),'24');
 assert.equal(logic.buildQuery({token:'PRIVATE_CANARY'},'tyres',2).has('token'),false);
 assert.equal(logic.buildQuery({tsn:'bht'},'wheels',2).get('tsn'),'BHT');
+assert.equal(logic.buildQuery({width:'255',ratio:'40',diameter:'19'},'tyres',1).get('width'),'255');
+assert.equal(logic.buildQuery({width:'255',ratio:'40',diameter:'19'},'tyres',1).get('ratio'),'40');
+assert.equal(logic.buildQuery({diameter:'19'},'wheels',1).get('diameter'),'19');
 assert.deepEqual(logic.vehicleQuery({make:' Audi ',model:'',year:''}),{make:'Audi'});
 assert.deepEqual(logic.vehicleQuery({keys:'0588 / bht'}),{hsn:'0588',tsn:'BHT'});
 assert.deepEqual(logic.vehicleQuery({keys:'0588BHT'}),{hsn:'0588',tsn:'BHT'});
@@ -407,17 +421,19 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
 (async()=>{
  // Missing/false warmup flags do not create background GET timers.
  for(const flag of [undefined,false]){const f=await boot(()=>page(pending(),flag));assert.equal(f.clock.jobs.size,0);assert.equal(f.calls.length,1);}
- // ALZURA market prices stay numeric, but never imply confirmed RSU supply.
+ // Unmapped raw prices are never displayed or usable, even in an old response.
  const marketProduct={...priced(),purchase_status:'inquiry_only',price_label:'Richtpreis'};
  const market=await boot(url=>url.includes('/products?')?page(marketProduct,false):{item:marketProduct,prices_refreshing:false});
- const marketCard=market.nodes['catalog-products'].children[0],marketPrice=find(marketCard,'shop-price');assert.equal(find(marketPrice,'shop-price-kind').textContent,'Richtpreis');assert.ok(walk(marketPrice).some(n=>n.tagName==='STRONG'&&n.textContent==='123,45 €'));assert.ok(walk(marketPrice).some(n=>n.textContent==='Preis und Verfügbarkeit auf Anfrage'));assert.equal(walk(marketPrice).some(n=>n.textContent==='20 Stück gemeldet'),false);
- const marketAdd=walk(marketCard).find(n=>n.tagName==='BUTTON'&&n.textContent==='Zur Anfrageauswahl');assert.ok(marketAdd);marketAdd.listeners.click();assert.equal(JSON.parse(market.stored.at(-1))[0].id,A);assert.equal(JSON.stringify(JSON.parse(market.stored.at(-1))).includes('price'),false);
- find(marketCard,'shop-detail-link').listeners.click();await flush();assert.equal(find(market.nodes['product-detail'],'shop-price-kind').textContent,'Richtpreis');assert.ok(walk(market.nodes['product-detail']).some(n=>n.textContent==='Zur Anfrageauswahl'));
+ const marketCard=market.nodes['catalog-products'].children[0],marketPrice=find(marketCard,'shop-price');assert.equal(find(marketPrice,'shop-price-kind'),undefined);assert.ok(walk(marketPrice).some(n=>n.tagName==='STRONG'&&n.textContent==='Aktuell nicht bestellbar'));assert.equal(walk(marketPrice).some(n=>n.textContent.includes('123,45')||n.textContent.includes('Richtpreis')||n.textContent==='20 Stück gemeldet'),false);
+ const marketAdd=walk(marketCard).find(n=>n.tagName==='BUTTON'&&n.textContent==='Aktuell nicht bestellbar');assert.ok(marketAdd);assert.equal(marketAdd.disabled,true);marketAdd.listeners.click();assert.deepEqual(JSON.parse(market.stored.at(-1)),[]);
+ find(marketCard,'shop-detail-link').listeners.click();await flush();assert.ok(walk(market.nodes['product-detail']).some(n=>n.tagName==='BUTTON'&&n.disabled&&n.textContent==='Aktuell nicht bestellbar'));assert.equal(walk(market.nodes['product-detail']).some(n=>n.textContent.includes('123,45')||n.textContent.includes('Richtpreis')),false);
  const bound=await boot(()=>page({...priced(),purchase_status:'supplier_check_required'},false));assert.equal(find(bound.nodes['catalog-products'],'shop-price-kind'),undefined);assert.ok(walk(bound.nodes['catalog-products']).some(n=>n.textContent==='In den Warenkorb'));
  const labelUrl='/shop/documents/'+'d'.repeat(64)+'.jpg',sheetUrl='/shop/documents/'+'e'.repeat(64)+'.pdf';
  const documented=await boot(()=>page({...priced(),product_documents:{tyre_label_url:labelUrl,tyre_sheet_url:sheetUrl,eprel_id:'12345'}},false));const labelButton=find(documented.nodes['catalog-products'],'shop-tyre-label');assert.ok(labelButton);assert.equal(labelButton.children[0].src,labelUrl);assert.ok(labelButton['aria-label'].includes('vergrößert ansehen'));assert.ok(walk(documented.nodes['catalog-products']).some(n=>n.tagName==='A'&&n.href===sheetUrl&&n.textContent==='Produktdatenblatt (PDF) ↗'));labelButton.listeners.click();const labelDialog=find(documented.document.body,'shop-document-dialog');assert.equal(labelDialog.open,true);assert.ok(walk(labelDialog).some(n=>n.tagName==='IMG'&&n.src===labelUrl));
  const badDocs=await boot(()=>page({...priced(),product_documents:{tyre_label_url:'https://foreign.test/private.jpg',tyre_sheet_url:'javascript:unsafe'}},false));assert.equal(find(badDocs.nodes['catalog-products'],'shop-tyre-label'),undefined);assert.ok(walk(badDocs.nodes['catalog-products']).some(n=>n.textContent==='EU-Reifenlabel und Produktdatenblatt werden noch geprüft.'));
- let marketReads=0;const marketPoll=await boot(()=>++marketReads===1?page({...pending(),purchase_status:'inquiry_only'},true):page(priced(),false));await marketPoll.clock.next();assert.equal(find(marketPoll.nodes['catalog-products'],'shop-price-kind').textContent,'Richtpreis');assert.ok(walk(marketPoll.nodes['catalog-products']).some(n=>n.textContent==='123,45 €'));
+ let marketReads=0;const marketPoll=await boot(()=>++marketReads===1?page({...pending(),purchase_status:'inquiry_only',price_status:'not_offered'},true):page(priced(),false));assert.equal(marketPoll.clock.jobs.size,0);assert.equal(marketPoll.calls.length,1);assert.ok(walk(marketPoll.nodes['catalog-products']).some(n=>n.textContent==='Aktuell nicht bestellbar'));assert.equal(walk(marketPoll.nodes['catalog-products']).some(n=>n.textContent==='Preis wird aktualisiert'),false);
+ const unofferedPart={...priced('parts:'+'d'.repeat(24)),category:'body_part',department:'parts',purchase_status:'inquiry_only',price_status:'current'};
+ const parts=await boot(url=>url.includes('/products?')?page(unofferedPart,true):{item:unofferedPart,prices_refreshing:true},{mode:'ersatzteile'});assert.equal(parts.clock.jobs.size,0);const partsCard=parts.nodes['catalog-products'].children[0];assert.ok(walk(partsCard).some(n=>n.tagName==='BUTTON'&&n.disabled&&n.textContent==='Aktuell nicht bestellbar'));assert.equal(walk(partsCard).some(n=>n.textContent.includes('123,45')||n.textContent.includes('Richtpreis')),false);find(partsCard,'shop-detail-link').listeners.click();await flush();assert.equal(walk(parts.nodes['product-detail']).some(n=>n.textContent.includes('123,45')||n.textContent.includes('Richtpreis')),false);assert.equal(parts.clock.jobs.size,0);
  // A warmup response updates the existing card/price node and preserves controls.
  let n=0;const f=await boot(()=>++n===1?page(pending(),true):page(priced(),false));
  const card=f.nodes['catalog-products'].children[0],price=find(card,'shop-price'),select=find(card,'shop-quantity');
@@ -460,7 +476,7 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  assert.equal(cart.nodes['cart-items'].children[0],cartLine);assert.equal(find(cartLine,'shop-quantity'),cartSelect);assert.equal(cartSelect.value,'2');assert.equal(cartTotal.textContent,'88,88 €');assert.equal(cart.calls.length,2);
  assert.ok(walk(cartLine).some(n=>n.textContent==='Reifengröße sowie Last- und Geschwindigkeitsindex vor dem Kauf prüfen. Fahrzeugpassung für Montage wird gesondert geprüft.'));
  const marketCartProduct={...priced(A,2,4444),purchase_status:'inquiry_only'};marketCartProduct.price.stock_reported=0;
- const marketCart=await boot(()=>({item:marketCartProduct,prices_refreshing:false}),{mode:'warenkorb',cart:[{id:A,quantity:2,services:{}}]});assert.equal(find(marketCart.nodes['cart-items'],'shop-price-kind').textContent,'Richtpreis');assert.equal(find(marketCart.nodes['cart-summary'],'shop-summary-total').textContent,'88,88 €');assert.ok(walk(marketCart.nodes['cart-summary']).some(n=>n.textContent==='Unverbindliche Artikel-Zwischensumme'));assert.ok(walk(marketCart.nodes['cart-summary']).some(n=>n.textContent==='Enthält Richtpreise. Preis und Verfügbarkeit auf Anfrage.'));assert.equal(marketCart.nodes['request-quote'].disabled,true);
+ const marketCart=await boot(()=>({item:marketCartProduct,prices_refreshing:true}),{mode:'warenkorb',cart:[{id:A,quantity:2,services:{}}]});assert.equal(find(marketCart.nodes['cart-items'],'shop-price-kind'),undefined);assert.equal(find(marketCart.nodes['cart-summary'],'shop-summary-total').textContent,'Auswahl aktuell nicht bestellbar');assert.equal(walk(marketCart.nodes['cart-items']).some(n=>n.textContent.includes('88,88')||n.textContent.includes('Richtpreis')),false);assert.equal(marketCart.nodes['request-quote'].disabled,true);assert.equal(marketCart.clock.jobs.size,0);assert.deepEqual(JSON.parse(marketCart.stored.at(-1)),[{id:A,quantity:2,services:{}}]);assert.ok(walk(marketCart.nodes['cart-items']).some(n=>n.tagName==='BUTTON'&&n.textContent==='Entfernen'));
  // Opening and reviewing a mounting wish neither books nor alters the cart.
  const writesBefore=cart.stored.length,readsBefore=cart.calls.length;
  const appointment=walk(cartLine).find(n=>n.tagName==='BUTTON'&&n.textContent==='Montagetermin in Mosbach buchen');assert.ok(appointment);appointment.listeners.click();
@@ -530,19 +546,21 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  find(noCandidates.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();const emptyBundle=find(noCandidates.nodes['product-detail'],'shop-bundle-panel'),emptySearch=walk(emptyBundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen'));assert.equal(emptySearch.disabled,true);await emptySearch.listeners.click();assert.equal(noCandidates.calls.some(call=>call.url.includes('/compatible-tyres')),false);
  // Candidate cards remain selectable during a price warmup. Updating that
  // exact selected tyre must unlock the explicit pair action without reselecting.
- const delayedPair=await boot(url=>{const u=new URL('https://shop.test'+url),q=Number(u.searchParams.get('quantity')||1);if(u.pathname.endsWith('/products'))return page({...rim(),purchase_status:'inquiry_only'},false);if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[{...pending(),purchase_status:'inquiry_only'}],scope:'rim_width_candidate',prices_refreshing:true};if(decodeURIComponent(u.pathname).endsWith('/products/'+A))return {item:{...priced(A,q,3000),purchase_status:'inquiry_only'},prices_refreshing:false};return {item:{...rim(q),purchase_status:'inquiry_only'},prices_refreshing:false};},{mode:'komplettraeder'});
+ const delayedPair=await boot(url=>{const u=new URL('https://shop.test'+url),q=Number(u.searchParams.get('quantity')||1);if(u.pathname.endsWith('/products'))return page({...rim(),purchase_status:'supplier_check_required'},false);if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[{...pending(),purchase_status:'supplier_check_required'}],scope:'rim_width_candidate',prices_refreshing:true};if(decodeURIComponent(u.pathname).endsWith('/products/'+A))return {item:{...priced(A,q,3000),purchase_status:'supplier_check_required'},prices_refreshing:false};return {item:{...rim(q),purchase_status:'supplier_check_required'},prices_refreshing:false};},{mode:'komplettraeder'});
  find(delayedPair.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();
  const delayedQty=find(find(delayedPair.nodes['product-detail'],'shop-options'),'shop-quantity');delayedQty.value='4';delayedQty.listeners.change();await flush();
  const delayedBundle=find(delayedPair.nodes['product-detail'],'shop-bundle-panel'),delayedSearch=walk(delayedBundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen'));
  await delayedSearch.listeners.click();const delayedRadio=walk(delayedBundle).find(n=>n.name==='bundle_tyre');assert.ok(delayedRadio);delayedRadio.checked=true;delayedRadio.listeners.change();
- const delayedAdd=walk(delayedBundle).find(n=>n.tagName==='BUTTON'&&n.textContent==='Felgen + Reifen zur Anfrageauswahl');assert.equal(delayedAdd.disabled,true);assert.deepEqual(JSON.parse(delayedPair.stored.at(-1)),[]);
+ const delayedAdd=walk(delayedBundle).find(n=>n.tagName==='BUTTON'&&n.textContent==='Felgen + Reifen zur Prüfung in den Warenkorb');assert.equal(delayedAdd.disabled,true);assert.deepEqual(JSON.parse(delayedPair.stored.at(-1)),[]);
  await delayedPair.clock.next();assert.equal(delayedRadio.checked,true);assert.equal(delayedAdd.disabled,false);assert.ok(walk(delayedBundle).some(n=>n.textContent==='Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.'));delayedAdd.listeners.click();assert.deepEqual(JSON.parse(delayedPair.stored.at(-1)).map(row=>row.quantity),[4,4]);
+ const unofferedBundle=await boot(url=>{const u=new URL('https://shop.test'+url);if(u.pathname.endsWith('/products'))return page(rim(),false);if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[{...priced(A,1,3000),purchase_status:'inquiry_only'}],scope:'rim_width_candidate',prices_refreshing:true};return {item:rim(),prices_refreshing:false};},{mode:'komplettraeder'});
+ find(unofferedBundle.nodes['catalog-products'].children[0],'shop-detail-link').listeners.click();await flush();const unavailablePanel=find(unofferedBundle.nodes['product-detail'],'shop-bundle-panel');await walk(unavailablePanel).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen')).listeners.click();const unavailableRadio=walk(unavailablePanel).find(n=>n.name==='bundle_tyre');unavailableRadio.checked=true;unavailableRadio.listeners.change();const unavailableAdd=walk(unavailablePanel).find(n=>n.tagName==='BUTTON'&&n.textContent==='Aktuell nicht bestellbar');assert.equal(unavailableAdd.disabled,true);unavailableAdd.listeners.click();assert.deepEqual(JSON.parse(unofferedBundle.stored.at(-1)),[]);assert.equal(walk(unavailablePanel).some(n=>n.textContent.includes('30,00')||n.textContent.includes('Richtpreis')),false);assert.equal(unofferedBundle.clock.jobs.size,0);
  // Family cards require an exact article choice before any cart action.
  const family=await boot(url=>{const u=new URL('https://shop.test'+url);if(u.pathname.endsWith('/products'))return page({...rim(),family:{variant_count:2,diameters:['17','18']}},false);if(u.pathname.endsWith('/variants'))return {items:[rim()],page:1,total:1,has_more:false};return {item:rim()};},{mode:'felgen'});
  const familyCard=family.nodes['catalog-products'].children[0];assert.equal(find(familyCard,'shop-quantity'),undefined);find(familyCard,'shop-detail-link').listeners.click();await flush();
  assert.ok(family.calls.some(call=>call.url.includes('/variants?')&&call.url.includes('page_size=24')));assert.deepEqual(JSON.parse(family.stored.at(-1)),[]);
  const exact=walk(family.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Diese Felge ansehen');exact.listeners.click();await flush();assert.ok(find(family.nodes['product-detail'],'shop-bundle-panel'));
- for(const fixture of [f,bounded,changed,quantity,tiers,detail,closed,cart,hidden,paused,pausedTier,images,standalone,standaloneCart,complete,winterOnly,noCandidates,delayedPair,family,market,bound,marketPoll,marketCart,documented,badDocs])assert.ok(fixture.calls.every(call=>call.options.method===undefined&&call.url.startsWith('/shop/api/v2/products')),'read-only product calls only');
+ for(const fixture of [f,bounded,changed,quantity,tiers,detail,closed,cart,hidden,paused,pausedTier,images,standalone,standaloneCart,complete,winterOnly,noCandidates,delayedPair,unofferedBundle,family,market,parts,bound,marketPoll,marketCart,documented,badDocs])assert.ok(fixture.calls.every(call=>call.options.method===undefined&&call.url.startsWith('/shop/api/v2/products')),'read-only product calls only');
  console.log('Bounded price/image polling passed');
 })().catch(error=>{console.error(error);process.exit(1)});
 '''

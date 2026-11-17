@@ -72,7 +72,7 @@ class SupplierTests(unittest.TestCase):
         self.assertIsNone(denied.retail_quote(product,4))
         self.assertEqual(inquiry.calls,0)
         approved = RSUQuoteProvider(bindings=bindings,approved_ids={PID},policy=policy,inquiry=inquiry,clock=lambda:NOW)
-        self.assertEqual(approved.retail_quote(product,4)['unit_gross_cent'],13090)
+        self.assertEqual(approved.retail_quote(product,4)['unit_gross_cent'],13685)
         tampered = deepcopy(bindings)
         tampered[PID]['mapping']['evidence']['rsu']['record']['Artikelnummer']='999'
         with self.assertRaises(RSUQuoteError):

@@ -114,7 +114,7 @@ class CartQuoteChecks(unittest.TestCase):
                           line(BODY,services={'painting':True,'paint_color':'LY7W'})])
         p = q.public()
         self.assertTrue(p['ready'])
-        self.assertEqual(p['total_gross_cent'], 148449)
+        self.assertEqual(p['total_gross_cent'], 153209)
         self.assertEqual(p['total_gross_cent'], p['known_subtotal_gross_cent'])
         self.assertEqual(len([v for v in self.f.calls['services'] if v[0]=='mounting']), 1)
         self.assertEqual([v[1:3] for v in self.f.calls['services'] if v[0]=='mounting'], [(TYRE,4)])
@@ -125,9 +125,9 @@ class CartQuoteChecks(unittest.TestCase):
         self.assertFalse(p['payment_enabled'])
 
     def test_trusted_markup_is_exact_per_unit_then_quantity(self):
-        self.assertEqual(retail_unit_gross_cent('50', 'tyre'), 6545)
+        self.assertEqual(retail_unit_gross_cent('50', 'tyre'), 6843)
         self.assertEqual(retail_unit_gross_cent('50', 'oil'), 6843)
-        self.assertEqual(retail_unit_gross_cent(Decimal('100.0055'), 'alloy_wheel'), 13091)
+        self.assertEqual(retail_unit_gross_cent(Decimal('100.0055'), 'alloy_wheel'), 13686)
         for value in ('NaN','Infinity','-1','0','0.00001',True,1.25):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 retail_unit_gross_cent(value,'oil')
@@ -294,7 +294,7 @@ class CartQuoteChecks(unittest.TestCase):
         self.f=Fixture();self.f.stock[TYRE]=8
         q=self.f.quote(rows).public()
         self.assertTrue(q['ready'])
-        self.assertEqual(q['total_gross_cent'],230140)
+        self.assertEqual(q['total_gross_cent'],239660)
         self.assertEqual([call for call in self.f.calls['retail'] if call[0]==TYRE],[(TYRE,8)])
         self.assertEqual(len([call for call in self.f.calls['services'] if call[0]=='mounting']),2)
         self.assertEqual(len(q['shipments']),1)
@@ -464,7 +464,7 @@ class CartQuoteChecks(unittest.TestCase):
         self.assertFalse(self.standalone_quote(service_quote=None).public()['ready'])
         ready = self.standalone_quote().public()
         self.assertTrue(ready['ready'])
-        self.assertEqual(ready['total_gross_cent'], 13090 * 4 + 500 * 4 + 500)
+        self.assertEqual(ready['total_gross_cent'], 13685 * 4 + 500 * 4 + 500)
 
     def test_standalone_geometry_is_immutable_hash_bound_and_not_accepted_from_browser(self):
         proof = self.standalone_rim(); quote = self.standalone_quote()
@@ -540,7 +540,7 @@ class CartQuoteChecks(unittest.TestCase):
         self.f.products[RIM]['required_fees']=['rdks','fasteners']
         q=self.f.quote([line(RIM,4)])
         self.assertTrue(q.public()['ready'])
-        self.assertEqual(q.public()['total_gross_cent'],13090*4+2000*4+500*4+500)
+        self.assertEqual(q.public()['total_gross_cent'],13685*4+2000*4+500*4+500)
         self.assertFalse(self.f.quote([line(RIM,4)],service_quote=None).public()['ready'])
         self.f.products[RIM]['required_fees']=[{}]
         self.assertIn('required_fees_unconfirmed',self.codes(self.f.quote([line(RIM)])))

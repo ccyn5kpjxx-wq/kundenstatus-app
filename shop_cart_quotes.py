@@ -131,7 +131,8 @@ def retail_unit_gross_cent(partner_net, category):
         net = Decimal(partner_net)
         if not net.is_finite() or not Decimal('0') < net <= Decimal('100000') or net.as_tuple().exponent < -4:
             raise ValueError('invalid_partner_price')
-        factor = Decimal('1.10') if category in WHEELS else Decimal('1.15')
+        # Merchant's latest rule: 15% on every material net partner price.
+        factor = Decimal('1.15')
         result = int((net * factor * Decimal('1.19') * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
     except (InvalidOperation, TypeError, ValueError):
         raise ValueError('invalid_partner_price') from None

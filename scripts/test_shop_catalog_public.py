@@ -64,6 +64,50 @@ def verified(row):
 
 
 class PublicCatalogueTests(unittest.TestCase):
+    def test_separate_tyre_dimensions_are_exact_independent_and_not_title_search(self):
+        def tyre(letter, width, ratio, diameter, **extra):
+            return wheel(letter, selection_id='tyre:'+letter*24, category='tyre',
+                name='Same tyre model 255 40 19', width=width, ratio=ratio, diameter=diameter, **extra)
+        exact=tyre('a','255','40','19')
+        wrong_ratio=tyre('b',255,45,19)
+        wrong_width=tyre('c',225,40,19)
+        wrong_diameter=tyre('d',255,40,18)
+        missing=wheel('e',selection_id='tyre:'+'e'*24,category='tyre',name='255/40 R19')
+        rim=wheel('f',width=255,ratio=40,diameter=19)
+        rows=[exact,wrong_ratio,wrong_width,wrong_diameter,missing,rim,
+              part('9',name='255/40 R19 accessory',width=255,ratio=40,diameter=19)]
+        c=catalogue(rows)
+        self.assertEqual([x['id'] for x in c.page(width='255',ratio='40',diameter='19')['items']],[exact['selection_id']])
+        self.assertEqual(c.page(width=255)['total'],3)
+        self.assertEqual(c.page(ratio='40')['total'],3)
+        self.assertEqual(c.page(category='alloy_wheel',diameter=19)['total'],1)
+        self.assertEqual(c.page(category='alloy_wheel',width=255)['total'],0)
+        self.assertEqual(c.page(department='parts',diameter=19)['total'],0)
+        self.assertEqual(c.page(width=255,ratio=35,diameter=19)['total'],0)
+        self.assertEqual(c.page(width=255,ratio=40,diameter=18)['total'],1)
+        self.assertEqual(c.page(width=255,ratio=40,diameter=19,page_size=1)['total'],1)
+        self.assertEqual(c.page(q='255/40R19')['total'],1)
+        self.assertEqual(c.page(q='255 / 40 r19')['total'],1)
+        self.assertEqual(c.page(q='255/40R19',diameter=18)['total'],0)
+        self.assertEqual(c.page(q='SYNTHETIC')['total'],len(rows))
+
+    def test_structured_size_does_not_discard_load_speed_or_brand_free_text(self):
+        row=wheel(selection_id='tyre:'+'a'*24,category='tyre',name='Synthetic Sport 96Y',
+            width=255,ratio=40,diameter=19)
+        c=catalogue([row])
+        self.assertEqual(c.page(q='96Y',width=255,ratio=40,diameter=19)['total'],1)
+        self.assertEqual(c.page(q='95Y',width=255,ratio=40,diameter=19)['total'],0)
+        self.assertEqual(c.page(q='Synthetic',width=255,ratio=40,diameter=19)['total'],1)
+
+    def test_size_filters_reject_invalid_types_units_and_ranges(self):
+        c=catalogue()
+        for key,values in {'width':[True,99,456,'0255','255mm','255/40',[],255.0],
+                           'ratio':['',9,101,'40%','NaN',False],
+                           'diameter':[7,31,'19.5','19.0','19 Zoll','1e1',None]}.items():
+            for value in values:
+                if value is None:continue
+                with self.subTest(field=key,value=value),self.assertRaises(CatalogError):c.page(**{key:value})
+
     def test_reviewed_model_types_without_years_never_match_a_year_or_unproven_keys(self):
         row = wheel()
         evidence = verified(row)

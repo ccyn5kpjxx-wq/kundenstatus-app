@@ -148,37 +148,30 @@ class ReleaseChecks(unittest.TestCase):
         with self.assertRaises(MediaError):
             dependencies['media_service'].read(self.asset)
 
-    def test_read_approval_constructs_cache_without_io_then_uses_fake_exact_quantity(self):
+    def test_unbound_read_approval_never_constructs_display_reader_or_warms_market_prices(self):
         self.descriptor.update(product_reads_approved=True,
-            provider_config=write_json(self.root / 'display-private.json', {'token': 'PRIVATE_CANARY'}))
+            provider_config={'file': 'unused-missing-private.json', 'sha256': 'f' * 64})
         self.install()
-        calls = []
-        class Provider:
-            def retail_quote(inner, product, quantity):
-                calls.append((deepcopy(product), quantity))
-                now = datetime.now(timezone.utc)
-                return {'confirmed': True, 'source': 'ALZURA', 'product_id': product['id'],
-                    'identity_hash': product['identity_hash'], 'mode': 'live', 'currency': 'eur',
-                    'vat_percent': '19.00', 'quantity': quantity, 'unit_gross_cent': 12345,
-                    'stock': 20, 'observed_at': now.isoformat(),
-                    'expires_at': (now + timedelta(minutes=10)).isoformat(), 'private': 'PRIVATE_CANARY'}
-        factory = Mock(return_value=Provider())
-        dependencies = self.prepare(provider_factory=factory)
-        self.assertTrue(dependencies)
-        factory.assert_called_once()
-        self.assertEqual(calls, [])
-        cache = self.portal.app.extensions['shop_production']['price_cache']
-        identifier = self.released['selection_id']
-        self.assertTrue(dependencies['catalogue_warmup']([identifier], quantities=(3,)))
-        self.assertEqual(calls, [])
-        self.assertTrue(cache.run_once())
-        self.assertEqual(calls, [({'id': identifier, 'identity_hash': variant_fingerprint(self.released),
-                                  'category': 'alloy_wheel'}, 3)])
-        product = dependencies['catalogue'].get(identifier)
-        self.assertEqual(product['price']['prices_by_quantity']['3']['items_gross_cent'], 37035)
-        self.assertNotIn('PRIVATE_CANARY', json.dumps(product))
-        self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
-        self.assertFalse(self.portal.app.config['SHOP_ORDER_DRAFT_ENABLED'])
+        for injected in (False, True):
+            factory = Mock(side_effect=AssertionError('No ALZURA reader construction'))
+            with self.subTest(injected=injected), patch.dict(sys.modules,
+                    {'shop_alzura_display': SimpleNamespace(provider_factory=factory)}):
+                dependencies = self.prepare(**({'provider_factory': factory} if injected else {}))
+                self.assertTrue(dependencies)
+                factory.assert_not_called()
+                adapters = self.portal.app.extensions['shop_production']
+                self.assertIsNone(adapters['read_provider'])
+                cache = adapters['price_cache']
+                identifier = self.released['selection_id']
+                self.assertFalse(dependencies['catalogue_warmup']([identifier], quantities=(3,)))
+                self.assertFalse(cache.run_once())
+                self.assertEqual(cache.status()['reserved_reads_in_period'], 0)
+                product = dependencies['catalogue'].get(identifier)
+                self.assertIsNone(product['price'])
+                self.assertEqual(product['price_status'], 'not_offered')
+                self.assertEqual(product['price_label'], '')
+                self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+                self.assertFalse(self.portal.app.config['SHOP_ORDER_DRAFT_ENABLED'])
 
     def test_quote_stage_creates_only_dedicated_storage_and_never_opens_orders_or_payments(self):
         self.descriptor.update(buyer_and_quotes_enabled=True, initial_storage_creation=True, rsu_reads_approved=True,
@@ -214,6 +207,34 @@ class ReleaseChecks(unittest.TestCase):
                 'currency': 'eur', 'vat_percent': '19.00', 'quantity': quantity, 'unit_gross_cent': unit,
                 'stock': 20, 'observed_at': now.isoformat(), 'expires_at': (now+timedelta(minutes=10)).isoformat()}
         return SimpleNamespace(retail_quote=retail, rsu_mapping=Mock(side_effect=AssertionError('No mapping on startup')))
+
+    def test_fixed_price_release_is_immediate_and_survives_restart_without_provider_reads(self):
+        identifier=self.released['selection_id'];identity=variant_fingerprint(self.released)
+        observed=datetime.now(timezone.utc)-timedelta(hours=2)
+        self.bundle['rsu_bindings']={identifier:{'synthetic':True}}
+        self.bundle['rsu_price_seeds']={'schema_version':1,'evidence_id':'e'*64,'records':{
+            identifier:{'source':'RSU','identity_hash':identity,'unit_gross_cent':13685,
+                        'stock_reported':20,'observed_at':observed.isoformat()}}}
+        self.descriptor.update(fixed_pricebook_enabled=True,rsu_reads_approved=True,
+            rsu_config=write_json(self.root/'rsu-private.json',{}))
+        self.install();calls=[];supplier=self.synthetic_provider('RSU',calls,10000)
+        with patch('shop_production.RSUQuoteProvider.from_config',return_value=supplier):
+            dependencies=self.prepare()
+        price=dependencies['catalogue'].get(identifier)['price']
+        self.assertEqual(price['prices_by_quantity']['4']['items_gross_cent'],54740)
+        self.assertEqual(price['kind'],'merchant_pricebook')
+        self.assertFalse(price['stock_current'])
+        self.assertFalse(dependencies['catalogue_warmup']([identifier],quantities=(1,4)))
+        self.assertEqual(calls,[])
+        self.assertFalse((self.data/'shop-v2').exists())
+        self.assertTrue((self.data/'shop-pricebook'/'prices.sqlite3').is_file())
+        self.portal.app.extensions['shop_production']['price_cache'].stop()
+        self.bundle['rsu_price_seeds']['records'][identifier]['unit_gross_cent']=99999
+        self.install()
+        with patch('shop_production.RSUQuoteProvider.from_config',return_value=supplier):
+            restarted=self.prepare()
+        self.assertEqual(restarted['catalogue'].get(identifier)['price'],price)
+        self.assertEqual(calls,[])
 
     def test_standalone_rim_policy_requires_private_literal_approval_and_reviewed_dimensions(self):
         identifier = self.released['selection_id']
@@ -303,7 +324,7 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(product['purchase_status'], 'supplier_check_required')
         self.assertFalse(dependencies['catalogue_warmup']([identifier], quantities=(1,)))
 
-    def test_mixed_browse_cache_uses_rsu_and_alzura_only_for_their_exact_scopes(self):
+    def test_mixed_browse_release_warms_only_exact_rsu_bindings(self):
         bound, market_id = self.released['selection_id'], self.hidden['selection_id']
         self.bundle['publication']['released_ids'].append(market_id)
         self.bundle['rsu_bindings'] = {bound: {'synthetic': True}}
@@ -311,24 +332,28 @@ class ReleaseChecks(unittest.TestCase):
             rsu_config=write_json(self.root / 'rsu-private.json', {'synthetic': True}),
             provider_config=write_json(self.root / 'market-private.json', {'synthetic': True}))
         self.install()
-        rsu_calls, market_calls = [], []
+        rsu_calls = []
         supplier = self.synthetic_provider('RSU', rsu_calls, 11111)
-        market = self.synthetic_provider('ALZURA', market_calls, 22222)
+        market = Mock(side_effect=AssertionError('No market-price reader'))
         with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
-            dependencies = self.prepare(provider_factory=Mock(return_value=market))
-        self.assertEqual(rsu_calls+market_calls, [])
+            dependencies = self.prepare(provider_factory=market)
+        market.assert_not_called()
+        self.assertEqual(rsu_calls, [])
         self.assertTrue(dependencies['catalogue_warmup']([bound, market_id], quantities=(2,)))
         cache = self.portal.app.extensions['shop_production']['price_cache']
         self.assertTrue(cache.run_once())
-        self.assertTrue(cache.run_once())
+        self.assertFalse(cache.run_once())
         self.assertEqual(rsu_calls, [(bound, 2)])
-        self.assertEqual(market_calls, [(market_id, 2)])
-        for identifier, source, status, unit in ((bound, 'RSU', 'supplier_check_required', 11111),
-                                               (market_id, 'ALZURA', 'inquiry_only', 22222)):
-            product = dependencies['catalogue'].get(identifier)
-            self.assertEqual(cache.get(identifier)['source'], source)
-            self.assertEqual(product['price']['prices_by_quantity']['2']['unit_gross_cent'], unit)
-            self.assertEqual(product['purchase_status'], status)
+        product = dependencies['catalogue'].get(bound)
+        self.assertEqual(cache.get(bound)['source'], 'RSU')
+        self.assertEqual(product['price']['prices_by_quantity']['2']['unit_gross_cent'], 11111)
+        self.assertEqual(product['purchase_status'], 'supplier_check_required')
+        unavailable = dependencies['catalogue'].get(market_id)
+        self.assertIsNone(cache.get(market_id))
+        self.assertIsNone(unavailable['price'])
+        self.assertEqual(unavailable['price_status'], 'not_offered')
+        self.assertEqual(unavailable['price_label'], '')
+        self.assertEqual(cache.status()['sources']['ALZURA']['queued'], 0)
         self.assertFalse((self.data / 'shop-v2').exists())
 
     def test_quote_stage_requires_its_own_literal_rsu_read_approval(self):

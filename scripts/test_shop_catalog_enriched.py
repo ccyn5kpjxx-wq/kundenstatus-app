@@ -52,6 +52,49 @@ class EnrichmentChecks(unittest.TestCase):
         self.assertIsNotNone(inquiry['price'])
         self.assertEqual(catalogue([a]).get(a['selection_id'])['purchase_status'], 'inquiry_only')
 
+    def test_rsu_only_policy_hides_unbound_imports_and_never_consults_their_cache(self):
+        bound, unbound, oil = wheel(), wheel('b'), part()
+        bound['quote_public']['source'] = 'RSU'
+        calls = []
+        def cached(identifier):
+            calls.append(identifier)
+            # A market cache might still contain a recent numeric value from
+            # an older release. Membership, rather than this value, controls it.
+            return deepcopy(bound['quote_public'] if identifier == bound['selection_id']
+                            else unbound['quote_public'])
+        catalog = catalogue([bound, unbound, oil], procurement_ids={bound['selection_id']},
+                            rsu_only_prices=True, quote_lookup=cached)
+        for product in (catalog.get(unbound['selection_id']), catalog.get(oil['id']),
+                        *catalog.page()['items'], *catalog.variants(bound['selection_id'])['items']):
+            if product['id'] == bound['selection_id']:
+                self.assertEqual(product['price_status'], 'current')
+                self.assertEqual(product['price']['prices_by_quantity']['1']['unit_gross_cent'], 12345)
+            else:
+                self.assertIsNone(product['price'])
+                self.assertEqual(product['price_status'], 'not_offered')
+                self.assertEqual(product['price_label'], '')
+                self.assertFalse(product['order_enabled'])
+        self.assertTrue(calls)
+        self.assertEqual(set(calls), {bound['selection_id']})
+        # Without any cache callback, imported market prices are still hidden.
+        imported = catalogue([unbound], rsu_only_prices=True).get(unbound['selection_id'])
+        self.assertIsNone(imported['price'])
+        self.assertEqual(imported['price_status'], 'not_offered')
+
+    def test_rsu_only_policy_applies_to_tyre_recommendations_without_changing_scope(self):
+        rim, tire = wheel(), tyre()
+        tire['quote_public'] = deepcopy(rim['quote_public'])
+        catalog = catalogue([rim, tire], procurement_ids={rim['selection_id']}, rsu_only_prices=True,
+                            compatible_pairs={rim['selection_id']: [pair(rim, tire)]})
+        result = catalog.compatible_tyres(rim['selection_id'], season='summer')
+        self.assertEqual(result['scope'], 'rim_width_candidate')
+        self.assertEqual(len(result['items']), 1)
+        self.assertEqual(result['items'][0]['price_status'], 'not_offered')
+        self.assertIsNone(result['items'][0]['price'])
+        for invalid in (None, 'true', 1):
+            with self.subTest(invalid=invalid), self.assertRaises(CatalogError):
+                catalogue([rim], rsu_only_prices=invalid)
+
     def test_exact_rim_dimensions_are_public_without_private_proof_or_vehicle_promise(self):
         row = wheel()
         identifier = row['selection_id']

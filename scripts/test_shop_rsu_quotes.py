@@ -80,7 +80,7 @@ class ProviderTests(unittest.TestCase):
 
     def test_exact_quantity_rounding_and_no_quantity_tier_inference(self):
         provider = self.provider()
-        for quantity, expected in ((1, 13090), (4, 11781), (2, 12436)):
+        for quantity, expected in ((1, 13685), (4, 12317), (2, 13001)):
             quote = provider.retail_quote(product(), quantity)
             self.assertEqual(quote["unit_gross_cent"], expected)
             self.assertEqual(quote["quantity"], quantity)
@@ -92,9 +92,9 @@ class ProviderTests(unittest.TestCase):
         for secret in ("expected_ean", "supplier_article_id", "price_1", "unit_net", "provider_id"):
             self.assertNotIn(secret, encoded)
 
-    def test_goods_markup_is_unchanged_and_shipping_is_not_charged_here(self):
+    def test_all_material_has_fifteen_percent_markup_and_shipping_is_separate(self):
         for category in ("tyre", "alloy_wheel", "steel_wheel"):
-            self.assertEqual(retail_unit_gross_cent(Decimal("100"), category), 13090)
+            self.assertEqual(retail_unit_gross_cent(Decimal("100"), category), 13685)
         for category in ("body_part", "oil", "care", "accessory"):
             self.assertEqual(retail_unit_gross_cent(Decimal("100"), category), 13685)
         self.assertNotIn("shipping", json.dumps(self.provider().retail_quote(product(), 1)))
@@ -123,7 +123,7 @@ class ProviderTests(unittest.TestCase):
         provider = self.provider(max_cache_entries=1)
         quote = provider.retail_quote(product(), 1)
         quote["unit_gross_cent"] = 1
-        self.assertEqual(provider.retail_quote(product(), 1)["unit_gross_cent"], 13090)
+        self.assertEqual(provider.retail_quote(product(), 1)["unit_gross_cent"], 13685)
         self.assertEqual(len(self.inquiry.calls), 1)
         self.now += timedelta(minutes=15)
         renewed = provider.retail_quote(product(), 1)
@@ -279,7 +279,7 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(quote['created_at'], (NOW + timedelta(seconds=5)).isoformat())
         self.assertEqual(quote['expires_at'], (NOW + timedelta(minutes=15)).isoformat())
         self.assertEqual(self.inquiry.calls, [('654321', 1)])
-        self.assertEqual(quote['total_gross_cent'], 13090)
+        self.assertEqual(quote['total_gross_cent'], 13685)
 
     def test_slow_later_freight_cannot_pay_for_expired_inquiry_or_fetch_new_price(self):
         quote = self.integrated_cart(freight_delay=timedelta(minutes=15)).public()

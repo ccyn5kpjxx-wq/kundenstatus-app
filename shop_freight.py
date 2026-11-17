@@ -72,9 +72,16 @@ class RSURetailFreight:
             expected = {key: shipment[key] for key in ('id', 'destination', 'private_items', 'context_hash')}
             if shipment.get('shipment_hash') != _hash(expected):
                 return None
+            workshop_delivery = context.get('workshop_delivery', 'collection')
+            if (not isinstance(workshop_delivery, str)
+                    or workshop_delivery not in {'collection', 'customer_reshipment'}):
+                return None
             # Eligibility is separate from address input validation, e.g. the
             # operator's confirmed mainland/island delivery areas.
             if not callable(self.eligibility) or self.eligibility(shipment['destination'], context) is not True:
+                return None
+            legs = 2 if shipment['destination'] == 'workshop' and workshop_delivery == 'customer_reshipment' else 1
+            if legs == 2 and self.eligibility('customer', context) is not True:
                 return None
             rows = shipment['private_items']
             if not isinstance(rows, list) or not 1 <= len(rows) <= 40:
@@ -99,8 +106,13 @@ class RSURetailFreight:
                 elif category == 'parts_bulky':
                     base += 6000
             # Our retail shipment line rounds once after summing the supplier
-            # order charges. No per-position gross-cent rounding is spliced in.
-            gross = shipping_gross_cent(base, basis=self.basis)
+            # order charges and any explicitly requested second shipping leg.
+            # Direct-to-customer and workshop collection always have one leg.
+            # Supplier-free inbound freight does not establish our outbound
+            # tariff. Hold reshipment until that separate cost is known.
+            if legs == 2 and base == 0:
+                return None
+            gross = shipping_gross_cent(base * legs, basis=self.basis)
             return {'confirmed': True, 'shipment_hash': shipment['shipment_hash'],
                     'context_hash': shipment['context_hash'], 'mode': self.mode,
                     'currency': 'eur', 'vat_percent': '19.00', 'gross_cent': gross,

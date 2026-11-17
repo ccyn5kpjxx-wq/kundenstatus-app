@@ -26,9 +26,10 @@ MAX_OUTBOX_FILE = 16 * 1024 * 1024
 MAX_OUTBOX_JOURNAL = 65536
 SHOP_RESTORE_TABLES = frozenset({'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
     'shop_payment_events_v2','shop_buyer_sessions_v2','shop_fulfillment_v2',
-    'shop_order_workflow_v2','shop_withdrawals_v2'})
-SHOP_RESTORE_MESSAGE = ('Diese Sicherung enthält Shop-Bestellungen. Portal und Shop müssen gemeinsam '
-    'mit Shopdatenbank, Initialisierungsdatei und Versandprotokollen kontrolliert wiederhergestellt werden. '
+    'shop_order_workflow_v2','shop_withdrawals_v2',
+    'shop_public_pricebook_meta','shop_public_prices_v1'})
+SHOP_RESTORE_MESSAGE = ('Diese Sicherung enthält Shop-Bestellungen oder veröffentlichte Shoppreise. Portal und Shop müssen gemeinsam '
+    'mit Shopdatenbank, Preisbuch, Initialisierungsdateien und Versandprotokollen kontrolliert wiederhergestellt werden. '
     'Der bisherige Portalimport ist dafür gesperrt; keine Bestellungen oder Zahlungen erneut auslösen.')
 
 
@@ -51,7 +52,7 @@ def reject_portal_only_restore(*, export=None, manifest=None, names=None, import
         for name in names:
             if not isinstance(name,str):
                 raise ValueError('Datenpaket ungültig: Archivliste kann nicht sicher geprüft werden.')
-            if 'shop-v2' in name.replace('\\','/').casefold().split('/'):
+            if {'shop-v2', 'shop-pricebook'}.intersection(name.replace('\\','/').casefold().split('/')):
                 raise ValueError(SHOP_RESTORE_MESSAGE)
     if imported_db is not None:
         path=Path(imported_db).resolve()
@@ -203,20 +204,24 @@ class ShopStorage:
                 temporary.unlink(missing_ok=True)
 
     def write_backup(self, archive):
-        """Private recovery package: ledger, initialized marker and mail fences.
+        """Private recovery package: ledger, published prices and mail fences.
 
         The SQLite image is the recovery point. Outbox rows must still match
         that image after all per-message OS locks are acquired; active sends
         fail the backup rather than claim a complete cross-store snapshot.
         Only referenced MIME/current-attempt journals and inert lock markers
-        are copied. Restoring an older financial backup still requires manual
+        are copied. An installed merchant pricebook is backed up read-only
+        with its marker; an invalid installed book cannot be silently omitted.
+        Restoring an older financial backup still requires manual
         provider reconciliation before workers or checkout can be rearmed.
         """
         from mailbox_outbox import _lock_fd
+        from shop_price_book import existing_pricebook_backup
         data = self.snapshot()
         deadline = time.monotonic() + 15
         try:
             self._paths()
+            pricebook = existing_pricebook_backup(self.root)
             marker = self.marker.read_bytes()
             if marker != b'shop_storage_v2\n':
                 raise ValueError()
@@ -293,10 +298,20 @@ class ShopStorage:
                     target = 'shop-v2/mail-outbox/' + filename
                     archive.writestr(target, raw)
                     manifest.append({'path': target, 'bytes': len(raw), 'sha256': sha256(raw).hexdigest()})
-                return {'format': 'shop_sqlite_v2', 'path': name, 'bytes': len(data),
+                result = {'format': 'shop_sqlite_v2', 'path': name, 'bytes': len(data),
                         'sha256': sha256(data).hexdigest(),
                         'marker': {'path': marker_name, 'bytes': len(marker), 'sha256': sha256(marker).hexdigest()},
                         'outbox': {'records': len(rows), 'bytes': total, 'files': manifest}}
+                if pricebook is not None:
+                    price_path, price_marker = ('shop-pricebook/prices.sqlite3',
+                                                'shop-pricebook/prices.sqlite3.initialized')
+                    archive.writestr(price_path, pricebook['data'])
+                    archive.writestr(price_marker, pricebook['marker'])
+                    result['pricebook'] = {'format': 'merchant-rsu-prices-v1', 'path': price_path,
+                        'bytes': len(pricebook['data']), 'sha256': sha256(pricebook['data']).hexdigest(),
+                        'marker': {'path': price_marker, 'bytes': len(pricebook['marker']),
+                                   'sha256': sha256(pricebook['marker']).hexdigest()}}
+                return result
         except Exception:
             raise StorageError('shop_backup_unavailable') from None
 

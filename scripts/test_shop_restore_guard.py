@@ -33,7 +33,10 @@ class RestoreGuardChecks(unittest.TestCase):
                 {'export':{'tables':{'shop_orders_v2':[]}}},
                 {'names':['backup.json','shop-v2/initialized']},
                 {'names':['backup.json','SHOP-V2\\shop.sqlite3']},
-                {'names':['nested/shop-v2/mail-outbox/private.eml']}):
+                {'names':['nested/shop-v2/mail-outbox/private.eml']},
+                {'names':['backup.json','shop-pricebook/prices.sqlite3']},
+                {'names':['SHOP-PRICEBOOK\\prices.sqlite3.initialized']},
+                {'export':{'tables':{'shop_public_prices_v1':[]}}}):
                 with self.subTest(changes=changes),self.assertRaisesRegex(ValueError,'Portal und Shop müssen gemeinsam'):
                     reject_portal_only_restore(**changes)
 
@@ -53,6 +56,16 @@ class RestoreGuardChecks(unittest.TestCase):
                 reject_portal_only_restore(imported_db=path)
             self.assertEqual(sha256(path.read_bytes()).hexdigest(),before)
             self.assertEqual(list(Path(temporary).iterdir()),[path])
+
+    def test_standalone_pricebook_cannot_enter_portal_only_importer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'source.sqlite3'
+            with closing(sqlite3.connect(path)) as db:
+                db.execute('CREATE TABLE shop_public_pricebook_meta (format TEXT, mode TEXT)')
+            before=sha256(path.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(ValueError,'Portal und Shop müssen gemeinsam'):
+                reject_portal_only_restore(imported_db=path)
+            self.assertEqual(sha256(path.read_bytes()).hexdigest(),before)
 
     def test_actual_zip_extractor_rejects_before_extraction_or_hydration(self):
         raw=BytesIO()

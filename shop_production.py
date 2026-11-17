@@ -23,6 +23,8 @@ from shop_media import ReleasedMedia
 from shop_documents import ReleasedProductDocuments
 from shop_price_cache import PublicPriceCache
 from shop_price_hybrid import HybridPriceCache
+from shop_price_book import PublishedPriceBook
+from shop_pricebook_runtime import PriceBookRuntime
 from shop_rsu_quotes import RSUQuotePolicy, RSUQuoteProvider
 from shop_storage import ShopStorage
 
@@ -109,6 +111,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
     Checkout is deliberately not inferred from a catalogue or provider login.
     Until its required frozen legal/delivery/payment/workflow configuration is
     fully supplied, this release serves real catalogue browsing and quotes only.
+    Prices are RSU-only. provider_factory remains accepted for call compatibility
+    but is never invoked; ALZURA supplies released product/media data only.
     """
     env = os.environ if environ is None else environ
     if env.get('SHOP_RELEASE_ENABLED') != '1':
@@ -140,8 +144,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         bindings = bundle.get('rsu_bindings', {})
         if not isinstance(bindings, Mapping) or not set(bindings) <= released_ids:
             raise ProductionError('procurement_bindings_invalid')
-        procurement_ids, market_ids = set(bindings), released_ids - set(bindings)
-        supplier_config, supplier, rsu_cache, market_cache = None, None, None, None
+        procurement_ids = set(bindings)
+        supplier_config, supplier, rsu_cache = None, None, None
         rsu_reads_approved = descriptor.get('rsu_reads_approved') is True
         if descriptor.get('buyer_and_quotes_enabled') is True and not rsu_reads_approved:
             raise ProductionError('supplier_reads_not_approved')
@@ -153,17 +157,25 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             rsu_cache = PublicPriceCache(identities, approved_ids=procurement_ids, provider=supplier,
                 mode='live', enabled=True, reads_approved=True, max_provider_reads_per_period=300,
                 spacing_seconds=2.1, max_cache_entries=4096, source='RSU', require_procurement=True)
-        read_provider = None
-        if market_ids and descriptor.get('product_reads_approved') is True and provider_factory is None:
-            from shop_alzura_display import provider_factory
-        if market_ids and descriptor.get('product_reads_approved') is True and provider_factory is not None:
-            secrets_config = _json(_private_file(root, descriptor.get('provider_config')), 262144)
-            read_provider = provider_factory(bundle, secrets_config, root)
-            market_cache = PublicPriceCache(identities, approved_ids=market_ids, provider=read_provider,
-                mode='live', enabled=True, reads_approved=True, max_provider_reads_per_period=300,
-                spacing_seconds=2.1, max_cache_entries=4096, source='ALZURA', require_procurement=False)
-        cache = HybridPriceCache(identities, released_ids=released_ids, procurement_ids=procurement_ids,
-                                 rsu_cache=rsu_cache, market_cache=market_cache)
+        fixed_prices = descriptor.get('fixed_pricebook_enabled') is True
+        pricebook = None
+        if fixed_prices:
+            if supplier is None:
+                raise ProductionError('fixed_price_supplier_unavailable')
+            seeds = bundle.get('rsu_price_seeds')
+            if (not isinstance(seeds, Mapping) or seeds.get('schema_version') != 1
+                    or not isinstance(seeds.get('records'), Mapping)
+                    or not set(seeds['records']) <= procurement_ids
+                    or not isinstance(seeds.get('evidence_id'), str)
+                    or not re.fullmatch(r'[a-f0-9]{64}', seeds['evidence_id'])):
+                raise ProductionError('fixed_price_seeds_invalid')
+            pricebook = PublishedPriceBook(data / 'shop-pricebook' / 'prices.sqlite3',
+                products=identities, approved_ids=procurement_ids, mode='live').provision(create=True)
+            pricebook.seed(seeds['records'], evidence_id=seeds['evidence_id'])
+            cache = PriceBookRuntime(pricebook, identities, approved_ids=procurement_ids, provider=supplier)
+        else:
+            cache = HybridPriceCache(identities, released_ids=released_ids, procurement_ids=procurement_ids,
+                                     rsu_cache=rsu_cache, market_cache=None)
         # Merchant explicitly permits exact-variant rim sales without making a
         # vehicle-fitment promise. Only independently reviewed RSU dimensions
         # qualify; assemblies and services retain their separate proof gates.
@@ -175,15 +187,17 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                     proof = supplier.rim_geometry(identities[identifier])
                     if proof is not None:
                         rim_sales[identifier] = proof
-        # A live browse price must come from the selected source's live cache.
-        # Never revive an imported ALZURA price when an RSU read is unavailable.
+        # Only a currently bound RSU quote can supply a price. Unbound rows
+        # remain visible with their released media, without numeric Richtpreise.
         display_rows = [{**row, 'quote_public': None, 'price': None, 'sample_price_cents': None} for row in rows]
         catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
             image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
             verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
             compatible_pairs=bundle.get('compatible_pairs'), quote_lookup=cache.get,
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
-            product_documents=bundle.get('product_documents'), standalone_rims=rim_sales)
+            product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
+            rsu_only_prices=True, allow_published_prices=fixed_prices,
+            preferred_ids=set(seeds['records']) if fixed_prices else None)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -206,10 +220,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         from shop_service_requests import prepare_service_request_links
         dependencies['feature_links'] = prepare_service_request_links(portal, enabled=True)
         adapters = {'catalogue': catalogue, 'media': media, 'documents': documents, 'price_cache': cache,
-                    'read_provider': read_provider, 'release_id': descriptor.get('release_id', ''),
+                    'read_provider': None, 'release_id': descriptor.get('release_id', ''),
                     'purchasing_enabled': False}
         if supplier is not None:
             adapters['supplier_quotes'] = supplier
+        if pricebook is not None:
+            adapters['published_prices'] = pricebook
         app.extensions['shop_production'] = adapters
         if descriptor.get('buyer_and_quotes_enabled') is True:
             storage = ShopStorage(data).provision(create=descriptor.get('initial_storage_creation') is True)
@@ -239,8 +255,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             approved_postcodes = frozenset(bundle.get('delivery_postcodes', []))
             freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
                 evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
-                destination_eligibility=lambda dest, ctx: dest == 'workshop' or ctx.get('delivery', {}).get('postcode') in approved_postcodes)
-            quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=supplier.retail_quote,
+                destination_eligibility=lambda dest, ctx: (dest == 'workshop'
+                    and ctx.get('workshop_delivery', 'collection') == 'collection'
+                    or ctx.get('delivery', {}).get('postcode') in approved_postcodes))
+            retail_quote = (lambda product, quantity: pricebook.checkout_quote(product, quantity, supplier.retail_quote)
+                            if pricebook is not None else supplier.retail_quote(product, quantity))
+            quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
                 assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims)
             def sink(quote, *, customer_id, delivery_context):

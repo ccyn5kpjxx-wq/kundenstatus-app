@@ -1,5 +1,6 @@
 """Persistent shop provisioning and consistent recovery copy, temporary IO only."""
 from contextlib import closing
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from hashlib import sha256
 from io import BytesIO
@@ -16,6 +17,7 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shop_storage import ShopStorage, StorageError
+from shop_price_book import PublishedPriceBook, existing_pricebook_backup
 from mailbox_outbox import MailOutbox
 
 
@@ -86,6 +88,60 @@ class ShopStorageChecks(unittest.TestCase):
             self.assertEqual(archive.read(info['marker']['path']), b'shop_storage_v2\n')
             self.assertEqual(info['outbox'], {'records': 0, 'bytes': 0, 'files': []})
         self.assertEqual(info['format'], 'shop_sqlite_v2')
+
+    def pricebook(self):
+        identifier = 'alloy_wheel:' + 'a' * 24
+        product = {'id': identifier, 'identity_hash': 'b' * 64, 'category': 'alloy_wheel'}
+        now = datetime(2026, 11, 17, 17, 17, tzinfo=timezone.utc)
+        book = PublishedPriceBook(self.root / 'shop-pricebook/prices.sqlite3',
+            products={identifier: product}, approved_ids=frozenset({identifier}), clock=lambda: now).provision(create=True)
+        book.seed({identifier: {'source': 'RSU', 'identity_hash': product['identity_hash'],
+            'observed_at': now.isoformat(), 'unit_gross_cent': 15000, 'stock_reported': 20}}, evidence_id='c' * 64)
+        return book, identifier
+
+    def test_existing_pricebook_is_in_protected_backup_without_runtime_or_provisioning(self):
+        storage = ShopStorage(self.root).provision(create=True)
+        book, identifier = self.pricebook()
+        before = book.marker_path.read_bytes()
+        # No app extension, approved catalogue or live feature flag is needed.
+        with patch.object(PublishedPriceBook, 'provision', side_effect=AssertionError('No creation')):
+            raw, manifest = self.backup(storage)
+        info = manifest['pricebook']
+        self.assertEqual(info['format'], 'merchant-rsu-prices-v1')
+        with zipfile.ZipFile(BytesIO(raw)) as archive:
+            data = archive.read(info['path'])
+            marker = archive.read(info['marker']['path'])
+            self.assertEqual(marker, before)
+            self.assertEqual((len(data), sha256(data).hexdigest()), (info['bytes'], info['sha256']))
+            self.assertEqual((len(marker), sha256(marker).hexdigest()),
+                             (info['marker']['bytes'], info['marker']['sha256']))
+            with closing(sqlite3.connect(':memory:')) as recovered:
+                recovered.deserialize(data)
+                self.assertEqual(recovered.execute('PRAGMA quick_check').fetchone(), ('ok',))
+                self.assertEqual(recovered.execute('SELECT unit_gross_cent FROM shop_public_prices_v1 WHERE product_id=?',
+                    (identifier,)).fetchone(), (15000,))
+        self.assertEqual(book.marker_path.read_bytes(), before)
+
+    def test_absent_pricebook_is_not_created_but_lost_or_corrupt_existing_book_blocks_backup(self):
+        storage = ShopStorage(self.root).provision(create=True)
+        self.assertIsNone(existing_pricebook_backup(self.root))
+        self.assertFalse((self.root / 'shop-pricebook').exists())
+        book, _ = self.pricebook()
+        saved = book.path.read_bytes()
+        for broken in ('missing_database', 'corrupt_database', 'missing_marker', 'corrupt_marker'):
+            with self.subTest(broken=broken):
+                book.path.write_bytes(saved)
+                book.marker_path.write_bytes(book._marker_bytes())
+                if broken == 'missing_database': book.path.unlink()
+                if broken == 'corrupt_database': book.path.write_bytes(b'BROKEN SQLITE')
+                if broken == 'missing_marker': book.marker_path.unlink()
+                if broken == 'corrupt_marker': book.marker_path.write_bytes(b'BROKEN MARKER')
+                output = BytesIO()
+                with zipfile.ZipFile(output, 'w') as archive:
+                    with self.assertRaisesRegex(StorageError, 'shop_backup_unavailable'):
+                        storage.write_backup(archive)
+                    self.assertEqual(archive.namelist(), [])
+        self.assertFalse(list((self.root / 'shop-pricebook').glob('.snapshot-*')))
 
     def pending_mail(self):
         storage = ShopStorage(self.root).provision(create=True)

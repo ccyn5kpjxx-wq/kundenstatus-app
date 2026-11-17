@@ -16,6 +16,7 @@ import unicodedata
 MAX_PRODUCTS = 100_000
 MAX_PAGE_SIZE = 48
 MAX_QUOTE_AGE = timedelta(minutes=15)
+MAX_PUBLISHED_PRICE_AGE = timedelta(days=7)
 CATEGORIES = frozenset({"tyre", "alloy_wheel", "steel_wheel", "body_part", "oil", "care", "accessory"})
 DEPARTMENTS = frozenset({"tyres", "wheels", "parts", "accessories"})
 PUBLIC_ID = re.compile(r"(tyre|alloy_wheel|steel_wheel|parts):[a-f0-9]{24}")
@@ -118,6 +119,22 @@ def _geometry(row):
             if key in row and type(row[key]) in (str, int) and _text(str(row[key]), 40)}
 
 
+def _size_filter(value, minimum, maximum):
+    if value is None:
+        return None
+    if (type(value) not in (str, int) or not re.fullmatch(r'[1-9][0-9]{0,2}', str(value))
+            or not minimum <= int(value) <= maximum):
+        raise CatalogError('invalid_size_filter')
+    return int(value)
+
+
+def _size_value(value):
+    # Numeric source values only. Do not infer a size from a title/description.
+    if type(value) not in (str, int) or not re.fullmatch(r'[0-9]{1,3}(?:\.0{1,4})?', str(value)):
+        return None
+    return int(str(value).split('.')[0])
+
+
 def variant_fingerprint(row):
     """Bind reviewed fitment to an exact public variant, never just its design."""
     if not isinstance(row, Mapping):
@@ -131,7 +148,7 @@ def variant_fingerprint(row):
     return sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _quote(row):
+def _quote(row, *, allow_published_prices=False):
     """Copy canonical EUR/19% retail cents; freshness is checked on every read.
 
     The normalized local wheel/parts contracts establish EUR/19% even when
@@ -143,6 +160,9 @@ def _quote(row):
     source = row.get("quote_public") if tiered else row.get("price")
     if not isinstance(source, Mapping) or row.get("price_status") == "review_pending":
         return None
+    published = source.get('kind') == 'merchant_pricebook'
+    if published and (allow_published_prices is not True or source.get('source') != 'RSU'):
+        return None
     if tiered and source.get("source") not in {"ALZURA", "RSU"}:
         return None
     if ("currency" in source and source["currency"] not in ("EUR", "eur")
@@ -153,7 +173,8 @@ def _quote(row):
     except CatalogError:
         return None
     stock = source.get("stock_reported") if tiered else source.get("stock")
-    if not timedelta(0) < expires - observed <= MAX_QUOTE_AGE or not _integer(stock, 0, 1_000_000):
+    maximum_age = MAX_PUBLISHED_PRICE_AGE if published else MAX_QUOTE_AGE
+    if not timedelta(0) < expires - observed <= maximum_age or not _integer(stock, 0, 1_000_000):
         return None
     prices = {}
     if tiered:
@@ -180,6 +201,17 @@ def _quote(row):
         return None
     result = {"currency": "EUR", "vat_percent": "19.00", "observed_at": observed.isoformat(),
               "expires_at": expires.isoformat(), "stock_reported": stock, "prices_by_quantity": prices}
+    if published:
+        try:
+            review_at = _stamp(source.get('review_at'))
+            stock_observed, stock_expires = _stamp(source.get('stock_observed_at')), _stamp(source.get('stock_expires_at'))
+            if (review_at != observed + timedelta(days=5)
+                    or not observed <= stock_observed < stock_expires <= stock_observed + MAX_QUOTE_AGE):
+                return None
+        except CatalogError:
+            return None
+        result.update(source='RSU', kind='merchant_pricebook', review_at=review_at.isoformat(), stock_observed_at=stock_observed.isoformat(),
+                      stock_expires_at=stock_expires.isoformat())
     if (not wheel and source.get("base_price_unit") == "L"
             and _integer(source.get("base_price_gross_cent"), 1, 10_000_000)):
         result.update(base_price_unit="L", base_price_gross_cent=source["base_price_gross_cent"])
@@ -195,7 +227,7 @@ class PublicCatalog:
     """
     def __init__(self, products: Iterable, *, released_ids, image_urls=None,
                  document_urls=None, verified_fitments=None, clock=None, quote_lookup=None,
-                 quote_lookup_authoritative=False):
+                 quote_lookup_authoritative=False, allow_published_prices=False):
         if (isinstance(products, (str, bytes, Mapping)) or not isinstance(products, Iterable)
                 or isinstance(released_ids, (str, bytes)) or not isinstance(released_ids, (set, frozenset, list, tuple))
                 or len(released_ids) > MAX_PRODUCTS
@@ -208,12 +240,13 @@ class PublicCatalog:
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         if quote_lookup is not None and not callable(quote_lookup):
             raise CatalogError('invalid_quote_lookup')
-        if type(quote_lookup_authoritative) is not bool:
+        if type(quote_lookup_authoritative) is not bool or type(allow_published_prices) is not bool:
             raise CatalogError('invalid_quote_lookup')
         # This callback reads an already populated public-price cache only;
         # it must never perform supplier IO in the HTTP browsing thread.
         self._quote_lookup = quote_lookup
         self._quote_lookup_authoritative = quote_lookup_authoritative
+        self._allow_published_prices = allow_published_prices
         self._rows = {}
         for count, row in enumerate(products, 1):
             if count > MAX_PRODUCTS:
@@ -252,7 +285,7 @@ class PublicCatalog:
                     product["images"].append(url)
             evidence = verified.get(sid)
             product["fitment"] = self._fitment(row, evidence, documents)
-            self._rows[sid] = {"public": product, "quote": _quote(row),
+            self._rows[sid] = {"public": product, "quote": _quote(row, allow_published_prices=self._allow_published_prices),
                                "search": _fold(" ".join([product["name"], product["brand"], product["size"],
                                                             product["article_number"], *product["specifications"].values()]))}
 
@@ -298,7 +331,7 @@ class PublicCatalog:
             return {**entry, 'quote': None} if self._quote_lookup_authoritative else entry
         try:
             value = self._quote_lookup(entry['public']['id'])
-            quote = _quote({'category': entry['public']['category'], 'quote_public': value})
+            quote = _quote({'category': entry['public']['category'], 'quote_public': value}, allow_published_prices=self._allow_published_prices)
             return {**entry, 'quote': quote if self._quote_lookup_authoritative else quote or entry['quote']}
         except Exception:
             return {**entry, 'quote': None} if self._quote_lookup_authoritative else entry
@@ -318,6 +351,8 @@ class PublicCatalog:
         product.update(price_status="update_required", price=None, order_enabled=False)
         if quote and _stamp(quote["observed_at"]) <= now < _stamp(quote["expires_at"]):
             product.update(price_status="current", price=deepcopy(quote))
+            if quote.get('kind') == 'merchant_pricebook':
+                product['price']['stock_current'] = _stamp(quote['stock_observed_at']) <= now < _stamp(quote['stock_expires_at'])
         return product
 
     def get(self, product_id, *, now=None):
@@ -327,8 +362,12 @@ class PublicCatalog:
         entry = self._rows.get(product_id)
         return self._project(self._cached_entry(entry), current) if entry else None
 
+    def _browse_order(self, entry):
+        return (_fold(entry['public']['name']), entry['public']['id'])
+
     def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
-             make=None, model=None, year=None, hsn=None, tsn=None, now=None):
+             make=None, model=None, year=None, hsn=None, tsn=None,
+             width=None, ratio=None, diameter=None, now=None):
         if not _integer(page, 1, 10_000) or not _integer(page_size, 1, MAX_PAGE_SIZE):
             raise CatalogError("invalid_pagination")
         if not isinstance(q, str) or len(q) > 100 or len(q.split()) > 12:
@@ -344,14 +383,34 @@ class PublicCatalog:
         if (hsn is None) != (tsn is None) or hsn is not None and (not isinstance(hsn, str) or not isinstance(tsn, str)
                 or not re.fullmatch(r"[0-9]{4}", hsn) or not re.fullmatch(r"[A-Z0-9]{3}", tsn)):
             raise CatalogError("invalid_vehicle_filter")
+        sizes = {'width': _size_filter(width, 100, 455), 'ratio': _size_filter(ratio, 10, 100),
+                 'diameter': _size_filter(diameter, 8, 30)}
+        # Only a complete standalone nominal size is structured. Brand names,
+        # load/speed indices and all other free text keep the existing search.
+        nominal = re.fullmatch(r'\s*([1-9][0-9]{2})\s*/\s*([1-9][0-9]{1,2})\s*[Rr]\s*([1-9][0-9]?)\s*', q)
+        size_conflict = False
+        if nominal:
+            parsed = {'width': _size_filter(nominal[1], 100, 455), 'ratio': _size_filter(nominal[2], 10, 100),
+                      'diameter': _size_filter(nominal[3], 8, 30)}
+            size_conflict = any(sizes[k] is not None and sizes[k] != parsed[k] for k in sizes)
+            sizes = {k: sizes[k] if sizes[k] is not None else parsed[k] for k in sizes}
         current = self._now(now)
-        tokens = _fold(q).split()
+        tokens = [] if nominal else _fold(q).split()
         rows = []
         for entry in self._rows.values():
             public = entry["public"]
+            if size_conflict:
+                continue
             if category is not None and public["category"] != category or department is not None and public["department"] != department:
                 continue
             if brand is not None and _fold(public["brand"]) != _fold(brand.strip()):
+                continue
+            if (sizes['width'] is not None or sizes['ratio'] is not None) and public['category'] != 'tyre':
+                continue
+            if sizes['diameter'] is not None and public['category'] not in {'tyre', 'alloy_wheel', 'steel_wheel'}:
+                continue
+            if any(wanted is not None and _size_value(public['geometry'].get(key)) != wanted
+                   for key, wanted in sizes.items()):
                 continue
             if any(token not in entry["search"] for token in tokens):
                 continue
@@ -365,7 +424,7 @@ class PublicCatalog:
                 if not any(matches(v) for v in public["fitment"]["vehicles"]):
                     continue
             rows.append(entry)
-        rows.sort(key=lambda entry: (_fold(entry["public"]["name"]), entry["public"]["id"]))
+        rows.sort(key=self._browse_order)
         offset = (page - 1) * page_size
         return {"items": [self._project(self._cached_entry(row), current, detail=False) for row in rows[offset:offset + page_size]],
                 "page": page, "page_size": page_size, "total": len(rows),

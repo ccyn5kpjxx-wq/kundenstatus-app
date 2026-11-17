@@ -34,7 +34,7 @@ class ExactTyrePurchaseChecks(unittest.TestCase):
         self.assertTrue(public['ready'])
         self.assertEqual(public['lines'][0]['quantity'], 4)
         self.assertEqual(public['lines'][0]['destination'], 'customer')
-        self.assertEqual(public['total_gross_cent'], 4 * 13090 + 500)
+        self.assertEqual(public['total_gross_cent'], 4 * 13685 + 500)
         self.assertEqual(frozen['vehicle_ref'], '')
         self.assertEqual(frozen['assembly_evidence'], {})
         self.assertNotIn('fitment_unconfirmed', self.codes(value))

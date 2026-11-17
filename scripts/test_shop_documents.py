@@ -60,6 +60,31 @@ class HTTP:
 
 
 class DocumentTests(unittest.TestCase):
+    def test_exact_provider_rim_report_remote_and_pinned_local_keep_all_original_pages(self):
+        from shop_rim_reports import rim_report_asset
+        url='https://media1.tyre-shopping.com/public/technical_reports/1234/synthetic.pdf'
+        asset=rim_report_asset(url)
+        stream=BytesIO();writer=PdfWriter()
+        for _ in range(30):writer.add_blank_page(width=100,height=100)
+        writer.write(stream);data=stream.getvalue()
+        self.http.responses[url]=Response(url,data,'application/pdf')
+        resources={asset:{'kind':'wheel_report','url':url}}
+        service=ReleasedProductDocuments(resources,approved_assets={asset},enabled=True,allow_network=True,
+            http=self.http,max_network_reads_per_period=1)
+        self.assertEqual(service.read(asset),(data,'application/pdf'))
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory).resolve();(root/asset).write_bytes(data)
+            pinned={**resources[asset],'file':asset,'sha256':sha256(data).hexdigest()}
+            local=ReleasedProductDocuments({asset:pinned},approved_assets={asset},enabled=True,local_root=root)
+            self.assertEqual(local.read(asset),(data,'application/pdf'))
+            for invalid in ({**pinned,'file':'../'+asset},{**pinned,'url':url+'?secret=bad'},
+                            {**pinned,'url':url.replace('media1.tyre-shopping.com','evil.invalid')}):
+                with self.subTest(invalid=invalid),self.assertRaises(DocumentError):
+                    ReleasedProductDocuments({asset:invalid},approved_assets={asset},enabled=True,local_root=root)
+            (root/asset).write_bytes(b'changed')
+            changed=ReleasedProductDocuments({asset:pinned},approved_assets={asset},enabled=True,local_root=root)
+            with self.assertRaises(DocumentError):changed.read(asset)
+
     def test_reviewed_wheel_report_is_hash_bound_local_only_and_keeps_original_pages(self):
         stream=BytesIO();writer=PdfWriter()
         for _ in range(30):writer.add_blank_page(width=100,height=100)

@@ -91,7 +91,7 @@ class ProductionBoundaryChecks(unittest.TestCase):
         self.assertTrue(body['quote']['ready'])
         self.assertFalse(body['order_created'])
         self.assertFalse(body['payment_enabled'])
-        self.assertEqual(body['quote']['total_gross_cent'], 148449)
+        self.assertEqual(body['quote']['total_gross_cent'], 153209)
         self.assertEqual(len([v for v in self.fixture.calls['services'] if v[0] == 'mounting']), 1)
         self.assertEqual(len(body['quote']['shipments']), 2)
         self.assertNotIn('PRIVATE_CANARY', json.dumps(body))
@@ -106,7 +106,7 @@ class ProductionBoundaryChecks(unittest.TestCase):
         again = self.post_order(payload).get_json()['order']
         self.assertEqual(order['id'], again['id'])
         self.assertNotIn('customer_id', order)
-        self.assertEqual(order['amount_gross_cent'], 148449)
+        self.assertEqual(order['amount_gross_cent'], 153209)
         self.assertEqual(self.store.delivery_context_for_order(order['id'], customer_id='customer-a', mode='test'), self.context)
         with self.assertRaises(OrderStoreError):
             self.store.create_order(quote_hash, customer_id='customer-b', mode='test', idempotency_key='synthetic-checkout-1')

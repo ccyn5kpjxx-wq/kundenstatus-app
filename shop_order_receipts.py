@@ -27,6 +27,10 @@ NAMESPACE = UUID('9325b13f-f90f-45a1-a423-ddcf2086c4fc')
 KINDS = {'order_received', 'order_confirmed', 'order_cancelled'}
 LABELS = {'mounting': 'Montage', 'painting': 'Lackierung', 'installation': 'Einbau',
           'oil_service': 'Ölservice', 'care': 'Aufbereitung'}
+WORKSHOP_DELIVERY_LABELS = {
+    'collection': 'Abholung nach Werkstattleistung',
+    'customer_reshipment': 'Weiterversand an die Lieferadresse nach Werkstattleistung (2 Versandwege)',
+}
 
 
 class ReceiptError(ValueError):
@@ -57,6 +61,17 @@ def _money(value):
     if type(value) is not int or not 0 <= value <= 100_000_000:
         raise ReceiptError('receipt_binding_mismatch')
     return f'{value // 100:,}'.replace(',', '.') + ',' + f'{value % 100:02d}' + ' EUR'
+
+
+def _receipt_context(value):
+    """Keep only validated buyer fields, including the explicit delivery choice."""
+    try:
+        selected = {key: value[key] for key in ('contact', 'billing', 'delivery')}
+        if 'workshop_delivery' in value:
+            selected['workshop_delivery'] = value['workshop_delivery']
+        return validate_context(selected)
+    except Exception:
+        raise ReceiptError('receipt_binding_mismatch') from None
 
 
 def init_order_receipt_schema(connection):
@@ -165,7 +180,7 @@ class ShopOrderReceipts:
         if not self.readiness()['queue_ready'] or kind not in KINDS:
             raise ReceiptError('receipt_unavailable')
         order, snapshot, context = self._load(order_id, customer_id)
-        context = validate_context({key: context[key] for key in ('contact', 'billing', 'delivery')})
+        context = _receipt_context(context)
         if (kind == 'order_received' and order['status'] != 'authorized'
                 or kind == 'order_confirmed' and order['status'] != 'paid'
                 or kind == 'order_cancelled' and order['status'] != 'cancelled'):
@@ -184,13 +199,20 @@ class ShopOrderReceipts:
             for service in line['services']:
                 lines.append('  ' + LABELS.get(service['code'], 'Erforderliches Zubehör') + ': ' + _money(service['gross_cent']))
         for shipment in snapshot['shipments']:
-            lines.append(('Versand zur Werkstatt' if shipment['destination'] == 'workshop' else 'Direktversand zum Kunden') + ': ' + _money(shipment['gross_cent']))
+            label = 'Versand zur Werkstatt' if shipment['destination'] == 'workshop' else 'Direktversand zum Kunden'
+            if shipment['destination'] == 'workshop' and 'workshop_delivery' in context:
+                label += '; ' + WORKSHOP_DELIVERY_LABELS[context['workshop_delivery']]
+            lines.append(label + ': ' + _money(shipment['gross_cent']))
         lines += ['', 'Gesamt inkl. 19 % MwSt.: ' + _money(order['amount_gross_cent']),
                   '', 'Montage-/Servicetermin vereinbaren wir nach Wareneingang; hier ist kein Termin reserviert.',
                   '', 'RECHNUNGSANSCHRIFT']
         for key in ('billing', 'delivery'):
             if key == 'delivery':
-                lines += ['', 'LIEFERANSCHRIFT FÜR DIREKTVERSAND']
+                title = ('LIEFERANSCHRIFT FÜR DIREKTVERSAND UND WEITERVERSAND NACH WERKSTATTLEISTUNG'
+                         if context.get('workshop_delivery') == 'customer_reshipment'
+                         and any(s['destination'] == 'workshop' for s in snapshot['shipments'])
+                         else 'LIEFERANSCHRIFT FÜR DIREKTVERSAND')
+                lines += ['', title]
             address = context[key]
             lines += [address['recipient'], address['street'], address['postcode'] + ' ' + address['city'], address['country']]
         lines += ['', 'Dies ist eine Bestell-/Statusbestätigung, keine Rechnung.', '', FOOTER_TEXT]
@@ -284,6 +306,8 @@ class ShopOrderReceipts:
 
     def customer_receipt(self, order_id, *, customer_id, include_addresses=False):
         order, snapshot, context = self._load(order_id, customer_id)
+        parsed_context = (_receipt_context(context) if include_addresses is True
+                          or isinstance(context, Mapping) and 'workshop_delivery' in context else None)
         with self._db() as connection:
             rows = connection.execute('SELECT kind,state FROM shop_order_receipts_v2 WHERE order_id=? AND customer_id=? AND mode=?',
                                       (order_id, customer_id, self.mode)).fetchall()
@@ -293,9 +317,12 @@ class ShopOrderReceipts:
             'shipments': [{key: group[key] for key in ('destination', 'gross_cent')} for group in snapshot['shipments']],
             'email_state': {row['kind']: row['state'] for row in rows}, 'invoice_status': 'not_issued',
             'invoice': None, 'returns_enabled': False}
+        if (parsed_context is not None and 'workshop_delivery' in parsed_context
+                and any(group['destination'] == 'workshop' for group in snapshot['shipments'])):
+            choice = parsed_context['workshop_delivery']
+            result.update(workshop_delivery=choice, workshop_delivery_label=WORKSHOP_DELIVERY_LABELS[choice])
         if include_addresses is True:
-            context = validate_context({key: context[key] for key in ('contact', 'billing', 'delivery')})
-            result['billing'], result['delivery'] = context['billing'], context['delivery']
+            result['billing'], result['delivery'] = parsed_context['billing'], parsed_context['delivery']
         return result
 
     def reconcile(self, order_id, *, customer_id, kind):

@@ -88,13 +88,21 @@ def _face(value):
 
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
-                 procurement_ids=None, product_documents=None, standalone_rims=None, **kwargs):
+                 procurement_ids=None, product_documents=None, standalone_rims=None,
+                 rsu_only_prices=False, preferred_ids=None, **kwargs):
+        if type(rsu_only_prices) is not bool:
+            raise CatalogError('invalid_price_policy')
         rows = deepcopy(list(products))
         super().__init__(rows, **kwargs)
         if (procurement_ids is not None and (not isinstance(procurement_ids, (set, frozenset, list, tuple))
                 or any(not isinstance(i, str) for i in procurement_ids))):
             raise CatalogError('invalid_procurement_ids')
         procurement = frozenset(procurement_ids or ())
+        self._rsu_only_prices, self._procurement_ids = rsu_only_prices, procurement
+        if (preferred_ids is not None and (not isinstance(preferred_ids, (set, frozenset))
+                or not preferred_ids <= procurement or not preferred_ids <= self._rows.keys())):
+            raise CatalogError('invalid_preferred_ids')
+        self._preferred_ids = frozenset(preferred_ids or ())
         if standalone_rims is not None and not isinstance(standalone_rims, Mapping):
             raise CatalogError('invalid_standalone_rims')
         sale_proofs = standalone_rims or {}
@@ -112,7 +120,7 @@ class EnrichedPublicCatalog(PublicCatalog):
                 continue
             product = entry['public']
             product['purchase_status'] = 'supplier_check_required' if identifier in procurement else 'inquiry_only'
-            product['price_label'] = '' if identifier in procurement else 'Richtpreis'
+            product['price_label'] = '' if rsu_only_prices or identifier in procurement else 'Richtpreis'
             product['delivery'] = {'status': 'unknown', 'label': 'Lieferzeit wird bestätigt'}
             if (identifier in procurement and product['category'] in {'alloy_wheel', 'steel_wheel'}):
                 dimensions = _sale_dimensions(sale_proofs.get(identifier), row)
@@ -132,6 +140,11 @@ class EnrichedPublicCatalog(PublicCatalog):
                 eprel = doc.get('eprel_id')
                 if original and isinstance(eprel, str) and re.fullmatch(r'[1-9][0-9]{0,11}', eprel):
                     product['product_documents'] = {**original, 'eprel_id': eprel}
+            if product['category'] in {'alloy_wheel', 'steel_wheel'}:
+                from shop_rim_reports import public_rim_documents
+                rim_documents = public_rim_documents(row, doc, kwargs.get('document_urls') or {})
+                if rim_documents:
+                    product['product_documents'] = rim_documents
             facts = row.get('quality_facts')
             if isinstance(facts, Mapping):
                 public_facts = {}
@@ -205,6 +218,23 @@ class EnrichedPublicCatalog(PublicCatalog):
             seasons = {season for _, season in candidates}
             entry['public']['tyre_seasons'] = [season for season in ('summer', 'winter', 'allseason') if season in seasons]
 
+    def _cached_entry(self, entry):
+        # An unbound article is outside this merchant's RSU offer, regardless
+        # of an imported quote or a stale/misconfigured display cache. Do not
+        # even consult that cache for an article we cannot procure.
+        if self._rsu_only_prices and entry['public']['id'] not in self._procurement_ids:
+            return {**entry, 'quote': None}
+        return super()._cached_entry(entry)
+
+    def _browse_order(self, entry):
+        return (entry['public']['id'] not in self._preferred_ids, *super()._browse_order(entry))
+
+    def _project(self, entry, now, *, detail=True):
+        product = super()._project(entry, now, detail=detail)
+        if self._rsu_only_prices and product['id'] not in self._procurement_ids:
+            product.update(price=None, price_status='not_offered', price_label='')
+        return product
+
     def _family(self, product, *, complete=False):
         identifiers = self._families.get(self._family_for.get(product['id']), [product['id']])
         if complete:
@@ -237,7 +267,10 @@ class EnrichedPublicCatalog(PublicCatalog):
                         # display-only ALZURA row sorts first. Keep the exact
                         # filtered variant's ID, price, image and geometry.
                         old = matches[seen[key]]
-                        if product.get('sale_dimensions') and not old.get('sale_dimensions'):
+                        preferred = product['id'] in self._preferred_ids
+                        old_preferred = old['id'] in self._preferred_ids
+                        if (preferred and not old_preferred or preferred == old_preferred
+                                and product.get('sale_dimensions') and not old.get('sale_dimensions')):
                             product['family'] = self._family(product, complete=complete == '1')
                             matches[seen[key]] = product
                         continue
@@ -255,7 +288,7 @@ class EnrichedPublicCatalog(PublicCatalog):
         if self.get(identifier) is None:
             return None
         ids = sorted(self._families.get(self._family_for.get(identifier), [identifier]),
-                     key=lambda pid: (not bool(self._rows[pid]['public'].get('sale_dimensions')), pid))
+                     key=lambda pid: (pid not in self._preferred_ids, not bool(self._rows[pid]['public'].get('sale_dimensions')), pid))
         if complete == '1':
             ids = [i for i in ids if self._rows[i]['public'].get('tyre_seasons')]
         if diameter is not None:
@@ -280,7 +313,8 @@ class EnrichedPublicCatalog(PublicCatalog):
         # Validate vehicle filter syntax, but never infer a tyre's vehicle
         # approval from a rim-width candidate or filter presence.
         self.page(department='wheels', page_size=1, **filters)
-        for tyre_id, canonical_season in self._candidate_tyres.get(identifier, []):
+        candidates = sorted(self._candidate_tyres.get(identifier, []), key=lambda item: item[0] not in self._preferred_ids)
+        for tyre_id, canonical_season in candidates:
             if season and canonical_season != season:
                 continue
             tyre = self.get(tyre_id)

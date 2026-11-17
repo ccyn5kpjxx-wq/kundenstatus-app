@@ -6,6 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shop_freight import RSURetailFreight, shipping_gross_cent, _hash
 
 NOW = datetime(2026, 11, 17, tzinfo=timezone.utc)
@@ -82,6 +83,75 @@ class FreightChecks(unittest.TestCase):
         for destination in ('workshop', 'customer'):
             self.assertEqual(self.provider(self.shipment([(TYRE, 1)], destination), self.context)['gross_cent'], 821)
         self.assertIsNone(self.provider(self.shipment([(TYRE, 1), (TYRE, 1)]), self.context))
+
+    def test_two_shipping_legs_only_for_explicit_workshop_reshipment(self):
+        for choice in (None, 'collection', 'customer_reshipment'):
+            if choice is None:self.context.pop('workshop_delivery', None)
+            else:self.context['workshop_delivery'] = choice
+            customer = self.provider(self.shipment([(TYRE, 1)], 'customer'), self.context)
+            workshop = self.provider(self.shipment([(TYRE, 1)], 'workshop'), self.context)
+            self.assertEqual(customer['gross_cent'], 821)
+            self.assertEqual(workshop['gross_cent'], 1642 if choice == 'customer_reshipment' else 821)
+        # Free supplier inbound freight does not prove free workshop outbound.
+        self.assertIsNone(self.provider(self.shipment([(TYRE, 2)]), self.context))
+        self.context['workshop_delivery'] = 'collection'
+        self.assertEqual(self.provider(self.shipment([(TYRE, 2)]), self.context)['gross_cent'], 0)
+        self.context['workshop_delivery'] = 'customer_reshipment'
+        self.assertEqual(self.provider(self.shipment([(TYRE, 2)], 'customer'), self.context)['gross_cent'], 0)
+
+    def test_workshop_reshipment_doubles_base_before_markup_vat_and_final_rounding(self):
+        ids = ['parts:' + f'{i:024x}' for i in range(1, 6)]
+        self.classes.update({pid: 'parts_standard' for pid in ids})
+        self.context['workshop_delivery'] = 'customer_reshipment'
+        quoted = self.service()(self.shipment([(pid, 1) for pid in ids]), self.context)
+        # Five €6 NET orders, two legs: €60 * 1.15 * 1.19 = €82.11.
+        self.assertEqual(quoted['gross_cent'], 8211)
+        self.assertNotEqual(quoted['gross_cent'], 2 * 4106)
+        self.assertEqual(self.service()(self.shipment([(BODY, 1)]), self.context)['gross_cent'], 16422)
+
+    def test_workshop_choice_is_bound_to_context_and_invalid_enum_cannot_reduce_fee(self):
+        original = self.shipment([(TYRE, 1)])
+        self.context['workshop_delivery'] = 'customer_reshipment'
+        self.assertIsNone(self.provider(original, self.context))
+        valid = self.shipment([(TYRE, 1)])
+        self.assertEqual(self.provider(valid, self.context)['gross_cent'], 1642)
+        for invalid in (None, '', True, [], 'customer', 'pickup'):
+            self.context['workshop_delivery'] = invalid
+            with self.subTest(choice=invalid):
+                self.assertIsNone(self.provider(self.shipment([(TYRE, 1)]), self.context))
+
+    def test_reshipment_requires_customer_eligibility_in_addition_to_workshop(self):
+        calls=[]
+        def eligible(destination, context):
+            calls.append(destination)
+            return destination == 'workshop'
+        provider=self.service(destination_eligibility=eligible)
+        self.context['workshop_delivery']='customer_reshipment'
+        self.assertIsNone(provider(self.shipment([(TYRE, 1)]), self.context))
+        self.assertEqual(calls,['workshop','customer'])
+        self.context['workshop_delivery']='collection'
+        self.assertEqual(provider(self.shipment([(TYRE, 1)]), self.context)['gross_cent'],821)
+
+    def test_actual_cart_quote_preserves_buyer_choice_in_shipping_price_and_frozen_hash(self):
+        from shop_buyer import validate_context
+        from test_shop_cart_quotes import Fixture, TYRE as CART_TYRE, NOW as CART_NOW
+        fixture=Fixture()
+        freight=RSURetailFreight({CART_TYRE:'pkw_tyre'},mode='test',basis='net',
+            evidence_id='SYNTHETIC_TWO_LEG_POLICY',checked_at=CART_NOW,
+            destination_eligibility=lambda *args:True,clock=lambda:CART_NOW)
+        service=fixture.service_instance(freight_quote=freight,clock=lambda:CART_NOW)
+        address={'recipient':'Synthetic Buyer','street':'Teststraße 12','postcode':'74821','city':'Mosbach','country':'DE'}
+        payload={'contact':{'name':'Synthetic Buyer','email':'buyer@example.test'},'billing':address,'delivery':None}
+        one=validate_context({**payload,'workshop_delivery':'collection'})
+        two=validate_context({**payload,'workshop_delivery':'customer_reshipment'})
+        cart={'lines':[{'id':CART_TYRE,'quantity':1,'services':{'mounting':True}}]}
+        first=service.quote(cart,customer_id='synthetic-customer',vehicle_ref='CAR-1',delivery_context=one)
+        second=service.quote(cart,customer_id='synthetic-customer',vehicle_ref='CAR-1',delivery_context=two)
+        self.assertTrue(first.snapshot()['ready']);self.assertTrue(second.snapshot()['ready'])
+        self.assertEqual(first.snapshot()['shipments'][0]['gross_cent'],821)
+        self.assertEqual(second.snapshot()['shipments'][0]['gross_cent'],1642)
+        self.assertEqual(second.snapshot()['total_gross_cent']-first.snapshot()['total_gross_cent'],821)
+        self.assertNotEqual(first.quote_hash,second.quote_hash)
 
     def test_unknown_tax_class_or_destination_never_becomes_free(self):
         group = self.shipment([(TYRE, 4)])

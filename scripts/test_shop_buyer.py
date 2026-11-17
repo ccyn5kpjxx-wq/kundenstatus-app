@@ -59,6 +59,41 @@ class BuyerChecks(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(BuyerError):
                 validate_context(payload)
 
+    def test_workshop_delivery_is_optional_strict_and_never_implied_in_legacy_context(self):
+        legacy = validate_context(deepcopy(PAYLOAD))
+        self.assertEqual(set(legacy), {'contact', 'billing', 'delivery'})
+        for value in ('collection', 'customer_reshipment'):
+            parsed = validate_context({**deepcopy(PAYLOAD), 'workshop_delivery': value})
+            self.assertEqual(parsed['workshop_delivery'], value)
+            self.assertEqual({k:v for k,v in parsed.items() if k != 'workshop_delivery'}, legacy)
+        for value in ('', 'pickup', 'customer', 'customer_reshipment\n', None, True, [], {}):
+            with self.subTest(value=value), self.assertRaises(BuyerError):
+                validate_context({**deepcopy(PAYLOAD), 'workshop_delivery': value})
+
+    def test_saved_workshop_choice_is_private_persistent_and_changes_frozen_context_hash(self):
+        from shop_freight import _hash
+        csrf = self.establish().get_json()['csrf_token']
+        self.assertEqual(self.save(csrf).status_code, 200)
+        legacy = self.callback(csrf).get_json()['context']['delivery_context']
+        self.assertNotIn('workshop_delivery', legacy)
+        response = self.save(csrf, {**deepcopy(PAYLOAD), 'workshop_delivery': 'customer_reshipment'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['workshop_delivery'], 'customer_reshipment')
+        self.assertEqual(set(response.get_json()), {'guest', 'address_ready', 'csrf_token', 'expires_at', 'workshop_delivery'})
+        restored = self.establish().get_json()
+        self.assertEqual(restored['workshop_delivery'], 'customer_reshipment')
+        self.assertNotIn('billing', restored)
+        self.assertNotIn('contact', restored)
+        reship = self.callback(csrf).get_json()['context']['delivery_context']
+        self.assertEqual(reship['workshop_delivery'], 'customer_reshipment')
+        self.assertNotEqual(_hash(legacy), _hash(reship))
+        record = json.loads(self.backend_records()[0][1])
+        self.assertEqual(record['context'], reship)
+        self.assertEqual(self.save(csrf, {**deepcopy(PAYLOAD), 'workshop_delivery': 'collection'}).status_code, 200)
+        collected = self.callback(csrf).get_json()['context']['delivery_context']
+        self.assertEqual(collected['workshop_delivery'], 'collection')
+        self.assertNotEqual(_hash(reship), _hash(collected))
+
     def make_app(self, buyer):
         app = Flask('synthetic-shop-buyer')
         app.config.update(TESTING=True, SECRET_KEY='synthetic-portal-unrelated', SHOP_BUYER_ENABLED=True)

@@ -130,6 +130,19 @@ class ReleasedProductDocuments:
                     raise DocumentError('invalid_document_release')
                 selected[asset]={'file':root/asset,'sha256':source['sha256'],'wheel_report':True}
                 continue
+            if (isinstance(source,Mapping) and source.get('kind')=='wheel_report'
+                    and set(source) in ({'kind','url'},{'kind','url','file','sha256'})):
+                from shop_rim_reports import rim_report_asset
+                try:
+                    if rim_report_asset(source['url']) != asset:raise ValueError()
+                except (ValueError,TypeError):raise DocumentError('invalid_document_release') from None
+                selected[asset]={'url':source['url'],'wheel_report':True}
+                if 'file' in source:
+                    if (root is None or source['file'] != asset
+                            or not isinstance(source['sha256'],str) or not re.fullmatch(r'[a-f0-9]{64}',source['sha256'])):
+                        raise DocumentError('invalid_document_release')
+                    selected[asset].update(file=root/asset,sha256=source['sha256'])
+                continue
             if not isinstance(source,Mapping) or 'url' not in source or document_asset(source['url'])!=asset:
                 raise DocumentError('invalid_document_release')
             expected={'url'}
@@ -218,7 +231,7 @@ class ReleasedProductDocuments:
             for chunk in response.iter_content(chunk_size=8192):
                 if not isinstance(chunk,bytes) or len(body)+len(chunk)>maximum or self.monotonic()>deadline:raise ValueError()
                 body.extend(chunk)
-            return self._validate(bytes(body),asset)
+            return self._validate(bytes(body),asset,wheel_report=source.get('wheel_report') is True)
         except Exception:raise DocumentError('document_unavailable') from None
         finally:
             if response is not None:response.close()

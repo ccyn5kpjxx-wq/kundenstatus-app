@@ -14,21 +14,24 @@
   const maxQuantity = id => id.startsWith('parts:') ? 20 : 4;
   function quotedPrice(product, quantity, now = Date.now()) {
     const p = product && product.price;
-    if (!p || typeof product.id !== 'string' || !PRODUCT.test(product.id) || product.price_status !== 'current' || p.currency !== 'EUR' || p.vat_percent !== '19.00' ||
+    if (inquiryOnly(product) || !p || typeof product.id !== 'string' || !PRODUCT.test(product.id) || product.price_status !== 'current' || p.currency !== 'EUR' || p.vat_percent !== '19.00' ||
         !Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity(product.id || '') ||
         !Number.isSafeInteger(p.stock_reported) || p.stock_reported < 0) return null;
     const observed = Date.parse(p.observed_at), expires = Date.parse(p.expires_at);
-    if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now || expires <= now || expires - observed > 900000 || expires <= observed) return null;
+    const published = p.kind === 'merchant_pricebook' && p.source === 'RSU';
+    if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now || expires <= now || expires - observed > (published ? 604800000 : 900000) || expires <= observed) return null;
     const line = p.prices_by_quantity && p.prices_by_quantity[String(quantity)];
     if (!line || line.quantity !== quantity || !Number.isSafeInteger(line.unit_gross_cent) || line.unit_gross_cent < 1 || line.unit_gross_cent > 10000000 ||
         line.items_gross_cent !== line.unit_gross_cent * quantity) return null;
-    return {unit: line.unit_gross_cent, total: line.items_gross_cent, stock: p.stock_reported, expires};
+    const stockExpires = Date.parse(p.stock_expires_at);
+    return {unit: line.unit_gross_cent, total: line.items_gross_cent, stock: p.stock_reported, expires,
+      stockCurrent: !published || Number.isFinite(stockExpires) && stockExpires > now};
   }
   function currentPrice(product, quantity, now = Date.now()) {
     const price = quotedPrice(product, quantity, now);
-    return price && price.stock >= quantity ? price : null;
+    return price && (!price.stockCurrent || price.stock >= quantity) ? price : null;
   }
-  const selectionPrice = (product, quantity) => inquiryOnly(product) ? quotedPrice(product, quantity) : currentPrice(product, quantity);
+  const selectionPrice = (product, quantity) => currentPrice(product, quantity);
   function rimDimensions(product) {
     if (!product || !['alloy_wheel', 'steel_wheel'].includes(product.category)) return [];
     // This projection is supplied only after the server verifies the exact
@@ -126,7 +129,7 @@
   function buildQuery(values, department, page) {
     const query = new URLSearchParams({page: String(Number.isInteger(page) && page > 0 ? Math.min(page, 10000) : 1), page_size: '24'});
     if (['tyres', 'wheels', 'parts', 'accessories'].includes(department)) query.set('department', department);
-    for (const field of ['q', 'brand', 'category', 'make', 'model', 'year', 'hsn', 'tsn']) {
+    for (const field of ['q', 'brand', 'category', 'make', 'model', 'year', 'hsn', 'tsn', 'width', 'ratio', 'diameter']) {
       const value = typeof values[field] === 'string' ? values[field].trim() : '';
       if (value) query.set(field, field === 'tsn' ? value.toUpperCase() : value);
     }
@@ -171,7 +174,7 @@
   const button = (text, handler, cls = 'shop-button') => { const node = el('button', text, cls); node.type = 'button'; node.addEventListener('click', handler); return node; };
   const priceNodes = new Map();
   const imageLoads = new WeakMap();
-  let cart = [], quote = null, retained = false, revision = 0, csrf = document.querySelector('meta[name=shop-csrf]').content || '', addressReady = false, consumerState = null, consumerRun = 0, checkoutInProgress = false;
+  let cart = [], quote = null, retained = false, revision = 0, csrf = document.querySelector('meta[name=shop-csrf]').content || '', addressReady = false, consumerState = null, consumerRun = 0, checkoutInProgress = false, cartSourceReady = false, confirmedWorkshopDelivery = 'collection';
   try { cart = normaliseCart(JSON.parse(root.localStorage.getItem(CART_KEY) || '[]')); } catch (_) { /* selection starts empty */ }
   function notice(text) { const n = byId('shop-announcement'); n.textContent = text; n.hidden = false; root.setTimeout(() => { n.hidden = true; }, 4500); }
   function invalidateQuote() {
@@ -210,13 +213,12 @@
   function updatePrice(node, product, quantity) {
     const price = quotedPrice(product, quantity), inquiry = inquiryOnly(product);
     node.replaceChildren();
-    if (inquiry) node.append(el('span', 'Richtpreis', 'shop-price-kind'));
-    if (!price) { node.append(el('strong', 'Preis wird aktualisiert'), el('small', 'Preis oder Verfügbarkeit für diese Menge noch nicht bestätigt.')); if (inquiry) node.append(el('small', 'Preis und Verfügbarkeit auf Anfrage', 'shop-inquiry-note')); appendTyreDocuments(node, product); return; }
+    if (inquiry) { node.append(el('strong', 'Aktuell nicht bestellbar'), el('small', 'Für diesen Artikel liegt noch kein bestätigtes Lieferantenangebot vor.')); appendTyreDocuments(node, product); return; }
+    if (!price) { node.append(el('strong', 'Preis wird aktualisiert'), el('small', 'Preis oder Verfügbarkeit für diese Menge noch nicht bestätigt.')); appendTyreDocuments(node, product); return; }
     node.append(el('strong', money(price.unit)), el('small', 'pro ' + (product.unit_label || 'Stück') + ' · inkl. 19 % MwSt.'));
     if (quantity > 1) node.append(el('small', quantity + ' Stück: ' + money(price.total)));
     if (product.price.base_price_unit === 'L' && Number.isSafeInteger(product.price.base_price_gross_cent)) node.append(el('small', money(product.price.base_price_gross_cent) + ' / Liter'));
-    if (inquiry) node.append(el('small', 'Preis und Verfügbarkeit auf Anfrage', 'shop-inquiry-note'));
-    else node.append(el('small', price.stock === 0 ? 'Derzeit nicht verfügbar' : price.stock < quantity ? 'Nur ' + price.stock + ' Stück gemeldet · gewünschte Menge nicht verfügbar' : price.stock + ' Stück gemeldet', 'shop-stock'));
+    node.append(el('small', !price.stockCurrent ? 'Bestand wird vor der Zahlung geprüft' : price.stock === 0 ? 'Derzeit nicht verfügbar' : price.stock < quantity ? 'Nur ' + price.stock + ' Stück gemeldet · gewünschte Menge nicht verfügbar' : price.stock + ' Stück gemeldet', 'shop-stock'));
     node.append(el('small', 'Versand und optionale Leistungen im Gesamtpreis.'));
     appendTyreDocuments(node, product);
   }
@@ -266,7 +268,7 @@
   function scheduleQuantityPrice(node, result, generation, retries = 0) {
     const state = priceNodes.get(node);
     if (!state || generation !== state.generation || !priceActive(node, state)) return;
-    if (result.prices_refreshing !== true || currentPrice(state.product, state.quantity) || retries >= MAX_PRICE_RETRIES) {
+    if (inquiryOnly(state.product) || result.prices_refreshing !== true || currentPrice(state.product, state.quantity) || retries >= MAX_PRICE_RETRIES) {
       state.pendingRefresh = null; return;
     }
     state.pendingRefresh = {generation, retries};
@@ -279,7 +281,7 @@
   }
   async function fetchQuantityPrice(node, generation, retries = 0) {
     const state = priceNodes.get(node);
-    if (!state || state.generation !== generation || !priceActive(node, state) || !visibleDocument()) return;
+    if (!state || inquiryOnly(state.product) || state.generation !== generation || !priceActive(node, state) || !visibleDocument()) return;
     const quantity = state.quantity;
     try {
       const result = await requestJSON('/products/' + encodeURIComponent(state.product.id) + '?quantity=' + quantity);
@@ -332,6 +334,7 @@
   }
   function validProduct(product) { return product && PRODUCT.test(product.id) && typeof product.name === 'string' && CATEGORIES.has(product.category); }
   function addToCart(product, quantity, services = {}) {
+    if (inquiryOnly(product)) { notice('Dieser Artikel ist aktuell nicht bestellbar.'); return; }
     const candidate = normaliseCart([{id: product.id, quantity, services}]);
     if (!candidate.length) { notice('Bitte Ihre Auswahl und den Farbcode prüfen.'); return; }
     const row = candidate[0];
@@ -339,18 +342,18 @@
     if (existing) existing.quantity = Math.min(maxQuantity(row.id), existing.quantity + quantity);
     else if (cart.length < 40) cart.push(row);
     else { notice('Maximal 40 Positionen möglich. Bitte die Auswahl im Warenkorb prüfen.'); return; }
-    saveCart(); notice(inquiryOnly(product) ? 'Artikel ist in Ihrer Anfrageauswahl. Preis und Verfügbarkeit bleiben zu bestätigen.' : product.name + ' ist im Warenkorb.');
+    saveCart(); notice(product.name + ' ist im Warenkorb.');
   }
   function card(product, active) {
     const family = ['alloy_wheel', 'steel_wheel'].includes(product.category) && Number.isSafeInteger(product.family?.variant_count) && product.family.variant_count > 1;
-    const view = () => family ? openFamily(product) : openProduct(product.id);
+    const view = () => family ? openFamily(product, 1, typeof filters.diameter === 'string' ? filters.diameter : '') : openProduct(product.id);
     const node = el('article', null, 'shop-card'), media = button('', view, 'shop-card-media');
     media.setAttribute('aria-label', product.name + ' ansehen'); media.append(productImage(product, ''));
     node.append(media);
     const imageNote = modelPhotoNote(product); if (imageNote) node.append(el('small', imageNote, 'shop-muted'));
     node.append(el('h3', product.name), el('p', [product.brand, product.size].filter(Boolean).join(' · '), 'shop-card-meta'));
-    let count = 1;
-    const price = priceBox(product, count, {active}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
+    let count = 1, add = null;
+    const price = priceBox(product, count, {active, onUpdate: () => { if (add) { add.disabled = inquiryOnly(product); add.textContent = inquiryOnly(product) ? 'Aktuell nicht bestellbar' : 'In den Warenkorb'; } }}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
     if (family) {
       node.append(el('p', product.family.variant_count + ' Ausführungen' + (Array.isArray(product.family.diameters) ? ' · ' + product.family.diameters.slice(0, 15).join(' / ') + ' Zoll' : ''), 'shop-card-meta'));
       node.append(el('p', 'Preis der gezeigten Ausführung', 'shop-card-meta'));
@@ -358,7 +361,8 @@
       controls.append(button('Ausführung wählen', view));
     } else {
       label.append(quantitySelect(product.id, count, value => { count = value; changePriceQuantity(price, value); }));
-      controls.append(label, button(inquiryOnly(product) ? 'Zur Anfrageauswahl' : 'In den Warenkorb', () => addToCart(product, count)));
+      add = button(inquiryOnly(product) ? 'Aktuell nicht bestellbar' : 'In den Warenkorb', () => addToCart(product, count)); add.disabled = inquiryOnly(product);
+      controls.append(label, add);
     }
     if (product.department === 'parts') node.append(el('p', 'Lieferzeit wird bestätigt', 'shop-card-meta'));
     node.append(price, controls, button(family ? 'Felge ansehen' : 'Artikel ansehen', view, 'shop-detail-link'));
@@ -369,7 +373,7 @@
   function pendingPagePrices() {
     return [...visibleCards.values()].some(({price}) => {
       const state = priceNodes.get(price);
-      return state && state.generation === 0 && state.quantity === 1 && priceActive(price, state) && !currentPrice(state.product, 1);
+      return state && !inquiryOnly(state.product) && state.generation === 0 && state.quantity === 1 && priceActive(price, state) && !currentPrice(state.product, 1);
     });
   }
   function schedulePagePrices(result, run, query, expectedPage, retries = 0) {
@@ -436,6 +440,7 @@
   });
   if (byId('catalog-products')) {
     byId('catalog-filters').addEventListener('submit', event => { event.preventDefault(); filters = Object.fromEntries(new FormData(event.currentTarget)); page = 1; loadPage(); });
+    byId('catalog-filters').addEventListener('reset', () => { filters = {}; page = 1; loadPage(); });
     if (byId('vehicle-filters')) {
       let vehicleTimer = null;
       const applyVehicle = form => {
@@ -533,12 +538,12 @@
       add.disabled = !selected || !rimPrice || !tyrePrice;
       if (!selected) return;
       summary.append(el('p', quantity + ' × Felge + ' + quantity + ' × Reifen', 'shop-muted'));
-      if (inquiry) summary.append(el('span', 'Richtpreis', 'shop-price-kind'), el('p', 'Preis und Verfügbarkeit auf Anfrage', 'shop-inquiry-note'));
+      if (inquiry) summary.append(el('p', 'Diese Kombination ist aktuell nicht bestellbar.', 'shop-inquiry-note'));
       if (rimPrice && tyrePrice) summary.append(el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
-      else summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
+      else if (!inquiry) summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
       summary.append(el('p', mounting.checked ? 'Montagepreis und Versand werden im Warenkorb verbindlich ergänzt. Den Termin vereinbaren wir nach Wareneingang.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
-      add.textContent = inquiry ? 'Felgen + Reifen zur Anfrageauswahl' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
+      add.textContent = inquiry ? 'Aktuell nicht bestellbar' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
     function clear() { serial++; selected = null; choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
     const search = button('Passende Reifen zu dieser Felge suchen', async () => {
@@ -602,8 +607,8 @@
         copy.append(el('h3', 'Genaue Felgenausführung'), specification,
           el('p', 'Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.', 'shop-muted'));
       }
-      let count = 1, bundle = null;
-      const price = priceBox(product, count, {active: () => run === detailSequence && dialog.open, onUpdate: () => bundle?.priceChanged()}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
+      let count = 1, bundle = null, add = null;
+      const price = priceBox(product, count, {active: () => run === detailSequence && dialog.open, onUpdate: () => { if (add) { add.disabled = inquiryOnly(product); add.textContent = inquiryOnly(product) ? 'Aktuell nicht bestellbar' : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb'; } bundle?.priceChanged(); }}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
       const quantity = el('label', 'Anzahl'); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); })); form.append(quantity);
       if (product.category === 'tyre') {
         checkbox('Montage bei uns in Mosbach dazu wählen', 'mounting', form);
@@ -621,18 +626,30 @@
         for (const [value, text] of [['', 'Ohne Aufbereitung'], ['inside', 'Innen'], ['outside', 'Außen'], ['complete', 'Innen und außen']]) { const opt = el('option', text); opt.value = value; select.append(opt); }
         label.append(select); form.append(label);
       }
-      copy.append(price, form, button(inquiryOnly(product) ? (isRim ? 'Nur Felge zur Anfrageauswahl' : 'Zur Anfrageauswahl') : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb', () => {
+      add = button(inquiryOnly(product) ? 'Aktuell nicht bestellbar' : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb', () => {
         const services = {}; for (const flag of FLAGS) { const field = form.elements.namedItem(flag); if (field && field.checked) services[flag] = true; }
         if (services.painting) services.paint_color = form.elements.namedItem('paint_color').value;
         const care = form.elements.namedItem('care'); if (care && care.value) services.care = care.value;
         addToCart(product, count, services);
-      }));
+      }); add.disabled = inquiryOnly(product); copy.append(price, form, add);
       if (product.description) copy.append(el('p', product.description, 'shop-muted'));
       const specs = el('dl', null, 'shop-specs');
       for (const [key, value] of Object.entries(product.specifications || {}).slice(0, 40)) specs.append(el('dt', key), el('dd', value)); copy.append(specs);
       const quality = qualityFacts(product);
       if (quality.length) { const labels = el('dl', null, 'shop-specs'); for (const [label, value] of quality) labels.append(el('dt', label), el('dd', value)); copy.append(el('h3', 'EU-Reifenlabel'), labels); }
       const fitment = el('section', null, 'shop-fitment'); fitment.append(el('h3', product.category === 'tyre' ? 'Ihre Reifenauswahl' : product.department === 'parts' ? 'Bestätigte Fahrzeugzuordnung' : 'Gutachten und Fahrzeugzuordnung'));
+      if (isRim) {
+        const originals = product.product_documents?.rim_reports;
+        if (Array.isArray(originals) && originals.length) {
+          fitment.append(el('h4', 'Originalgutachten zu dieser Ausführung'));
+          for (const report of originals.slice(0, 48)) {
+            if (report.scope !== 'provider_document_not_vehicle_approval' || !safeMedia(report.url, true)) continue;
+            const link = el('a', [report.report_number, report.type_description].filter(Boolean).join(' · ') || 'Originalgutachten öffnen ↗');
+            link.href = report.url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br'));
+          }
+          fitment.append(el('p', 'Originalunterlagen des Anbieters. Die genaue Felgenausführung, Fahrzeugausführung und Auflagen im Dokument prüfen. Eine bestätigte Fahrzeugzuordnung ist unten gesondert aufgeführt.', 'shop-muted'));
+        }
+      }
       if (product.category === 'tyre') fitment.append(el('p', TYRE_PURCHASE_NOTE));
       if (product.fitment && (product.fitment.status === 'reviewed_with_conditions' || product.department === 'parts' && product.fitment.status === 'provider_vehicle')) {
         for (const url of (product.fitment.reports || []).filter(url => safeMedia(url, true))) { const link = el('a', 'Gutachten zur Ausführung öffnen ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br')); }
@@ -702,8 +719,9 @@
   }
   let cartRun = 0, offerSelection = [];
   function offerButton(target, label = 'Warenkorb als Gesamtangebot anfragen') {
-    if (body.dataset.cartRequestUrl !== '/anfrage?anliegen=allgemein&shop_anfrage=1' || !cart.length) return;
+    if (body.dataset.cartRequestUrl !== '/anfrage?anliegen=allgemein&shop_anfrage=1' || !cart.length || !cartSourceReady) return;
     target.append(button(label, () => {
+      if (!cartSourceReady) { notice('Bitte die aktuell nicht bestellbaren Artikel aus der Auswahl entfernen.'); return; }
       const value = buildOfferRequest(offerSelection);
       if (!value) { notice('Die Auswahl wird noch geladen. Bitte gleich erneut versuchen.'); return; }
       try { root.sessionStorage.setItem('gaertner-shop-offer-request-v1', JSON.stringify(value)); }
@@ -713,7 +731,7 @@
   }
   async function renderCart() {
     const run = ++cartRun, container = byId('cart-items'), summary = byId('cart-summary');
-    container.replaceChildren(); summary.replaceChildren(); offerSelection = []; byId('cart-status').textContent = cart.length ? 'Artikel werden geprüft …' : 'Ihr Warenkorb ist noch leer.';
+    container.replaceChildren(); summary.replaceChildren(); offerSelection = []; cartSourceReady = false; byId('cart-status').textContent = cart.length ? 'Artikel werden geprüft …' : 'Ihr Warenkorb ist noch leer.';
     if (!cart.length) { byId('request-quote').disabled = true; return; }
     let subtotal = 0, complete = true, subtotalExpires = Infinity, subtotalOutput = null, subtotalLabel = null, inquiryNote = null;
     const subtotalItems = [];
@@ -726,9 +744,11 @@
         if (!current) ready = false;
         else { value += current.total; until = Math.min(until, current.expires); }
       }
-      subtotalOutput.textContent = ready ? money(value) : 'Preise werden geprüft';
       const inquiry = subtotalItems.some(item => inquiryOnly(item.product));
-      if (subtotalLabel) subtotalLabel.textContent = inquiry ? 'Unverbindliche Artikel-Zwischensumme' : 'Artikel-Zwischensumme';
+      cartSourceReady = offerSelection.length === cart.length && offerSelection.every(item => item.product && !inquiryOnly(item.product));
+      byId('request-quote').disabled = body.dataset.quoteEnabled !== 'true' || !addressReady || !cartSourceReady;
+      subtotalOutput.textContent = inquiry ? 'Auswahl aktuell nicht bestellbar' : ready ? money(value) : 'Preise werden geprüft';
+      if (subtotalLabel) subtotalLabel.textContent = 'Artikel-Zwischensumme';
       if (inquiryNote) inquiryNote.hidden = !inquiry;
       if (ready) subtotalOutput.dataset.subtotalExpires = String(until);
       else delete subtotalOutput.dataset.subtotalExpires;
@@ -772,19 +792,28 @@
     const total = el('p', complete ? money(subtotal) : 'Preise werden geprüft', 'shop-summary-total');
     subtotalOutput = total;
     if (complete) total.dataset.subtotalExpires = String(subtotalExpires);
-    subtotalLabel = el('p', 'Artikel-Zwischensumme', 'shop-muted'); inquiryNote = el('p', 'Enthält Richtpreise. Preis und Verfügbarkeit auf Anfrage.', 'shop-inquiry-note'); inquiryNote.hidden = true;
+    subtotalLabel = el('p', 'Artikel-Zwischensumme', 'shop-muted'); inquiryNote = el('p', 'Bitte die aktuell nicht bestellbaren Artikel aus der Auswahl entfernen.', 'shop-inquiry-note'); inquiryNote.hidden = true;
     summary.append(subtotalLabel, total, inquiryNote, el('p', 'Zuzüglich bestätigter Montage, Lackierung und Versand. Noch kein Gesamtangebot.', 'shop-muted'));
     refreshSubtotal();
+    cartSourceReady = offerSelection.length === cart.length && offerSelection.every(item => item.product && !inquiryOnly(item.product));
     offerButton(summary);
     byId('cart-status').textContent = '';
-    byId('request-quote').disabled = body.dataset.quoteEnabled !== 'true' || !addressReady;
+    byId('request-quote').disabled = body.dataset.quoteEnabled !== 'true' || !addressReady || !cartSourceReady;
     if (body.dataset.quoteEnabled !== 'true') byId('quote-status').textContent = 'Der verbindliche Gesamtpreis wird freigeschaltet, sobald Artikel, Service und Versand sicher abgeglichen sind.';
+    else if (!cartSourceReady) byId('quote-status').textContent = 'Bitte die aktuell nicht bestellbaren Artikel aus der Auswahl entfernen.';
     else if (!addressReady) byId('quote-status').textContent = 'Bitte zuerst Ihre Rechnungs- und Lieferanschrift bestätigen.';
   }
   async function buyerSession() {
     const result = await requestJSON('/buyer/session');
     if (typeof result.csrf_token !== 'string' || !/^[A-Za-z0-9_\-.:]{16,256}$/.test(result.csrf_token) || typeof result.address_ready !== 'boolean') throw new Error('invalid_session');
-    csrf = result.csrf_token; addressReady = result.address_ready; return result;
+    csrf = result.csrf_token; addressReady = result.address_ready; restoreWorkshopDelivery(result); return result;
+  }
+  function restoreWorkshopDelivery(result) {
+    const value = result.workshop_delivery || 'collection';
+    if (!['collection', 'customer_reshipment'].includes(value)) throw new Error('invalid_session');
+    confirmedWorkshopDelivery = value;
+    const field = byId('buyer-address')?.elements.namedItem('workshop_delivery');
+    if (field) field.value = value;
   }
   function addressPayload(form) {
     const data = new FormData(form), get = key => String(data.get(key) || '').trim();
@@ -794,7 +823,12 @@
     const salutation = get('delivery_salutation');
     if (salutation && !['Herr', 'Frau', 'Firma'].includes(salutation)) throw new Error('invalid_address');
     if (salutation) delivery = {...(delivery || billing), salutation};
-    return {contact, billing, delivery};
+    const payload = {contact, billing, delivery}, workshopDelivery = get('workshop_delivery');
+    if (workshopDelivery) {
+      if (!['collection', 'customer_reshipment'].includes(workshopDelivery)) throw new Error('invalid_address');
+      payload.workshop_delivery = workshopDelivery;
+    }
+    return payload;
   }
   const BLOCKED = {mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.', fitment_unconfirmed: 'Fahrzeugpassung noch nicht bestätigt', rsu_mapping_unconfirmed: 'Lieferantenartikel noch nicht sicher abgeglichen', freight_unconfirmed: 'Versandkosten noch nicht bestätigt', assembly_fitment_unconfirmed: 'Rad-Reifen-Kombination noch nicht freigegeben', service_unconfirmed: 'Servicepreis noch nicht bestätigt', stock_insufficient_or_unconfirmed: 'Bestand für diese Menge noch nicht bestätigt', procurement_price_unconfirmed: 'Lieferantenpreis noch nicht bestätigt'};
   Object.assign(BLOCKED, {
@@ -834,7 +868,8 @@
       lines.append(el('dt', line.quantity + ' × ' + line.name), el('dd', money(line.items_gross_cent)));
       for (const service of line.services || []) lines.append(el('dt', ({mounting: 'Montage', painting: 'Lackierung', oil_service: 'Ölservice', installation: 'Einbau', care: 'Aufbereitung'})[service.code] || 'Erforderliches Zubehör'), el('dd', money(service.gross_cent)));
     }
-    for (const shipment of value.shipments) lines.append(el('dt', shipment.destination === 'workshop' ? 'Versand zur Werkstatt' : 'Direktversand zum Kunden'), el('dd', money(shipment.gross_cent)));
+    const reshipment = confirmedWorkshopDelivery === 'customer_reshipment';
+    for (const shipment of value.shipments) lines.append(el('dt', shipment.destination === 'workshop' ? reshipment ? 'Versand zur Werkstatt und anschließend zum Kunden' : 'Versand zur Werkstatt · Abholung' : 'Direktversand zum Kunden'), el('dd', money(shipment.gross_cent)));
     review.append(lines);
     if (value.ready === true && result.quote_retained === true && Number.isSafeInteger(value.total_gross_cent) && value.total_gross_cent > 0 && /^[a-f0-9]{64}$/.test(value.quote_hash) && Date.parse(value.expires_at) > Date.now()) {
       quote = value; retained = true; review.append(el('p', 'Gesamtpreis inkl. MwSt.', 'shop-muted'), el('p', money(value.total_gross_cent), 'shop-summary-total'));
@@ -868,12 +903,12 @@
           const result = await requestJSON('/buyer/address', {method: 'PUT', body: JSON.stringify(addressPayload(form))});
           if (result.address_ready !== true || typeof result.csrf_token !== 'string') throw new Error('invalid_session');
           if (submittedRevision !== revision) { byId('address-status').textContent = 'Die Anschrift wurde während der Prüfung geändert. Bitte erneut bestätigen.'; return; }
-          csrf = result.csrf_token; addressReady = true; byId('address-status').textContent = 'Anschrift für diese Bestellung gespeichert.'; renderCart();
+          csrf = result.csrf_token; addressReady = true; restoreWorkshopDelivery(result); byId('address-status').textContent = 'Anschrift für diese Bestellung gespeichert.'; renderCart();
         } catch (error) { byId('address-status').textContent = errorText(error); }
       });
     }
     byId('request-quote').addEventListener('click', async () => {
-      if (body.dataset.quoteEnabled !== 'true' || !addressReady || !cart.length) return;
+      if (body.dataset.quoteEnabled !== 'true' || !addressReady || !cart.length || !cartSourceReady) return;
       invalidateQuote(); byId('request-quote').disabled = true; byId('quote-status').textContent = 'Gesamtpreis und Lieferwege werden geprüft …';
       const submittedRevision = revision, submitted = JSON.stringify({lines: cart});
       try {
@@ -882,10 +917,10 @@
         await showQuote(result);
       }
       catch (error) { byId('quote-status').textContent = errorText(error); }
-      finally { byId('request-quote').disabled = !addressReady; }
+      finally { byId('request-quote').disabled = !addressReady || !cartSourceReady; }
     });
     byId('checkout-button').addEventListener('click', async () => {
-      if (body.dataset.orderEnabled !== 'true' || body.dataset.checkoutEnabled !== 'true' || body.dataset.consumerEnabled !== 'true' || !quote || !retained || !addressReady || checkoutInProgress || !consumerState || consumerState.quoteHash !== quote.quote_hash || !consumerState.consumer.checked || !consumerState.accept.checked) return;
+      if (body.dataset.orderEnabled !== 'true' || body.dataset.checkoutEnabled !== 'true' || body.dataset.consumerEnabled !== 'true' || !quote || !retained || !addressReady || !cartSourceReady || checkoutInProgress || !consumerState || consumerState.quoteHash !== quote.quote_hash || !consumerState.consumer.checked || !consumerState.accept.checked) return;
       if (Date.parse(quote.expires_at) <= Date.now()) { invalidateQuote(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen. Bitte den Gesamtpreis erneut prüfen.'; return; }
       const frozenQuote = quote, hash = frozenQuote.quote_hash, submittedRevision = revision, pack = consumerState.packHash; checkoutInProgress = true; byId('checkout-button').disabled = true; byId('quote-status').textContent = 'Ihre geprüfte Auswahl wird übernommen …';
       let orderId = null;

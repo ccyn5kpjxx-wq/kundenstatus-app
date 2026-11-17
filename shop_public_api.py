@@ -12,7 +12,8 @@ from flask import Blueprint, current_app, request, Response
 from shop_order_store import OrderStoreError
 
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
-                         'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete'})
+                         'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete',
+                         'width', 'ratio', 'diameter'})
 MAX_REQUEST = 16384
 MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
@@ -111,6 +112,10 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'invalid_query'}, 400)
         if 'complete' in params and params['complete'] != '1':
             return reply({'error': 'invalid_query'}, 400)
+        for field, minimum, maximum in (('width', 100, 455), ('ratio', 10, 100), ('diameter', 8, 30)):
+            if field in params and (not re.fullmatch(r'[1-9][0-9]{0,2}', params[field])
+                                    or not minimum <= int(params[field]) <= maximum):
+                return reply({'error': 'invalid_query'}, 400)
         for field in ('page', 'page_size', 'year'):
             if field in params:
                 if not re.fullmatch(r'[0-9]{1,5}', params[field]):

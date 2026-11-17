@@ -107,6 +107,17 @@ class PublicApiChecks(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self.client.get('/shop/api/v2/products?' + query).status_code, 400)
 
+    def test_size_filters_forward_only_three_exact_typed_query_values(self):
+        self.enabled()
+        result=self.client.get('/shop/api/v2/products?department=tyres&width=255&ratio=40&diameter=19')
+        self.assertEqual(result.status_code,200)
+        self.catalogue.page.assert_called_once_with(department='tyres',width='255',ratio='40',diameter='19')
+        self.catalogue.page.reset_mock()
+        for query in ('width=255&width=225','ratio=0','width=0255','width=255mm','diameter=31',
+                      'diameter=19.5','diameter=NaN','width=','rim_width=8'):
+            with self.subTest(query=query):self.assertEqual(self.client.get('/shop/api/v2/products?'+query).status_code,400)
+        self.catalogue.page.assert_not_called()
+
     def test_exact_lookup_404_and_fixed_errors_do_not_echo_internal_failures(self):
         self.enabled()
         self.assertEqual(self.client.get('/shop/api/v2/products/tyre:' + 'a' * 24).status_code, 404)

@@ -111,7 +111,9 @@ def _address(value, *, delivery=False):
 
 def validate_context(payload):
     """Normalize user-entered data, not supplier deliverability or freight proof."""
-    if not isinstance(payload, dict) or set(payload) != {'contact', 'billing', 'delivery'}:
+    required = {'contact', 'billing', 'delivery'}
+    if (not isinstance(payload, dict) or not required <= set(payload)
+            or set(payload) - required - {'workshop_delivery'}):
         raise BuyerError('invalid_address')
     contact = payload['contact']
     if not isinstance(contact, dict) or not {'name', 'email'} <= set(contact) <= {'name', 'email', 'phone'}:
@@ -130,7 +132,15 @@ def validate_context(payload):
             result_contact['phone'] = phone
     billing = _address(payload['billing'])
     delivery = deepcopy(billing) if payload['delivery'] is None else _address(payload['delivery'], delivery=True)
-    return {'contact': result_contact, 'billing': billing, 'delivery': delivery}
+    result = {'contact': result_contact, 'billing': billing, 'delivery': delivery}
+    # Absence preserves legacy address contexts and means collection. Only a
+    # separately saved explicit selection may request workshop reshipment.
+    if 'workshop_delivery' in payload:
+        value = payload['workshop_delivery']
+        if not isinstance(value, str) or value not in {'collection', 'customer_reshipment'}:
+            raise BuyerError('invalid_address')
+        result['workshop_delivery'] = value
+    return result
 
 
 def _record(value, now, *, require_fresh=True):
@@ -308,8 +318,13 @@ class ShopBuyer:
 
     @staticmethod
     def public(record):
-        return {'guest': True, 'address_ready': record['context'] is not None,
-                'csrf_token': record['csrf_token'], 'expires_at': record['expires_at']}
+        result = {'guest': True, 'address_ready': record['context'] is not None,
+                  'csrf_token': record['csrf_token'], 'expires_at': record['expires_at']}
+        context = record.get('context')
+        choice = context.get('workshop_delivery') if isinstance(context, Mapping) else None
+        if isinstance(choice, str) and choice in {'collection', 'customer_reshipment'}:
+            result['workshop_delivery'] = choice
+        return result
 
     def establish(self, req):
         """Return (public state, new opaque cookie or None). No portal identity."""

@@ -105,15 +105,15 @@ class PaymentBoundaryChecks(unittest.TestCase):
     def authorize(self):
         self.session.update(status='complete', url=None, payment_intent='pi_SYNTHETIC')
         self.intent = {'object': 'payment_intent', 'id': 'pi_SYNTHETIC', 'livemode': False,
-            'currency': 'eur', 'amount': 148449, 'amount_capturable': 148449, 'amount_received': 0,
+            'currency': 'eur', 'amount': 153209, 'amount_capturable': 153209, 'amount_received': 0,
             'capture_method': 'manual', 'metadata': deepcopy(self.session['metadata']), 'status': 'requires_capture'}
 
     def test_mixed_total_authorization_capture_evidence_and_replay_with_real_sdk_verification(self):
         result = self.start()
         self.assertEqual(result.status_code, 200, result.get_json())
-        self.assertEqual(result.get_json()['checkout']['amount_gross_cent'], 148449)
+        self.assertEqual(result.get_json()['checkout']['amount_gross_cent'], 153209)
         self.assertFalse(result.get_json()['checkout']['payment_confirmed'])
-        self.assertEqual(sum(x['quantity'] * x['price_data']['unit_amount'] for x in self.sent_params['line_items']), 148449)
+        self.assertEqual(sum(x['quantity'] * x['price_data']['unit_amount'] for x in self.sent_params['line_items']), 153209)
         self.assertEqual(len([x for x in self.sent_params['line_items'] if x['price_data']['product_data']['name'].startswith('Montage')]), 1)
         self.assertEqual(self.sent_params['payment_intent_data']['capture_method'], 'manual')
         self.assertEqual(self.start().status_code, 200)
@@ -132,7 +132,7 @@ class PaymentBoundaryChecks(unittest.TestCase):
         self.assertEqual(self.store.get_order(self.order['id'], customer_id='customer-a', mode='test')['status'], 'authorized')
         authorization = self.event('evt_SYNTHETICAUTH', 'payment_intent.amount_capturable_updated', self.intent)
         self.assertEqual(self.webhook(authorization).status_code, 200)
-        self.intent.update(status='succeeded', amount_capturable=0, amount_received=148449)
+        self.intent.update(status='succeeded', amount_capturable=0, amount_received=153209)
         self.assertEqual(self.webhook(self.event('evt_SYNTHETICPAID', 'payment_intent.succeeded', self.intent)).status_code, 200)
         self.assertTrue(self.checkout.status(self.order['id'], customer_id='customer-a')['payment_confirmed'])
         self.assertEqual(self.webhook(authorization).status_code, 200)
