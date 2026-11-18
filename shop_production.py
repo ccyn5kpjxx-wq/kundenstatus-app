@@ -140,6 +140,10 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         from shop_nominal_overlay import load_nominal_tyre_overlay, unavailable_document_product_ids
         bundle = load_nominal_tyre_overlay(root, descriptor.get('nominal_tyre_overlay'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'])
+        from shop_document_overlay import local_product_document_resources
+        document_resources = local_product_document_resources(root, descriptor.get('local_product_documents'), bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'],
+            overlay_sha256=(descriptor.get('nominal_tyre_overlay') or {}).get('sha256'))
         blocked_document_ids = unavailable_document_product_ids(bundle, descriptor.get('unavailable_product_documents'))
         rows, publication = bundle['products'], bundle['publication']
         if not isinstance(rows, list) or not 1 <= len(rows) <= 100000 or not isinstance(publication, dict):
@@ -232,7 +236,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         documents = None
         if isinstance(bundle.get('documents'), Mapping):
             manifest = bundle['documents']
-            documents = ReleasedProductDocuments(manifest['resources'], approved_assets=set(manifest['approved_assets']),
+            documents = ReleasedProductDocuments(document_resources, approved_assets=set(manifest['approved_assets']),
                 local_root=root / 'documents', enabled=True,
                 allow_network=descriptor.get('document_reads_approved') is True,
                 max_network_reads_per_period=5000, max_concurrent_reads=1, spacing_seconds=.2)

@@ -115,6 +115,40 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(client.post('/shop/api/v2/orders', json={}).status_code, 404)
         self.assertFalse((self.data / 'shop-v2').exists())
 
+    def test_pinned_original_document_cache_is_wired_locally_and_corruption_closes_release(self):
+        from test_shop_document_overlay import LocalDocumentChecks
+        local = LocalDocumentChecks('runTest'); local.setUp(); self.addCleanup(local.doCleanups)
+        self.bundle['documents'] = deepcopy(local.bundle['documents'])
+        (self.root / 'documents').mkdir()
+        for asset, data in local.payloads.items():
+            (self.root / 'documents' / asset).write_bytes(data)
+        self.install()
+        manifest = deepcopy(local.manifest)
+        manifest['base_bundle_sha256'] = self.descriptor['bundle']['sha256']
+        pinned = write_json(self.root / 'originals.json', manifest)
+        self.descriptor['local_product_documents'] = {'path': pinned['file'], 'sha256': pinned['sha256'],
+            'base_bundle_sha256': self.descriptor['bundle']['sha256']}
+        self.descriptor['nominal_tyre_overlay'] = {'sha256': local.overlay}
+        write_json(self.root / 'current.json', self.descriptor)
+        # Nominal-source validation has its own strict suite; isolate only that
+        # unrelated prerequisite while exercising the real document bootstrap.
+        with patch('shop_nominal_overlay.load_nominal_tyre_overlay', side_effect=lambda root, record, bundle, **kw: bundle):
+            dependencies = self.prepare()
+        self.assertTrue(dependencies)
+        documents = dependencies['documents_service']
+        self.assertFalse(documents.allow_network)
+        for asset, data in local.payloads.items():
+            self.assertIn('file', documents.resources[asset])
+            self.assertEqual(documents.read(asset), (data, 'application/pdf'))
+        self.assertEqual(len(documents.attempts), 0)
+        self.assertEqual(self.bundle['documents']['resources'], local.resources)
+        first = next(iter(local.payloads))
+        (self.root / 'documents' / first).write_bytes(b'CORRUPT')
+        with patch('shop_nominal_overlay.load_nominal_tyre_overlay', side_effect=lambda root, record, bundle, **kw: bundle):
+            with self.assertLogs(self.portal.app.logger, level='ERROR'):
+                self.assertEqual(self.prepare(), {})
+        self.assert_closed()
+
     def test_invalid_release_clears_preexisting_purchase_flags_and_hides_errors(self):
         self.portal.app.config.update({flag: True for flag in FLAGS})
         self.descriptor['publication_approved'] = 'PRIVATE_CANARY'
