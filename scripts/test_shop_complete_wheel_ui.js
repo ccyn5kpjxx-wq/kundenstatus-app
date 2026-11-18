@@ -106,8 +106,10 @@ async function statusPage(status, technical){
  assert.ok(rendered.some(n=>n.textContent==='Die genaue Rad-Reifen-Kombination wird technisch geprüft.'));
  assert.ok(rendered.some(n=>n.textContent.includes('Apple Pay')));assert.equal(f.nodes['checkout-button'].textContent,'Gesamtbetrag online reservieren');assert.equal(f.nodes['checkout-button'].hidden,false);assert.equal(f.nodes['checkout-button'].disabled,true);
  const checkboxes=rendered.filter(n=>n.type==='checkbox');assert.equal(checkboxes.length,2);for(const input of checkboxes){input.checked=true;input.listeners.change();}assert.equal(f.nodes['checkout-button'].disabled,false);
- f.form.fields.vehicle_ref.value='SYNTHETIC BMW 3er 2018';f.change();assert.equal(f.nodes['checkout-button'].hidden,true);assert.equal(f.nodes['request-quote'].disabled,true);
+ f.form.fields.vehicle_ref.value='SYNTHETIC BMW 3er 2018';f.change();assert.equal(f.nodes['checkout-button'].hidden,true);assert.equal(f.nodes['request-quote'].textContent,'Zur Kasse');
  await f.submit();assert.equal(JSON.parse(f.calls.filter(c=>c.url.endsWith('/buyer/address')).at(-1).options.body).vehicle_ref,'SYNTHETIC BMW 3er 2018');
+ assert.equal(f.calls.filter(c=>c.url.endsWith('/cart/quote')).length,2,'confirmed change automatically requests a new mounted-set total');
+ assert.equal(f.nodes['checkout-button'].textContent,'Gesamtbetrag online reservieren');assert.equal(f.nodes['checkout-button'].disabled,true,'fresh quote requires new consent');
  const stale=await boot();await stale.request();
  const setSelectors=walk(stale.nodes['cart-items']).filter(n=>n.tagName==='SELECT');
  assert.equal(setSelectors.length,1);
@@ -142,6 +144,11 @@ async function statusPage(status, technical){
  const pending=await boot({waitQuote:true});const request=pending.request();const remove=walk(pending.nodes['cart-items']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Satz entfernen');remove.listeners.click();await flush();pending.resolveQuote();await request;
  assert.deepEqual(JSON.parse(pending.stored.at(-1)),[]);assert.equal(pending.nodes['checkout-button'].hidden,true,'late quote cannot authorize removed set');
  for(const storedVehicle of [7,'x'.repeat(201),'SYNTHETIC\nA3']){const bad=await boot({storedVehicle});assert.equal(bad.nodes['request-quote'].disabled,true);}
+ const firstSet=await boot({storedVehicle:''});
+ assert.equal(firstSet.nodes['request-quote'].textContent,'Zur Kasse','a returning tyre customer may still need to enter a vehicle');
+ await firstSet.request();assert.equal(firstSet.calls.some(c=>c.url.endsWith('/cart/quote')),false);
+ firstSet.form.fields.vehicle_ref.value='SYNTHETIC Audi A3 2016';firstSet.change();await firstSet.submit();
+ assert.equal(firstSet.nodes['checkout-button'].textContent,'Gesamtbetrag online reservieren');
  const missing=await boot({missing:true});await missing.submit();assert.equal(missing.calls.filter(c=>c.url.endsWith('/buyer/address')).length,0);
  const blank=await boot();blank.form.fields.vehicle_ref.value='';blank.change();await blank.submit();assert.equal(blank.calls.filter(c=>c.url.endsWith('/buyer/address')).length,0);
  const single=[{id:TYRE,quantity:1,services:{}}],optional=await boot({rows:single});assert.equal(optional.form.fields.vehicle_ref.required,false);optional.form.fields.vehicle_ref.value='';optional.change();await optional.submit();assert.equal(JSON.parse(optional.calls.filter(c=>c.url.endsWith('/buyer/address')).at(-1).options.body).vehicle_ref,'');

@@ -93,7 +93,7 @@ class FrontendChecks(unittest.TestCase):
         selects = [attrs for tag, attrs in Markup(source).tags if tag == 'select']
         self.assertEqual(selects, [{'name': 'delivery_salutation', 'autocomplete': 'off'}, {'name': 'workshop_delivery'}])
         options = [attrs for tag, attrs in Markup(source).tags if tag == 'option']
-        self.assertEqual([attrs.get('value') for attrs in options], ['', 'Herr', 'Frau', 'Firma', 'collection', 'customer_reshipment'])
+        self.assertEqual([attrs.get('value') for attrs in options], ['', 'Herr', 'Frau', 'Firma', 'personal_offer', 'collection', 'customer_reshipment'])
         self.assertEqual([attrs.get('value') for attrs in options if 'selected' in attrs], ['collection'])
         self.assertIn('data-checkout-enabled="true"', source)
         self.assertIn('data-consumer-enabled="true"', source)
@@ -609,6 +609,7 @@ async function cartFixture(deferredQuote=false,consumerEnabled=true,invalidTerms
  // Delivery salutation is explicit, optional and never inferred from a name.
  async function address(choice,different=false){const f=await cartFixture(),form=f.nodes['buyer-address'];for(const [key,value] of Object.entries({name:'Synthetic Person',email:'synthetic@example.invalid',recipient:'Synthetic Recipient',street:'Teststraße 12',postcode:'74821',city:'Mosbach',delivery_salutation:choice,delivery_recipient:'Other Recipient',delivery_street:'Andere Straße 7',delivery_postcode:'10115',delivery_city:'Berlin'}))form.elements.namedItem(key).value=value;form.elements.namedItem('different_delivery').checked=different;await form.listeners.submit({preventDefault(){}});return f;}
  const blankAddress=await address('');const blankPayload=JSON.parse(blankAddress.requests.find(r=>r.url.endsWith('/buyer/address')).options.body);assert.equal(blankPayload.delivery,null);assert.equal(Object.hasOwn(blankPayload.billing,'salutation'),false);
+ const personal=await address('personal_offer');assert.equal(JSON.parse(personal.requests.find(r=>r.url.endsWith('/buyer/address')).options.body).delivery,null);
  for(const choice of ['Herr','Frau','Firma']){const f=await address(choice);const payload=JSON.parse(f.requests.find(r=>r.url.endsWith('/buyer/address')).options.body);assert.equal(payload.delivery.salutation,choice);assert.equal(payload.delivery.recipient,'Synthetic Recipient');assert.equal(Object.hasOwn(payload.billing,'salutation'),false);assert.equal(f.requests.some(r=>r.url.endsWith('/orders')||r.url.endsWith('/checkout')),false);}
  const separate=await address('Frau',true),separatePayload=JSON.parse(separate.requests.find(r=>r.url.endsWith('/buyer/address')).options.body);assert.equal(separatePayload.delivery.salutation,'Frau');assert.equal(separatePayload.delivery.recipient,'Other Recipient');assert.equal(separatePayload.billing.recipient,'Synthetic Recipient');
  const invalidAn=await address('An');assert.equal(invalidAn.requests.some(r=>r.url.endsWith('/buyer/address')),false);assert.ok(invalidAn.nodes['address-status'].textContent.includes('Eingaben prüfen'));
