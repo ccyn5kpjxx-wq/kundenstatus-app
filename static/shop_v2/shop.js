@@ -650,6 +650,36 @@
     season.value = seasons.some(([value]) => value === 'summer') ? 'summer' : seasons[0]?.[0] || '';
     if (!seasons.length) status.textContent = 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.';
     seasonLabel.append(season);
+    const sizeLabel = el('label', 'Reifengröße für den Vergleich'), size = el('select', null, 'shop-quantity');
+    sizeLabel.hidden = true; sizeLabel.append(size);
+    function exactSize(value) {
+      if (typeof value !== 'string') return false;
+      const match = value.match(/^([0-9]{3})\/([0-9]{2,3}) R([0-9]{1,2})$/);
+      return !!match && match[0] === value && Number(match[1]) >= 100 && Number(match[1]) <= 455 &&
+        Number(match[2]) >= 10 && Number(match[2]) <= 100 && Number(match[3]) >= 8 && Number(match[3]) <= 30;
+    }
+    function comparisonSize(product) {
+      const geometry = product?.geometry;
+      if (!geometry || !['width', 'ratio', 'diameter'].every(key => typeof geometry[key] === 'string' && /^[0-9]+(?:\.0+)?$/.test(geometry[key]))) return '';
+      const value = Number(geometry.width) + '/' + Number(geometry.ratio) + ' R' + Number(geometry.diameter);
+      return exactSize(value) ? value : '';
+    }
+    function setSizes(result) {
+      const provided = Object.hasOwn(result, 'available_sizes') || Object.hasOwn(result, 'selected_size');
+      if (!provided) { size.replaceChildren(); size.value = ''; sizeLabel.hidden = true; return false; }
+      if (!Array.isArray(result.available_sizes) || result.available_sizes.length > 1000 ||
+          !result.available_sizes.every(exactSize) || new Set(result.available_sizes).size !== result.available_sizes.length ||
+          !(result.selected_size === null || exactSize(result.selected_size)) ||
+          result.items.length && (!result.available_sizes.includes(result.selected_size) ||
+            !result.items.every(tyre => validProduct(tyre) && tyre.category === 'tyre' && comparisonSize(tyre) === result.selected_size))) throw new Error('invalid_recommendation_sizes');
+      size.replaceChildren();
+      for (const value of result.available_sizes) { const option = el('option', value); option.value = value; size.append(option); }
+      if (result.selected_size && !result.available_sizes.includes(result.selected_size)) {
+        const missing = el('option', result.selected_size + ' – aktuell keine Angebote'); missing.value = result.selected_size; missing.disabled = true; size.append(missing);
+      }
+      size.value = result.selected_size || ''; sizeLabel.hidden = !result.available_sizes.length && !result.selected_size;
+      return true;
+    }
     let serial = 0, selected = null, scope = 'blocked';
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.name = 'bundle_mounting';
     mountingLabel.append(mounting, el('span', 'Mit Montage bei uns in Mosbach'));
@@ -696,19 +726,23 @@
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrage hinzufügen' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
-    function clear() { serial++; selected = null; clearFeedback(); choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
-    const search = button('Passende Reifen zu dieser Felge suchen', async () => {
+    function clear() { serial++; selected = null; clearFeedback(); choices.replaceChildren(); summary.replaceChildren(); size.replaceChildren(); size.value = ''; sizeLabel.hidden = true; size.disabled = false; add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
+    async function searchTyres() {
       if (!seasons.some(([value]) => value === season.value)) return;
       clearFeedback();
-      const run = ++serial, quantity = getQuantity(); selected = null; choices.replaceChildren(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true;
+      const run = ++serial, quantity = getQuantity(), requestedSize = size.value; selected = null; choices.replaceChildren(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true; size.disabled = true;
       try {
         const query = new URLSearchParams({quantity: String(quantity), season: season.value, ...vehicleFilters});
+        if (exactSize(requestedSize)) query.set('tyre_size', requestedSize);
         const result = await requestJSON('/products/' + encodeURIComponent(rim.id) + '/compatible-tyres?' + query);
         if (run !== serial || !active()) return;
         if (result.rim_id !== rim.id || !Array.isArray(result.items) || result.items.length > 5 || !['approved', 'rim_width_candidate', 'blocked'].includes(result.scope)) throw new Error('invalid_recommendations');
+        if (exactSize(requestedSize) && result.selected_size !== requestedSize) throw new Error('changed_recommendation_size');
+        const comparison = setSizes(result);
         scope = result.scope;
         if (scope === 'blocked' || !result.items.length) { status.textContent = 'Für diese Auswahl liegt noch kein dokumentierter Reifenvorschlag vor. Fahrzeug und genaue Felgenausführung prüfen lassen.'; return; }
         status.textContent = scope === 'approved' ? 'Dokumentierte Reifenvorschläge. Die konkrete Fahrzeugausführung und Auflagen beachten.' : 'Vorschläge nach dokumentiertem Größen-/Breitenabgleich. Die Fahrzeugfreigabe bleibt offen.';
+        if (comparison) status.textContent += ' Angebote gleicher Reifengröße nach Preis aufsteigend. Last- und Geschwindigkeitsindex gesondert beachten.';
         for (const tyre of result.items.filter(validProduct)) {
           if (tyre.category !== 'tyre') continue;
           const row = el('label', null, 'shop-bundle-option'), radio = el('input'); radio.type = 'radio'; radio.name = 'bundle_tyre'; radio.value = tyre.id;
@@ -723,11 +757,13 @@
           scheduleQuantityPrice(price, result, 0);
         }
       } catch (_) { if (run === serial && active()) status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.'; }
-      finally { if (run === serial && active()) search.disabled = false; }
-    });
+      finally { if (run === serial && active()) { search.disabled = false; size.disabled = false; } }
+    }
+    const search = button('Passende Reifen zu dieser Felge suchen', searchTyres);
     search.disabled = !seasons.length;
     mounting.addEventListener('change', () => { clearFeedback(); updateSummary(); }); season.addEventListener('change', clear);
-    panel.append(search, seasonLabel, status, choices, mountingLabel, summary, add, feedback, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
+    size.addEventListener('change', () => { if (exactSize(size.value)) searchTyres(); });
+    panel.append(search, seasonLabel, sizeLabel, status, choices, mountingLabel, summary, add, feedback, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
     return {node: panel, quantityChanged: clear, priceChanged: updateSummary};
   }
   async function openProduct(id) {
