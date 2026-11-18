@@ -45539,6 +45539,21 @@ def get_google_reviews():
         return fallback
 
 
+def homepage_shop_links():
+    """Use direct shop routes, with the existing read-only shop as fallback."""
+    if app.config.get('SHOP_FRONTEND_ENABLED') is True:
+        return {key: url_for('shop_frontend.' + endpoint)
+                for key, endpoint in (('home', 'home'), ('reifen', 'reifen'), ('felgen', 'felgen'))}
+    # The legacy endpoint has several category defaults. Building its URL
+    # without a category can therefore select /shop/reifen instead of /shop.
+    return {'home': '/shop', 'reifen': '/shop/reifen', 'felgen': '/shop/felgen'}
+
+
+@app.context_processor
+def inject_homepage_shop_links():
+    return {'homepage_shop_links': homepage_shop_links()}
+
+
 def homepage_portal_links():
     def link(endpoint, path, **values):
         if PORTAL_BASE_URL:
@@ -47068,15 +47083,16 @@ def oeffentlicher_shop(shop_category):
     """Independent public shop entry with the established offer request flow."""
     if app.config.get('SHOP_FRONTEND_ENABLED') is True:
         return redirect(url_for('shop_frontend.' + (shop_category or 'home')), code=302)
-    shop_path = url_for("oeffentlicher_shop", shop_category=shop_category)
+    shop_links = homepage_shop_links()
+    shop_path = shop_links[shop_category or 'home']
     anfrage_url = homepage_portal_links()["anfrage"]
     return render_template(
         "homepage_shop.html",
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}{shop_path}" if PUBLIC_BASE_URL else "",
         shop_category=shop_category,
-        shop_felgen_url=url_for("oeffentlicher_shop", shop_category="felgen"),
-        shop_reifen_url=url_for("oeffentlicher_shop", shop_category="reifen"),
+        shop_felgen_url=shop_links['felgen'],
+        shop_reifen_url=shop_links['reifen'],
         reifen_anfrage_url=f"{anfrage_url}?anliegen=reifenangebot#kurzanfrage",
         felgen_anfrage_url=f"{anfrage_url}#kurzanfrage",
     )

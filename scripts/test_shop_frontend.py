@@ -101,6 +101,126 @@ class FrontendChecks(unittest.TestCase):
         self.assertIn('type="button" hidden', source)
         self.assertLess(source.index('</aside>'), source.index('id="quote-review"'))
 
+    def test_mainland_declaration_is_a_literal_opt_in_and_never_prechecked(self):
+        self.app.config.update(SHOP_FRONTEND_ENABLED=True, SHOP_BUYER_ENABLED=True)
+        for enabled in (None, False, 'true', 1, True):
+            with self.subTest(enabled=enabled):
+                self.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = enabled
+                source = self.client.get('/shop/warenkorb/').get_data(as_text=True)
+                fields = [attrs for tag, attrs in Markup(source).tags
+                          if tag == 'input' and attrs.get('name') == 'delivery_mainland']
+                self.assertIn('data-mainland-delivery-enabled="' + ('true' if enabled is True else 'false') + '"', source)
+                if enabled is True:
+                    self.assertEqual(len(fields), 1)
+                    self.assertEqual(fields[0]['type'], 'checkbox')
+                    self.assertNotIn('checked', fields[0])
+                    self.assertIn('disabled', fields[0])  # JS requires it only for a customer shipping leg.
+                    self.assertIn('Meine Lieferadresse liegt auf dem deutschen Festland (keine Inselzustellung).', source)
+                    self.assertIn('Für Inselzustellung bestätigen wir Versandkosten', source)
+                else:
+                    self.assertEqual(fields, [])
+                self.assertIn('data-checkout-enabled="false"', source)
+
+    def test_complete_wheel_controls_require_literal_server_opt_in(self):
+        self.app.config.update(SHOP_FRONTEND_ENABLED=True, SHOP_BUYER_ENABLED=True)
+        for enabled in (None, False, 'true', 1, True):
+            with self.subTest(enabled=enabled):
+                self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = enabled
+                source = self.client.get('/shop/warenkorb/').get_data(as_text=True)
+                fields = [attrs for tag, attrs in Markup(source).tags
+                          if tag == 'input' and attrs.get('name') == 'vehicle_ref']
+                self.assertIn('data-deferred-complete-wheels-enabled="' + ('true' if enabled is True else 'false') + '"', source)
+                if enabled is True:
+                    self.assertEqual(len(fields), 1)
+                    self.assertEqual(fields[0]['maxlength'], '200')
+                    self.assertEqual(fields[0]['minlength'], '3')
+                    self.assertNotIn('required', fields[0])  # Dynamic only for complete-wheel review carts.
+                    self.assertNotIn('value', fields[0])
+                    self.assertIn('Fahrzeugpassung und Gutachten prüfen wir vor der Abbuchung.', source)
+                else:
+                    self.assertEqual(fields, [])
+                self.assertIn('data-checkout-enabled="false"', source)
+
+    def test_complete_wheel_review_ui_uses_only_synthetic_saved_context(self):
+        result = subprocess.run(['node', str(ROOT / 'scripts/test_shop_complete_wheel_ui.js'),
+                                 str(ROOT / 'static/shop_v2/shop.js')],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Complete-wheel authorization UI checks passed', result.stdout)
+
+    def test_mainland_payload_and_delivery_changes_use_real_frontend_handlers(self):
+        code = r'''
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const path=process.argv[1],source=fs.readFileSync(path,'utf8'),logic=require(path),ID='tyre:'+'a'.repeat(24);
+const row=services=>({id:ID,quantity:1,services:services||{}});
+assert.equal(logic.cartNeedsCustomerDelivery([row()]),true);
+assert.equal(logic.cartNeedsCustomerDelivery([row({runflat:true})]),true);
+assert.equal(logic.cartNeedsCustomerDelivery([row({mounting:true})]),false);
+assert.equal(logic.cartNeedsCustomerDelivery([row({mounting:true})],'customer_reshipment'),true);
+assert.equal(logic.cartNeedsCustomerDelivery([row({mounting:true}),row()]),true);
+assert.equal(logic.cartNeedsCustomerDelivery([]),false);
+class Node{
+ constructor(tag='div'){this.tagName=tag.toUpperCase();this.children=[];this.fields={};this.listeners={};this.dataset={};this.textContent='';this.value='';this.checked=false;this.hidden=false;this.disabled=false;this.isConnected=true;this.classList={toggle(){}};this.elements={namedItem:key=>this.fields[key]||null};}
+ append(...nodes){this.children.push(...nodes);}replaceChildren(...nodes){this.children=[];this.append(...nodes);}
+ addEventListener(name,fn){this.listeners[name]=fn;}setAttribute(name,value){this[name]=value;}
+ removeAttribute(name){delete this[name];}scrollIntoView(){}replaceWith(){}showModal(){this.open=true;}close(){this.open=false;}
+}
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+async function boot({enabled=true,services={},storedMainland,missing=false,readySession=false}={}){
+ const nodes={};for(const key of ['close-product','product-dialog','product-detail','shop-announcement','cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note','buyer-address','address-status','delivery-fields','cart-workflow-note','mainland-delivery-confirmation'])nodes[key]=new Node();
+ const form=nodes['buyer-address'];
+ for(const key of ['name','email','phone','recipient','street','postcode','city','delivery_recipient','delivery_street','delivery_postcode','delivery_city','different_delivery','delivery_salutation','workshop_delivery','delivery_mainland']){
+  const field=new Node('input');field.name=key;field.type=['different_delivery','delivery_mainland'].includes(key)?'checkbox':'text';form.fields[key]=field;
+ }
+ Object.assign(form.fields.name,{value:'SYNTHETIC'});Object.assign(form.fields.email,{value:'synthetic@example.invalid'});
+ Object.assign(form.fields.recipient,{value:'SYNTHETIC'});Object.assign(form.fields.street,{value:'Synthetic 1'});Object.assign(form.fields.postcode,{value:'74821'});Object.assign(form.fields.city,{value:'Mosbach'});
+ Object.assign(form.fields.delivery_recipient,{value:'OTHER SYNTHETIC'});Object.assign(form.fields.delivery_street,{value:'Other 2'});Object.assign(form.fields.delivery_postcode,{value:'74821'});Object.assign(form.fields.delivery_city,{value:'Mosbach'});
+ form.fields.workshop_delivery.value='collection';form.fields.delivery_salutation.value='Firma';
+ if(missing)delete form.fields.delivery_mainland;
+ const body=new Node('body');body.dataset={api:'/shop/api/v2',page:'warenkorb',buyerEnabled:'true',quoteEnabled:'true',orderEnabled:'false',checkoutEnabled:'false',consumerEnabled:'false',mainlandDeliveryEnabled:enabled?'true':'false',cartRequestUrl:'/anfrage?anliegen=allgemein&shop_anfrage=1'};
+ const calls=[],token='SYNTHETIC_TOKEN_12345678901234567890',expiry=new Date(Date.now()+600000).toISOString();
+ const session=()=>({guest:true,address_ready:readySession,csrf_token:token,expires_at:expiry,workshop_delivery:'collection',...(storedMainland===undefined?{}:{delivery_mainland:storedMainland})});
+ const product={id:ID,category:'tyre',name:'SYNTHETIC TYRE',size:'205/55 R18',images:[],purchase_status:'supplier_check_required',price_status:'current',price:{currency:'EUR',vat_percent:'19.00',observed_at:new Date(Date.now()-1000).toISOString(),expires_at:expiry,stock_reported:20,prices_by_quantity:{'1':{quantity:1,unit_gross_cent:10000,items_gross_cent:10000}}}};
+ const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:token}),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:()=>JSON.stringify([row(services)]),setItem(){}},sessionStorage:{getItem:()=>null,setItem(){}},location:{pathname:'/shop/warenkorb/',assign(){throw Error('No navigation');}},setTimeout(){},clearTimeout(){},setInterval(){},
+ fetch:async(url,options)=>{calls.push({url,options});let value;
+  if(url.endsWith('/buyer/session'))value=session();
+  else if(url.includes('/products/'))value={item:product,prices_refreshing:false};
+  else if(url.endsWith('/buyer/address')){const saved=JSON.parse(options.body);value={...session(),address_ready:true,...(Object.hasOwn(saved,'delivery_mainland')?{delivery_mainland:saved.delivery_mainland}:{})};}
+  else throw Error('Forbidden request '+url);
+  return{ok:true,text:async()=>JSON.stringify(value)};
+ }};
+ class FormData{constructor(form){this.form=form;}get(key){const field=this.form.elements.namedItem(key);return !field||field.disabled?null:field.type==='checkbox'?(field.checked?'on':null):field.value||null;}}
+ vm.runInNewContext(source,{window:win,URL,URLSearchParams,Intl,Date,console,FormData});await flush();await flush();
+ return{nodes,form,calls,field:form.elements.namedItem('delivery_mainland'),submit:async()=>{await form.listeners.submit({preventDefault(){}});await flush();await flush();},change:()=>form.listeners.input()};
+}
+const puts=f=>f.calls.filter(c=>c.url.endsWith('/buyer/address'));
+(async()=>{
+ const direct=await boot();assert.equal(direct.field.required,true);assert.equal(direct.field.disabled,false);assert.equal(direct.nodes['mainland-delivery-confirmation'].hidden,false);
+ assert.equal(direct.field.checked,false);await direct.submit();assert.equal(JSON.parse(puts(direct).at(-1).options.body).delivery_mainland,false);
+ direct.field.checked=true;direct.change();assert.equal(direct.field.checked,true,'checking declaration must not clear itself');await direct.submit();assert.equal(JSON.parse(puts(direct).at(-1).options.body).delivery_mainland,true);
+ assert.equal(typeof JSON.parse(puts(direct).at(-1).options.body).delivery_mainland,'boolean');
+ const missing=await boot({missing:true});await missing.submit();assert.equal(puts(missing).length,0,'missing enabled control never asserts true');
+ const malformed=await boot();malformed.field.checked='true';await malformed.submit();assert.equal(puts(malformed).length,0,'string cannot become a declaration');
+ const badSession=await boot({storedMainland:'true',readySession:true});assert.equal(badSession.field.checked,false);assert.equal(badSession.nodes['request-quote'].disabled,true,'invalid session declaration cannot mark address ready');
+ const legacy=await boot({enabled:false,missing:true});await legacy.submit();assert.equal(Object.hasOwn(JSON.parse(puts(legacy).at(-1).options.body),'delivery_mainland'),false,'disabled feature preserves old payload');
+ const saved=await boot({storedMainland:true});assert.equal(saved.field.checked,true);saved.form.fields.phone.value='SYNTHETIC';saved.change();assert.equal(saved.field.checked,true);
+ saved.form.fields.street.value='Synthetic 3';saved.change();assert.equal(saved.field.checked,false,'effective billing delivery changed');
+ saved.field.checked=true;saved.change();assert.equal(saved.field.checked,true);
+ saved.form.fields.different_delivery.checked=true;saved.form.fields.different_delivery.listeners.change({target:saved.form.fields.different_delivery});assert.equal(saved.field.checked,false,'separate delivery switched');
+ saved.field.checked=true;saved.change();saved.form.fields.street.value='Billing-only 4';saved.change();assert.equal(saved.field.checked,true,'unrelated billing address does not change separate delivery');
+ saved.form.fields.delivery_postcode.value='10115';saved.change();assert.equal(saved.field.checked,false,'actual separate postcode changed');
+ const collection=await boot({services:{mounting:true}});assert.equal(collection.field.required,false);assert.equal(collection.field.disabled,true);assert.equal(collection.nodes['mainland-delivery-confirmation'].hidden,true);
+ await collection.submit();assert.equal(JSON.parse(puts(collection).at(-1).options.body).delivery_mainland,false,'workshop collection keeps bool without forced mainland assertion');
+ collection.form.fields.workshop_delivery.value='customer_reshipment';collection.form.fields.workshop_delivery.listeners.change();assert.equal(collection.field.required,true);assert.equal(collection.field.checked,false);
+ assert.equal([direct,missing,malformed,legacy,saved,collection].flatMap(f=>f.calls).some(c=>/\/orders|\/checkout|\/consumer|\/cart\/quote/.test(c.url)),false);
+ console.log('Mainland UI declaration and saved-address payload checks passed');
+})().catch(error=>{console.error(error);process.exit(1)});
+'''
+        result = subprocess.run(['node', '-e', code, str(ROOT / 'static/shop_v2/shop.js')],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Mainland UI declaration and saved-address payload checks passed', result.stdout)
+
     def test_approved_links_only_and_csrf_failure_is_closed(self):
         for link in ('https://external.example', '//external.example', '/a/../admin', '/x\\y', '/x\nfoo'):
             with self.assertRaises(ValueError):
@@ -416,6 +536,8 @@ class Node{
  replaceChildren(...nodes){for(const n of this.children){n.parent=null;n.isConnected=false;}this.children=[];this.append(...nodes);}
  addEventListener(key,fn){this.listeners[key]=fn;}
  setAttribute(key,value){this[key]=value;}
+ getAttribute(key){return this[key]??null;}
+ scrollIntoView(){}
  replaceWith(node){this.replacement=node;this.isConnected=false;if(this.parent){const i=this.parent.children.indexOf(this);this.parent.children[i]=node;node.parent=this.parent;}}
  closest(tag){for(let n=this.parent;n;n=n.parent)if(n.tagName===tag.toUpperCase())return n;return null;}
  showModal(){this.open=true;}close(){this.open=false;}
@@ -438,7 +560,8 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  const body=new Node('body');body.dataset={api:'/shop/api/v2',page:mode,department:['felgen','komplettraeder'].includes(mode)?'wheels':'tyres',quoteEnabled:'false',buyerEnabled:'false',completeUrl:'/shop/komplettraeder/',studioUrl:'/shop/felgenstudio/'};
  const calls=[],stored=[];
  const events={};
- const document={body,visibilityState:visibility,createElement:tag=>new Node(tag),getElementById:id=>nodes[id]||null,querySelector:()=>({content:''}),querySelectorAll:()=>[],addEventListener:(event,fn)=>{events[event]=fn;}};
+ const headerLink=new Node('a');headerLink.href='/shop/warenkorb/';
+ const document={body,visibilityState:visibility,createElement:tag=>new Node(tag),getElementById:id=>nodes[id]||null,querySelector:selector=>selector==='a.shop-cart-link'?headerLink:({content:''}),querySelectorAll:()=>[],addEventListener:(event,fn)=>{events[event]=fn;}};
  const win={document,localStorage:{getItem:()=>JSON.stringify(cart),setItem:(key,value)=>stored.push(value)},setTimeout:(fn,delay)=>clock.set(fn,delay),clearTimeout:id=>clock.clear(id),setInterval(){},location:{search:'',pathname:'/shop/warenkorb/'},
   fetch:async(url,options)=>{calls.push({url,options});const result=await handler(url,calls.length);return {ok:true,text:async()=>JSON.stringify(result)};}};
  class FakeDate extends Date{constructor(...args){super(...(args.length?args:[clock.now]));}static now(){return clock.now;}}

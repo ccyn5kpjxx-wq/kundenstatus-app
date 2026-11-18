@@ -297,17 +297,19 @@ def released_width_pairs(bundle, *, approved_ids):
     for identifier, candidates in proposals.items():
         existing = result.setdefault(identifier, [])
         used = {pair.get('tyre_id') for pair in existing}
-        selected = Counter()
         def rank(candidate):
             p=by[candidate['tyre_selection_id']]
             return (p.get('manufacturer_name','').casefold(),p.get('name',''),candidate['tyre_selection_id'])
         for candidate in sorted(candidates,key=rank):
             tyre_id=candidate['tyre_selection_id'];tyre=by[tyre_id]
             season=seasons.get(tyre.get('season')) or seasons.get(tyre.get('group'))
-            if tyre_id in used or season is None or selected[season] >= 5:
+            # Keep the exact reviewed pool here. The public recommendation
+            # method applies its five-card limit after quantity/price/stock
+            # checks; an earlier cutoff can hide a usable sixth candidate.
+            if tyre_id in used or season is None:
                 continue
             existing.append({'reviewed':True,'scope':'rim_width_candidate','tyre_id':tyre_id,
                 'rim_identity':fingerprints[identifier],'tyre_identity':fingerprints[tyre_id],
                 'source':candidate['source'],'evidence_id':candidate['evidence_id']})
-            used.add(tyre_id);selected[season]+=1
+            used.add(tyre_id)
     return result

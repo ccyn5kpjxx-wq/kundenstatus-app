@@ -116,6 +116,32 @@ class ConsumerChecks(unittest.TestCase):
         self.assertFalse(self.service.readiness()['checkout_ready'])
         self.assertTrue(self.consumer(delivery_enabled=True).readiness()['checkout_ready'])
 
+    def test_review_quote_requires_its_exact_hash_bound_reservation_notice_server_side(self):
+        from test_shop_complete_wheels import make_quote, CONTEXT as review_context
+        from test_shop_order_store import rehash
+        from shop_complete_wheels import NOTICE
+        snapshot = make_quote().snapshot()
+        snapshot.update(created_at=(self.now-timedelta(minutes=1)).isoformat(),
+                        expires_at=(self.now+timedelta(minutes=14)).isoformat())
+        snapshot = rehash(snapshot)
+        self.store.save_quote(snapshot, expected_quote_hash=snapshot['quote_hash'], customer_id='23',
+                              mode='test', delivery_context=review_context)
+        with self.assertRaisesRegex(ConsumerError, 'terms_acceptance_required'):
+            self.service.accept_quote(snapshot['quote_hash'], customer_id='23', pack_hash=self.service.pack_hash,
+                                      terms_accepted=True, consumer=True)
+        special = deepcopy(self.pack)
+        special['version'] = 'SYNTHETIC-COMPLETE-WHEEL-REVIEW'
+        special['texts']['komplettraeder_zahlung'] = NOTICE
+        service = self.consumer(pack=special)
+        self.assertNotEqual(service.pack_hash, self.service.pack_hash)
+        service.accept_quote(snapshot['quote_hash'], customer_id='23', pack_hash=service.pack_hash,
+                             terms_accepted=True, consumer=True)
+        self.assertTrue(service.require_acceptance(snapshot['quote_hash'], customer_id='23'))
+        tampered = deepcopy(special)
+        tampered['texts']['komplettraeder_zahlung'] = 'Immediately captured, no review.'
+        self.assertFalse(self.consumer(pack=tampered).readiness()['legal_ready'])
+        self.outbox.send.assert_not_called()
+
     def test_acceptance_freezes_pack_once_for_exact_owner_quote_and_mode(self):
         first = self.accept()
         self.now += timedelta(seconds=1)

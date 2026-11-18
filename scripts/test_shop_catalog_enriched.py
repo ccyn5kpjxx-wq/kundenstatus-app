@@ -95,6 +95,54 @@ class EnrichmentChecks(unittest.TestCase):
             with self.subTest(invalid=invalid), self.assertRaises(CatalogError):
                 catalogue([rim], rsu_only_prices=invalid)
 
+    def test_recommendations_use_priced_rsu_offers_without_padding_with_enquiries(self):
+        rim, offered, inquiry = wheel(), tyre('d'), tyre('e')
+        offered['quote_public'] = deepcopy(rim['quote_public'])
+        offered['quote_public']['source'] = 'RSU'
+        inquiry['name'] = 'AAA enquiry first alphabetically'
+        pairs = {rim['selection_id']: [pair(rim, row) for row in (inquiry, offered)]}
+        catalog = catalogue([rim, offered, inquiry], compatible_pairs=pairs,
+            procurement_ids={offered['selection_id']}, rsu_only_prices=True)
+        result = catalog.compatible_tyres(rim['selection_id'], quantity=4, season='summer')
+        self.assertEqual([p['id'] for p in result['items']], [offered['selection_id']])
+        self.assertEqual(result['items'][0]['price']['prices_by_quantity']['4']['items_gross_cent'], 49380)
+        self.assertEqual(result['scope'], 'rim_width_candidate')
+        self.assertFalse(result['items'][0]['order_enabled'])
+        self.assertEqual(result['items'][0]['fitment']['status'], 'not_confirmed')
+        # Enquiry products remain in the ordinary catalogue and detail routes.
+        self.assertEqual(catalog.page(department='tyres')['total'], 2)
+        self.assertEqual(catalog.get(inquiry['selection_id'])['price_status'], 'not_offered')
+
+    def test_recommendation_offer_selection_respects_quantity_stock_price_and_season(self):
+        rim = wheel()
+        rows = [tyre(letter) for letter in ('a', 'b', 'c', 'd', 'e')]
+        sufficient, short, expired, missing_tier, winter = rows
+        for row in rows:
+            row['quote_public'] = deepcopy(rim['quote_public'])
+            row['quote_public']['source'] = 'RSU'
+        short['quote_public']['stock_reported'] = 2
+        expired['quote_public'].update(observed_at=(NOW - timedelta(minutes=20)).isoformat(),
+                                       expires_at=(NOW - timedelta(minutes=5)).isoformat())
+        missing_tier['quote_public']['prices_by_quantity'].pop('4')
+        winter['season'] = 'Winterreifen'
+        catalog = catalogue([rim, *rows], procurement_ids={row['selection_id'] for row in rows},
+            rsu_only_prices=True, compatible_pairs={rim['selection_id']: [pair(rim, row) for row in rows]})
+        four = catalog.compatible_tyres(rim['selection_id'], quantity=4, season='summer')
+        self.assertEqual([p['id'] for p in four['items']], [sufficient['selection_id']])
+        two = catalog.compatible_tyres(rim['selection_id'], quantity=2, season='summer')
+        self.assertEqual({p['id'] for p in two['items']},
+                         {row['selection_id'] for row in (sufficient, short, missing_tier)})
+        self.assertEqual([p['id'] for p in catalog.compatible_tyres(rim['selection_id'], season='winter')['items']],
+                         [winter['selection_id']])
+
+    def test_price_does_not_create_recommendation_without_exact_pair_evidence(self):
+        rim, documented, unreviewed = wheel(), tyre('d'), tyre('e')
+        unreviewed['quote_public'] = deepcopy(rim['quote_public'])
+        catalog = catalogue([rim, documented, unreviewed], procurement_ids={unreviewed['selection_id']},
+            compatible_pairs={rim['selection_id']: [pair(rim, documented)]})
+        self.assertEqual([p['id'] for p in catalog.compatible_tyres(rim['selection_id'])['items']],
+                         [documented['selection_id']])
+
     def test_exact_rim_dimensions_are_public_without_private_proof_or_vehicle_promise(self):
         row = wheel()
         identifier = row['selection_id']

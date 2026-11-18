@@ -70,6 +70,77 @@ class BuyerChecks(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(BuyerError):
                 validate_context({**deepcopy(PAYLOAD), 'workshop_delivery': value})
 
+    def test_mainland_declaration_is_optional_and_strictly_boolean(self):
+        legacy = validate_context(deepcopy(PAYLOAD))
+        self.assertNotIn('delivery_mainland', legacy)
+        for value in (False, True):
+            parsed = validate_context({**deepcopy(PAYLOAD), 'delivery_mainland': value})
+            self.assertIs(parsed.pop('delivery_mainland'), value)
+            self.assertEqual(parsed, legacy)
+        for value in (None, 0, 1, 'true', 'false', [], {}):
+            with self.subTest(value=value), self.assertRaises(BuyerError):
+                validate_context({**deepcopy(PAYLOAD), 'delivery_mainland': value})
+
+    def test_vehicle_reference_is_optional_but_typed_and_saved_with_the_quote_context(self):
+        self.assertNotIn('vehicle_ref', validate_context(deepcopy(PAYLOAD)))
+        for value in (None, True, [], 'x' * 201, 'Audi\nA3'):
+            with self.subTest(value=value), self.assertRaises(BuyerError):
+                validate_context({**deepcopy(PAYLOAD), 'vehicle_ref': value})
+        csrf = self.establish().get_json()['csrf_token']
+        payload = {**deepcopy(PAYLOAD), 'vehicle_ref': 'Audi A3 2016 / 0588 ABC'}
+        for flag in (None, False, 1, 'true'):
+            self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = flag
+            self.assertEqual(self.save(csrf, payload).status_code, 400)
+            self.assertFalse(self.establish().get_json()['address_ready'])
+        self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = True
+        self.assertEqual(self.save(csrf, payload).status_code, 200)
+        self.assertEqual(self.establish().get_json()['vehicle_ref'], payload['vehicle_ref'])
+        cookie = self.client.get_cookie(COOKIE_NAME, domain='shop.example.test').value
+        with self.app.test_request_context('/cart', base_url=ORIGIN, method='POST',
+                headers={'Origin': ORIGIN, 'X-CSRF-Token': csrf, 'Cookie': COOKIE_NAME + '=' + cookie}):
+            principal = self.buyer.authorize_quote(request)
+            context = self.buyer.quote_context(request, principal)
+            self.assertEqual(context['vehicle_ref'], payload['vehicle_ref'])
+            self.assertEqual(context['delivery_context']['vehicle_ref'], payload['vehicle_ref'])
+        self.assertEqual(self.save(csrf, {**payload, 'vehicle_ref': ''}).status_code, 200)
+        self.assertEqual(self.establish().get_json()['vehicle_ref'], '')
+
+    def test_mainland_http_field_is_rejected_until_literal_server_activation(self):
+        csrf = self.establish().get_json()['csrf_token']
+        for flag in (None, False, 'true', 1):
+            self.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = flag
+            for value in (False, True):
+                response = self.save(csrf, {**deepcopy(PAYLOAD), 'delivery_mainland': value})
+                self.assertEqual(response.status_code, 400)
+            self.assertFalse(self.establish().get_json()['address_ready'])
+        self.assertEqual(self.save(csrf).status_code, 200)
+        self.assertNotIn('delivery_mainland', self.establish().get_json())
+
+    def test_saved_mainland_declaration_requires_csrf_and_is_bound_to_exact_address(self):
+        from shop_freight import _hash
+        self.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = True
+        csrf = self.establish().get_json()['csrf_token']
+        payload = {**deepcopy(PAYLOAD), 'delivery_mainland': True}
+        self.assertEqual(self.save(csrf, payload, headers={'Origin': ORIGIN, 'X-CSRF-Token': 'x'*43}).status_code, 403)
+        self.assertFalse(self.establish().get_json()['address_ready'])
+        response = self.save(csrf, payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(response.get_json()['delivery_mainland'], True)
+        first = self.callback(csrf).get_json()['context']['delivery_context']
+        self.assertIs(first['delivery_mainland'], True)
+        self.assertEqual(json.loads(self.backend_records()[0][1])['context'], first)
+        self.assertIs(self.establish().get_json()['delivery_mainland'], True)
+        self.assertNotIn('delivery', self.establish().get_json())
+        changed = deepcopy(payload)
+        changed['billing']['street'] = 'Andere Straße 99'
+        self.assertEqual(self.save(csrf, changed).status_code, 200)
+        second = self.callback(csrf).get_json()['context']['delivery_context']
+        self.assertNotEqual(_hash(first), _hash(second))
+        changed['delivery_mainland'] = False
+        self.assertEqual(self.save(csrf, changed).status_code, 200)
+        self.assertIs(self.establish().get_json()['delivery_mainland'], False)
+        self.assertNotEqual(_hash(second), _hash(self.callback(csrf).get_json()['context']['delivery_context']))
+
     def test_saved_workshop_choice_is_private_persistent_and_changes_frozen_context_hash(self):
         from shop_freight import _hash
         csrf = self.establish().get_json()['csrf_token']

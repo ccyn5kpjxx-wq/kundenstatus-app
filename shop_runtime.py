@@ -60,6 +60,9 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
     for key in FLAGS:
         app.config[key] = previous and requested[key] and prerequisites[key]
         previous = app.config[key]
+    app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = (
+        app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True
+        and app.config['SHOP_CHECKOUT_ENABLED'] is True)
     app.register_blueprint(create_shop_public_blueprint(
         catalogue=catalogue, quote_service=quote_service,
         authorize_quote=authorize_quote, quote_context=quote_context,

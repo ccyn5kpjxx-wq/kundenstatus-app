@@ -37,6 +37,7 @@ import sqlite3
 from shop_cart_quotes import retail_unit_gross_cent
 from shop_order_store import _validate_snapshot, _delivery_context
 from shop_rsu_orders import freeze_order_request, request_sha256
+from shop_order_review import requires_review
 
 TTL = timedelta(minutes=15)
 HASH = re.compile(r'[a-f0-9]{64}')
@@ -229,6 +230,16 @@ class FulfillmentJournal:
                 return False
             return db.execute('UPDATE shop_fulfillment_positions_v3 SET grant_used=1 WHERE reference=? AND grant_used=0', (row['reference'],)).rowcount == 1
 
+    def submission_owner(self, reference, *, mode):
+        """Resolve a frozen position internally; never a public ownership API."""
+        if not isinstance(reference, str) or len(reference) > 200:
+            return None
+        with self._connection() as db:
+            row = db.execute('''SELECT p.order_id,f.customer_id FROM shop_fulfillment_positions_v3 p
+                JOIN shop_fulfillment_v2 f ON f.order_id=p.order_id WHERE p.reference=? AND f.mode=?''',
+                (reference, mode)).fetchone()
+            return dict(row) if row else None
+
     def settle(self, order_id, *, customer_id, mode, child_key, state, receipt):
         if state not in {'accepted', 'rejected', 'unknown'}:
             raise FulfillmentError('fulfillment_binding_mismatch')
@@ -308,7 +319,7 @@ class FulfillmentJournal:
 class ShopFulfillment:
     def __init__(self, order_store, journal, payment_actions=None, rsu_transport=None, *, mode,
                  supplier_policy=None, fresh_inquiry=None, revalidate=None, delivery_address=None,
-                 enabled=False, clock=None, minimum_capture_seconds=120):
+                 enabled=False, clock=None, minimum_capture_seconds=120, review_service=None):
         if (mode not in {'test', 'live'} or type(enabled) is not bool
                 or type(minimum_capture_seconds) is not int or not 60 <= minimum_capture_seconds <= 3600):
             raise FulfillmentError('invalid_fulfillment_configuration')
@@ -322,6 +333,7 @@ class ShopFulfillment:
         self.mode, self.enabled, self.policy = mode, enabled, deepcopy(policy)
         self.inquiry, self.revalidate, self.delivery_address = fresh_inquiry, revalidate, delivery_address
         self.clock, self.margin = clock or (lambda: datetime.now(timezone.utc)), minimum_capture_seconds
+        self.review_service = review_service
 
     def __repr__(self):
         return '<ShopFulfillment mode=' + self.mode + ' enabled=' + str(self.enabled) + '>'
@@ -407,6 +419,13 @@ class ShopFulfillment:
             if (fresh['request'] != old_requests or fresh.get('vehicle_ref') != snapshot.get('vehicle_ref')
                     or not started <= _stamp(fresh['created_at']) <= self._now()
                     or not self._now() < _stamp(fresh['expires_at']) or len(fresh['lines']) != len(old_lines)):
+                raise ValueError()
+            if requires_review(snapshot) and (not requires_review(fresh)
+                    or any(fresh.get(key) != snapshot.get(key) for key in
+                           ('review_requirements', 'assembly_proposals', 'assembly_evidence', 'product_checks'))):
+                # Approval covers these exact technical dependencies. A newly
+                # generated financial quote cannot silently substitute another
+                # nominal source or erase an unresolved/required condition.
                 raise ValueError()
             demand, unit_limits = Counter(), {}
             for old, new in zip(old_lines, fresh['lines']):
@@ -499,12 +518,34 @@ class ShopFulfillment:
     def authorize_submission(self, envelope):
         if not isinstance(envelope, Mapping) or not self.readiness()['ready'] or envelope.get('configured_mode') != self.mode:
             return False
+        try:
+            owner = self.journal.submission_owner(envelope.get('reference'), mode=self.mode)
+            if owner is None:
+                return False
+            _, snapshot, _, binding = self._load(owner['order_id'], owner['customer_id'])
+            self._require_review(snapshot, binding)
+        except Exception:
+            return False
         return self.journal.grant(envelope)
 
     def proof_resolver(self, order_id, *, operation):
         if not self.enabled:
             raise FulfillmentError('fulfillment_disabled')
+        if operation == 'capture':
+            owner = self.store.lookup_payment_owner(order_id, mode=self.mode)
+            _, snapshot, _, binding = self._load(order_id, owner['customer_id'])
+            self._require_review(snapshot, binding)
         return self.journal.proof(order_id, operation=operation, mode=self.mode)
+
+    def _require_review(self, snapshot, binding):
+        try:
+            if not requires_review(snapshot):
+                return None
+            if self.review_service is None or self.review_service.readiness().get('ready') is not True or self.review_service.mode != self.mode:
+                raise ValueError()
+            return self.review_service.require_approved(binding['order_id'], customer_id=binding['customer_id'], binding=binding)
+        except Exception:
+            raise FulfillmentError('review_approval_required') from None
 
     def status(self, order_id, *, customer_id):
         row = self.journal.load(order_id, customer_id=customer_id, mode=self.mode)
@@ -521,6 +562,12 @@ class ShopFulfillment:
                 'delivery_confirmed': False, 'supplier_retry_allowed': False}
 
     def _action(self, order_id, customer_id, operation):
+        if operation == 'capture':
+            try:
+                _, snapshot, _, binding = self._load(order_id, customer_id)
+                self._require_review(snapshot, binding)
+            except Exception:
+                return {**self.status(order_id, customer_id=customer_id), 'state': 'manual_review'}
         try:
             result = getattr(self.payment, operation)(order_id)
             row = self.journal.load(order_id, customer_id=customer_id, mode=self.mode)
@@ -555,6 +602,20 @@ class ShopFulfillment:
         row = self.journal.load(order_id, customer_id=customer_id, mode=self.mode)
         if row['action_state'] in {'captured', 'cancelled', 'conflict'} or row['state'] == 'manual_review':
             return self.status(order_id, customer_id=customer_id)
+        if requires_review(snapshot):
+            try:
+                if self.review_service is None or self.review_service.readiness().get('ready') is not True or self.review_service.mode != self.mode:
+                    raise ValueError()
+                review = self.review_service.ensure(order_id, customer_id=customer_id)
+                if review['state'] in {'rejected', 'expired'}:
+                    if row['state'] == 'rejected' or self.journal.reject_unordered(order_id, customer_id=customer_id,
+                            mode=self.mode, reason='technical_review_' + review['state']):
+                        return self._action(order_id, customer_id, 'cancel')
+                    self.journal.manual(order_id, customer_id=customer_id, mode=self.mode, reason='review_expired_after_procurement')
+                    return {**self.status(order_id, customer_id=customer_id), 'state': 'manual_review'}
+                self._require_review(snapshot, binding)
+            except Exception:
+                return {**self.status(order_id, customer_id=customer_id), 'state': 'awaiting_review'}
         if row['state'] in {'accepted', 'rejected'}:
             return self._action(order_id, customer_id, 'capture' if row['state'] == 'accepted' else 'cancel')
         if order['status'] != 'authorized':
@@ -573,12 +634,14 @@ class ShopFulfillment:
                 self.journal.manual(order_id, customer_id=customer_id, mode=self.mode, reason='authorization_unconfirmed')
                 return self.status(order_id, customer_id=customer_id)
             try:
+                self._require_review(snapshot, binding)
                 latest = self.journal.load(order_id, customer_id=customer_id, mode=self.mode)
                 current = next(v for v in latest['children'] if v['child_key'] == child['child_key'])
                 if current['state'] != 'pending' or any(v['state'] in {'claimed', 'unknown', 'rejected'} for v in latest['children']):
                     return self.status(order_id, customer_id=customer_id)
                 remaining = [v for v in latest['children'] if v['state'] == 'pending']
                 fresh, net = self._fresh_plan(snapshot, context, remaining)
+                self._require_review(snapshot, binding)
                 payload = self._payload(context, child, net[child['child_key']])
                 # A slow service/stock/address read must not consume the hold's
                 # remaining capture window or refresh any observation time.
@@ -596,6 +659,7 @@ class ShopFulfillment:
             if not self.journal.claim(order_id, customer_id=customer_id, mode=self.mode, child_key=child['child_key'], payload=payload, authorization=authorization):
                 return self.status(order_id, customer_id=customer_id)
             try:
+                self._require_review(snapshot, binding)
                 result = self.transport.submit_order(deepcopy(payload), idempotency_key=child['reference'])
                 outcome = self._receipt(payload, result)
             except Exception:

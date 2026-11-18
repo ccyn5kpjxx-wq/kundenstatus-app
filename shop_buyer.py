@@ -113,7 +113,7 @@ def validate_context(payload):
     """Normalize user-entered data, not supplier deliverability or freight proof."""
     required = {'contact', 'billing', 'delivery'}
     if (not isinstance(payload, dict) or not required <= set(payload)
-            or set(payload) - required - {'workshop_delivery'}):
+            or set(payload) - required - {'workshop_delivery', 'delivery_mainland', 'vehicle_ref'}):
         raise BuyerError('invalid_address')
     contact = payload['contact']
     if not isinstance(contact, dict) or not {'name', 'email'} <= set(contact) <= {'name', 'email', 'phone'}:
@@ -140,6 +140,15 @@ def validate_context(payload):
         if not isinstance(value, str) or value not in {'collection', 'customer_reshipment'}:
             raise BuyerError('invalid_address')
         result['workshop_delivery'] = value
+    if 'delivery_mainland' in payload:
+        if type(payload['delivery_mainland']) is not bool:
+            raise BuyerError('invalid_address')
+        # A customer's declaration only; not supplier deliverability proof.
+        # Storing the exact address and this value in the same context binds
+        # both to the existing quote/shipment hash and buyer CSRF boundary.
+        result['delivery_mainland'] = payload['delivery_mainland']
+    if 'vehicle_ref' in payload:
+        result['vehicle_ref'] = _text(payload['vehicle_ref'], 200, minimum=0)
     return result
 
 
@@ -324,6 +333,10 @@ class ShopBuyer:
         choice = context.get('workshop_delivery') if isinstance(context, Mapping) else None
         if isinstance(choice, str) and choice in {'collection', 'customer_reshipment'}:
             result['workshop_delivery'] = choice
+        if isinstance(context, Mapping) and type(context.get('delivery_mainland')) is bool:
+            result['delivery_mainland'] = context['delivery_mainland']
+        if isinstance(context, Mapping) and isinstance(context.get('vehicle_ref'), str):
+            result['vehicle_ref'] = context['vehicle_ref']
         return result
 
     def establish(self, req):
@@ -376,7 +389,7 @@ class ShopBuyer:
         _, record = self._session(req, csrf=req.method not in {'GET', 'HEAD', 'OPTIONS'})
         if record['customer_id'] != principal or record['context'] is None:
             raise BuyerError('buyer_address_required')
-        return {'vehicle_ref': '', 'delivery_context': deepcopy(record['context'])}
+        return {'vehicle_ref': record['context'].get('vehicle_ref', ''), 'delivery_context': deepcopy(record['context'])}
 
 
 def create_shop_buyer_blueprint(buyer):
@@ -434,6 +447,14 @@ def create_shop_buyer_blueprint(buyer):
                                  parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
         except (ValueError, UnicodeError, RecursionError):
             raise BuyerError('invalid_request') from None
+        if (isinstance(payload, dict) and 'delivery_mainland' in payload
+                and current_app.config.get('SHOP_MAINLAND_DELIVERY_ENABLED') is not True):
+            # Keep legacy contexts readable by all old workers until every
+            # service has the compatible validator and the flag is activated.
+            raise BuyerError('invalid_address')
+        if (isinstance(payload, dict) and 'vehicle_ref' in payload
+                and current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is not True):
+            raise BuyerError('invalid_address')
         return reply(buyer.save_address(request, payload))
 
     @bp.delete('/session')

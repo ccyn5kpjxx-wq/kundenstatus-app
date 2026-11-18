@@ -108,6 +108,20 @@ class CheckoutApiChecks(unittest.TestCase):
         self.assertFalse(response.get_json()['payment_enabled'])
         self.assertNotIn(b'PRIVATE_CANARY', response.data)
 
+    def test_readonly_status_projects_only_the_bound_technical_review_state(self):
+        self.enable()
+        self.checkout.status.return_value = {'technical_review': {'required': True, 'state': 'pending',
+            'expires_at': '2026-11-19T12:00:00+00:00', 'customer_id': 'PRIVATE_CANARY',
+            'certificate_references': ['PRIVATE_CANARY']}, 'PRIVATE_CANARY': 'PRIVATE_CANARY'}
+        response = self.client.get('/shop/api/v2/orders/' + self.order_id, base_url=self.origin)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['technical_review'], {'required': True, 'state': 'pending',
+            'expires_at': '2026-11-19T12:00:00+00:00'})
+        self.assertNotIn(b'PRIVATE_CANARY', response.data)
+        self.checkout.status.assert_called_once_with(self.order_id, customer_id='customer-a')
+        self.checkout.start.assert_not_called()
+        self.checkout.handle_webhook.assert_not_called()
+
     def test_malformed_or_cross_origin_checkout_url_and_provider_exceptions_are_not_exposed(self):
         self.enable()
         self.checkout.start.return_value['checkout_url'] = 'https://attacker.test/pay'

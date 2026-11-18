@@ -28,7 +28,8 @@ from shop_storage import ShopStorage, StorageError
 from test_shop_catalog_public import PHOTO, wheel
 
 FLAGS = ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED',
-         'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED')
+         'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED',
+         'SHOP_MAINLAND_DELIVERY_ENABLED')
 
 
 def write_json(path, value):
@@ -87,9 +88,11 @@ class ReleaseChecks(unittest.TestCase):
     def test_literal_enable_is_required_without_file_db_or_provider_access(self):
         for value in (None, True, 'true', '0', 'yes'):
             with self.subTest(value=value), patch('shop_production._json', side_effect=AssertionError('No file read')):
+                self.portal.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = True
                 result = prepare_shop_runtime(self.portal, environ={'SHOP_RELEASE_ENABLED': value},
                     provider_factory=Mock(side_effect=AssertionError('No provider construction')))
                 self.assertEqual(result, {})
+                self.assertFalse(self.portal.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'])
         self.assertFalse((self.data / 'shop-v2').exists())
 
     def test_approved_browse_release_exposes_only_allowlisted_projection_and_original_image(self):
@@ -265,7 +268,8 @@ class ReleaseChecks(unittest.TestCase):
                 self.assertEqual(service.allow_standalone_rims, approved is True)
                 quote = service.quote({'lines': [{'id': identifier, 'quantity': 4}]},
                     customer_id='synthetic-customer', delivery_context={'delivery': {
-                        'salutation': 'Herr', 'postcode': '74821'}}).snapshot()
+                        'salutation': 'Herr', 'recipient': 'Synthetic Buyer', 'street': 'Teststraße 12',
+                        'country': 'DE', 'city': 'Mosbach', 'postcode': '74821'}}).snapshot()
                 self.assertEqual(quote['ready'], approved is True)
                 if approved is True:
                     self.assertEqual(product['sale_dimensions'], geometry)
@@ -278,6 +282,55 @@ class ReleaseChecks(unittest.TestCase):
                     self.assertNotIn('sale_dimensions', product)
                     self.assertIn('fitment_unconfirmed', [r['code'] for r in quote['blocked_reasons']])
                 self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+
+    def test_mainland_flag_is_wired_to_real_quote_freight_without_opening_other_gates(self):
+        identifier = self.released['selection_id']
+        identity = variant_fingerprint(self.released)
+        proof = {'confirmed': True, 'product_id': identifier, 'identity_hash': identity,
+            'supplier': 'RSU', 'evidence_id': 'synthetic-reviewed-rim',
+            'geometry': {'width': '8', 'diameter': '18', 'offset': '45',
+                         'bolt_count': '5', 'pcd': '112', 'centre_bore': '66.6'}}
+        self.bundle.update(rsu_bindings={identifier: {'synthetic': True}},
+                           shipping_classes={identifier: 'pkw_rim'}, delivery_postcodes=['74821'])
+        self.descriptor.update(buyer_and_quotes_enabled=True, initial_storage_creation=True,
+            standalone_rim_sales_approved=True, rsu_reads_approved=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {}))
+        delivery = {'salutation': 'Herr', 'recipient': 'Synthetic Buyer', 'street': 'Teststraße 12',
+                    'country': 'DE', 'city': 'Berlin', 'postcode': '10115'}
+        cart = {'lines': [{'id': identifier, 'quantity': 1}]}
+        for flag in (None, False, 'true', 1, True):
+            self.descriptor['mainland_delivery_approved'] = flag
+            self.install()
+            supplier = self.synthetic_provider('RSU', [], 10000)
+            supplier.rim_geometry = Mock(return_value=proof)
+            supplier.rsu_mapping = lambda p: {'confirmed': True, 'product_id': identifier,
+                'identity_hash': identity, 'supplier': 'RSU', 'supplier_article_id': '123',
+                'evidence_id': 'synthetic-reviewed-mapping'}
+            with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
+                dependencies = self.prepare()
+            self.assertTrue(dependencies)
+            self.assertIs(self.portal.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'], flag is True)
+            service = self.portal.app.extensions['shop_production']['quotes']
+            self.assertTrue(service.manual_mixed_orders)
+            self.assertIsNone(service.assembly_fitment(None, None, None))
+            for declaration in (None, False, True):
+                context = {'delivery': deepcopy(delivery)}
+                if declaration is not None:
+                    context['delivery_mainland'] = declaration
+                result = service.quote(cart, customer_id='synthetic-buyer', delivery_context=context).snapshot()
+                self.assertIs(result['ready'], flag is True and declaration is True)
+                if result['ready']:
+                    self.assertEqual(result['total_gross_cent'], 10821)
+                else:
+                    self.assertIn('freight', [r.get('dependency') for r in result['blocked_reasons']])
+            legacy = service.quote(cart, customer_id='synthetic-buyer',
+                delivery_context={'delivery': {**delivery, 'postcode': '74821'}}).snapshot()
+            self.assertTrue(legacy['ready'])
+            self.assertEqual(legacy['total_gross_cent'], 10821)
+            island = service.quote(cart, customer_id='synthetic-buyer',
+                delivery_context={'delivery': {**delivery, 'postcode': '27498'}, 'delivery_mainland': True}).snapshot()
+            self.assertFalse(island['ready'])
+            self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
 
     def test_rsu_display_read_stage_works_without_buyer_and_skips_alzura_for_bound_rows(self):
         identifier = self.released['selection_id']

@@ -97,7 +97,12 @@ def _validate_snapshot(snapshot, expected_hash, customer_id, mode):
     # Detach nested data before inspecting it; later caller mutation cannot
     # change either the values validated below or the canonical frozen record.
     value = json.loads(encoded)
-    if (value.get('version') != 1 or type(value.get('version')) is not int
+    from shop_complete_wheels import is_review_snapshot
+    review = value.get('version') == 2 and is_review_snapshot(value)
+    if (type(value.get('version')) is not int or value['version'] not in (1, 2)
+            or value['version'] == 2 and not review
+            or value['version'] == 1 and any(key in value for key in
+                ('authorization_ready', 'fulfillment_ready', 'review_requirements', 'assembly_proposals'))
             or value.get('ready') is not True or value.get('blocked_reasons') != []
             or value.get('customer_id') != customer_id or value.get('mode') != mode
             or value.get('currency') != 'eur' or value.get('vat_percent') != '19.00'
@@ -161,9 +166,11 @@ def _validate_snapshot(snapshot, expected_hash, customer_id, mode):
             raise OrderStoreError('service_cost_unconfirmed')
     for group, members in groups.items():
         evidence = value.get('assembly_evidence')
-        if (len(members) != 2 or not isinstance(evidence, Mapping) or group not in evidence
-                or not any(requested['services'].get('mounting') for _, requested, _ in members)
-                or sum('mounting' in codes for _, _, codes in members) != 1):
+        mounting = any(requested['services'].get('mounting') for _, requested, _ in members)
+        pending = review and group in value['assembly_proposals']
+        if (len(members) != 2 or not isinstance(evidence, Mapping) or group not in evidence and not pending
+                or not mounting
+                or sum('mounting' in codes for _, _, codes in members) != int(mounting)):
             raise OrderStoreError('service_cost_unconfirmed')
     seen_groups, shipped = set(), Counter()
     for group in shipments:

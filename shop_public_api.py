@@ -340,8 +340,17 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         if request.args:
             return reply({'error': 'invalid_query'}, 400)
         try:
-            return reply({'order': public_order(order_store.get_order(order_id, customer_id=principal, mode=mode)),
-                          'payment_enabled': payment_available()})
+            result = {'order': public_order(order_store.get_order(order_id, customer_id=principal, mode=mode)),
+                      'payment_enabled': payment_available()}
+            if getattr(checkout_service, 'mode', None) == mode and callable(getattr(checkout_service, 'status', None)):
+                retained = checkout_service.status(order_id, customer_id=principal)
+                technical = retained.get('technical_review') if isinstance(retained, dict) else None
+                if (isinstance(technical, dict) and technical.get('required') is True
+                        and technical.get('state') in {'pending', 'approved', 'rejected', 'expired'}
+                        and (technical.get('expires_at') is None or
+                             isinstance(technical.get('expires_at'), str) and len(technical['expires_at']) <= 50)):
+                    result['technical_review'] = {key: technical.get(key) for key in ('required', 'state', 'expires_at')}
+            return reply(result)
         except OrderStoreError as error:
             if error.code == 'order_not_found':
                 return reply({'error': 'order_not_found'}, 404)

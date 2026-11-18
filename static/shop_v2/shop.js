@@ -114,15 +114,83 @@
   function cartSourceReady(items) {
     return cartOfferReady(items) && items.every(item => item.product.purchase_status === 'supplier_check_required');
   }
-  function cartPurchaseFlow(items) {
+  // This is only a UI route to the server's quote check, never a fitment proof.
+  function completeWheelGroups(items) {
+    if (!cartSourceReady(items)) return null;
+    const groups = new Map();
+    for (const {product, selection} of items) {
+      const row = normaliseCart([selection])[0], group = row?.assembly_group;
+      if (!group || group.length > 80 || !currentPrice(product, row.quantity)) return null;
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push({product, row});
+    }
+    const result = [];
+    for (const [group, members] of groups) {
+      const rim = members.find(item => ['alloy_wheel', 'steel_wheel'].includes(item.product.category));
+      const tyre = members.find(item => item.product.category === 'tyre');
+      if (members.length !== 2 || !rim || !tyre || rim.row.quantity !== tyre.row.quantity ||
+          Object.keys(rim.row.services).length || tyre.row.services.mounting !== true ||
+          Object.keys(tyre.row.services).some(key => !['mounting', 'runflat', 'disposal'].includes(key)) || rimDimensions(rim.product).length !== 6) return null;
+      const size = typeof tyre.product.size === 'string' && /^[0-9]{3}\/[0-9]{2,3}\s*R([0-9]{2})(?:\s+[A-Za-z0-9 +./()\-]+)?$/.exec(tyre.product.size);
+      if (!size || Number(size[1]) !== Number(rim.product.sale_dimensions.diameter)) return null;
+      result.push({group, rimId: rim.row.id, tyreId: tyre.row.id, quantity: rim.row.quantity});
+    }
+    return result.length ? result : null;
+  }
+  function reviewQuoteReady(value, items, enabled) {
+    const groups = enabled === true && completeWheelGroups(items);
+    if (!groups || !value || value.version !== 2 || value.ready !== true || value.authorization_ready !== true ||
+        value.fulfillment_ready !== false || !Array.isArray(value.blocked_reasons) || value.blocked_reasons.length ||
+        !Array.isArray(value.review_requirements) || !value.review_requirements.length || value.review_requirements.length > 81 ||
+        !Array.isArray(value.lines) || value.lines.length !== items.length) return false;
+    // Bind every projected line and quantity to this exact cart, without trusting a display name.
+    const remaining = items.map(({selection}) => ({id: selection.id, quantity: selection.quantity}));
+    for (const line of value.lines) {
+      const index = remaining.findIndex(row => line && row.id === line.id && row.quantity === line.quantity);
+      if (index < 0) return false;
+      remaining.splice(index, 1);
+    }
+    const seen = new Set();
+    for (const item of value.review_requirements) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+      const keys = Object.keys(item).sort().join(','), code = item.code;
+      let key;
+      if (code === 'mixed_cart_manual_review_required' && keys === 'code') key = code;
+      else if (code === 'fitment_unconfirmed' && keys === 'code,product_id' && groups.some(group => group.rimId === item.product_id)) key = code + ':' + item.product_id;
+      else if (code === 'assembly_fitment_unconfirmed' && keys === 'assembly_group,code' && groups.some(group => group.group === item.assembly_group)) key = code + ':' + item.assembly_group;
+      else return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+    return true;
+  }
+  function vehicleReference(value) {
+    return typeof value === 'string' && value.trim().length <= 200 && !/[\x00-\x1f\x7f\ud800-\udfff]/.test(value) ? value.trim() : null;
+  }
+  function cartPurchaseFlow(items, deferredCompleteWheels = false) {
     if (!cartOfferReady(items)) return 'unavailable';
     if (items.some(item => inquiryOnly(item.product))) return 'inquiry';
+    if (deferredCompleteWheels === true && completeWheelGroups(items)) return 'checkout';
     const children = new Set(items.map(({selection}) => {
       const row = normaliseCart([selection])[0], services = row.services;
       const workshop = Boolean(row.assembly_group || services.mounting || services.painting || services.installation || services.oil_service || services.care);
       return row.id + '|' + (workshop ? 'workshop' : 'customer');
     }));
     return children.size > 1 ? 'inquiry' : 'checkout';
+  }
+  function cartNeedsCustomerDelivery(rows, workshopDelivery = 'collection') {
+    if (!Array.isArray(rows) || !rows.length) return false;
+    if (workshopDelivery === 'customer_reshipment') return true;
+    return rows.some(row => {
+      const selected = normaliseCart([row])[0];
+      if (!selected) return true;
+      const services = selected.services;
+      return !Boolean(selected.assembly_group || services.mounting || services.painting || services.installation || services.oil_service || services.care);
+    });
+  }
+  function deliveryAddressSignature(values) {
+    const prefix = values.different_delivery === true ? 'delivery_' : '';
+    return JSON.stringify(['recipient', 'street', 'postcode', 'city'].map(key => String(values[prefix + key] || '').trim()));
   }
   function buildOfferRequest(items, now = Date.now()) {
     if (!Array.isArray(items) || items.length < 1 || items.length > 40 || items.some(item => !item || typeof item !== 'object') || !Number.isSafeInteger(now)) return null;
@@ -154,7 +222,9 @@
       const value = typeof values[field] === 'string' ? values[field].trim() : '';
       if (value) query.set(field, field === 'tsn' ? value.toUpperCase() : value);
     }
-    if (values.group === 'family') query.set('group', 'family');
+    // The mixed shop start page also contains rims. Group their designs on
+    // the server before pagination; tyres and parts retain their exact IDs.
+    if (!department || department === 'wheels' || values.group === 'family') query.set('group', 'family');
     if (values.studio === '1') query.set('studio', '1');
     if (values.complete === '1') query.set('complete', '1');
     return query;
@@ -185,7 +255,7 @@
       return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|g\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
     } catch (_) { return false; }
   }
-  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
+  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
@@ -195,7 +265,7 @@
   const button = (text, handler, cls = 'shop-button') => { const node = el('button', text, cls); node.type = 'button'; node.addEventListener('click', handler); return node; };
   const priceNodes = new Map();
   const imageLoads = new WeakMap();
-  let cart = [], quote = null, retained = false, revision = 0, csrf = document.querySelector('meta[name=shop-csrf]').content || '', addressReady = false, consumerState = null, consumerRun = 0, checkoutInProgress = false, sourceReady = false, offerReady = false, cartFlow = 'unavailable', quoteBlocked = false, quoteBusy = false, quoteRequestRun = 0, confirmedWorkshopDelivery = 'collection';
+  let cart = [], cartStored = false, quote = null, retained = false, revision = 0, csrf = document.querySelector('meta[name=shop-csrf]').content || '', addressReady = false, consumerState = null, consumerRun = 0, checkoutInProgress = false, sourceReady = false, offerReady = false, cartFlow = 'unavailable', quoteBlocked = false, quoteBusy = false, quoteRequestRun = 0, confirmedWorkshopDelivery = 'collection';
   try { cart = normaliseCart(JSON.parse(root.localStorage.getItem(CART_KEY) || '[]')); } catch (_) { /* selection starts empty */ }
   function notice(text) { const n = byId('shop-announcement'); n.textContent = text; n.hidden = false; root.setTimeout(() => { n.hidden = true; }, 4500); }
   function invalidateQuote() {
@@ -208,7 +278,7 @@
     revision++;
     quoteRequestRun++; quoteBusy = false;
     invalidateQuote();
-    try { root.localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch (_) { notice('Auswahl bleibt nur in diesem geöffneten Fenster erhalten.'); }
+    try { root.localStorage.setItem(CART_KEY, JSON.stringify(cart)); cartStored = true; } catch (_) { cartStored = false; notice('Auswahl bleibt nur in diesem geöffneten Fenster erhalten.'); }
     document.querySelectorAll('[data-cart-count]').forEach(node => { node.textContent = String(cart.reduce((n, row) => n + row.quantity, 0)); });
   }
   saveCart();
@@ -439,7 +509,7 @@
     status.textContent = 'Sortiment wird geladen …';
     byId('previous-page').disabled = true; byId('next-page').disabled = true;
     try {
-      const expectedPage = page, query = buildQuery({...filters, ...vehicleFilters, ...(body.dataset.department === 'wheels' ? {group: 'family'} : {}), ...(body.dataset.page === 'komplettraeder' ? {complete: '1'} : {})}, body.dataset.department, page).toString();
+      const expectedPage = page, query = buildQuery({...filters, ...vehicleFilters, ...(body.dataset.page === 'komplettraeder' ? {complete: '1'} : {})}, body.dataset.department, page).toString();
       const result = await requestJSON('/products?' + query);
       if (run !== sequence) return;
       if (!Array.isArray(result.items) || result.items.length > 24 || !Number.isInteger(result.total) || result.page !== page) throw new Error('invalid_catalogue');
@@ -545,14 +615,34 @@
     let serial = 0, selected = null, scope = 'blocked';
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.name = 'bundle_mounting';
     mountingLabel.append(mounting, el('span', 'Mit Montage bei uns in Mosbach'));
+    const feedback = el('div', null, 'shop-cart-feedback');
+    feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite'); feedback.setAttribute('aria-atomic', 'true');
+    function clearFeedback() { feedback.replaceChildren(); delete feedback.dataset.kind; }
+    function showFeedback(kind, title, text, linkToCart = false) {
+      feedback.dataset.kind = kind;
+      feedback.replaceChildren(el('strong', title), el('p', text));
+      const cartHref = document.querySelector('a.shop-cart-link')?.getAttribute('href');
+      if (linkToCart && cartHref === '/shop/warenkorb/') {
+        const link = el('a', 'Zum Warenkorb', 'shop-button shop-button-light'); link.href = cartHref; feedback.append(link);
+      }
+      feedback.scrollIntoView({block: 'nearest'});
+    }
     const summary = el('div', null, 'shop-bundle-summary'), add = button('Felgen + Reifen in den Warenkorb', () => {
+      clearFeedback();
       if (!selected || !active()) return;
       const quantity = getQuantity();
-      if ((!inquiryOnly(rim) && !selectionPrice(rim, quantity)) || (!inquiryOnly(selected) && !selectionPrice(selected, quantity))) { updateSummary(); return; }
+      if ((!inquiryOnly(rim) && !selectionPrice(rim, quantity)) || (!inquiryOnly(selected) && !selectionPrice(selected, quantity))) {
+        updateSummary(); showFeedback('error', 'Noch nicht hinzugefügt', 'Bitte die aktuellen Preise und die gewünschte Anzahl prüfen.'); return;
+      }
       const group = mounting.checked ? 'set|' + rim.id + '|' + selected.id : '';
       const lines = [{id: rim.id, quantity, services: {}}, {id: selected.id, quantity, services: mounting.checked ? {mounting: true} : {}}];
       if (group) for (const line of lines) line.assembly_group = group;
-      if (!addLines(lines)) notice('Bitte die vorhandenen Mengen im Warenkorb prüfen. Es wurde nichts hinzugefügt.');
+      if (!addLines(lines)) {
+        showFeedback('error', 'Nicht hinzugefügt', 'Bitte die vorhandenen Mengen im Warenkorb prüfen. Es wurde nichts hinzugefügt.'); return;
+      }
+      const added = quantity + (quantity === 1 ? ' Felge + ' : ' Felgen + ') + quantity + ' Reifen hinzugefügt.';
+      if (cartStored) showFeedback('success', 'Im Warenkorb', added, true);
+      else showFeedback('warning', 'In dieser Ansicht hinzugefügt', added + ' Ihr Browser konnte die Auswahl nicht speichern. Lassen Sie dieses Fenster geöffnet.');
     });
     add.disabled = true;
     function updateSummary() {
@@ -568,9 +658,10 @@
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrage hinzufügen' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
-    function clear() { serial++; selected = null; choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
+    function clear() { serial++; selected = null; clearFeedback(); choices.replaceChildren(); summary.replaceChildren(); add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
     const search = button('Passende Reifen zu dieser Felge suchen', async () => {
       if (!seasons.some(([value]) => value === season.value)) return;
+      clearFeedback();
       const run = ++serial, quantity = getQuantity(); selected = null; choices.replaceChildren(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true;
       try {
         const query = new URLSearchParams({quantity: String(quantity), season: season.value, ...vehicleFilters});
@@ -590,15 +681,15 @@
           for (const [label, value] of quality) details.append(el('p', label + ': ' + value, 'shop-card-meta'));
           if (!quality.length) for (const label of ['Nasshaftung', 'Kraftstoffeffizienz', 'Außengeräusch']) if (tyre.specifications?.[label]) details.append(el('p', label + ': ' + tyre.specifications[label], 'shop-card-meta'));
           row.append(radio, productImage(tyre, ''), details); choices.append(row);
-          radio.addEventListener('change', () => { if (radio.checked) { selected = tyre; updateSummary(); } });
+          radio.addEventListener('change', () => { if (radio.checked) { clearFeedback(); selected = tyre; updateSummary(); } });
           scheduleQuantityPrice(price, result, 0);
         }
       } catch (_) { if (run === serial && active()) status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.'; }
       finally { if (run === serial && active()) search.disabled = false; }
     });
     search.disabled = !seasons.length;
-    mounting.addEventListener('change', updateSummary); season.addEventListener('change', clear);
-    panel.append(search, seasonLabel, status, choices, mountingLabel, summary, add, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
+    mounting.addEventListener('change', () => { clearFeedback(); updateSummary(); }); season.addEventListener('change', clear);
+    panel.append(search, seasonLabel, status, choices, mountingLabel, summary, add, feedback, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
     return {node: panel, quantityChanged: clear, priceChanged: updateSummary};
   }
   async function openProduct(id) {
@@ -755,10 +846,12 @@
     const allLoaded = cart.length > 0 && offerSelection.length === cart.length;
     offerReady = allLoaded && cartOfferReady(offerSelection);
     sourceReady = offerReady && cartSourceReady(offerSelection);
-    const nextFlow = allLoaded ? cartPurchaseFlow(offerSelection) : 'unavailable';
+    const nextFlow = allLoaded ? cartPurchaseFlow(offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true') : 'unavailable';
     if (allLoaded && nextFlow !== 'checkout' && quote) invalidateQuote();
     cartFlow = nextFlow;
     const form = byId('buyer-address'), primary = byId('request-quote'), note = byId('cart-workflow-note');
+    updateMainlandRequirement(form);
+    updateVehicleRequirement(form);
     if (form) form.hidden = cartFlow !== 'checkout';
     if (cartFlow !== 'checkout') {
       byId('checkout-button').hidden = true; byId('checkout-button').disabled = true;
@@ -829,7 +922,8 @@
           copy.append(el('p', service || row.assembly_group ? 'Lieferziel zur Prüfung: Werkstatt Mosbach' : 'Lieferziel zur Prüfung: Kundenanschrift', 'shop-muted'));
           if (product.category === 'tyre') copy.append(el('p', TYRE_PURCHASE_NOTE, 'shop-muted'));
           if (product.category === 'tyre' || row.assembly_group) {
-            const action = el('div', null, 'shop-mounting-action'); action.append(button('Montagetermin in Mosbach buchen', () => mountingRequest(row, product), 'shop-button shop-button-secondary'), el('small', 'Terminbestätigung nach Lieferklärung', 'shop-muted')); copy.append(action);
+            const deferredMontage = row.assembly_group && body.dataset.deferredCompleteWheelsEnabled === 'true';
+            const action = el('div', null, 'shop-mounting-action'); action.append(button(deferredMontage ? 'Montage nach Wareneingang abstimmen' : 'Montagetermin in Mosbach buchen', () => mountingRequest(row, product), 'shop-button shop-button-secondary'), el('small', deferredMontage ? 'Montage ist ausgewählt. Terminvereinbarung nach Wareneingang.' : 'Terminbestätigung nach Lieferklärung', 'shop-muted')); copy.append(action);
           }
           article.append(copy);
         }
@@ -853,7 +947,7 @@
     const result = await requestJSON('/buyer/session');
     if (typeof result.csrf_token !== 'string' || !/^[A-Za-z0-9_\-.:]{16,256}$/.test(result.csrf_token) || typeof result.address_ready !== 'boolean') throw new Error('invalid_session');
     csrf = result.csrf_token;
-    if (requestedRevision === revision) { addressReady = result.address_ready; restoreWorkshopDelivery(result); }
+    if (requestedRevision === revision) { restoreWorkshopDelivery(result); addressReady = result.address_ready; }
     return result;
   }
   function restoreWorkshopDelivery(result) {
@@ -862,6 +956,42 @@
     confirmedWorkshopDelivery = value;
     const field = byId('buyer-address')?.elements.namedItem('workshop_delivery');
     if (field) field.value = value;
+    const form = byId('buyer-address');
+    if (body.dataset.mainlandDeliveryEnabled === 'true') {
+      if (result.delivery_mainland !== undefined && typeof result.delivery_mainland !== 'boolean') throw new Error('invalid_session');
+      const mainland = form?.elements.namedItem('delivery_mainland');
+      if (mainland) mainland.checked = result.delivery_mainland === true;
+    }
+    if (body.dataset.deferredCompleteWheelsEnabled === 'true') {
+      const vehicle = form?.elements.namedItem('vehicle_ref');
+      if (!vehicle || result.vehicle_ref !== undefined && vehicleReference(result.vehicle_ref) === null) throw new Error('invalid_session');
+      vehicle.value = result.vehicle_ref === undefined ? '' : vehicleReference(result.vehicle_ref);
+      if (completeWheelGroups(offerSelection) && vehicle.value.length < 3 && result.address_ready === true) throw new Error('invalid_session');
+    }
+    updateMainlandRequirement(form);
+    updateVehicleRequirement(form);
+  }
+  function updateMainlandRequirement(form) {
+    if (!form || body.dataset.mainlandDeliveryEnabled !== 'true') return;
+    const field = form.elements.namedItem('delivery_mainland'), region = byId('mainland-delivery-confirmation');
+    if (!field || !region) return;
+    const required = cartNeedsCustomerDelivery(cart, form.elements.namedItem('workshop_delivery')?.value || 'collection');
+    field.required = required; field.disabled = !required; region.hidden = !required;
+  }
+  function updateVehicleRequirement(form) {
+    if (!form || body.dataset.deferredCompleteWheelsEnabled !== 'true') return;
+    const field = form.elements.namedItem('vehicle_ref'), region = byId('complete-wheel-vehicle');
+    if (!field || !region) return;
+    const required = Boolean(completeWheelGroups(offerSelection));
+    field.required = required; region.hidden = !required;
+    // Restored address sessions without this cart's vehicle reference cannot skip review input.
+    if (required && (vehicleReference(field.value) === null || vehicleReference(field.value).length < 3)) addressReady = false;
+  }
+  function currentDeliverySignature(form) {
+    const values = {};
+    for (const key of ['recipient', 'street', 'postcode', 'city', 'delivery_recipient', 'delivery_street', 'delivery_postcode', 'delivery_city']) values[key] = form.elements.namedItem(key)?.value || '';
+    values.different_delivery = form.elements.namedItem('different_delivery')?.checked === true;
+    return deliveryAddressSignature(values);
   }
   function addressPayload(form) {
     const data = new FormData(form), get = key => String(data.get(key) || '').trim();
@@ -876,6 +1006,16 @@
       if (!['collection', 'customer_reshipment'].includes(workshopDelivery)) throw new Error('invalid_address');
       payload.workshop_delivery = workshopDelivery;
     }
+    if (body.dataset.mainlandDeliveryEnabled === 'true') {
+      const field = form.elements.namedItem('delivery_mainland');
+      if (!field || field.type !== 'checkbox' || typeof field.checked !== 'boolean') throw new Error('invalid_address');
+      payload.delivery_mainland = field.checked;
+    }
+    if (body.dataset.deferredCompleteWheelsEnabled === 'true') {
+      const field = form.elements.namedItem('vehicle_ref'), value = field && vehicleReference(field.value);
+      if (!field || value === null || completeWheelGroups(offerSelection) && value.length < 3) throw new Error('invalid_address');
+      payload.vehicle_ref = value;
+    }
     return payload;
   }
   const BLOCKED = {mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.', fitment_unconfirmed: 'Fahrzeugpassung noch nicht bestätigt', rsu_mapping_unconfirmed: 'Lieferantenartikel noch nicht sicher abgeglichen', freight_unconfirmed: 'Versandkosten noch nicht bestätigt', assembly_fitment_unconfirmed: 'Rad-Reifen-Kombination noch nicht freigegeben', service_unconfirmed: 'Servicepreis noch nicht bestätigt', stock_insufficient_or_unconfirmed: 'Bestand für diese Menge noch nicht bestätigt', procurement_price_unconfirmed: 'Lieferantenpreis noch nicht bestätigt'};
@@ -889,6 +1029,7 @@
     const run = ++consumerRun, terms = await requestJSON('/consumer/terms');
     if (run !== consumerRun || quote !== frozenQuote || !retained) return;
     const documents = {agb: 'Allgemeine Geschäftsbedingungen', widerruf: 'Widerrufsbelehrung', widerrufsformular: 'Muster-Widerrufsformular', lieferung: 'Lieferung und Leistungen', datenschutz: 'Datenschutzhinweise'};
+    if (frozenQuote.version === 2) documents.komplettraeder_zahlung = 'Kompletträder: Kartenreservierung und technische Prüfung';
     if (!terms || !/^[a-f0-9]{64}$/.test(terms.pack_hash) || typeof terms.version !== 'string' || !terms.version || terms.version.length > 100 || terms.consumer_only !== true || !terms.texts || Object.keys(documents).some(key => typeof terms.texts[key] !== 'string' || !terms.texts[key] || terms.texts[key].length > 65536)) throw new Error('legal_terms_unavailable');
     const section = el('section', null, 'shop-consumer-review'); section.append(el('h3', 'Vor dem Abschluss'), el('p', 'Vertragsunterlagen · Version ' + terms.version, 'shop-muted'));
     if (typeof terms.before_order_notice === 'string' && terms.before_order_notice.length > 0 && terms.before_order_notice.length <= 4000) section.append(el('p', terms.before_order_notice, 'shop-review-note'));
@@ -906,10 +1047,14 @@
     const changed = () => { if (consumerState && consumerState.quoteHash === frozenQuote.quote_hash && quote === frozenQuote && !checkoutInProgress) checkout.disabled = !(consumer.checked && accept.checked); };
     consumer.addEventListener('change', changed); accept.addEventListener('change', changed); section.append(consumerLabel, acceptLabel); byId('quote-review').append(section);
     checkout.hidden = !(body.dataset.orderEnabled === 'true' && body.dataset.checkoutEnabled === 'true'); changed();
+    checkout.textContent = frozenQuote.version === 2 ? 'Gesamtbetrag online reservieren' : 'Gesamtpreis bezahlen';
   }
   async function showQuote(result) {
     const value = result.quote, review = byId('quote-review');
     if (!value || typeof value.ready !== 'boolean' || value.currency !== 'eur' || !Array.isArray(value.lines) || !Array.isArray(value.shipments)) throw new Error('invalid_quote');
+    const reviewPayment = value.version === 2;
+    if (reviewPayment && !reviewQuoteReady(value, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) throw new Error('invalid_quote');
+    if (value.version !== undefined && value.version !== 1 && value.version !== 2) throw new Error('invalid_quote');
     review.replaceChildren();
     const lines = el('dl');
     for (const line of value.lines) {
@@ -921,8 +1066,18 @@
     review.append(lines);
     if (value.ready === true && result.quote_retained === true && Number.isSafeInteger(value.total_gross_cent) && value.total_gross_cent > 0 && /^[a-f0-9]{64}$/.test(value.quote_hash) && Date.parse(value.expires_at) > Date.now()) {
       quote = value; retained = true; review.append(el('p', 'Gesamtpreis inkl. MwSt.', 'shop-muted'), el('p', money(value.total_gross_cent), 'shop-summary-total'));
-      byId('quote-status').textContent = 'Artikel, Leistungen und Versand wurden für diese Auswahl geprüft.';
-      byId('checkout-note').textContent = 'Bitte Ihre Auswahl prüfen. Montage wird mitgekauft; den Termin vereinbaren wir nach Wareneingang.';
+      byId('quote-status').textContent = reviewPayment ? 'Gesamtpreis einschließlich Montage und Versand bestätigt. Die technische Prüfung steht noch aus.' : 'Artikel, Leistungen und Versand wurden für diese Auswahl geprüft.';
+      byId('checkout-note').textContent = reviewPayment ? 'Der vollständige Gesamtbetrag wird zunächst auf Ihrer Karte reserviert. Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab. Den Montagetermin vereinbaren wir nach Wareneingang.' : 'Bitte Ihre Auswahl prüfen. Montage wird mitgekauft; den Termin vereinbaren wir nach Wareneingang.';
+      if (reviewPayment) {
+        review.append(el('p', byId('checkout-note').textContent, 'shop-review-note'), el('p', 'Sicher mit Karte. Apple Pay erscheint im Zahlungsfenster, wenn Ihr Gerät und Konto es unterstützen.', 'shop-muted'));
+        const pending = el('ul', null, 'shop-review-requirements'), descriptions = {
+          mixed_cart_manual_review_required: 'Vollständige Kombination und Lieferbarkeit werden geprüft.',
+          fitment_unconfirmed: 'Fahrzeugpassung und Felgengutachten werden geprüft.',
+          assembly_fitment_unconfirmed: 'Die genaue Rad-Reifen-Kombination wird technisch geprüft.'
+        };
+        for (const text of new Set(value.review_requirements.map(item => descriptions[item.code]))) pending.append(el('li', text));
+        review.append(pending);
+      }
       await consumerTerms(value);
     } else {
       invalidateQuote(); quoteBlocked = true; review.append(lines);
@@ -944,8 +1099,20 @@
     if (body.dataset.buyerEnabled === 'true') buyerSession().then(() => renderCart()).catch(error => { byId('address-status').textContent = errorText(error); });
     if (byId('buyer-address')) {
       const form = byId('buyer-address');
-      form.elements.namedItem('different_delivery').addEventListener('change', event => { byId('delivery-fields').hidden = !event.target.checked; byId('delivery-fields').disabled = !event.target.checked; });
-      form.addEventListener('input', () => { revision++; invalidateQuote(); addressReady = false; updateCartAction(); });
+      let previousDelivery = currentDeliverySignature(form);
+      const resetChangedDelivery = () => {
+        if (body.dataset.mainlandDeliveryEnabled !== 'true') return;
+        const current = currentDeliverySignature(form);
+        if (current !== previousDelivery) {
+          const field = form.elements.namedItem('delivery_mainland'); if (field) field.checked = false;
+          previousDelivery = current;
+        }
+      };
+      const addressChanged = () => { resetChangedDelivery(); revision++; invalidateQuote(); addressReady = false; updateCartAction(); };
+      form.elements.namedItem('different_delivery').addEventListener('change', event => { byId('delivery-fields').hidden = !event.target.checked; byId('delivery-fields').disabled = !event.target.checked; addressChanged(); });
+      form.elements.namedItem('workshop_delivery')?.addEventListener('change', addressChanged);
+      form.addEventListener('input', addressChanged);
+      form.addEventListener('change', addressChanged);
       form.addEventListener('submit', async event => {
         event.preventDefault();
         if (cartFlow !== 'checkout' || !sourceReady || !offerReady) return;
@@ -955,7 +1122,7 @@
           const result = await requestJSON('/buyer/address', {method: 'PUT', body: JSON.stringify(addressPayload(form))});
           if (result.address_ready !== true || typeof result.csrf_token !== 'string') throw new Error('invalid_session');
           if (submittedRevision !== revision) { byId('address-status').textContent = 'Die Anschrift wurde während der Prüfung geändert. Bitte erneut bestätigen.'; return; }
-          csrf = result.csrf_token; addressReady = true; restoreWorkshopDelivery(result); byId('address-status').textContent = 'Anschrift für diese Bestellung gespeichert.'; renderCart();
+          csrf = result.csrf_token; restoreWorkshopDelivery(result); addressReady = true; byId('address-status').textContent = 'Anschrift für diese Bestellung gespeichert.'; renderCart();
         } catch (error) { byId('address-status').textContent = errorText(error); }
       });
     }
@@ -975,7 +1142,7 @@
     });
     byId('checkout-button').addEventListener('click', async () => {
       if (cartFlow !== 'checkout' || body.dataset.orderEnabled !== 'true' || body.dataset.checkoutEnabled !== 'true' || body.dataset.consumerEnabled !== 'true' || !quote || !retained || !addressReady || !sourceReady || !offerReady || checkoutInProgress || !consumerState || consumerState.quoteHash !== quote.quote_hash || !consumerState.consumer.checked || !consumerState.accept.checked) return;
-      if (Date.parse(quote.expires_at) <= Date.now()) { invalidateQuote(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen. Bitte den Gesamtpreis erneut prüfen.'; return; }
+      if (Date.parse(quote.expires_at) <= Date.now() || quote.version === 2 && !reviewQuoteReady(quote, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) { invalidateQuote(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen oder wurde geändert. Bitte den Gesamtpreis erneut prüfen.'; return; }
       const frozenQuote = quote, hash = frozenQuote.quote_hash, submittedRevision = revision, pack = consumerState.packHash; checkoutInProgress = true; byId('checkout-button').disabled = true; byId('quote-status').textContent = 'Ihre geprüfte Auswahl wird übernommen …';
       let orderId = null;
       try {
@@ -1012,6 +1179,11 @@
         const result = await requestJSON('/orders/' + id), order = result.order;
         if (!order || order.id !== id || !Object.hasOwn(labels, order.status)) throw new Error('order_unavailable');
         status.textContent = labels[order.status]; summary.replaceChildren(el('p', 'Bestellung ' + id), el('p', money(order.amount_gross_cent), 'shop-summary-total'));
+        const technical = result.technical_review;
+        if (technical && technical.required === true && ['pending', 'approved', 'rejected', 'expired'].includes(technical.state)) {
+          const reviewStates = {pending: 'Die technische Prüfung von Fahrzeugpassung, Gutachten und Lieferbarkeit läuft. Eine Kartenreservierung ist noch keine Abbuchung.', approved: 'Die technische Prüfung ist abgeschlossen. Die Abbuchung erfolgt erst nach vollständiger Lieferantenbestätigung.', rejected: 'Die Zusammenstellung konnte technisch nicht bestätigt werden. Die Kartenreservierung wird freigegeben.', expired: 'Die Prüfungsfrist ist abgelaufen. Die Kartenreservierung wird freigegeben.'};
+          summary.append(el('p', technical.state === 'approved' && order.status === 'paid' ? 'Technische Prüfung abgeschlossen.' : reviewStates[technical.state], 'shop-review-note'));
+        }
         if (order.mode === 'test') summary.append(el('p', 'Testvorgang · keine echte Zahlung', 'shop-notice'));
         if (order.status === 'payment_pending' && ++checks < 12) root.setTimeout(poll, 5000);
       } catch (error) { status.textContent = errorText(error); }

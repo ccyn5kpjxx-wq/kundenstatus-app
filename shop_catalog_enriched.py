@@ -340,6 +340,20 @@ class EnrichedPublicCatalog(PublicCatalog):
             if season and canonical_season != season:
                 continue
             candidates.append(self._cached_entry(self._rows[tyre_id]))
+        # Prefer actual merchant offers for the requested quantity. Do not pad
+        # a short, priced recommendation list with unpriced enquiry cards.
+        # This is display selection only: reported stock may be older than the
+        # price, and neither this list nor its dimensional scope permits an order.
+        offered = []
+        for entry in candidates:
+            tyre = self._project(entry, current)
+            price = tyre.get('price')
+            if (tyre['id'] in self._procurement_ids and tyre['price_status'] == 'current'
+                    and price and str(quantity) in price['prices_by_quantity']
+                    and price['stock_reported'] >= quantity):
+                offered.append(entry)
+        if offered:
+            candidates = offered
         candidates.sort(key=lambda entry: self._ranked_order(entry, current))
         for entry in candidates:
             tyre = self._project(entry, current)
@@ -347,6 +361,39 @@ class EnrichedPublicCatalog(PublicCatalog):
             if len(result['items']) == 5:
                 break
         return result
+
+    def assembly_proposal(self, rim, tyre, vehicle_ref):
+        """Return an exact documented nominal proposal, never vehicle approval.
+
+        Legacy visual matches without source-backed dimensional evidence are
+        intentionally excluded from the authorization-before-review route.
+        """
+        from shop_complete_wheels import valid_proposal
+        if not isinstance(rim, Mapping) or not isinstance(tyre, Mapping):
+            return None
+        rim_id, tyre_id = rim.get('id'), tyre.get('id')
+        if (rim_id not in self._source_rows or tyre_id not in self._source_rows
+                or (tyre_id, _tyre_season(self._rows[tyre_id]['public'], self._source_rows[tyre_id]))
+                    not in self._candidate_tyres.get(rim_id, [])):
+            return None
+        pairs = self._pairs.get(rim_id, [])
+        for pair in pairs[:1000] if isinstance(pairs, list) else ():
+            source = pair.get('source') if isinstance(pair, Mapping) else None
+            if (not isinstance(pair, Mapping) or pair.get('reviewed') is not True
+                    or pair.get('scope') != 'rim_width_candidate' or pair.get('tyre_id') != tyre_id
+                    or pair.get('rim_identity') != rim.get('identity_hash')
+                    or pair.get('tyre_identity') != tyre.get('identity_hash')
+                    or not _text(pair.get('evidence_id'), 200) or not isinstance(source, Mapping)
+                    or not isinstance(source.get('sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', source['sha256'])
+                    or type(source.get('page')) is not int or source['page'] < 1):
+                continue
+            proposal = {'rim_id': rim_id, 'tyre_id': tyre_id,
+                'rim_identity_hash': rim['identity_hash'], 'tyre_identity_hash': tyre['identity_hash'],
+                'tyre_size': tyre.get('tyre_size'), 'rim_diameter': rim.get('diameter'),
+                'evidence_id': pair['evidence_id']}
+            if valid_proposal(proposal, rim, tyre):
+                return proposal
+        return None
 
     def _source_row(self, identifier):
         # Set by the reviewed release bootstrap; do not construct a source

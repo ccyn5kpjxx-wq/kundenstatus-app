@@ -11,51 +11,56 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from shop_catalog_public import variant_fingerprint
+from shop_catalog_enriched import EnrichedPublicCatalog
 from shop_rim_width_candidates import released_width_pairs
 from shop_rsu_match import alzura_record, match_catalogues, rsu_record
 from shop_rsu_rim_evidence import WIDTH_TABLE_SHA
 from test_shop_rim_width_candidates import registry, rim
+from test_shop_catalog_public import NOW, wheel
 
 TYRE_ID = 'tyre:' + 'a' * 24
 RIM_ID = rim()['selection_id']
 
 
-def rehash(bundle):
-    entry = bundle['nominal_tyre_sources'][TYRE_ID]
+def rehash(bundle, identifier=TYRE_ID):
+    entry = bundle['nominal_tyre_sources'][identifier]
     entry['proof_sha256'] = sha256(json.dumps(entry['proof'], sort_keys=True,
         ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
-def fixture(*, manufacturer='Continental', runflat='0'):
-    mpn = 'SYNTHETIC-225-17'
-    p = {'selection_id': TYRE_ID, 'category': 'tyre', 'dimensions_valid': True,
-        'manufacturer_name': manufacturer, 'name': manufacturer + ' synthetic fixture',
+def fixture(*, manufacturer='Continental', runflat='0', index=0):
+    identifier = 'tyre:' + format(index, '024x') if index else TYRE_ID
+    mpn = 'SYNTHETIC-225-17' + (str(index) if index else '')
+    alz_id, rsu_id = str(123456 + index), str(654321 + index)
+    left_row, right_row = 1 + index, 2 + index
+    p = {'selection_id': identifier, 'category': 'tyre', 'dimensions_valid': True,
+        'manufacturer_name': manufacturer, 'name': manufacturer + ' synthetic fixture' + (str(index) if index else ''),
         'article_number': mpn, 'width': '225', 'ratio': '45', 'diameter': '17',
         'load_index': '94', 'speed_index': 'V', 'season': 'Sommerreifen',
         'size': '225/45 R17 94V', 'details': {'Herstellerartikelnummer': mpn}}
-    a = dict(id='123456', brandname=manufacturer, manufacturer_number=mpn,
+    a = dict(id=alz_id, brandname=manufacturer, manufacturer_number=mpn,
         width='225', height='45', inner_diameter='17', tyre_type='R', load_index='94',
         speed_index='V', type='S', dot='0', demo='0', da_decke='0', runflat=runflat,
         ms='0', **{'3pmfs':'0'})
-    r = dict(Artikelnummer='654321', Hersteller=manufacturer,
+    r = dict(Artikelnummer=rsu_id, Hersteller=manufacturer,
         Herstellerartikelnummer=mpn, Reifenbreite='225', Reifenquerschnitt='45',
         Reifendurchmesser='17', Bauart='R', Loadindex='94', Speedindex='V', Saison='s',
         Artikeltyp='Reifen', Artikeluntertyp='PKW', Dot='', Demo='', Da='')
-    mapping = match_catalogues([alzura_record(a, archive_sha256='a'*64, row_number=1)],
-        [rsu_record(r, csv_sha256='b'*64, row_number=2)])['mappings'][0]
+    mapping = match_catalogues([alzura_record(a, archive_sha256='a'*64, row_number=left_row)],
+        [rsu_record(r, csv_sha256='b'*64, row_number=right_row)])['mappings'][0]
     fp = variant_fingerprint(p)
-    proof = {'rule':'alzura_full_export_nominal_text_v1', 'product_id':TYRE_ID,
-        'identity_hash':fp, 'alzura_source_sha256':'a'*64, 'alzura_row_number':1,
-        'alzura_article_id':'123456', 'articlename':'SYNTHETIC 225/45 R17 94 V XL',
+    proof = {'rule':'alzura_full_export_nominal_text_v1', 'product_id':identifier,
+        'identity_hash':fp, 'alzura_source_sha256':'a'*64, 'alzura_row_number':left_row,
+        'alzura_article_id':alz_id, 'articlename':'SYNTHETIC 225/45 R17 94 V XL',
         'description':'', 'info':'', 'manufacturer_description':'', 'runflat':'0',
-        'rsu_source_sha256':'b'*64, 'rsu_row_number':2, 'rsu_profile':'SYNTHETIC XL'}
+        'rsu_source_sha256':'b'*64, 'rsu_row_number':right_row, 'rsu_profile':'SYNTHETIC XL'}
     reviewed = registry()
     reviewed['source']['sha256'] = WIDTH_TABLE_SHA
     b = {'products':[p, rim()], 'reviewed_rim_width_registry':reviewed,
-        'compatible_pairs':{}, 'rsu_bindings':{TYRE_ID:{'identity_hash':fp,
+        'compatible_pairs':{}, 'rsu_bindings':{identifier:{'identity_hash':fp,
         'category':'tyre', 'mapping':mapping, 'expected_ean':'4019238594195'}},
-        'nominal_tyre_sources':{TYRE_ID:{'proof':proof}}}
-    rehash(b)
+        'nominal_tyre_sources':{identifier:{'proof':proof}}}
+    rehash(b, identifier)
     return b
 
 
@@ -80,6 +85,32 @@ class ReleasedWidthPairChecks(unittest.TestCase):
         self.assertEqual(pair['source']['sha256'], WIDTH_TABLE_SHA)
         for key in ('fitment_spec', 'approved', 'vehicle_id', 'certificate_reference'):
             self.assertNotIn(key, pair)
+
+    def test_sixth_documented_offer_survives_until_quantity_check_and_display_limit(self):
+        bundle = fixture(index=1)
+        for index in range(2, 7):
+            extra = fixture(index=index)
+            bundle['products'].append(extra['products'][0])
+            for key in ('rsu_bindings', 'nominal_tyre_sources'):
+                bundle[key].update(extra[key])
+        bundle['products'][1].update(name='SYNTHETIC rim', manufacturer_name='SYNTHETIC', size='7.5 x 17')
+        tyres = [p for p in bundle['products'] if p['category'] == 'tyre']
+        identifiers = {p['selection_id'] for p in tyres}
+        for p in tyres:
+            p['quote_public'] = deepcopy(wheel()['quote_public'])
+            p['quote_public']['source'] = 'RSU'
+        tyres[0]['quote_public']['stock_reported'] = 2
+        pairs = released_width_pairs(bundle, approved_ids=identifiers)
+        self.assertEqual(len(pairs[RIM_ID]), 6)
+        catalogue = EnrichedPublicCatalog(bundle['products'],
+            released_ids=[p['selection_id'] for p in bundle['products']],
+            compatible_pairs=pairs, procurement_ids=identifiers, rsu_only_prices=True, clock=lambda: NOW)
+        result = catalogue.compatible_tyres(RIM_ID, quantity=4, season='summer')
+        self.assertEqual(len(result['items']), 5)
+        self.assertEqual({p['id'] for p in result['items']}, identifiers - {tyres[0]['selection_id']})
+        self.assertIn(tyres[-1]['selection_id'], {p['id'] for p in result['items']})
+        self.assertEqual(result['scope'], 'rim_width_candidate')
+        self.assertTrue(all(not p['order_enabled'] for p in result['items']))
 
     def test_exact_load_speed_may_use_compact_source_spelling(self):
         bundle = fixture()

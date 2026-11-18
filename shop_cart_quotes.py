@@ -207,6 +207,10 @@ class CartQuote:
         fields = ('version', 'mode', 'currency', 'vat_percent', 'created_at', 'expires_at', 'ready',
                   'known_subtotal_gross_cent', 'total_gross_cent', 'blocked_reasons', 'quote_hash')
         result = {key: snapshot[key] for key in fields}
+        if snapshot['version'] == 2:
+            result.update(authorization_ready=snapshot['authorization_ready'],
+                          fulfillment_ready=snapshot['fulfillment_ready'],
+                          review_requirements=deepcopy(snapshot['review_requirements']))
         result['lines'] = [{key: row[key] for key in ('id', 'name', 'category', 'quantity',
                            'destination', 'unit_gross_cent', 'items_gross_cent', 'services')}
                           for row in snapshot['lines']]
@@ -242,7 +246,8 @@ class CartQuoteService:
     def __init__(self, catalogue_lookup=None, retail_quote=None, rsu_mapping=None,
                  service_quote=None, freight_quote=None, assembly_fitment=None,
                  *, mode='test', clock=None, manual_mixed_orders=None, require_tyre_documents=None,
-                 require_delivery_salutation=None, allow_standalone_rims=False):
+                 require_delivery_salutation=None, allow_standalone_rims=False,
+                 complete_wheel_review=False, assembly_proposal=None):
         if not isinstance(mode, str) or mode not in {'test', 'live'}:
             raise ValueError('invalid_quote_mode')
         self.catalogue_lookup, self.retail_quote, self.rsu_mapping = catalogue_lookup, retail_quote, rsu_mapping
@@ -262,6 +267,9 @@ class CartQuoteService:
         if type(allow_standalone_rims) is not bool:
             raise ValueError('invalid_standalone_rim_policy')
         self.allow_standalone_rims = allow_standalone_rims
+        if type(complete_wheel_review) is not bool:
+            raise ValueError('invalid_complete_wheel_policy')
+        self.complete_wheel_review, self.assembly_proposal = complete_wheel_review, assembly_proposal
 
     @staticmethod
     def _call(provider, *args):
@@ -442,15 +450,16 @@ class CartQuoteService:
         for i, row in enumerate(rows):
             if row['assembly_group']:
                 grouped.setdefault(row['assembly_group'], []).append(i)
-        assembly_owner, valid_groups = {}, {}
+        assembly_owner, valid_groups, proposals = {}, {}, {}
         for group, indices in sorted(grouped.items()):
             members = [rows[i] for i in indices]
             selected = [products.get(row['id']) for row in members]
             tyre = next((p for p in selected if p and p['category'] == 'tyre'), None)
             rim = next((p for p in selected if p and p['category'] in RIMS), None)
-            valid = (len(indices) == 2 and tyre is not None and rim is not None
+            structural = (len(indices) == 2 and tyre is not None and rim is not None
                      and members[0]['quantity'] == members[1]['quantity']
                      and type(rim.get('diameter')) is int and rim['diameter'] == tyre.get('diameter'))
+            valid = structural
             if valid:
                 proof = call(self.assembly_fitment, rim, tyre, vehicle_ref)
                 tyre_size = tyre.get('tyre_size')
@@ -465,6 +474,14 @@ class CartQuoteService:
                          and _text(proof.get('evidence_id')))
             if not valid:
                 block('assembly_fitment_unconfirmed', assembly_group=group)
+                if self.complete_wheel_review and structural and vehicle_ref.strip():
+                    from shop_complete_wheels import valid_proposal
+                    proposal = call(self.assembly_proposal, rim, tyre, vehicle_ref)
+                    if valid_proposal(proposal, rim, tyre):
+                        proposals[group] = proposal
+                        assembly_owner[group] = next(i for i in indices if rows[i]['id'] == tyre['id'])
+                        if not any(rows[i]['services']['mounting'] for i in indices):
+                            block('assembly_mounting_unconfirmed', assembly_group=group)
                 continue
             owner = next(i for i in indices if rows[i]['id'] == tyre['id'])
             if not any(rows[i]['services']['mounting'] for i in indices):
@@ -497,7 +514,10 @@ class CartQuoteService:
             elif not group and (options['runflat'] or options['disposal']):
                 block('mounting_required_for_options', line=index)
             if group in assembly_owner and assembly_owner[group] == index and any(rows[i]['services']['mounting'] for i in grouped[group]):
-                requests.append(('mounting', {**valid_groups[group],
+                group_options = valid_groups.get(group) or {
+                    'rim_id': proposals[group]['rim_id'], 'tyre_id': proposals[group]['tyre_id'],
+                    'proposal_evidence_id': proposals[group]['evidence_id']}
+                requests.append(('mounting', {**group_options,
                     'runflat': any(rows[i]['services']['runflat'] for i in grouped[group]),
                     'disposal': any(rows[i]['services']['disposal'] for i in grouped[group])}))
             for code in ('painting', 'installation', 'oil_service', 'care'):
@@ -558,6 +578,23 @@ class CartQuoteService:
         if not _amount(known, zero=True):
             block('total_exceeds_limit')
             known = None
+        review = []
+        # Move ONLY genuine deferred technical checks after all pricing work.
+        # Malformed groups, source-less matches, non-wheel lines, monetary,
+        # documents, stock and freight failures never become payable this way.
+        eligible = (self.complete_wheel_review and bool(grouped) and bool(vehicle_ref.strip())
+                    and len(vehicle_ref.strip()) >= 3 and all(row['assembly_group'] for row in rows)
+                    and set(grouped) == set(valid_groups) | set(proposals)
+                    and all(p['category'] == 'tyre' or p['category'] in RIMS and p['fitment_required'] is True
+                            for p in products.values()) and len(products) == len(demand))
+        if eligible:
+            for reason in list(reasons):
+                code = reason['code']
+                if (code == 'mixed_cart_manual_review_required'
+                        or code == 'fitment_unconfirmed' and products.get(reason.get('product_id'), {}).get('category') in RIMS
+                        or code == 'assembly_fitment_unconfirmed' and reason.get('assembly_group') in proposals):
+                    review.append(reason)
+                    reasons.remove(reason)
         value = {'version': 1, 'mode': self.mode, 'currency': 'eur', 'vat_percent': '19.00', 'customer_id': str(customer_id).strip(),
                  'vehicle_ref': vehicle_ref, 'request': rows, 'created_at': now.isoformat(), 'expires_at': expiry.isoformat(),
                  'ready': not reasons, 'known_subtotal_gross_cent': known if known_any else None, 'total_gross_cent': known if not reasons else None,
@@ -567,5 +604,11 @@ class CartQuoteService:
                                          'required_fees': value['required_fees'],
                                          **({'standalone_rim_geometry': standalone_rims[key]} if key in standalone_rims else {})}
                                     for key, value in products.items()}}
+        if review and not reasons:
+            value.update(version=2, authorization_ready=True, fulfillment_ready=False,
+                         review_requirements=review, assembly_proposals=proposals)
+            from shop_complete_wheels import is_review_snapshot
+            if not is_review_snapshot(value):
+                raise QuoteInputError('invalid_complete_wheel_proposal')
         encoded = _json(value)
         return CartQuote(encoded, hashlib.sha256(encoded.encode('utf-8')).hexdigest())

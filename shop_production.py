@@ -18,7 +18,7 @@ from shop_catalog_enriched import EnrichedPublicCatalog
 from shop_catalog_public import variant_fingerprint
 from shop_cart_quotes import CartQuoteService
 from shop_buyer import ShopBuyer
-from shop_freight import RSURetailFreight
+from shop_freight import RSURetailFreight, MainlandDeliveryEligibility
 from shop_media import ReleasedMedia
 from shop_documents import ReleasedProductDocuments
 from shop_price_cache import PublicPriceCache
@@ -115,12 +115,15 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
     but is never invoked; ALZURA supplies released product/media data only.
     """
     env = os.environ if environ is None else environ
+    app = portal.app
+    app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = False
+    app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = False
     if env.get('SHOP_RELEASE_ENABLED') != '1':
         return {}
-    app = portal.app
     # A failure cannot retain a previously requested purchasing flag.
     for flag in ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED', 'SHOP_DOCUMENTS_ENABLED',
-                 'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED'):
+                 'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED',
+                 'SHOP_MAINLAND_DELIVERY_ENABLED', 'SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'):
         app.config[flag] = False
     try:
         data = Path(env.get('DATA_DIR', '/var/data'))
@@ -195,11 +198,13 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             from shop_rim_width_candidates import released_width_pairs
             compatible_pairs = released_width_pairs(bundle, approved_ids=set(seeds['records']))
         approved_postcodes = frozenset(bundle.get('delivery_postcodes', []))
+        mainland_approved = descriptor.get('mainland_delivery_approved') is True
+        delivery_eligibility = MainlandDeliveryEligibility(approved_postcodes,
+            mainland_delivery_approved=mainland_approved)
         freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
             evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
-            destination_eligibility=lambda dest, ctx: (dest == 'workshop'
-                and ctx.get('workshop_delivery', 'collection') == 'collection'
-                or ctx.get('delivery', {}).get('postcode') in approved_postcodes))
+            destination_eligibility=delivery_eligibility)
+        app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = mainland_approved
         catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
             image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
             verified_fitments=bundle.get('verified_fitments'), browsing_evidence=bundle.get('browsing_evidence'),
@@ -233,6 +238,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         adapters = {'catalogue': catalogue, 'media': media, 'documents': documents, 'price_cache': cache,
                     'read_provider': None, 'release_id': descriptor.get('release_id', ''),
                     'purchasing_enabled': False}
+        adapters['complete_wheel_review_requested'] = descriptor.get('complete_wheel_checkout_approved') is True
         if supplier is not None:
             adapters['supplier_quotes'] = supplier
         if pricebook is not None:
@@ -267,7 +273,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                             if pricebook is not None else supplier.retail_quote(product, quantity))
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
-                assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims)
+                assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims,
+                assembly_proposal=catalogue.assembly_proposal)
             def sink(quote, *, customer_id, delivery_context):
                 return store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
                     customer_id=customer_id, mode='live', delivery_context=delivery_context)
@@ -290,6 +297,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                     payment_dependencies, starter = prepare_production_payments(portal, adapters, profile,
                         pack=pack, supplier_config=supplier_config, stripe_config=stripe_config)
                     dependencies.update(payment_dependencies)
+                    if adapters['complete_wheel_review_requested']:
+                        quotes.complete_wheel_review = True
+                        app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = True
                     adapters['start_workflow'] = starter
                     dependencies['feature_links'].update(terms='/shop/recht/agb', privacy='/shop/recht/datenschutz',
                                                          withdrawal='/shop/widerruf/')
@@ -303,7 +313,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         return dependencies
     except Exception:
         for flag in ('SHOP_PUBLIC_CATALOGUE_ENABLED', 'SHOP_FRONTEND_ENABLED', 'SHOP_MEDIA_ENABLED', 'SHOP_DOCUMENTS_ENABLED',
-                     'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED'):
+                     'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED',
+                     'SHOP_MAINLAND_DELIVERY_ENABLED', 'SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'):
             app.config[flag] = False
         app.extensions['shop_production'] = {'ready': False, 'reason': 'release_configuration_incomplete'}
         app.logger.error('Shop release not activated: private release configuration incomplete')

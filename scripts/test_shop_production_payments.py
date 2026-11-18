@@ -122,6 +122,30 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.construct_outbox.assert_not_called()
         self.portal.get_werkstatt_smtp_config.assert_not_called()
 
+    def test_complete_wheel_review_requires_explicit_profile_and_wires_all_fences(self):
+        self.adapters['complete_wheel_review_requested'] = True
+        for invalid in (None, False, 'true', 1):
+            supplied = {**profile(), 'complete_wheel_review_approved': invalid}
+            with self.assertRaisesRegex(PaymentProfileError, 'complete_wheel_review_not_approved'):
+                prepare_production_payments(self.portal, self.adapters, supplied, pack=pack(),
+                    supplier_config=self.supplier_config, stripe_config=self.stripe_config)
+        self.assertEqual(self.client.mock_calls, [])
+        supplied = {**profile(), 'complete_wheel_review_approved': True}
+        dependencies, _ = prepare_production_payments(self.portal, self.adapters, supplied, pack=pack(),
+            supplier_config=self.supplier_config, stripe_config=self.stripe_config)
+        review = self.adapters['order_review']
+        self.assertTrue(review.readiness()['ready'])
+        self.assertIs(self.adapters['fulfillment'].review_service, review)
+        self.assertIs(self.adapters['workflow'].review_service, review)
+        self.assertIs(self.adapters['checkout'].checkout.review_service, review)
+        terms = dependencies['consumer_service'].terms()
+        self.assertIn('komplettraeder_zahlung', terms['texts'])
+        self.assertIn('reserviert', terms['texts']['komplettraeder_zahlung'])
+        self.assertIn('rad-review-v1', terms['version'])
+        self.assertEqual(self.portal.app.config['SHOP_REVIEW_ADMIN_ORIGIN'], ORIGIN)
+        self.assertEqual(self.client.mock_calls, [])
+        self.assertEqual(self.outbox.sent, [])
+
     def test_missing_or_draft_legal_pack_never_arms_checkout(self):
         bad = [None, {}, {**pack(), 'approved': False}, {**pack(), 'scope': 'tyres_only'},
                {**pack(), 'version': 'entwurf:synthetic'}, {**pack(), 'texts': {'agb': 'incomplete'}}]
@@ -231,7 +255,18 @@ class ProductionPaymentChecks(unittest.TestCase):
         transport = saga.transport
         # No durable supplier claim exists, so the real circular callback denies.
         self.assertIs(transport._authorize({'configured_mode': 'live', 'reference': 'SYNTHETIC'}), False)
-        identifier = 'sho_' + 'a' * 32
+        frozen = self.save_quote()
+        order = self.store.create_order(frozen['quote_hash'], customer_id='customer-a', mode='live',
+                                       idempotency_key='synthetic-circular-proof')
+        identifier = order['id']
+        attempt = self.store.claim_payment(identifier, customer_id='customer-a', mode='live')
+        self.store.bind_payment(identifier, attempt['id'], customer_id='customer-a', mode='live',
+            session_id='cs_live_SYNTHETIC', intent_id='pi_SYNTHETIC', currency='eur',
+            amount_gross_cent=order['amount_gross_cent'])
+        self.store.apply_verified_event({'event_id': 'evt_SYNTHETIC_AUTH', 'order_id': identifier,
+            'attempt_id': attempt['id'], 'mode': 'live', 'currency': 'eur',
+            'amount_gross_cent': order['amount_gross_cent'], 'session_id': 'cs_live_SYNTHETIC',
+            'intent_id': 'pi_SYNTHETIC', 'kind': 'authorized', 'occurred_at': self.now.isoformat()}, verified=True)
         with patch.object(saga.journal, 'proof', return_value={'synthetic': True}) as resolve:
             self.assertEqual(saga.payment.proof_resolver(identifier, operation='capture'), {'synthetic': True})
             resolve.assert_called_once_with(identifier, operation='capture', mode='live')

@@ -1,5 +1,7 @@
 """Authenticated read-only admin against isolated synthetic shop SQLite only."""
 from contextlib import closing
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 import json
@@ -9,7 +11,9 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 from uuid import uuid4
+from werkzeug.datastructures import MultiDict
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -22,6 +26,34 @@ from shop_order_workflow import init_order_workflow_schema
 from shop_storage import ShopStorage
 from shop_consumer import init_consumer_schema
 from test_shop_cart_quotes import Fixture,NOW,OIL,line
+
+
+class ReviewStub:
+    """No provider, payment or supplier method is available to these routes."""
+    mode='test'
+
+    def __init__(self,value):
+        self.value=value
+        self.calls=[]
+        self.ready=True
+
+    def readiness(self):return {'ready':self.ready,'mode':self.mode}
+
+    def status(self,order_id,*,customer_id):
+        self.calls.append(('status',order_id,customer_id))
+        return deepcopy(self.value)
+
+    def approve(self,order_id,**kwargs):
+        self.calls.append(('approve',order_id,kwargs))
+        self.value['state']='approved'
+        return deepcopy(self.value)
+
+    def reject(self,order_id,**kwargs):
+        self.calls.append(('reject',order_id,kwargs))
+        self.value['state']='rejected'
+        return deepcopy(self.value)
+
+    def ensure(self,*args,**kwargs):raise AssertionError('Admin must not inspect the payment provider')
 
 
 class ShopAdminTests(unittest.TestCase):
@@ -72,6 +104,207 @@ class ShopAdminTests(unittest.TestCase):
                  NOW.isoformat(),str(uuid4()),'unknown'))
             db.commit()
         return identifier
+
+    def review_order(self,*,technical=True):
+        self.origin='https://shop.example'
+        self.app.config.update(SERVER_NAME='shop.example',SHOP_PUBLIC_ORIGIN=self.origin,
+            SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED=True)
+        order=self.order()
+        # A synthetic stored authorization only; no Stripe operation or real
+        # review service is constructed in route-boundary tests.
+        with closing(self.storage.connect()) as db:
+            db.execute("UPDATE shop_orders_v2 SET status='authorized' WHERE id=?",(order['id'],))
+            db.commit()
+        self.review=ReviewStub({'required':True,'order_id':order['id'],'mode':'test','state':'pending',
+            'quote_hash':order['quote_hash'],'amount_gross_cent':order['amount_gross_cent'],'currency':'eur',
+            'expires_at':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),
+            'authorization_verified':True,'vehicle_ref':'SYNTHETIC verified vehicle',
+            'review_requirements':[{'code':'assembly_fitment_unconfirmed','assembly_group':'synthetic-set'}]
+                if technical else [{'code':'mixed_cart_manual_review_required'}]})
+        self.app.extensions['shop_production']['order_review']=self.review
+        self.login()
+        self.client.get('/admin/shop/'+order['id'],base_url=self.origin)
+        with self.client.session_transaction() as value:token=value['csrf_token']
+        return order,token
+
+    def decision(self,order,token,*,decision='freigeben',data=None,headers=None,base_url=None):
+        if data is None:
+            data={'csrf_token':token,'quote_hash':order['quote_hash']}
+            if decision=='freigeben':
+                data.update(full_order_confirmed='yes',vehicle_ref='SYNTHETIC verified vehicle',
+                    certificate_references='SYNTHETIC report page 4\nSYNTHETIC tyre approval',conditions_confirmed='yes')
+        return self.client.post('/admin/shop/'+order['id']+'/pruefung/'+decision,data=data,
+            base_url=base_url or self.origin,headers={'Origin':self.origin,'Sec-Fetch-Site':'same-origin',**(headers or {})})
+
+    def test_review_view_shows_exact_selection_and_never_prechecks_or_provides_false_capture(self):
+        order,token=self.review_order()
+        self.review.value['vehicle_ref']='SYNTHETIC <script>vehicle</script>'
+        text=self.client.get('/admin/shop/'+order['id'],base_url=self.origin).get_data(as_text=True)
+        self.assertIn('noch nicht eingezogen',text)
+        self.assertIn('synthetic-set',text)
+        self.assertIn(OIL,text)
+        self.assertIn('&lt;script&gt;vehicle&lt;/script&gt;',text)
+        self.assertNotIn('<script>vehicle',text)
+        self.assertNotIn(' checked',text)
+        self.assertIn('Danach darf der Hintergrundprozess den Einkauf auslösen',text)
+        self.assertIn('name="csrf_token" value="'+token+'"',text)
+        self.assertTrue(all(call[0]=='status' for call in self.review.calls))
+        with closing(self.storage.connect()) as db:
+            db.execute("UPDATE shop_orders_v2 SET status='paid' WHERE id=?",(order['id'],))
+            db.commit()
+        self.review.value['state']='approved'
+        text=self.client.get('/admin/shop/'+order['id'],base_url=self.origin).get_data(as_text=True)
+        self.assertIn('Der Zahlungseinzug ist in der Bestellung bestätigt.',text)
+        self.assertNotIn('noch nicht eingezogen',text)
+        self.assertNotIn('Prüfung verbindlich freigeben</button>',text)
+
+    def test_review_approval_uses_server_owner_hash_and_session_actor_only(self):
+        order,token=self.review_order()
+        result=self.decision(order,token)
+        self.assertEqual(result.status_code,303)
+        self.assertEqual(result.headers['Location'],'/admin/shop/'+order['id'])
+        actions=[call for call in self.review.calls if call[0]=='approve']
+        self.assertEqual(len(actions),1)
+        _,identifier,args=actions[0]
+        self.assertEqual(identifier,order['id'])
+        self.assertEqual(args['customer_id'],order['customer_id'])
+        self.assertEqual(args['expected_quote_hash'],order['quote_hash'])
+        self.assertRegex(args['actor_id'],r'^portal-admin-session:[a-f0-9]{32}$')
+        self.assertNotIn(token,args['actor_id'])
+        self.assertEqual(args['evidence'],{'vehicle_ref':'SYNTHETIC verified vehicle',
+            'certificate_references':['SYNTHETIC report page 4','SYNTHETIC tyre approval'],
+            'conditions_confirmed':True,'full_order_confirmed':True})
+        self.assertEqual(self.decision(order,token).status_code,409)
+        self.assertEqual(self.decision(order,token,decision='ablehnen').status_code,409)
+        self.assertEqual(len([c for c in self.review.calls if c[0] in {'approve','reject'}]),1)
+
+    def test_review_rejection_and_mixed_only_confirmation_use_narrow_contract(self):
+        order,token=self.review_order()
+        self.assertEqual(self.decision(order,token,decision='ablehnen').status_code,303)
+        self.assertEqual([c[0] for c in self.review.calls if c[0]!='status'],['reject'])
+        self.review.value['state']='pending'
+        self.review.value['review_requirements']=[{'code':'mixed_cart_manual_review_required'}]
+        data={'csrf_token':token,'quote_hash':order['quote_hash'],'full_order_confirmed':'yes'}
+        self.assertEqual(self.decision(order,token,data=data).status_code,303)
+        self.assertIsNone([c for c in self.review.calls if c[0]=='approve'][-1][2]['evidence'])
+
+    def test_review_mutations_require_real_admin_exact_origin_csrf_and_post(self):
+        order,token=self.review_order()
+        url='/admin/shop/'+order['id']+'/pruefung/freigeben'
+        self.assertEqual(self.client.get(url,base_url=self.origin).status_code,405)
+        for value in (None,False,1,'yes'):
+            self.login(value)
+            self.assertEqual(self.decision(order,token).status_code,403)
+        self.login()
+        with self.client.session_transaction() as value:value['csrf_token']=token
+        for headers in ({'Origin':'https://elsewhere.example'},{'Origin':''},{'Sec-Fetch-Site':'cross-site'}):
+            self.assertEqual(self.decision(order,token,headers=headers).status_code,403)
+        self.assertEqual(self.decision(order,'x'*43).status_code,403)
+        self.assertEqual(self.decision(order,token,base_url='http://shop.example',headers={'Origin':'http://shop.example'}).status_code,403)
+        self.assertFalse(any(c[0] in {'approve','reject'} for c in self.review.calls))
+
+    def test_review_form_rejects_extra_duplicate_incomplete_or_tampered_fields(self):
+        order,token=self.review_order()
+        valid={'csrf_token':token,'quote_hash':order['quote_hash'],'full_order_confirmed':'yes',
+            'vehicle_ref':'SYNTHETIC verified vehicle','certificate_references':'SYNTHETIC report','conditions_confirmed':'yes'}
+        for changed in ({**valid,'amount_gross_cent':'1'},{**valid,'customer_id':'another'},
+                {**valid,'conditions_confirmed':'false'},{**valid,'certificate_references':''},
+                {**valid,'vehicle_ref':''},{k:v for k,v in valid.items() if k!='full_order_confirmed'},
+                MultiDict([*valid.items(),('quote_hash',order['quote_hash'])])):
+            self.assertEqual(self.decision(order,token,data=changed).status_code,400)
+        self.assertEqual(self.decision(order,token,data={**valid,'quote_hash':'f'*64}).status_code,409)
+        result=self.client.post('/admin/shop/'+order['id']+'/pruefung/freigeben',json=valid,
+            base_url=self.origin,headers={'Origin':self.origin})
+        self.assertEqual(result.status_code,400)
+        self.assertFalse(any(c[0] in {'approve','reject'} for c in self.review.calls))
+
+    def test_review_disabled_missing_unready_expired_unverified_or_misbound_fail_closed(self):
+        order,token=self.review_order()
+        for flag in (None,False,'true',1):
+            self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED']=flag
+            self.assertEqual(self.decision(order,token).status_code,404)
+        self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED']=True
+        self.review.ready=False
+        self.assertEqual(self.decision(order,token).status_code,503)
+        self.review.ready=True
+        for changes in ({'state':'expired'},{'authorization_verified':False,'expires_at':None},
+                {'state':'approved'},{'state':'rejected'}):
+            original=deepcopy(self.review.value)
+            self.review.value.update(changes)
+            self.assertEqual(self.decision(order,token).status_code,409)
+            self.review.value=original
+        self.review.value['quote_hash']='f'*64
+        self.assertEqual(self.decision(order,token).status_code,503)
+        text=self.client.get('/admin/shop/'+order['id'],base_url=self.origin).get_data(as_text=True)
+        self.assertIn('Freigabe und Ablehnung sind gesperrt',text)
+        self.app.extensions['shop_production'].pop('order_review')
+        self.assertEqual(self.decision(order,token).status_code,503)
+        self.assertFalse(any(c[0] in {'approve','reject'} for c in self.review.calls))
+
+    def test_review_uses_explicit_admin_origin_instead_of_arbitrary_host(self):
+        order,token=self.review_order()
+        self.app.config['SHOP_REVIEW_ADMIN_ORIGIN']='https://cockpit.example'
+        self.assertEqual(self.decision(order,token).status_code,403)
+        self.app.config['SHOP_REVIEW_ADMIN_ORIGIN']=self.origin
+        self.app.config['SHOP_PUBLIC_ORIGIN']='https://public.example'
+        self.assertEqual(self.decision(order,token).status_code,303)
+
+    def test_actual_v2_review_service_admin_decision_is_durable_provider_free_and_get_read_only(self):
+        from shop_order_review import ShopOrderReview, OrderReviewJournal, init_order_review_schema
+        from test_shop_complete_wheels import make_quote, CONTEXT
+        from test_shop_cart_quotes import TYRE,RIM
+        self.origin='https://shop.example'
+        self.app.config.update(SERVER_NAME='shop.example',SHOP_PUBLIC_ORIGIN=self.origin,
+            SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED=True)
+        quote=make_quote(rows=[line(RIM,4,group='set-1'),
+            line(TYRE,4,services={'mounting':True},group='set-1')])
+        self.assertEqual(quote.snapshot()['version'],2)
+        self.store.save_quote(quote.snapshot(),expected_quote_hash=quote.quote_hash,
+            customer_id='23',mode='test',delivery_context=CONTEXT)
+        order=self.store.create_order(quote.quote_hash,customer_id='23',mode='test',
+            idempotency_key='synthetic-admin-review-v2')
+        attempt=self.store.claim_payment(order['id'],customer_id='23',mode='test')
+        self.store.bind_payment(order['id'],attempt['id'],customer_id='23',mode='test',
+            session_id='cs_test_SYNTHETIC_ADMIN',intent_id='pi_SYNTHETIC_ADMIN',
+            amount_gross_cent=order['amount_gross_cent'],currency='eur')
+        funds={'order_id':order['id'],'customer_id':'23','mode':'test','quote_hash':quote.quote_hash,
+            'amount_gross_cent':order['amount_gross_cent'],'currency':'eur','payment_attempt':attempt['id'],
+            'session_id':'cs_test_SYNTHETIC_ADMIN','intent_id':'pi_SYNTHETIC_ADMIN'}
+        self.store.apply_verified_event({'event_id':'evt_SYNTHETIC_ADMIN_AUTH','order_id':order['id'],
+            'attempt_id':attempt['id'],'mode':'test','amount_gross_cent':order['amount_gross_cent'],'currency':'eur',
+            'session_id':funds['session_id'],'intent_id':funds['intent_id'],'kind':'authorized','occurred_at':NOW.isoformat()},verified=True)
+        with closing(self.storage.connect()) as db:init_order_review_schema(db)
+        now=[NOW]
+        payment=SimpleNamespace(authorization=lambda identifier:{**funds,'verified':True,'state':'authorized',
+            'observed_at':NOW.isoformat(),'authorized_until':(NOW+timedelta(hours=1)).isoformat()})
+        journal=OrderReviewJournal(self.storage.connect,clock=lambda:now[0])
+        review=ShopOrderReview(self.store,journal,payment,mode='test',enabled=True,clock=lambda:now[0])
+        review.ensure(order['id'],customer_id='23')  # Explicit simulated worker verification only.
+        self.app.extensions['shop_production']['order_review']=review
+        self.login()
+        def stored():
+            with closing(self.storage.connect()) as db:
+                return list(db.execute('SELECT binding_json,state,evidence_json,updated_at FROM shop_order_reviews_v1'))
+        before=stored()
+        with patch.object(payment,'authorization',side_effect=AssertionError('Provider access forbidden from admin')):
+            response=self.client.get('/admin/shop/'+order['id'],base_url=self.origin)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(stored(),before)
+            with self.client.session_transaction() as value:token=value['csrf_token']
+            result=self.decision(order,token,data={'csrf_token':token,'quote_hash':quote.quote_hash,
+                'full_order_confirmed':'yes','vehicle_ref':'CAR-1','conditions_confirmed':'yes',
+                'certificate_references':'SYNTHETIC original report page 4'})
+            self.assertEqual(result.status_code,303)
+            status=review.status(order['id'],customer_id='23')
+            self.assertEqual(status['state'],'approved')
+            self.assertEqual(status['review_evidence']['certificate_references'],['SYNTHETIC original report page 4'])
+            self.assertEqual(self.store.get_order(order['id'],customer_id='23',mode='test')['status'],'authorized')
+            approved=stored()
+            now[0]+=timedelta(hours=2)
+            response=self.client.get('/admin/shop/'+order['id'],base_url=self.origin)
+            self.assertIn('Kartenreservierung abgelaufen',response.get_data(as_text=True))
+            self.assertEqual(stored(),approved,'Expiry on GET must remain a projection without a journal mutation')
+            self.assertEqual(self.decision(order,token,decision='ablehnen').status_code,409)
 
     def test_construction_and_registration_have_no_database_or_filesystem_io(self):
         app=Flask('isolated-registration')

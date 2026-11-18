@@ -67,6 +67,18 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
             or supplier_config.get('TYRESYSTEM_API_MODE') != 'live'):
         raise PaymentProfileError('payment_profile_incomplete')
     storage, original_store, buyer, quotes = (adapters[k] for k in ('storage', 'store', 'buyer', 'quotes'))
+    complete_wheel_review = adapters.get('complete_wheel_review_requested') is True
+    if complete_wheel_review and profile.get('complete_wheel_review_approved') is not True:
+        raise PaymentProfileError('complete_wheel_review_not_approved')
+    if complete_wheel_review:
+        from shop_complete_wheels import NOTICE
+        if (not isinstance(pack.get('texts'), dict) or not isinstance(pack.get('version'), str)
+                or not pack['version'].strip() or len(pack['version']) > 80):
+            raise PaymentProfileError('consumer_terms_or_withdrawal_unavailable')
+        pack = deepcopy(pack)
+        pack['version'] = str(pack.get('version', ''))[:80] + '/rad-review-v1'
+        pack['texts']['bestellhinweis'] = (NOTICE + '\n\n' + pack['texts'].get('bestellhinweis', '')).strip()
+        pack['texts']['komplettraeder_zahlung'] = NOTICE
     supplier_quotes = adapters['supplier_quotes']
     if (not storage.ready or not buyer.readiness()['ready'] or getattr(buyer, 'mode', None) != 'live'
             or stripe_config.get('SHOP_STRIPE_PUBLIC_ORIGIN') != buyer.public_origin):
@@ -80,6 +92,9 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         init_order_receipt_schema(db)
         init_order_workflow_schema(db)
         init_consumer_schema(db)
+        if complete_wheel_review:
+            from shop_order_review import init_order_review_schema
+            init_order_review_schema(db)
     mail_service = Mailbox(portal.get_werkstatt_imap_config)
     outbox = MailOutbox(storage.connect, storage.directory / 'mail-outbox', mail_service)
     smtp_config = lambda: portal.get_werkstatt_smtp_config(include_local_hostname=False)
@@ -96,6 +111,11 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
     holder = {}
     payment = PaymentActions(store, gateway, PaymentActionJournal(storage.connect),
         lambda order_id, **kwargs: holder['saga'].proof_resolver(order_id, **kwargs), mode='live', enabled=True)
+    review = None
+    if complete_wheel_review:
+        from shop_order_review import OrderReviewJournal, ShopOrderReview
+        review = ShopOrderReview(store, OrderReviewJournal(storage.connect), payment, mode='live', enabled=True)
+        checkout.review_service = review
     policy = RSUOrderPolicy(mode='live', mode_confirmed_evidence='RSU-written-20261117-live',
         acceptance_policy_evidence='RSU-written-20261106-full-quantity-net-price',
         rejection_policy_evidence='RSU-written-20261106-production404', enabled=True, live_armed=True)
@@ -120,19 +140,24 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         supplier_policy={'account_fingerprint': transport.account_fingerprint,
                          'mode_evidence_id': policy.mode_confirmed_evidence,
                          'acceptance_evidence_id': policy.acceptance_policy_evidence},
-        fresh_inquiry=supplier_quotes.fresh_inquiry, revalidate=revalidate, delivery_address=address)
+        fresh_inquiry=supplier_quotes.fresh_inquiry, revalidate=revalidate, delivery_address=address,
+        review_service=review)
     holder['saga'] = saga
     receipts = ShopOrderReceipts(store, storage.connect, mode='live', enabled=True, delivery_enabled=True,
         sender_address='info@auto-lackierzentrum.de', outbox=outbox, smtp_config=smtp_config,
         legal_snapshot=consumer.contract_pack, require_legal=True)
     workflow = ShopOrderWorkflow(store, WorkflowJournal(storage.connect), saga, payment,
-        mode='live', enabled=True, receipt_service=_ReceiptDelivery(receipts, consumer))
+        mode='live', enabled=True, receipt_service=_ReceiptDelivery(receipts, consumer), review_service=review)
     wrapped = WorkflowCheckout(checkout, workflow)
     if (not wrapped.readiness()['ready'] or not receipts.readiness()['delivery_ready']
             or not payment.readiness()['ready']):
         raise PaymentProfileError('payment_workflow_unavailable')
     adapters.update(consumer=consumer, guarded_store=store, gateway=gateway, checkout=wrapped,
         fulfillment=saga, receipts=receipts, workflow=workflow, outbox=outbox, purchasing_enabled=True)
+    if review is not None:
+        adapters['order_review'] = review
+        from shop_checkout import _origin
+        portal.app.config['SHOP_REVIEW_ADMIN_ORIGIN'] = _origin(profile.get('review_admin_origin', buyer.public_origin))
     # The ordinary runtime owns registration; callers must not start this
     # worker if any later blueprint/readiness setup fails.
     return {'order_store': store, 'checkout_service': wrapped, 'consumer_service': consumer}, workflow.start

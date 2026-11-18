@@ -185,7 +185,7 @@ class OfferRankingChecks(unittest.TestCase):
         self.assertEqual(len(result['items']), 1)
         self.assertEqual(calls, Counter({pid: 1 for pid in ids}))
 
-    def test_recommendations_put_real_priced_candidates_before_unbound_market_rows(self):
+    def test_recommendations_keep_real_priced_candidates_without_unbound_padding(self):
         rim = wheel()
         inquiry = tyre('1'); inquiry.update(name='AAA inquiry', quote_public=quote())
         available = tyre('2'); available.update(name='ZZZ available', quote_public=quote())
@@ -193,8 +193,10 @@ class OfferRankingChecks(unittest.TestCase):
         c = catalog([rim, inquiry, available], procurement_ids={tid}, shipping_ready_ids={tid},
             product_documents={tid: documented(available)}, compatible_pairs={identifier(rim): [pair(rim, inquiry), pair(rim, available)]})
         result = c.compatible_tyres(identifier(rim), season='summer')
-        self.assertEqual([p['id'] for p in result['items']], [tid, identifier(inquiry)])
+        self.assertEqual([p['id'] for p in result['items']], [tid])
         self.assertEqual(result['scope'], 'rim_width_candidate')
+        self.assertEqual(c.get(identifier(inquiry))['purchase_status'], 'inquiry_only')
+        self.assertEqual(c.page(department='tyres')['total'], 2)
 
     def test_shipping_rank_input_rejects_unreleased_or_unbound_identity(self):
         row = part()

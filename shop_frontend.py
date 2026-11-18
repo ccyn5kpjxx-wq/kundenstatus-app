@@ -111,6 +111,8 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
                                indexable=(key not in {'warenkorb', 'order_status'}
                                           and current_app.config.get('SHOP_FRONTEND_INDEXABLE') is True),
                                buyer_enabled=current_app.config.get('SHOP_BUYER_ENABLED') is True,
+                               mainland_delivery_enabled=current_app.config.get('SHOP_MAINLAND_DELIVERY_ENABLED') is True,
+                               deferred_complete_wheels_enabled=current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True,
                                quote_enabled=current_app.config.get('SHOP_CART_QUOTE_ENABLED') is True,
                                order_enabled=current_app.config.get('SHOP_ORDER_DRAFT_ENABLED') is True,
                                checkout_enabled=current_app.config.get('SHOP_CHECKOUT_ENABLED') is True,

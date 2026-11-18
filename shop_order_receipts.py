@@ -194,6 +194,9 @@ class ShopOrderReceipts:
         subject, intro = labels[kind]
         lines = [('TESTVORGANG · keine echte Bestellung oder Zahlung\n' if self.mode == 'test' else '') + intro,
                  '', 'Bestellung: ' + order_id, 'Bestelleingang: ' + order['created_at'], '']
+        if snapshot.get('version') == 2 and kind == 'order_received':
+            from shop_complete_wheels import NOTICE
+            lines.extend([NOTICE, 'Fahrzeugangabe: ' + snapshot['vehicle_ref'], ''])
         for line in snapshot['lines']:
             lines.append(f"{line['quantity']} × {line['name']}: {_money(line['items_gross_cent'])}")
             for service in line['services']:

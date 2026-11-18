@@ -1,18 +1,24 @@
-"""Read-only shop operations view on the explicitly provisioned shop SQLite.
+"""Shop operations on the explicitly provisioned shop SQLite.
 
-No schema creation, portal DB fallback, provider lookup or financial action.
+The ledger reader remains read-only. Explicit technical review decisions use
+the separately configured review service; never a provider or financial action.
+No schema creation, portal DB fallback or provider lookup.
 Registration/construction performs no database IO. Every request requires the
 existing portal's real administrator session, not office or partner access.
 """
 from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import datetime
+from hashlib import sha256
+import hmac
 import json
 from pathlib import Path
 import re
+import secrets
 import sqlite3
+from urllib.parse import urlsplit
 
-from flask import Blueprint, abort, current_app, has_request_context, render_template, request, session
+from flask import Blueprint, abort, current_app, has_request_context, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 from shop_order_store import OrderStore
 from shop_storage import ShopStorage
@@ -29,7 +35,7 @@ STATUS={'draft':'Entwurf','payment_pending':'Zahlung ausstehend','authorized':'B
 PAYMENT={'claimed':'Zahlung wird vorbereitet','unknown':'Zahlungsausgang unklar',
          'bound':'Zahlungsseite erstellt','authorized':'Betrag reserviert','paid':'Zahlung eingezogen',
          'failed':'Zahlung fehlgeschlagen','cancelled':'Reservierung beendet'}
-FLOW={'queued':'Vorgemerkt','running':'In Bearbeitung','fulfilled':'Abgeschlossen',
+FLOW={'queued':'Vorgemerkt','running':'In Bearbeitung','awaiting_review':'Technische Prüfung ausstehend','fulfilled':'Abgeschlossen',
       'cancelled':'Abgebrochen','manual_review':'Manuelle Prüfung erforderlich'}
 FULFILLMENT={'open':'Noch nicht vollständig bearbeitet','accepted':'Alle Positionen angenommen',
              'rejected':'Lieferant hat abgelehnt','manual_review':'Manuelle Prüfung erforderlich'}
@@ -39,6 +45,13 @@ MAIL={'queued':'Vorgemerkt','sending':'Übergabe läuft','submitted':'An Maildie
       'unknown':'Versand unklar – prüfen','not_sent':'Nicht gesendet'}
 DESTINATION={'customer':'Direkt zum Kunden','workshop':'Zur Werkstatt'}
 SERVICE={'mounting':'Montage','painting':'Lackierung','installation':'Einbau','oil_service':'Ölservice','care':'Aufbereitung'}
+REVIEW_REQUIREMENTS={'mixed_cart_manual_review_required':'Vollständigen Warenkorb und alle Lieferwege bestätigen',
+    'fitment_unconfirmed':'Genaue Fahrzeugausführung und Felgenfreigabe prüfen',
+    'assembly_fitment_unconfirmed':'Genaue Rad-Reifen-Kombination einschließlich Auflagen prüfen'}
+REVIEW_STATES={'pending':'Technische Prüfung offen','approved':'Prüfung verbindlich freigegeben',
+    'rejected':'Prüfung abgelehnt','expired':'Kartenreservierung abgelaufen'}
+CSRF=re.compile(r'[A-Za-z0-9_-]{32,128}')
+HASH=re.compile(r'[a-f0-9]{64}')
 
 
 def _text(value,limit=200):
@@ -129,7 +142,7 @@ class ShopAdminReader:
     @staticmethod
     def _summary(row,related):
         state=row['status']
-        attention=(related['payment']=='unknown' or related['workflow']=='manual_review'
+        attention=(related['payment']=='unknown' or related['workflow'] in {'manual_review','awaiting_review'}
             or related['fulfillment']=='manual_review' or related['action'] in {'unknown','conflict'}
             or related['uncertain_positions']>0
             or any(value in {'unknown','not_sent'} for value in related['receipts'].values()))
@@ -156,10 +169,11 @@ class ShopAdminReader:
     def detail(self,order_id):
         if not isinstance(order_id,str) or not ORDER.fullmatch(order_id):abort(404)
         with self.read() as (db,tables):
-            row=db.execute('''SELECT id,mode,status,amount_gross_cent,currency,created_at,
+            row=db.execute('''SELECT id,mode,status,amount_gross_cent,currency,created_at,quote_hash,
                 substr(snapshot_json,1,131073) AS snapshot_json FROM shop_orders_v2 WHERE id=? LIMIT 1''',(order_id,)).fetchone()
             if row is None:abort(404)
             summary=self._summary(row,self._related(db,tables,[row])[order_id])
+            summary['_review_binding']={key:row[key] for key in ('mode','status','amount_gross_cent','currency','quote_hash')}
             try:
                 if len(row['snapshot_json'].encode('utf-8'))>131072:raise ValueError()
                 snapshot=json.loads(row['snapshot_json'])
@@ -169,7 +183,7 @@ class ShopAdminReader:
                     if not isinstance(line,dict) or type(line.get('quantity')) is not int or not 1<=line['quantity']<=20:raise ValueError()
                     services=line.get('services',[])
                     if not isinstance(services,list) or len(services)>20:raise ValueError()
-                    lines.append({'name':_text(line.get('name')),'quantity':line['quantity'],
+                    lines.append({'id':_text(line.get('id'),64),'name':_text(line.get('name')),'quantity':line['quantity'],
                         'unit_price':_money(line.get('unit_gross_cent')),'items_price':_money(line.get('items_gross_cent')),
                         'destination':DESTINATION.get(line.get('destination'),'Versandziel ungeklärt'),
                         'services':[{'name':SERVICE.get(service.get('code'),'Erforderliches Zubehör'),
@@ -258,6 +272,50 @@ def _private_root(value):
     return root
 
 
+def _review_csrf_token():
+    token=session.get('csrf_token')
+    if not isinstance(token,str) or not CSRF.fullmatch(token):
+        token=secrets.token_urlsafe(32)
+        session['csrf_token']=token
+    return token
+
+
+def _review_projection(value,detail):
+    """Whitelist status only. Approval/procurement authority stays in service."""
+    if not isinstance(value,Mapping):raise ValueError('invalid_review')
+    if value.get('required') is False and value.get('state')=='not_required':return None
+    binding=detail['_review_binding']
+    requirements=value.get('review_requirements')
+    if (value.get('required') is not True or value.get('order_id')!=detail['id']
+            or value.get('mode')!=binding['mode'] or binding['currency']!='eur' or value.get('currency')!='eur'
+            or type(value.get('amount_gross_cent')) is not int
+            or value['amount_gross_cent']!=binding['amount_gross_cent']
+            or value.get('quote_hash')!=binding['quote_hash']
+            or not isinstance(value.get('quote_hash'),str) or not HASH.fullmatch(value['quote_hash'])
+            or value.get('state') not in REVIEW_STATES
+            or not isinstance(requirements,list) or not 1<=len(requirements)<=100
+            or any(not isinstance(item,Mapping) or item.get('code') not in REVIEW_REQUIREMENTS for item in requirements)
+            or not isinstance(value.get('vehicle_ref',''),str) or len(value.get('vehicle_ref',''))>200):
+        raise ValueError('invalid_review')
+    technical=any(item['code'] in {'fitment_unconfirmed','assembly_fitment_unconfirmed'} for item in requirements)
+    verified=value.get('authorization_verified') is True
+    expires=_date(value.get('expires_at'))
+    actionable=(value['state']=='pending' and verified and expires!='Nicht verfügbar'
+                and binding['status']=='authorized')
+    result={'state':value['state'],'label':REVIEW_STATES[value['state']],
+        'quote_hash':value['quote_hash'],'vehicle_ref':_text(value.get('vehicle_ref'),200),
+        'payment_state':binding['status'],
+        'authorization_verified':verified,'expires':expires,'actionable':actionable,'technical':technical,
+        'requirements':[{'label':REVIEW_REQUIREMENTS[item['code']],
+            'product_id':_text(item.get('product_id'),64),'assembly_group':_text(item.get('assembly_group'),180)} for item in requirements]}
+    evidence=value.get('review_evidence')
+    if isinstance(evidence,Mapping):
+        refs=evidence.get('certificate_references')
+        result['evidence']={'vehicle_ref':_text(evidence.get('vehicle_ref'),200),
+            'certificate_references':[_text(ref,200) for ref in refs[:20]] if isinstance(refs,list) else []}
+    return result
+
+
 def create_shop_admin_blueprint(*,private_data_dir=None):
     blueprint=Blueprint('shop_admin',__name__,template_folder='templates')
     blueprint.shop_admin_private_data_dir=_private_root(private_data_dir)
@@ -286,6 +344,51 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
         # Construction is inert: marker/schema checks happen in the RO reader.
         existing=ShopStorage(root)
         return ShopAdminReader(existing,existing.order_store(),existing_only=True)
+
+    def review_dependencies():
+        if current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is not True:abort(404)
+        adapters=current_app.extensions.get('shop_production')
+        service=adapters.get('order_review') if isinstance(adapters,Mapping) else None
+        store=adapters.get('store') if isinstance(adapters,Mapping) else None
+        if (service is None or not all(callable(getattr(service,name,None)) for name in ('readiness','status','approve','reject'))
+                or not callable(getattr(store,'lookup_payment_owner',None))):abort(503)
+        try:
+            ready=service.readiness()
+        except Exception:
+            abort(503)
+        mode=getattr(service,'mode',None)
+        if (not isinstance(ready,Mapping) or ready.get('ready') is not True
+                or mode not in {'test','live'} or ready.get('mode')!=mode):abort(503)
+        return service,store,mode
+
+    def review_status(service,store,mode,order_id,detail):
+        owner=store.lookup_payment_owner(order_id,mode=mode)
+        if (not isinstance(owner,Mapping) or owner.get('mode')!=mode
+                or not isinstance(owner.get('customer_id'),str) or not owner['customer_id']):abort(503)
+        value=service.status(order_id,customer_id=owner['customer_id'])
+        return _review_projection(value,detail),owner['customer_id']
+
+    def decision_form():
+        origin=current_app.config.get('SHOP_REVIEW_ADMIN_ORIGIN',current_app.config.get('SHOP_PUBLIC_ORIGIN'))
+        try:
+            parsed=urlsplit(origin) if isinstance(origin,str) else None
+        except ValueError:
+            abort(503)
+        if (not parsed or parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password
+                or parsed.path or parsed.query or parsed.fragment):abort(503)
+        if (request.scheme!='https' or request.host_url.rstrip('/')!=origin
+                or request.headers.get('Origin')!=origin
+                or request.headers.get('Sec-Fetch-Site') not in (None,'same-origin')):abort(403)
+        if request.args or request.mimetype!='application/x-www-form-urlencoded':abort(400)
+        if request.content_length is None or not 0<request.content_length<=16384:abort(413)
+        fields=request.form
+        if any(len(fields.getlist(key))!=1 for key in fields):abort(400)
+        supplied=fields.get('csrf_token')
+        expected=session.get('csrf_token')
+        if (not isinstance(expected,str) or not CSRF.fullmatch(expected)
+                or not isinstance(supplied,str) or not CSRF.fullmatch(supplied)
+                or not hmac.compare_digest(supplied,expected)):abort(403)
+        return fields,'portal-admin-session:'+sha256(expected.encode('ascii')).hexdigest()[:32]
 
     @blueprint.app_context_processor
     def staff_queue_badge():
@@ -333,7 +436,60 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
     def order_detail(order_id):
         if not ORDER.fullmatch(order_id):abort(404)
         if request.args:abort(400)
-        return render_template('shop_v2/admin_orders.html',orders=None,detail=reader().detail(order_id))
+        detail=reader().detail(order_id)
+        review=None
+        if current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True:
+            try:
+                service,store,mode=review_dependencies()
+                review,_=review_status(service,store,mode,order_id,detail)
+            except Exception:
+                review={'unavailable':True}
+        token=_review_csrf_token() if review and review.get('actionable') else None
+        return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,review_csrf=token)
+
+    @blueprint.post('/admin/shop/<order_id>/pruefung/<decision>')
+    def decide_review(order_id,decision):
+        if not ORDER.fullmatch(order_id) or decision not in {'freigeben','ablehnen'}:abort(404)
+        fields,actor=decision_form()
+        service,store,mode=review_dependencies()
+        detail=reader().detail(order_id)
+        try:
+            review,customer_id=review_status(service,store,mode,order_id,detail)
+            if not review or not review['actionable']:abort(409)
+            expected={'csrf_token','quote_hash'}
+            if decision=='freigeben':
+                expected.add('full_order_confirmed')
+                if review['technical']:expected.update({'vehicle_ref','certificate_references','conditions_confirmed'})
+            if set(fields)!=expected:abort(400)
+            if (not isinstance(fields.get('quote_hash'),str) or not HASH.fullmatch(fields['quote_hash'])
+                    or not hmac.compare_digest(fields['quote_hash'],review['quote_hash'])):abort(409)
+            evidence=None
+            if decision=='freigeben':
+                if fields['full_order_confirmed']!='yes':abort(400)
+                if review['technical']:
+                    vehicle=fields['vehicle_ref'].strip()
+                    refs=[line.strip() for line in fields['certificate_references'].splitlines() if line.strip()]
+                    if (fields['conditions_confirmed']!='yes' or not 1<=len(vehicle)<=200
+                            or review['vehicle_ref'] and vehicle!=review['vehicle_ref']
+                            or not 1<=len(refs)<=20 or len(set(refs))!=len(refs) or any(len(ref)>200 for ref in refs)
+                            or any(ord(c)<32 or ord(c)==127 or c in '<>' for text in [vehicle,*refs] for c in text)):
+                        abort(400)
+                    evidence={'vehicle_ref':vehicle,'certificate_references':refs,
+                        'conditions_confirmed':True,'full_order_confirmed':True}
+                updated=service.approve(order_id,customer_id=customer_id,expected_quote_hash=review['quote_hash'],actor_id=actor,evidence=evidence)
+            else:
+                updated=service.reject(order_id,customer_id=customer_id,expected_quote_hash=review['quote_hash'],actor_id=actor)
+            result=_review_projection(updated,detail)
+            if not result or result['state']!=('approved' if decision=='freigeben' else 'rejected'):abort(503)
+        except HTTPException:
+            raise
+        except Exception as error:
+            if getattr(error,'code',None) in {'review_expired','review_not_pending','review_binding_mismatch',
+                    'review_already_decided','review_not_required','review_authorization_unconfirmed',
+                    'authorization_unconfirmed','review_approval_required'}:abort(409)
+            if getattr(error,'code',None) in {'review_evidence_required','invalid_review_decision'}:abort(400)
+            abort(503)
+        return redirect(url_for('shop_admin.order_detail',order_id=order_id),code=303)
 
     return blueprint
 

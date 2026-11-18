@@ -40,10 +40,36 @@
   <section class="card"><h2>Bestellte Artikel und Leistungen</h2>
   {% if detail.snapshot_unavailable %}<p class="note warning">Die gespeicherten Artikeldaten konnten nicht sicher angezeigt werden. Bitte intern prüfen.</p>{% endif %}
   {% if detail.lines %}<div class="table-scroll"><table><thead><tr><th>Artikel</th><th>Anzahl</th><th>Stückpreis</th><th>Artikel gesamt</th><th>Warenweg</th></tr></thead><tbody>
-  {% for line in detail.lines %}<tr><td><strong>{{ line.name }}</strong>{% for service in line.services %}<div class="service">{{ service.name }}: {{ service.price }}</div>{% endfor %}</td><td>{{ line.quantity }}</td><td class="money">{{ line.unit_price }}</td><td class="money">{{ line.items_price }}</td><td>{{ line.destination }}</td></tr>{% endfor %}
+  {% for line in detail.lines %}<tr><td><strong>{{ line.name }}</strong><div class="order-id small">{{ line.id }}</div>{% for service in line.services %}<div class="service">{{ service.name }}: {{ service.price }}</div>{% endfor %}</td><td>{{ line.quantity }}</td><td class="money">{{ line.unit_price }}</td><td class="money">{{ line.items_price }}</td><td>{{ line.destination }}</td></tr>{% endfor %}
   </tbody></table></div>{% endif %}
   {% for shipment in detail.shipments %}<p>{{ shipment.destination }} · Versand: <strong>{{ shipment.price }}</strong></p>{% endfor %}
   <p class="muted small">Artikel, Leistungen und Warenwege entsprechen der gespeicherten Bestellung. Ein Montage- oder Servicetermin wird nach Wareneingang abgestimmt.</p></section>
+  {% if order_review %}<section class="card" aria-labelledby="technical-review-title"><h2 id="technical-review-title">Verbindliche Auftragsprüfung</h2>
+  {% if order_review.unavailable %}<p class="note warning">Die Auftragsprüfung ist nicht sicher verfügbar. Freigabe und Ablehnung sind gesperrt.</p>
+  {% else %}
+  <p class="status{% if order_review.state != 'approved' %} warning{% endif %}">{{ order_review.label }}</p>
+  {% if order_review.payment_state == 'paid' %}<p class="note">Der Zahlungseinzug ist in der Bestellung bestätigt.</p>{% elif order_review.authorization_verified and order_review.payment_state == 'authorized' and order_review.state != 'expired' %}<p class="note">Der Gesamtbetrag ist auf der Karte reserviert und noch nicht eingezogen. Reservierung prüfbar bis {{ order_review.expires }}.</p>{% elif order_review.authorization_verified %}<p class="note">Gespeicherte Reservierungsfrist: {{ order_review.expires }}. Der aktuelle Zahlungsstand steht oben in der Bestellung.</p>{% else %}<p class="note warning">Noch keine verifizierte Kartenreservierung für diese Prüfung. Es ist keine Freigabe möglich.</p>{% endif %}
+  <p><strong>Fahrzeugangabe des Kunden:</strong> {{ order_review.vehicle_ref or 'Noch nicht angegeben' }}</p>
+  <ul>{% for item in order_review.requirements %}<li>{{ item.label }}{% if item.product_id %}<div class="order-id small">{{ item.product_id }}</div>{% endif %}{% if item.assembly_group %}<div class="order-id small">Zusammenstellung: {{ item.assembly_group }}</div>{% endif %}</li>{% endfor %}</ul>
+  {% if order_review.evidence %}<p><strong>Geprüfte Fahrzeugausführung:</strong> {{ order_review.evidence.vehicle_ref }}</p><ul>{% for reference in order_review.evidence.certificate_references %}<li>{{ reference }}</li>{% endfor %}</ul>{% endif %}
+  {% if order_review.actionable %}
+  <p class="note warning">Nur die genaue Fahrzeugausführung, die oben gespeicherten Artikel, Mengen, Leistungen und sämtliche Gutachtenauflagen freigeben. Danach darf der Hintergrundprozess den Einkauf auslösen. Der Zahlungseinzug bleibt an die vollständige Lieferantenannahme gebunden.</p>
+  <form method="post" action="{{ url_for('shop_admin.decide_review',order_id=detail.id,decision='freigeben') }}">
+    <input type="hidden" name="csrf_token" value="{{ review_csrf }}"><input type="hidden" name="quote_hash" value="{{ order_review.quote_hash }}">
+    {% if order_review.technical %}
+    <p><label>Verbindlich geprüfte Fahrzeugausführung<br><input name="vehicle_ref" value="{{ order_review.vehicle_ref }}" maxlength="200" required{% if order_review.vehicle_ref %} readonly{% endif %} style="width:100%;padding:10px"></label></p><p class="muted small">Eine abweichende Fahrzeugausführung erfordert eine neue Zusammenstellung; diese Bestellung wird nicht nachträglich geändert.</p>
+    <p><label>Gutachten und geprüfte Fundstellen – eine Referenz je Zeile<br><textarea name="certificate_references" rows="4" maxlength="4020" required style="width:100%;padding:10px"></textarea></label></p>
+    <p><label><input type="checkbox" name="conditions_confirmed" value="yes" required> Fahrzeugtyp, Genehmigung, Felgenausführung, Reifenausführung, Traglast, Geschwindigkeit, Befestigung, benötigte Teile und sämtliche Auflagen wurden geprüft und sind erfüllt.</label></p>
+    {% endif %}
+    <p><label><input type="checkbox" name="full_order_confirmed" value="yes" required> Ich bestätige den vollständigen Auftrag mit genau diesen Artikeln, Mengen, Leistungen, Lieferwegen und Gesamtpreis.</label></p>
+    <button type="submit">Prüfung verbindlich freigeben</button>
+  </form>
+  <form method="post" action="{{ url_for('shop_admin.decide_review',order_id=detail.id,decision='ablehnen') }}" style="margin-top:24px">
+    <input type="hidden" name="csrf_token" value="{{ review_csrf }}"><input type="hidden" name="quote_hash" value="{{ order_review.quote_hash }}">
+    <p class="muted small">Ablehnung ist nur vor dem Einkauf möglich. Der Hintergrundprozess hebt anschließend die Kartenreservierung auf; dieser Klick führt keine Erstattung oder Lieferantenstornierung aus.</p><button type="submit">Prüfung ablehnen</button>
+  </form>
+  {% else %}<p class="muted">Hier ist keine neue Entscheidung möglich. Eine gespeicherte Entscheidung wird nicht überschrieben.</p>{% endif %}
+  {% endif %}</section>{% endif %}
   <section class="card grid"><div><h2>Kundenbestätigungen</h2><ul>
     <li>Eingang: {{ detail.receipts.get('received','Noch nicht erstellt') }}</li>
     <li>Bestätigung: {{ detail.receipts.get('confirmed','Noch nicht erstellt') }}</li>

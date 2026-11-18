@@ -18,6 +18,59 @@ import re
 SHIPPING_CLASSES = {'pkw_tyre', 'pkw_rim', 'complete_wheel', 'rdks_sensor',
                     'centring_ring', 'mounting_supply', 'parts_standard', 'parts_bulky', 'free'}
 MAX_CENTS = 1_000_000
+# GLS lists these as examples of island-surcharge postcodes, not an exhaustive
+# inventory of German islands. The explicit customer declaration must exclude
+# ALL island addresses, including ones absent from this defensive denylist.
+# https://www.gls-pakete.de/glossar/inselzuschlag
+KNOWN_ISLAND_POSTCODES = frozenset({
+    '18565', '25849', '25859', '25863', '25869', '25938', '25946', '26465',
+    '26474', '26486', '26548', '26571', '26579', '26757', '27498',
+}) | frozenset(str(value) for value in range(25980, 26000))
+
+
+class MainlandDeliveryEligibility:
+    """Merchant delivery-area policy, never a supplier/address verification.
+
+    TYREsystem publishes delivery within Germany and separate per-parcel island
+    costs. Parcel count is unknown here, so no island price is inferred. The
+    existing postcode allowlist remains available without opting into mainland
+    declarations; extending it requires BOTH explicit server and saved buyer
+    opt-ins. https://www.tyresystem.de/lieferbedingungen
+    """
+    def __init__(self, approved_postcodes=(), *, mainland_delivery_approved=False):
+        if (not isinstance(approved_postcodes, (list, tuple, set, frozenset))
+                or len(approved_postcodes) > 100000
+                or any(not isinstance(value, str) or not re.fullmatch(r'[0-9]{5}', value)
+                       or value == '00000' for value in approved_postcodes)):
+            raise ValueError('invalid_shipping_policy')
+        self.approved_postcodes = frozenset(approved_postcodes)
+        self.mainland_enabled = mainland_delivery_approved is True
+
+    def __call__(self, destination, context):
+        if (not isinstance(destination, str) or destination not in {'workshop', 'customer'} or not isinstance(context, Mapping)
+                or 'delivery_mainland' in context and type(context['delivery_mainland']) is not bool):
+            return False
+        choice = context.get('workshop_delivery', 'collection')
+        if not isinstance(choice, str) or choice not in {'collection', 'customer_reshipment'}:
+            return False
+        if destination == 'workshop' and choice == 'collection':
+            return True
+        # Reuse the exact saved-buyer address rules rather than creating a
+        # weaker country/postcode-only path at checkout or worker revalidation.
+        from shop_buyer import BuyerError, _address
+        try:
+            delivery = context.get('delivery')
+            if not isinstance(delivery, Mapping):
+                return False
+            delivery = _address(dict(delivery), delivery=True)
+        except BuyerError:
+            return False
+        text = ' '.join(delivery[key] for key in ('recipient', 'street', 'city'))
+        if (delivery['postcode'] in KNOWN_ISLAND_POSTCODES
+                or re.search(r'(?i)\b(?:postfach|packstation|paketstation|postfiliale)\b', text)):
+            return False
+        return (delivery['postcode'] in self.approved_postcodes
+                or self.mainland_enabled and context.get('delivery_mainland') is True)
 
 
 def shipping_gross_cent(base_cent, *, basis):

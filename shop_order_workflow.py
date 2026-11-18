@@ -13,6 +13,7 @@ import re
 import sqlite3
 import threading
 from uuid import uuid4
+from shop_order_review import requires_review
 
 
 class WorkflowError(ValueError):
@@ -48,6 +49,19 @@ def init_order_workflow_schema(connection):
 
 
 class WorkflowJournal:
+    # Only an already final verified payment may recover an uncertain payment
+    # action. Unknown/claimed supplier outcomes can never become replay jobs.
+    _PAYMENT_RECOVERY = '''FROM shop_order_workflow_v2 j
+      JOIN shop_orders_v2 o ON o.id=j.order_id
+      JOIN shop_payment_attempts_v2 a ON a.order_id=o.id
+      JOIN shop_fulfillment_v2 f ON f.order_id=o.id AND f.mode=o.mode
+      WHERE o.mode=? AND j.state IN ('manual_review','awaiting_review') AND f.action_state='unknown'
+        AND ((o.status='paid' AND f.state='accepted' AND NOT EXISTS
+            (SELECT 1 FROM shop_fulfillment_positions_v3 p WHERE p.order_id=o.id AND p.state!='accepted'))
+          OR (o.status='cancelled' AND f.state='rejected' AND NOT EXISTS
+            (SELECT 1 FROM shop_fulfillment_positions_v3 p WHERE p.order_id=o.id AND p.state NOT IN ('pending','rejected'))))
+        AND EXISTS (SELECT 1 FROM shop_payment_events_v2 e WHERE e.order_id=o.id AND e.attempt_id=a.id
+            AND e.kind=CASE WHEN o.status='paid' THEN 'paid' ELSE 'cancelled' END)'''
     def __init__(self, connection_factory, *, clock=None, lease_seconds=300):
         if not callable(connection_factory) or type(lease_seconds) is not int or not 60 <= lease_seconds <= 3600:
             raise WorkflowError('invalid_workflow_configuration')
@@ -85,21 +99,40 @@ class WorkflowJournal:
         with self._db() as connection:
             return [row[0] for row in connection.execute('''SELECT o.id FROM shop_orders_v2 o
               JOIN shop_payment_attempts_v2 a ON a.order_id=o.id
+              LEFT JOIN shop_order_workflow_v2 j ON j.order_id=o.id
               WHERE o.mode=? AND o.status='authorized' AND a.session_id IS NOT NULL AND a.intent_id IS NOT NULL
                 AND EXISTS (SELECT 1 FROM shop_payment_events_v2 e WHERE e.order_id=o.id AND e.attempt_id=a.id AND e.kind='authorized')
-                AND NOT EXISTS (SELECT 1 FROM shop_order_workflow_v2 j WHERE j.order_id=o.id)
-              ORDER BY o.created_at,o.id LIMIT ?''', (mode, limit))]
+                AND (j.order_id IS NULL OR j.state='awaiting_review')
+              ORDER BY COALESCE(j.updated_at,o.created_at),o.id LIMIT ?''', (mode, limit))]
 
-    def enqueue_authorized(self, order_id, *, mode, receipt_service, prepared):
+    def reconciliation_candidates(self, *, mode, limit=20):
+        with self._db() as connection:
+            return [r[0] for r in connection.execute('SELECT j.order_id ' + self._PAYMENT_RECOVERY
+                + ' ORDER BY j.updated_at,j.order_id LIMIT ?', (mode, limit))]
+
+    def resume_reconciliation(self, order_id, *, mode):
+        with self._db(write=True) as connection:
+            row = connection.execute('SELECT j.* ' + self._PAYMENT_RECOVERY + ' AND o.id=?', (mode, order_id)).fetchone()
+            if row is None:
+                return None
+            connection.execute("UPDATE shop_order_workflow_v2 SET state='queued',lease_token=NULL,lease_until=NULL,updated_at=? WHERE order_id=?",
+                               (_stamp(self.clock()).isoformat(), order_id))
+            return dict(connection.execute('SELECT * FROM shop_order_workflow_v2 WHERE order_id=?', (order_id,)).fetchone())
+
+    def enqueue_authorized(self, order_id, *, mode, receipt_service, prepared, state='queued'):
         """Qualify the retained authorization and persist job+receipt atomically."""
-        if not isinstance(order_id, str) or not re.fullmatch(r'sho_[a-f0-9]{32}', order_id):
+        if (not isinstance(order_id, str) or not re.fullmatch(r'sho_[a-f0-9]{32}', order_id)
+                or state not in {'queued', 'awaiting_review'}):
             raise WorkflowError('invalid_workflow_order')
         with self._db(write=True) as connection:
             prior = connection.execute('SELECT * FROM shop_order_workflow_v2 WHERE order_id=?', (order_id,)).fetchone()
             if prior:
                 if prior['mode'] != mode:
                     raise ValueError()
-                return dict(prior)
+                if prior['state'] in {'queued', 'awaiting_review'}:
+                    connection.execute('''UPDATE shop_order_workflow_v2 SET state=?,lease_token=NULL,lease_until=NULL,
+                        updated_at=? WHERE order_id=?''', (state, _stamp(self.clock()).isoformat(), order_id))
+                return dict(connection.execute('SELECT * FROM shop_order_workflow_v2 WHERE order_id=?', (order_id,)).fetchone())
             row = connection.execute('''SELECT o.*,a.id AS payment_attempt,a.session_id,a.intent_id
               FROM shop_orders_v2 o JOIN shop_payment_attempts_v2 a ON a.order_id=o.id
               WHERE o.id=? AND o.mode=? AND o.status='authorized' AND a.session_id IS NOT NULL AND a.intent_id IS NOT NULL
@@ -114,8 +147,8 @@ class WorkflowJournal:
             binding = {**expected, **{key: row[key] for key in ('payment_attempt', 'session_id', 'intent_id')}}
             now = _stamp(self.clock()).isoformat()
             connection.execute('''INSERT INTO shop_order_workflow_v2
-              (order_id,customer_id,mode,binding_json,created_at,updated_at) VALUES (?,?,?,?,?,?)''',
-              (order_id, row['customer_id'], mode, _json(binding), now, now))
+              (order_id,customer_id,mode,binding_json,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?)''',
+              (order_id, row['customer_id'], mode, _json(binding), state, now, now))
             return dict(connection.execute('SELECT * FROM shop_order_workflow_v2 WHERE order_id=?', (order_id,)).fetchone())
 
     def claim(self, *, mode):
@@ -132,7 +165,7 @@ class WorkflowJournal:
             return dict(connection.execute('SELECT * FROM shop_order_workflow_v2 WHERE order_id=?', (row['order_id'],)).fetchone())
 
     def finish(self, job, *, state, receipt_service=None, prepared=None):
-        if state not in {'fulfilled', 'cancelled', 'manual_review'}:
+        if state not in {'fulfilled', 'cancelled', 'manual_review', 'awaiting_review'}:
             raise WorkflowError('invalid_workflow_result')
         with self._db(write=True) as connection:
             row = connection.execute("SELECT * FROM shop_order_workflow_v2 WHERE order_id=? AND state='running' AND lease_token=?",
@@ -151,12 +184,13 @@ class WorkflowJournal:
 
 class ShopOrderWorkflow:
     def __init__(self, store, journal, fulfillment, payment_actions=None, *, mode, enabled=False,
-                 receipt_service=None, clock=None, poll_seconds=2):
+                 receipt_service=None, clock=None, poll_seconds=2, review_service=None):
         if (not isinstance(mode, str) or mode not in {'test', 'live'} or type(enabled) is not bool
                 or type(poll_seconds) not in (int, float) or not 0.5 <= poll_seconds <= 60):
             raise WorkflowError('invalid_workflow_configuration')
         self.store, self.journal, self.fulfillment, self.payment = store, journal, fulfillment, payment_actions
         self.mode, self.enabled, self.receipts = mode, enabled, receipt_service
+        self.review_service = review_service
         self.clock, self.poll_seconds = clock or (lambda: datetime.now(timezone.utc)), poll_seconds
         self._stop, self._thread, self._run_lock, self._start_lock = threading.Event(), None, threading.Lock(), threading.Lock()
 
@@ -166,7 +200,9 @@ class ShopOrderWorkflow:
             receipt = self.receipts.readiness()
             ready = (self.enabled and fulfillment.get('ready') is True and fulfillment.get('mode') == self.mode
                      and receipt.get('queue_ready') is True and receipt.get('mode') == self.mode
-                     and all(callable(getattr(self.journal, method, None)) for method in ('existing', 'eligible', 'enqueue_authorized', 'claim', 'finish'))
+                     and all(callable(getattr(self.journal, method, None)) for method in
+                         ('existing', 'eligible', 'enqueue_authorized', 'claim', 'finish',
+                          'reconciliation_candidates', 'resume_reconciliation'))
                      and all(callable(getattr(self.store, method, None)) for method in ('get_order', 'lookup_payment_owner')))
         except Exception:
             ready, receipt = False, {}
@@ -179,7 +215,11 @@ class ShopOrderWorkflow:
     def consider(self, order_id):
         self._active()
         existing = self.journal.existing(order_id, mode=self.mode)
-        if existing is not None:
+        if existing is not None and existing['state'] in {'manual_review', 'awaiting_review'}:
+            reconciled = self.journal.resume_reconciliation(order_id, mode=self.mode)
+            if reconciled is not None:
+                return reconciled
+        if existing is not None and existing['state'] not in {'queued', 'awaiting_review'}:
             return existing
         identity = self.store.lookup_payment_owner(order_id, mode=self.mode)
         if identity is None:
@@ -187,8 +227,21 @@ class ShopOrderWorkflow:
         order = self.store.get_order(order_id, customer_id=identity['customer_id'], mode=self.mode)
         if order['status'] != 'authorized':
             return None
+        state = self._review_queue_state(order_id, identity['customer_id'])
         prepared = self.receipts.prepare(order_id, customer_id=identity['customer_id'], kind='order_received')
-        return self.journal.enqueue_authorized(order_id, mode=self.mode, receipt_service=self.receipts, prepared=prepared)
+        return self.journal.enqueue_authorized(order_id, mode=self.mode, receipt_service=self.receipts, prepared=prepared, state=state)
+
+    def _review_queue_state(self, order_id, customer_id):
+        snapshot = self.store.snapshot_for_order(order_id, customer_id=customer_id, mode=self.mode)
+        if not requires_review(snapshot):
+            return 'queued'
+        try:
+            if self.review_service is None or self.review_service.readiness().get('ready') is not True or self.review_service.mode != self.mode:
+                return 'awaiting_review'
+            status = self.review_service.ensure(order_id, customer_id=customer_id)
+            return 'queued' if status['state'] in {'approved', 'rejected', 'expired'} else 'awaiting_review'
+        except Exception:
+            return 'awaiting_review'
 
     def repair(self, limit=20):
         self._active()
@@ -197,11 +250,18 @@ class ShopOrderWorkflow:
         queued = 0
         for order_id in self.journal.eligible(mode=self.mode, limit=limit):
             try:
-                if self.consider(order_id) is not None:
+                result = self.consider(order_id)
+                if result is not None and result['state'] == 'queued':
                     queued += 1
             except Exception:
                 # A missing frozen legal pack/address must not execute goods,
                 # nor prevent other independently valid orders being queued.
+                continue
+        for order_id in self.journal.reconciliation_candidates(mode=self.mode, limit=limit):
+            try:
+                if self.journal.resume_reconciliation(order_id, mode=self.mode) is not None:
+                    queued += 1
+            except Exception:
                 continue
         return queued
 
@@ -220,6 +280,9 @@ class ShopOrderWorkflow:
                 if current['status'] not in {'authorized', 'paid', 'cancelled'}:
                     self.journal.finish(job, state='manual_review')
                     return {'processed': True, 'state': 'manual_review'}
+                if current['status'] == 'authorized' and self._review_queue_state(job['order_id'], job['customer_id']) == 'awaiting_review':
+                    self.journal.finish(job, state='awaiting_review')
+                    return {'processed': True, 'state': 'awaiting_review'}
                 # The saga fresh-checks authorization before new procurement,
                 # but can reconcile a prior capture when the PI is now paid.
                 result = self.fulfillment.run(job['order_id'], customer_id=job['customer_id'])
@@ -232,6 +295,8 @@ class ShopOrderWorkflow:
                 elif result.get('state') == 'cancelled' and result.get('authorization_released') is True and result.get('payment_confirmed') is False:
                     state = 'cancelled'
                     prepared = self.receipts.prepare(job['order_id'], customer_id=job['customer_id'], kind='order_cancelled')
+                elif result.get('state') == 'awaiting_review':
+                    state = 'awaiting_review'
                 self.journal.finish(job, state=state, receipt_service=self.receipts, prepared=prepared)
                 self.receipts.deliver_once()
                 return {'processed': True, 'state': state}

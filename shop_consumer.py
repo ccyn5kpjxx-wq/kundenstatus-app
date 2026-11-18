@@ -75,6 +75,11 @@ def _freeze_pack(pack):
         if version.startswith(('entwurf:', 'demo:')):
             return None
         texts = {key: _text(pack['texts'].get(key), 65536) for key in DOCS}
+        if 'komplettraeder_zahlung' in pack['texts']:
+            from shop_complete_wheels import NOTICE
+            if pack['texts']['komplettraeder_zahlung'] != NOTICE:
+                return None
+            texts['komplettraeder_zahlung'] = NOTICE
         attachments = []
         for item in pack.get('attachments', []):
             if (not isinstance(item, Mapping) or not isinstance(item.get('filename'), str)
@@ -195,9 +200,13 @@ class ShopConsumer:
                 or terms_accepted is not True or consumer is not True):
             raise ConsumerError('terms_acceptance_required')
         try:
-            self.store.lookup_server_quote(quote_hash, customer_id=customer_id, mode=self.mode)
+            snapshot = self.store.lookup_server_quote(quote_hash, customer_id=customer_id, mode=self.mode)
         except Exception:
             raise ConsumerError('quote_not_found') from None
+        if snapshot.get('version') == 2:
+            from shop_complete_wheels import NOTICE
+            if json.loads(self.pack_json)['texts'].get('komplettraeder_zahlung') != NOTICE:
+                raise ConsumerError('terms_acceptance_required')
         now = _stamp(self.clock()).isoformat()
         with self._db(write=True) as db:
             previous = db.execute('SELECT * FROM shop_consumer_acceptances_v2 WHERE quote_hash=?', (quote_hash,)).fetchone()

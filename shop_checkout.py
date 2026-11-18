@@ -83,12 +83,13 @@ def _origin(value):
 
 class ShopCheckout:
     def __init__(self, store, gateway=None, *, mode, public_origin, enabled=False,
-                 order_lookup=None, clock=None):
+                 order_lookup=None, clock=None, review_service=None):
         if not isinstance(mode, str) or mode not in {'test', 'live'} or type(enabled) is not bool:
             raise CheckoutError('invalid_configuration')
         self.store, self.gateway, self.mode = store, gateway, mode
         self.public_origin, self.enabled = _origin(public_origin), enabled
         self.order_lookup = order_lookup
+        self.review_service = review_service
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
@@ -133,6 +134,15 @@ class ShopCheckout:
                 raise ValueError()
         except (KeyError, TypeError, ValueError, UnicodeError):
             raise CheckoutError('order_binding_mismatch') from None
+        if value.get('version') == 2:
+            from shop_complete_wheels import is_review_snapshot
+            try:
+                state = self.review_service.readiness()
+                if (not is_review_snapshot(value) or state.get('ready') is not True
+                        or state.get('mode') != self.mode):
+                    raise ValueError()
+            except Exception:
+                raise CheckoutError('order_review_unavailable') from None
         return order, snapshot
 
     @staticmethod
@@ -343,7 +353,18 @@ class ShopCheckout:
     def status(self, order_id, *, customer_id):
         """Read the retained status only; a browser return is never proof."""
         order = self._store('get_order', order_id, customer_id=customer_id, mode=self.mode)
-        return self._result(order)
+        result = self._result(order)
+        snapshot = self._store('snapshot_for_order', order_id, customer_id=customer_id, mode=self.mode)
+        if snapshot.get('version') == 2:
+            state = {'required': True, 'state': 'pending', 'expires_at': None}
+            try:
+                review = self.review_service.status(order_id, customer_id=customer_id)
+                if review.get('required') is True and review.get('state') in {'pending', 'approved', 'rejected', 'expired'}:
+                    state.update(state=review['state'], expires_at=review.get('expires_at'))
+            except Exception:
+                pass  # A read failure never promotes an authorization to approval.
+            result['technical_review'] = state
+        return result
 
     def start(self, order_id, *, customer_id):
         self._active()
