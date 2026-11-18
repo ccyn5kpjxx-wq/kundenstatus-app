@@ -1,0 +1,15 @@
+/* Shared palette for workshop and dealership workspaces. */
+:root {
+  --portal-bg: #f2f4f5;
+  --portal-surface: #fff;
+  --portal-ink: #18252e;
+  --portal-muted: #50616b;
+  --portal-line: #ced7db;
+  --portal-dark: #192b35;
+  --portal-action: #a73726;
+  --portal-action-hover: #872b1d;
+  --portal-focus: #006b84;
+  --portal-warn-bg: #fff4dc;
+  --portal-warn: #744513;
+  --portal-radius: 14px;
+}

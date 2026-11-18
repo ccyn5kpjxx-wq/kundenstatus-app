@@ -1,109 +1,30 @@
 {% extends "base.html" %}
 {% block title %}Betriebs-Cockpit{% endblock %}
 {% block extra_css %}
-<style>
-  .cockpit-compact { --cockpit-line:#dfd9d0; display:grid; gap:16px; max-width:1320px; margin:auto; }
-  .cockpit-compact * { box-sizing:border-box; }
-  .cockpit-compact h1,.cockpit-compact h2,.cockpit-compact p { margin:0; }
-  .cockpit-head { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:4px 0; }
-  .cockpit-eyebrow { font-size:.7rem; text-transform:uppercase; letter-spacing:.14em; font-weight:750; color:var(--muted); }
-  .cockpit-head h1 { font-size:clamp(1.5rem,2.5vw,2rem); letter-spacing:-.035em; margin:4px 0 6px; }
-  .cockpit-subtitle { font-size:.88rem; color:var(--muted); }
-  .cockpit-time { font-variant-numeric:tabular-nums; font-size:1.25rem; font-weight:700; text-align:right; }
-  .cockpit-weather { position:relative; font-size:.78rem; color:var(--muted); text-align:right; margin-top:4px; }
-  .cockpit-weather summary { cursor:pointer; min-height:26px; }
-  .rail-weather-hours { display:flex; gap:12px; justify-content:flex-end; padding:8px 0; }
-  .rail-weather-hour-main { font-weight:650; }
-  .cockpit-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  .cockpit-search { flex:1 1 340px; position:relative; }
-  .cockpit-search label { display:block; margin-bottom:5px; font-size:.75rem; font-weight:700; color:var(--muted); }
-  .cockpit-search input { width:100%; min-height:46px; border:1px solid var(--cockpit-line); border-radius:12px; padding:10px 14px; background:#fffefa; font:inherit; }
-  .cockpit-search input:focus { outline:3px solid #145d6630; border-color:#145d66; }
-  .cockpit-search-results { position:absolute; z-index:20; top:100%; left:0; right:0; margin-top:5px; background:#fffefa; border:1px solid var(--cockpit-line); border-radius:12px; box-shadow:0 12px 30px #25313818; overflow:hidden; max-height:420px; overflow-y:auto; }
-  .cockpit-search-results[hidden] { display:none; }
-  .cockpit-search-result { display:grid; gap:3px; padding:12px 14px; text-decoration:none; color:var(--ink); border-bottom:1px solid var(--cockpit-line); }
-  .cockpit-search-result:hover,.cockpit-search-result:focus { background:#edf3f2; color:var(--ink); }
-  .cockpit-search-result span,.cockpit-search-message { font-size:.8rem; color:var(--muted); }
-  .cockpit-search-message { padding:14px; margin:0; }
-  .cockpit-shortcuts { display:flex; align-self:end; gap:8px; flex-wrap:wrap; }
-  .cockpit-shortcuts .btn { min-height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:11px; font-size:.82rem; }
-  .cockpit-card { background:rgba(255,254,250,.95); border:1px solid var(--cockpit-line); border-radius:16px; overflow:hidden; }
-  .cockpit-day { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--cockpit-line); }
-  .cockpit-day details { min-width:0; background:#fffefa; }
-  .cockpit-day summary { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:13px 16px; cursor:pointer; list-style:none; min-height:65px; }
-  .cockpit-day summary::-webkit-details-marker { display:none; }
-  .cockpit-day summary span { font-size:.86rem; font-weight:650; }
-  .cockpit-day summary small { display:block; font-size:.7rem; font-weight:400; color:var(--muted); margin-top:3px; }
-  .cockpit-day summary::after { content:'⌄'; color:var(--muted); font-size:.85rem; }
-  .cockpit-day details[open] summary::after { content:'⌃'; }
-  .cockpit-day summary strong { font-size:1.55rem; font-variant-numeric:tabular-nums; color:#145d66; }
-  .cockpit-day-list { padding:0 13px 12px; font-size:.8rem; }
-  .cockpit-day-list a { display:block; padding:7px 0; color:var(--ink); border-top:1px solid var(--cockpit-line); text-decoration:none; overflow-wrap:anywhere; }
-  .cockpit-day-list .badge-soft { display:inline-block; margin:3px 0; vertical-align:middle; }
-  .cockpit-warnings { display:grid; gap:8px; }
-  .cockpit-alerts { display:flex; flex-wrap:wrap; gap:8px; }
-  .cockpit-alert { display:block; padding:10px 12px; border:1px solid #e8b8af; border-radius:11px; background:#fff1ec; color:#8d3325; font-size:.85rem; text-decoration:none; }
-  .cockpit-alert:hover { background:#ffe7dd; color:#6b251b; }
-  .cockpit-section-summary { min-height:60px; padding:15px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; cursor:pointer; list-style:none; }
-  .cockpit-section-summary::-webkit-details-marker { display:none; }
-  .cockpit-section-title { font-size:1rem; font-weight:750; }
-  .cockpit-section-title::before { content:'＋'; font-weight:400; color:#798179; margin-right:9px; }
-  details[open] > .cockpit-section-summary .cockpit-section-title::before { content:'−'; }
-  .cockpit-counts { display:flex; gap:10px; flex-wrap:wrap; font-size:.8rem; color:var(--muted); }
-  .cockpit-counts strong { color:var(--ink); font-variant-numeric:tabular-nums; }
-  .cockpit-detail-body { border-top:1px solid var(--cockpit-line); padding:16px 18px; }
-  .cockpit-detail-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px; font-size:.82rem; color:var(--muted); }
-  .cockpit-detail-head a { color:#145d66; font-weight:650; }
-  .cockpit-bottom { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
-  .mietwagen-heute-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
-  .mietwagen-heute-col-title { font-size:.83rem; font-weight:700; margin-bottom:8px; }
-  .mietwagen-heute-item { padding:8px 0; border-top:1px solid var(--cockpit-line); font-size:.83rem; }
-  .mietwagen-heute-item strong,.mietwagen-heute-item span { display:block; overflow-wrap:anywhere; }
-  .mietwagen-heute-item span,.mietwagen-heute-empty { font-size:.78rem; color:var(--muted); }
-  .start-list { display:grid; gap:0; }
-  .start-list-item { display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--cockpit-line); }
-  .start-list-item:first-child { border-top:0; padding-top:0; }
-  .start-list-link { flex:1 1 300px; min-width:0; color:var(--ink); text-decoration:none; }
-  .start-list-link:hover { color:#145d66; }
-  .start-list-title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:.9rem; }
-  .start-list-meta { margin-top:4px; color:var(--muted); font-size:.78rem; overflow-wrap:anywhere; }
-  .start-list-actions { display:flex; gap:7px; flex-wrap:wrap; }
-  .email-ki-toggle { border:1px solid #cadbd7; background:#eef5f2; color:#145d66; border-radius:9px; padding:7px 10px; font-size:.76rem; }
-  .email-ki-analyse { display:none; flex-basis:100%; padding:10px; background:#f3f6f1; font-size:.82rem; }
-  .email-ki-analyse.is-open { display:block; }
-  .ai-kicker { font-weight:700; margin-bottom:4px; }
-  .reminder-form { display:flex; gap:8px; }
-  .reminder-form input { min-width:0; }
-  .reminder-list { display:grid; gap:8px; margin-top:14px; }
-  .reminder-item { display:flex; justify-content:space-between; gap:12px; align-items:center; font-size:.84rem; }
-  .reminder-text { overflow-wrap:anywhere; }
-  .reminder-meta { color:var(--muted); font-size:.73rem; }
-  .cockpit-modules { display:flex; flex-wrap:wrap; gap:8px; }
-  .cockpit-module { display:inline-flex; align-items:center; gap:8px; padding:11px 13px; border:1px solid var(--cockpit-line); border-radius:11px; background:#fffefa; color:var(--ink); font-size:.8rem; text-decoration:none; min-height:43px; }
-  .cockpit-module:hover { border-color:#145d66; color:#145d66; }
-  .module-count { border-radius:6px; background:#edf0e9; padding:1px 6px; font-size:.75rem; }
-  .module-count.is-alert { background:#fce3db; color:#933b2d; }
-  .cockpit-secondary { display:flex; gap:12px; flex-wrap:wrap; font-size:.78rem; color:var(--muted); }
-  .cockpit-secondary summary { cursor:pointer; }
-  .cockpit-source-mix { display:flex; flex-wrap:wrap; gap:12px; padding-top:8px; }
-  .cockpit-compact summary:focus-visible,.cockpit-compact a:focus-visible,.cockpit-compact button:focus-visible { outline:3px solid #087d91; outline-offset:3px; }
-  @media(max-width:850px) { .cockpit-bottom{grid-template-columns:1fr;} .cockpit-head{align-items:flex-start;} .cockpit-shortcuts{align-self:auto;} }
-  @media(max-width:575px) { .cockpit-compact{gap:12px;} .cockpit-head{gap:10px;} .cockpit-head h1{font-size:1.45rem;} .cockpit-time{font-size:1rem;} .cockpit-day{grid-template-columns:repeat(2,minmax(0,1fr));} .cockpit-day summary{padding:11px 12px;} .cockpit-day summary strong{font-size:1.3rem;} .cockpit-weather{font-size:.7rem;} .cockpit-section-summary{padding:13px;} .cockpit-detail-body{padding:13px;} .mietwagen-heute-grid{grid-template-columns:1fr;} .cockpit-shortcuts{width:100%;} .cockpit-shortcuts .btn{flex:1 1 auto;} .reminder-form{flex-direction:column;} .cockpit-modules{gap:6px;} .cockpit-module{padding:9px 10px;} }
-</style>
+<link rel="stylesheet" href="{{ static_asset_url('portal-design.css') }}">
+<link rel="stylesheet" href="{{ static_asset_url('werkstatt-cockpit.css') }}">
 {% endblock %}
 {% block content %}
 {% set mahn_cockpit_badge = mahnungen_faellig_count() %}
 <div class="cockpit-compact">
-  <header class="cockpit-head">
-    <div><div class="cockpit-eyebrow">Werkstatt · Tagesüberblick</div><h1>{{ tages_gruss }}, Christopher.</h1><p class="cockpit-subtitle" data-live-date>{{ current_date_label }}</p></div>
-    <div data-live-clock-root data-server-now="{{ current_datetime_iso }}"><div class="cockpit-time" data-live-clock>{{ current_time_label }}</div><details class="cockpit-weather" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}"><summary><span data-weather-current-icon aria-hidden="true">☁</span> <strong data-weather-current-temp>--°C</strong> <span data-weather-current-text>Mosbach · wird geladen …</span></summary><div class="rail-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div></details></div>
-  </header>
-  <div class="cockpit-tools">
-    <div class="cockpit-search" data-cockpit-search data-search-url="{{ url_for('admin_cockpit_auftraege_suche') }}">
-      <label for="cockpit-auftrag-suche">Auftrag finden</label><input id="cockpit-auftrag-suche" type="search" autocomplete="off" placeholder="Kennzeichen, Auftrag, Fahrzeug oder Kunde" aria-controls="cockpit-suchergebnisse" aria-describedby="cockpit-suchhinweis"><span id="cockpit-suchhinweis" class="visually-hidden">Ab zwei Zeichen suchen. Treffer mit Tab auswählen.</span>
-      <div id="cockpit-suchergebnisse" class="cockpit-search-results" data-search-results aria-live="polite" hidden></div>
+  <div class="cockpit-command">
+    <header class="cockpit-head" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+      <div><div class="cockpit-eyebrow">Werkstatt · Tagesüberblick</div><h1>{{ tages_gruss }}, Christopher.</h1><p class="cockpit-subtitle" data-live-date>{{ current_date_label }}</p></div>
+      <div class="cockpit-clock">
+        <div class="cockpit-time" data-live-clock>{{ current_time_label }}</div>
+        <details class="cockpit-weather" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+          <summary><span data-weather-current-icon aria-hidden="true"></span> <strong data-weather-current-temp></strong> <span data-weather-current-text>Wetter in Mosbach</span></summary>
+          <div class="rail-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden">Wetterdaten werden geladen.</div>
+        </details>
+      </div>
+    </header>
+    <div class="cockpit-tools">
+      <div class="cockpit-search" data-cockpit-search data-search-url="{{ url_for('admin_cockpit_auftraege_suche') }}">
+        <label for="cockpit-auftrag-suche">Auftrag finden</label><input id="cockpit-auftrag-suche" type="search" autocomplete="off" placeholder="z. B. Kennzeichen oder Name" aria-controls="cockpit-suchergebnisse" aria-describedby="cockpit-suchhinweis"><span id="cockpit-suchhinweis" class="visually-hidden">Nach Kennzeichen, Auftragsnummer, Fahrzeug oder Kunde suchen. Ab zwei Zeichen erscheinen Treffer. Mit Tab auswählen.</span>
+        <div id="cockpit-suchergebnisse" class="cockpit-search-results" data-search-results aria-live="polite" hidden></div>
+      </div>
+      <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">+ Fahrzeug neu</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Lackierportal öffnen</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsschaden</a></nav>
     </div>
-    <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">+ Fahrzeug neu</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Lackierportal öffnen</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsschaden</a></nav>
   </div>
   {% if mahn_cockpit_badge or cockpit.get('offene_reklamationen') or cockpit.get('offene_verzoegerungen') or cockpit.get('ueberfaellig') %}
   <section class="cockpit-warnings" aria-labelledby="cockpit-hinweise">
@@ -133,19 +54,32 @@
     </div>
   </section>
   {% endif %}
-  <section class="cockpit-card cockpit-day" aria-label="Fahrzeuge heute">
+  <section class="cockpit-day" aria-label="Fahrzeuge heute">
     {% for key, label, sub in [('heute_bringen','Übernehmen','Anlieferung & Holservice'),('heute_starten','Starten','Arbeitsbeginn heute'),('heute_fertig','Fertig','Fertigstellung heute'),('heute_abholen','Zurückgeben','Abholung & Rückbringung')] %}
     <details><summary><span>{{ label }}<small>{{ sub }}</small></span><strong>{{ cockpit[key]|length }}</strong></summary><div class="cockpit-day-list">{% for item in cockpit[key] %}<a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}"><strong>{{ item['kennzeichen'] or item['fahrzeug'] }}</strong> {% if item['auftragsart_label'] %}<span class="badge-soft" style="background:{{ item['auftragsart_bg'] }}; color:{{ item['auftragsart_farbe'] }};">{{ item['auftragsart_label'] }}</span>{% endif %}<br>{{ item['fahrzeug'] }}{% if key == 'heute_bringen' and item['annahme_uhrzeit'] %} · {{ item['annahme_uhrzeit'] }} Uhr{% elif key == 'heute_abholen' and item['abhol_uhrzeit'] %} · {{ item['abhol_uhrzeit'] }} Uhr{% endif %}</a>{% else %}<span class="text-muted">Heute kein Eintrag.</span>{% endfor %}</div></details>
     {% endfor %}
   </section>
-  <a class="cockpit-card" href="{{ url_for('buero_belege.admin_index') }}" style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;text-decoration:none;color:inherit" aria-label="Rechnungen und Belege zur Freigabe öffnen">
-    <span><strong>Rechnungen zur Freigabe</strong><small style="display:block;color:var(--muted)">Rechnungen, Gebühren und private Belege prüfen</small></span>
-    <span>{% if belegfreigabe.neue_anzahl %}<strong class="badge-soft">{{ belegfreigabe.neue_anzahl }} neu</strong> · {% endif %}{{ belegfreigabe.offen_anzahl }} offen →</span>
-  </a>
-  <p class="small text-muted"><a href="{{ url_for('office_inbox_bindings.admin') }}">E-Mail-Rechnungen prüfen</a> · <a href="/werkstatt/buero">Büroansicht öffnen</a></p>
+  <div class="cockpit-billing cockpit-card">
+    <a class="cockpit-approval" href="{{ url_for('buero_belege.admin_index') }}" aria-label="Rechnungen und Belege zur Freigabe öffnen">
+      <span><strong>Rechnungen zur Freigabe</strong><small>Rechnungen, Gebühren und private Belege prüfen</small></span>
+      <span class="cockpit-approval-count">{% if belegfreigabe.neue_anzahl %}<strong>{{ belegfreigabe.neue_anzahl }} neu</strong> · {% endif %}{{ belegfreigabe.offen_anzahl }} offen <span aria-hidden="true">→</span></span>
+    </a>
+    <div class="cockpit-billing-links">
+      <a href="{{ url_for('office_inbox_bindings.admin') }}">E-Mail-Rechnungen prüfen</a>
+      <a href="/werkstatt/buero">Büroansicht öffnen</a>
+    </div>
+  </div>
   {% include "_cockpit_aktionen.html" %}
-  <a class="cockpit-card" href="{{ url_for('office_payroll.admin') }}" style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;text-decoration:none;color:inherit"><span><strong>Löhne zur Freigabe</strong><small style="display:block;color:var(--muted)">Monatsauswertung ansehen und freigeben</small></span><strong>{{ lohnfreigabe_count }} offen →</strong></a>
-  <a class="cockpit-card" href="{{ url_for('assistent.vacation_admin') }}" style="display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px;text-decoration:none;color:inherit"><span><strong>Urlaub zur Freigabe</strong><small style="display:block;color:var(--muted)">Anträge der Mitarbeiter prüfen</small></span><strong>{{ urlaubfreigabe_count }} offen →</strong></a>
+  <div class="cockpit-bottom">
+    <a class="cockpit-card cockpit-approval" href="{{ url_for('office_payroll.admin') }}">
+      <span><strong>Löhne zur Freigabe</strong><small>Monatsauswertung ansehen und freigeben</small></span>
+      <span class="cockpit-approval-count">{{ lohnfreigabe_count }} offen <span aria-hidden="true">→</span></span>
+    </a>
+    <a class="cockpit-card cockpit-approval" href="{{ url_for('assistent.vacation_admin') }}">
+      <span><strong>Urlaub zur Freigabe</strong><small>Anträge der Mitarbeiter prüfen</small></span>
+      <span class="cockpit-approval-count">{{ urlaubfreigabe_count }} offen <span aria-hidden="true">→</span></span>
+    </a>
+  </div>
   <details class="cockpit-card" data-cockpit-eingang>
     <summary class="cockpit-section-summary"><span class="cockpit-section-title">Eingang</span><span class="cockpit-counts"><span>Fahrzeuge <strong>{{ start_inbox['fahrzeuge_count'] or 0 }}</strong></span><span>Anfragen <strong>{{ start_inbox['anfragen_count'] or 0 }}</strong></span><span>Aufgaben <strong>{{ start_inbox['aufgaben_count'] or 0 }}</strong></span></span></summary>
     <div class="cockpit-detail-body"><div class="cockpit-detail-head"><span>Neue Fahrzeuge, Anfragen und Rückmeldungen.</span><a href="{{ url_for('admin_postfach') }}">Vollständiges Postfach →</a></div>
@@ -290,10 +224,10 @@
     };
 
     const renderError = () => {
-      currentIcon.textContent = '?';
-      currentTemp.textContent = '--°C';
-      currentText.textContent = 'Mosbach · Wetter n. v.';
-      hoursTarget.replaceChildren();
+      currentIcon.textContent = '';
+      currentTemp.textContent = '';
+      currentText.textContent = 'Wetter in Mosbach';
+      hoursTarget.textContent = 'Aktuell sind keine Wetterdaten verfügbar.';
     };
 
     const renderHours = (hourly) => {
@@ -334,7 +268,11 @@
           return;
         }
         const data = await response.json();
-        const current = data.current || {};
+        const current = data.current;
+        if (current?.temperature_2m == null || !Number.isFinite(Number(current.temperature_2m))) {
+          renderError();
+          return;
+        }
         const [icon, label] = weatherState(current.weather_code, current.wind_speed_10m);
         currentIcon.textContent = icon;
         currentTemp.textContent = `${rounded(current.temperature_2m)}°C`;
