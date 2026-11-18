@@ -52,6 +52,59 @@ class EnrichmentChecks(unittest.TestCase):
         self.assertIsNotNone(inquiry['price'])
         self.assertEqual(catalogue([a]).get(a['selection_id'])['purchase_status'], 'inquiry_only')
 
+    def test_checkout_exclusions_are_strict_known_ids_without_changing_prices_or_sources(self):
+        rim, tire = wheel(), tyre()
+        tire['quote_public'] = deepcopy(rim['quote_public'])
+        tire['quote_public']['source'] = 'RSU'
+        rows = [rim, tire]
+        original = deepcopy(rows)
+        identifier = tire['selection_id']
+        exclusions = {identifier}
+        excluded = catalogue(rows, procurement_ids={identifier}, rsu_only_prices=True,
+                             checkout_excluded_ids=exclusions)
+        unchanged = catalogue(rows, procurement_ids={identifier}, rsu_only_prices=True)
+        price = excluded.get(identifier)
+        self.assertEqual(price['purchase_status'], 'inquiry_only')
+        self.assertEqual(price['price_status'], 'current')
+        self.assertEqual(price['price'], unchanged.get(identifier)['price'])
+        self.assertEqual(price['price_label'], '')
+        self.assertEqual(rows, original)
+        self.assertEqual(excluded._procurement_ids, frozenset({identifier}))
+        self.assertEqual(excluded._source_row(identifier), tire)
+        self.assertEqual(variant_fingerprint(excluded._source_row(identifier)), variant_fingerprint(tire))
+        exclusions.clear()
+        self.assertEqual(excluded.get(identifier)['purchase_status'], 'inquiry_only', 'caller mutation cannot lift the exclusion')
+        self.assertEqual(catalogue(rows, checkout_excluded_ids=frozenset()).get(identifier)['purchase_status'], 'inquiry_only')
+        for invalid in (True, 'true', identifier, [identifier], (identifier,), {identifier: True},
+                        {None}, {1}, {'tyre:' + 'f' * 24}):
+            with self.subTest(invalid=invalid), self.assertRaises(CatalogError):
+                catalogue(rows, checkout_excluded_ids=invalid)
+
+    def test_known_document_exclusions_do_not_pad_or_displace_priced_recommendations(self):
+        rim, excluded, first, second = wheel(), tyre('a'), tyre('b'), tyre('c')
+        excluded['name'] = 'AAA known unavailable mandatory document'
+        for row in (excluded, first, second):
+            row['quote_public'] = deepcopy(rim['quote_public'])
+            row['quote_public']['source'] = 'RSU'
+        rows = [rim, excluded, first, second]
+        pairs = {rim['selection_id']: [pair(rim, row) for row in (excluded, first, second)]}
+        catalog = catalogue(rows, compatible_pairs=pairs, rsu_only_prices=True,
+                            procurement_ids={row['selection_id'] for row in (excluded, first, second)},
+                            checkout_excluded_ids={excluded['selection_id']})
+        before = deepcopy(pairs)
+        result = catalog.compatible_tyres(rim['selection_id'], quantity=4, season='summer')
+        self.assertEqual({row['id'] for row in result['items']}, {first['selection_id'], second['selection_id']})
+        self.assertTrue(all(row['purchase_status'] == 'supplier_check_required' for row in result['items']))
+        self.assertEqual(result['scope'], 'rim_width_candidate')
+        self.assertEqual(pairs, before)
+        self.assertIsNotNone(catalog.get(excluded['selection_id'])['price'])
+        self.assertEqual(catalog.page(department='tyres')['items'][-1]['id'], excluded['selection_id'])
+        # When there is no other offer, do not fall back to the known-bad item.
+        only_excluded = catalogue([rim, excluded], compatible_pairs={rim['selection_id']: [pair(rim, excluded)]},
+                                  procurement_ids={excluded['selection_id']},
+                                  checkout_excluded_ids={excluded['selection_id']})
+        self.assertEqual(only_excluded.compatible_tyres(rim['selection_id'])['items'], [])
+
     def test_rsu_only_policy_hides_unbound_imports_and_never_consults_their_cache(self):
         bound, unbound, oil = wheel(), wheel('b'), part()
         bound['quote_public']['source'] = 'RSU'

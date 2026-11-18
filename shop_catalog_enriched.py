@@ -89,7 +89,8 @@ def _face(value):
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
-                 rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None, **kwargs):
+                 rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
+                 checkout_excluded_ids=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         rows = deepcopy(list(products))
@@ -99,6 +100,13 @@ class EnrichedPublicCatalog(PublicCatalog):
             raise CatalogError('invalid_procurement_ids')
         procurement = frozenset(procurement_ids or ())
         self._rsu_only_prices, self._procurement_ids = rsu_only_prices, procurement
+        if (checkout_excluded_ids is not None and
+                (not isinstance(checkout_excluded_ids, (set, frozenset))
+                 or not checkout_excluded_ids <= self._rows.keys())):
+            raise CatalogError('invalid_checkout_excluded_ids')
+        # A known unavailable mandatory document removes checkout eligibility,
+        # not the actual source identity, procurement mapping or merchant price.
+        self._checkout_excluded_ids = frozenset(checkout_excluded_ids or ())
         if (shipping_ready_ids is not None and
                 (not isinstance(shipping_ready_ids, (set, frozenset, list, tuple))
                  or any(not isinstance(i, str) for i in shipping_ready_ids)
@@ -128,7 +136,8 @@ class EnrichedPublicCatalog(PublicCatalog):
             if entry is None:
                 continue
             product = entry['public']
-            product['purchase_status'] = 'supplier_check_required' if identifier in procurement else 'inquiry_only'
+            product['purchase_status'] = ('supplier_check_required'
+                if identifier in procurement and identifier not in self._checkout_excluded_ids else 'inquiry_only')
             product['price_label'] = '' if rsu_only_prices or identifier in procurement else 'Richtpreis'
             product['delivery'] = {'status': 'unknown', 'label': 'Lieferzeit wird bestätigt'}
             if (identifier in procurement and product['category'] in {'alloy_wheel', 'steel_wheel'}):
@@ -242,7 +251,7 @@ class EnrichedPublicCatalog(PublicCatalog):
     def _offer_rank(self, entry, now):
         public = entry['public']
         identifier = public['id']
-        if identifier not in self._procurement_ids:
+        if identifier not in self._procurement_ids or identifier in self._checkout_excluded_ids:
             return 4
         price_rank = super()._offer_rank(entry, now)
         if price_rank == 2:
@@ -337,7 +346,7 @@ class EnrichedPublicCatalog(PublicCatalog):
         current = self._now(None)
         candidates = []
         for tyre_id, canonical_season in self._candidate_tyres.get(identifier, []):
-            if season and canonical_season != season:
+            if tyre_id in self._checkout_excluded_ids or season and canonical_season != season:
                 continue
             candidates.append(self._cached_entry(self._rows[tyre_id]))
         # Prefer actual merchant offers for the requested quantity. Do not pad
