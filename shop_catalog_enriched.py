@@ -86,14 +86,59 @@ def _face(value):
     return result
 
 
+def validated_parts_notices(rows, released_ids, parts_notices):
+    """Validate exact released parts notes without IO or purchase authority.
+
+    The integration also calls this before provisioning or seeding any store.
+    No source/evidence/provider prices enter the returned public prose.
+    """
+    if parts_notices is None:
+        return {}
+    if (not isinstance(parts_notices, Mapping) or len(parts_notices) > 5000
+            or not isinstance(rows, (list, tuple)) or len(rows) > 100000
+            or not isinstance(released_ids, (set, frozenset, list, tuple))
+            or len(released_ids) > 100000 or any(not isinstance(value, str) for value in released_ids)):
+        raise CatalogError('invalid_parts_notices')
+    released = frozenset(released_ids)
+    index = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        identifier = row.get('selection_id', row.get('id'))
+        if isinstance(identifier, str) and identifier in released:
+            if identifier in index:
+                raise CatalogError('invalid_parts_notices')
+            index[identifier] = row
+    result = {}
+    for identifier, record in parts_notices.items():
+        row = index.get(identifier) if isinstance(identifier, str) else None
+        if (row is None or not re.fullmatch(r'parts:[a-f0-9]{24}', identifier)
+                or row.get('department') != 'parts' or row.get('category') not in {'body_part', 'accessory'}
+                or not isinstance(record, Mapping) or set(record) != {'identity_hash', 'notes'}
+                or record.get('identity_hash') != variant_fingerprint(row)
+                or not isinstance(record.get('notes'), list) or not 1 <= len(record['notes']) <= 12):
+            raise CatalogError('invalid_parts_notices')
+        notes = []
+        for note in record['notes']:
+            if not isinstance(note, str) or not 1 <= len(note) <= 2000:
+                raise CatalogError('invalid_parts_notices')
+            value = _text(note, 2000)
+            if not value:
+                raise CatalogError('invalid_parts_notices')
+            notes.append(value)
+        result[identifier] = {'identity_hash': record['identity_hash'], 'notes': notes}
+    return result
+
+
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
                  rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
-                 checkout_excluded_ids=None, **kwargs):
+                 checkout_excluded_ids=None, parts_notices=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         rows = deepcopy(list(products))
+        notices = validated_parts_notices(rows, kwargs.get('released_ids'), parts_notices)
         super().__init__(rows, **kwargs)
         if (procurement_ids is not None and (not isinstance(procurement_ids, (set, frozenset, list, tuple))
                 or any(not isinstance(i, str) for i in procurement_ids))):
@@ -136,6 +181,8 @@ class EnrichedPublicCatalog(PublicCatalog):
             if entry is None:
                 continue
             product = entry['public']
+            if identifier in notices:
+                product['application_notes'] = deepcopy(notices[identifier]['notes'])
             product['purchase_status'] = ('supplier_check_required'
                 if identifier in procurement and identifier not in self._checkout_excluded_ids else 'inquiry_only')
             product['price_label'] = '' if rsu_only_prices or identifier in procurement else 'Richtpreis'

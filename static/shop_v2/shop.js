@@ -759,6 +759,13 @@
       if (product.description) copy.append(el('p', product.description, 'shop-muted'));
       const specs = el('dl', null, 'shop-specs');
       for (const [key, value] of Object.entries(product.specifications || {}).slice(0, 40)) specs.append(el('dt', key), el('dd', value)); copy.append(specs);
+      if (product.department === 'parts' && Array.isArray(product.application_notes) && product.application_notes.length >= 1 && product.application_notes.length <= 12 &&
+          product.application_notes.every(note => typeof note === 'string' && note.length >= 1 && note.length <= 2000)) {
+        const notes = el('section', null, 'shop-application-notes'), list = el('ul');
+        notes.append(el('h3', 'Hinweise zu diesem Ersatzteil'));
+        for (const note of product.application_notes) list.append(el('li', note));
+        notes.append(list); copy.append(notes);
+      }
       const quality = qualityFacts(product);
       if (quality.length) { const labels = el('dl', null, 'shop-specs'); for (const [label, value] of quality) labels.append(el('dt', label), el('dd', value)); copy.append(el('h3', 'EU-Reifenlabel'), labels); }
       const fitment = el('section', null, 'shop-fitment'); fitment.append(el('h3', product.category === 'tyre' ? 'Ihre Reifenauswahl' : product.department === 'parts' ? 'Bestätigte Fahrzeugzuordnung' : 'Gutachten und Fahrzeugzuordnung'));

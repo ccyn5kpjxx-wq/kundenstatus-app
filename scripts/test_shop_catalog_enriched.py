@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from flask import Flask
-from shop_catalog_enriched import EnrichedPublicCatalog
+from shop_catalog_enriched import EnrichedPublicCatalog, validated_parts_notices
 from shop_catalog_public import CatalogError, variant_fingerprint
 from shop_public_api import create_shop_public_blueprint
 from test_shop_catalog_public import NOW, PHOTO, IMAGE, wheel, part
@@ -41,6 +41,67 @@ class EnrichmentChecks(unittest.TestCase):
 
     def tearDown(self):
         self.network.stop()
+
+    def test_application_notes_are_absent_by_default_and_not_taken_from_provider_rows(self):
+        body = part(category='body_part', department='parts', application_notes=['UNREVIEWED_PRIVATE_CANARY'])
+        self.assertEqual(validated_parts_notices([body], [body['id']], None), {})
+        catalog = catalogue([body])
+        self.assertNotIn('application_notes', catalog.get(body['id']))
+        self.assertNotIn('UNREVIEWED_PRIVATE_CANARY', json.dumps(catalog.page()))
+
+    def test_exact_reviewed_parts_notes_project_only_detached_public_text(self):
+        body = part(category='body_part', department='parts')
+        identifier = body['id']
+        notes = {identifier: {'identity_hash': variant_fingerprint(body), 'notes': [
+            'Nur zur Reparatur mit unverändertem ursprünglichem Erscheinungsbild.',
+            'Montage durch geschultes Fachpersonal.']}}
+        rows = [deepcopy(body)]
+        before = deepcopy(notes)
+        clean = validated_parts_notices(rows, [identifier], notes)
+        self.assertEqual(clean, notes)
+        catalog = catalogue(rows, parts_notices=clean)
+        public = catalog.get(identifier)
+        self.assertEqual(public['application_notes'], notes[identifier]['notes'])
+        self.assertEqual(public['fitment']['status'], 'not_confirmed', 'notes cannot approve a vehicle')
+        self.assertEqual(public['purchase_status'], 'inquiry_only')
+        self.assertNotIn('identity_hash', public)
+        self.assertNotIn(variant_fingerprint(body), json.dumps(public))
+        public['application_notes'].clear()
+        clean[identifier]['notes'].clear()
+        self.assertEqual(catalog.get(identifier)['application_notes'], before[identifier]['notes'])
+        self.assertEqual(rows, [body])
+        self.assertEqual(notes, before)
+
+    def test_parts_notes_reject_wrong_identity_unreleased_rows_and_invalid_bounds(self):
+        body, rim = part(category='body_part', department='parts'), wheel()
+        identifier = body['id']
+        record = {'identity_hash': variant_fingerprint(body), 'notes': ['Montage durch Fachpersonal.']}
+        for invalid in (True, [], {identifier: {**record, 'identity_hash': 'f' * 64}},
+                        {identifier: {**record, 'source': 'PRIVATE_SOURCE'}},
+                        {identifier: {**record, 'notes': []}}, {identifier: {**record, 'notes': ['x'] * 13}},
+                        {identifier: {**record, 'notes': ['x' * 2001]}}, {identifier: {**record, 'notes': [None]}},
+                        {identifier: {**record, 'notes': ['<script>private</script>']}},
+                        {rim['selection_id']: {'identity_hash': variant_fingerprint(rim), 'notes': ['x']}}):
+            with self.subTest(invalid=invalid), self.assertRaises(CatalogError):
+                catalogue([body, rim], parts_notices=invalid)
+        with self.assertRaises(CatalogError):
+            catalogue([body], released_ids=[], parts_notices={identifier: record})
+        other = {**body, 'department': 'accessories'}
+        with self.assertRaises(CatalogError):
+            catalogue([other], parts_notices={identifier: {**record, 'identity_hash': variant_fingerprint(other)}})
+
+    def test_parts_notes_strip_html_and_private_fields_without_shortening_exclusions(self):
+        body = part(category='body_part', department='parts')
+        notes = ['<b>Nur Reparatur.</b><script>PRIVATE_SCRIPT_CANARY</script> Kein Umbau.',
+                 '<img src=x onerror=PRIVATE_HTML_CANARY>Montage durch Fachpersonal.', 'x' * 2000]
+        catalog = catalogue([body], parts_notices={body['id']: {
+            'identity_hash': variant_fingerprint(body), 'notes': notes}})
+        public = catalog.get(body['id'])
+        self.assertEqual(public['application_notes'], ['Nur Reparatur. Kein Umbau.', 'Montage durch Fachpersonal.', 'x' * 2000])
+        self.assertEqual(len(public['application_notes'][-1]), 2000)
+        serialized = json.dumps(catalog.page())
+        for canary in ('PRIVATE_SCRIPT_CANARY', 'PRIVATE_HTML_CANARY', '<img', '<b>', 'source_sha256'):
+            self.assertNotIn(canary, serialized)
 
     def test_only_exact_procurement_membership_removes_market_price_label(self):
         a, b = wheel(), wheel('b')
