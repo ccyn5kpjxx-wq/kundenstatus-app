@@ -293,6 +293,25 @@ const puts=f=>f.calls.filter(c=>c.url.endsWith('/buyer/address'));
                     with self.client.get(source) as asset:
                         self.assertEqual(asset.status_code, 200, source)
 
+    def test_home_categories_use_released_same_origin_media_and_link_to_full_configurator(self):
+        self.app.config.update(SHOP_FRONTEND_ENABLED=True, SHOP_MEDIA_ENABLED=True)
+        home = self.client.get('/shop/').get_data(as_text=True)
+        tags = Markup(home).tags
+        tiles = [attrs['href'] for tag, attrs in tags if tag == 'a' and attrs.get('class') == 'shop-category-tile']
+        self.assertEqual(tiles, ['/shop/felgen/', '/shop/reifen/', '/shop/ersatzteile/', '/shop/zubehoer/'])
+        photos = [attrs for tag, attrs in tags if tag == 'img' and attrs['src'].startswith('/shop/media/')]
+        self.assertEqual(len({p['src'] for p in photos}), 4)
+        for photo in photos:
+            self.assertRegex(photo['src'], r'^/shop/media/[a-f0-9]{64}\.(?:jpg|png)$')
+            self.assertEqual((photo['alt'], photo['loading']), ('', 'lazy'))
+        self.assertIn('href="/shop/komplettraeder/">Kompletträder zusammenstellen', home)
+        self.assertIn('href="#produktgruppen"', home)
+        self.assertIn('href="/">Firmenhomepage', home)
+        self.app.config['SHOP_MEDIA_ENABLED'] = False
+        labelled = Markup(self.client.get('/shop/').get_data(as_text=True))
+        self.assertFalse(any(tag == 'img' and attrs['src'].startswith('/shop/media/') for tag, attrs in labelled.tags))
+        self.assertEqual(tiles, [attrs['href'] for tag, attrs in labelled.tags if tag == 'a' and attrs.get('class') == 'shop-category-tile'])
+
     def test_optional_google_measurement_has_only_bounded_external_csp_allowance(self):
         self.app.config['SHOP_FRONTEND_ENABLED'] = True
         response = self.client.get('/shop/felgen/')

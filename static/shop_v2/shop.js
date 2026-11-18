@@ -1479,6 +1479,12 @@
     },
     openProduct,
   });
+  if (body.dataset.page === 'home') {
+    for (const photo of document.querySelectorAll('.shop-category-tile img')) {
+      const source = photo.getAttribute('src');
+      if (!photo.naturalWidth && safeMedia(source)) setImageSource(photo, source);
+    }
+  }
   if (body.dataset.page === 'komplettraeder') {
     const linked = new URLSearchParams(root.location.search).get('artikel');
     if (typeof linked === 'string' && /^(alloy_wheel|steel_wheel):[a-f0-9]{24}$/.test(linked)) openProduct(linked, true);

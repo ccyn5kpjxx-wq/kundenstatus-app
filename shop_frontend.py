@@ -13,14 +13,14 @@ from shop_service_requests import WORKSHOP_SERVICES
 
 
 PAGES = {
-    'home': ('Für Ihren Stil. Für jede Saison.', '', 'felgen.webp',
-             'Reifen, Felgen und Teile. Persönlicher Service bei uns in Mosbach.'),
+    'home': ('Felgen & Reifen.', '', 'felgen.webp',
+             'Stellen Sie Ihre Räder zusammen. Auf Wunsch mit Montage in unserer Werkstatt in Mosbach.'),
     'felgen': ('Felgen', 'wheels', 'felgen.webp',
                'Designs und Ausführungen entdecken. Fahrzeug auswählen und bestätigte Gutachten prüfen.'),
     'reifen': ('Reifen', 'tyres', 'reifen-groessen-hero.png',
                 'Sommer, Winter oder ganzjährig. Ihre Reifengröße steht seitlich auf dem Reifen.'),
-    'komplettraeder': ('Ihr Rad. Ihre Wahl.', 'wheels', 'felgen.webp',
-                       'Mit der Felge beginnen. Reifen und Montage erst nach bestätigtem Abgleich ergänzen.'),
+    'komplettraeder': ('Kompletträder.', 'wheels', 'felgen.webp',
+                       'Felge auswählen, Reifen vergleichen und Montage in Mosbach ergänzen.'),
     'ersatzteile': ('Das passende Teil. Ihr fertiger Plan.', 'parts', 'teile-werkstatt-hero.png',
                     'Karosserieteile und Fahrzeugkomponenten. Wunschlackierung direkt am Artikel auswählen.'),
     'zubehoer': ('Für Ihr Fahrzeug. Für Ihre Werkstatt.', 'accessories', 'teile-werkstatt-hero.png',
@@ -34,6 +34,14 @@ PAGES = {
 }
 NAV = [('felgen', 'Felgen'), ('reifen', 'Reifen'), ('komplettraeder', 'Kompletträder'),
        ('ersatzteile', 'Ersatzteile'), ('zubehoer', 'Zubehör'), ('service', 'Werkstattservice')]
+
+# Editorial category photos from the released shop media catalogue.
+CATEGORY_PHOTOS = {
+    'felgen': 'a17d616282aca5e07599d85f7215a1fba366983c6bb88972d23bfa6fec50049e.png',
+    'reifen': '7d8cd2c44ea9fa06a11b6cd233ee4615b94c17972c853d2d571ddf9106c3c11c.jpg',
+    'ersatzteile': '03cd824eeb5a9f59e9e29d0837bef5f17774d66ce964f9000c93b0e819e739fb.jpg',
+    'zubehoer': '0833c603fa055e0fbe973a3af4e24e448cc058a2b09661ac78289b6c4fbb76b3.jpg',
+}
 
 
 def _link(value):
@@ -139,7 +147,7 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
             token = ''
         values = PAGES.get(key, ('Bestellstatus', '', '', 'Der Status wird ausschließlich vom Server abgerufen.'))
         return render_template('shop_v2/page.html', page_key=key, title=values[0], department=values[1],
-                               hero=values[2], description=values[3], navigation=NAV,
+                               hero=values[2], description=values[3], navigation=NAV, category_photos=CATEGORY_PHOTOS,
                                company_url=company, feature_links=links, csrf_token=token,
                                workshop_services=WORKSHOP_SERVICES if key == 'service' else {},
                                order_id=order_id, return_kind=return_kind,

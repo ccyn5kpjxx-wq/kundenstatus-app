@@ -13,12 +13,14 @@
   <script src="{{ url_for('static', filename='shop_v2/conversions.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/studio.css') }}">{% endif %}
   {% if page_key == 'komplettraeder' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/complete.css') }}">{% endif %}
+  {% set storefront = page_key not in ['felgenstudio', 'order_status'] %}
+  {% if storefront %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/storefront.css') }}">{% endif %}
   <script src="{{ url_for('static', filename='shop_v2/shop.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/rim-families.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}
 </head>
-<body class="modern-shop catalog-page{{ ' wheel-studio' if page_key == 'felgenstudio' else '' }}" data-page="{{ page_key }}" data-department="{{ department }}"
+<body class="modern-shop catalog-page{{ ' shop-storefront' if storefront else '' }}{{ ' wheel-studio' if page_key == 'felgenstudio' else '' }}" data-page="{{ page_key }}" data-department="{{ department }}"
       data-api="/shop/api/v2" data-order-id="{{ order_id }}" data-return-kind="{{ return_kind }}"
       data-measurement-url="{{ '/shop/api/v2/orders/' + order_id + '/measurement' if order_id else '' }}"
       data-complete-url="{{ url_for('shop_frontend.komplettraeder') }}" data-studio-url="{{ feature_links.studio }}"
@@ -31,7 +33,7 @@
       data-buyer-enabled="{{ 'true' if buyer_enabled else 'false' }}" data-quote-enabled="{{ 'true' if quote_enabled else 'false' }}"
       data-order-enabled="{{ 'true' if order_enabled else 'false' }}" data-checkout-enabled="{{ 'true' if checkout_enabled else 'false' }}">
 <a class="skip-link" href="#inhalt">Zum Inhalt</a>
-<div class="modern-utility"><div class="modern-wrap"><span><i aria-hidden="true"></i> Gärtner · Mosbach</span><a href="{{ company_url }}">Zur Firmenhomepage ↗</a></div></div>
+{% if not storefront %}<div class="modern-utility"><div class="modern-wrap"><span><i aria-hidden="true"></i> Gärtner · Mosbach</span><a href="{{ company_url }}">Zur Firmenhomepage ↗</a></div></div>{% endif %}
 <header class="modern-header"><div class="modern-wrap modern-header-inner">
   <a class="modern-brand" href="{{ url_for('shop_frontend.home') }}"><img src="{{ url_for('static', filename='shop_v2/logo.webp') }}" alt="Gärtner Karosserie &amp; Lack" width="154" height="60"></a>
   <nav class="modern-navigation" aria-label="Shop">{% for key, label in navigation %}<a href="{{ url_for('shop_frontend.' + key) }}"{% if key == page_key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
@@ -41,20 +43,42 @@
 {% if hero %}
 <section class="shop-hero{% if page_key == 'home' %} shop-hero-home{% endif %}" aria-labelledby="shop-title">
   <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" alt="{{ 'Beispielreifen mit Größenangabe 205/55 R16 91V' if page_key == 'reifen' else '' }}" fetchpriority="high">
-  <div class="modern-wrap shop-hero-copy"><p class="shop-eyebrow">Gärtner Shop · Mosbach</p><h1 id="shop-title">{{ title }}</h1><p>{{ description }}</p><div class="shop-actions"><a class="shop-button" href="{{ '#sortiment' if page_key != 'service' else '#services' }}">{{ 'Sortiment entdecken' if page_key != 'service' else 'Leistungen ansehen' }} ↗</a>{% if page_key == 'home' %}<a class="shop-button shop-button-outline" href="{{ url_for('shop_frontend.felgen') }}">Felgen entdecken</a>{% elif page_key == 'reifen' %}<a class="shop-button shop-button-outline" href="#reifengroesse">Größe verstehen</a>{% endif %}</div></div>
+  <div class="modern-wrap shop-hero-copy">
+    <p class="shop-eyebrow">Gärtner Shop · Mosbach</p>
+    <h1 id="shop-title">{% if page_key == 'home' %}Felgen <em>&amp;</em> Reifen.{% else %}{{ title }}{% endif %}</h1>
+    <p>{{ description }}</p>
+    <div class="shop-actions">
+      {% if page_key == 'home' %}
+      <a class="shop-button" href="{{ url_for('shop_frontend.komplettraeder') }}">Kompletträder zusammenstellen</a>
+      <a class="shop-button shop-button-outline" href="#produktgruppen">Alle Kategorien</a>
+      {% else %}
+      <a class="shop-button" href="{{ '#services' if page_key == 'service' else '#sortiment' }}">{{ 'Leistungen ansehen' if page_key == 'service' else 'Sortiment entdecken' }} ↗</a>
+      {% if page_key == 'reifen' %}<a class="shop-button shop-button-outline" href="#reifengroesse">Größe verstehen</a>{% endif %}
+      {% endif %}
+    </div>
+  </div>
 </section>
 {% endif %}
 {% if page_key == 'home' %}
-<section class="modern-wrap shop-section"><p class="shop-eyebrow">Das Sortiment</p><h2>Ein guter Auftritt.</h2><div class="shop-category-grid">{% for key, label in navigation if key != 'service' %}<a class="shop-category" href="{{ url_for('shop_frontend.' + key) }}"><span>{{ label }}</span><span aria-hidden="true">↗</span></a>{% endfor %}</div></section>
+<section class="modern-wrap shop-section">
+  <h2 id="produktgruppen">Produktgruppen</h2>
+  <nav class="shop-category-tiles" aria-labelledby="produktgruppen">
+    {% for key, label in navigation if key in category_photos %}
+    <a class="shop-category-tile" href="{{ url_for('shop_frontend.' + key) }}">
+      {% if config.get('SHOP_MEDIA_ENABLED') is sameas true %}<img alt="" src="/shop/media/{{ category_photos[key] }}" width="160" height="140" loading="lazy">{% endif %}
+      <span>{{ label }}</span><i aria-hidden="true">↗</i>
+    </a>
+    {% endfor %}
+  </nav>
+</section>
 {% endif %}
 {% if page_key == 'reifen' %}
 <details class="modern-wrap shop-size-guide" id="reifengroesse"><summary>205/55 R16 91V – was gebe ich ein?</summary><dl><dt>205</dt><dd>Reifenbreite in Millimetern</dd><dt>55</dt><dd>Querschnitt in Prozent der Breite</dd><dt>R16</dt><dd>Radialreifen, 16 Zoll Felgendurchmesser</dd><dt>91V</dt><dd>Tragfähigkeits- und Geschwindigkeitsindex</dd></dl><p>Beispielkennzeichnung. Größe und Freigabe am eigenen Fahrzeug prüfen.</p></details>
 {% endif %}
 {% if page_key in ['home', 'felgen', 'reifen', 'komplettraeder', 'ersatzteile', 'zubehoer'] %}
 <section class="modern-wrap shop-section shop-results" id="sortiment" aria-labelledby="results-heading">
-  <div class="shop-section-heading"><div><p class="shop-eyebrow">Produkte entdecken</p><h2 id="results-heading">{{ 'Unser Sortiment' if page_key == 'home' else title }}</h2></div><a href="{{ url_for('shop_frontend.service') }}">Service in Mosbach ↗</a></div>
+  <div class="shop-section-heading"><div><p class="shop-eyebrow">Produkte entdecken</p><h2 id="results-heading">{{ 'Unser Sortiment' if page_key == 'home' else 'Felge auswählen' if page_key == 'komplettraeder' else title }}</h2></div><a href="{{ url_for('shop_frontend.service') }}">Service in Mosbach ↗</a></div>
   {% if page_key in ['felgen', 'komplettraeder'] and feature_links.studio %}<aside class="shop-feature"><div><p class="shop-eyebrow">Ihr Foto. Ihr Look.</p><h3>Wie steht die Felge Ihrem Auto?</h3><p>Felgen am eigenen Fahrzeug ansehen. Optische Simulation; Fahrzeugfreigabe separat prüfen.</p></div><a class="shop-button" href="{{ feature_links.studio }}">Felgenstudio öffnen ↗</a></aside>{% endif %}
-  {% if page_key == 'komplettraeder' %}<div class="cw-steps" aria-label="So funktioniert die Auswahl"><span>01 Felge ansehen</span><span>02 Passende Reifen suchen</span><span>03 Montage wählen</span><span>04 Gemeinsam in den Warenkorb</span></div>{% endif %}
   {% if department == 'parts' %}<section class="shop-vehicle" id="vehicle-filter"><h3>Das passende Teil für Ihr Fahrzeug.</h3><form id="vehicle-filters" class="shop-filters"><label>Automarke<input name="make" maxlength="80" placeholder="z. B. Audi" autocomplete="off"></label><label>Modell (optional)<input name="model" maxlength="120" placeholder="z. B. A3"></label><label hidden>Baureihe eingrenzen<select id="parts-model-refinement" disabled></select></label><label>Baujahr (optional)<input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><label>oder HSN / TSN<input name="keys" maxlength="20" placeholder="0588 / BHT"></label><button class="shop-button" type="submit">Passende Teile anzeigen</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur bestätigte Fahrzeugzuordnungen. Marke allein zeigt bereits die zugeordneten Artikel; genaue Ausführung vor dem Kauf prüfen.</p></section>{% endif %}
   <form id="catalog-filters" class="shop-filters" role="search"><label>Produktsuche<input type="search" name="q" maxlength="100" placeholder="Marke, Bezeichnung oder Größe"></label><label>Hersteller<input name="brand" maxlength="90" placeholder="z. B. Continental"></label>{% if department == 'tyres' %}<label>Reifenbreite (mm)<input type="number" name="width" inputmode="numeric" min="100" max="455" step="1" placeholder="255"></label><label>Querschnitt (%)<input type="number" name="ratio" inputmode="numeric" min="10" max="100" step="1" placeholder="40"></label><label>Zollgröße<input type="number" name="diameter" inputmode="numeric" min="8" max="30" step="1" placeholder="19"></label>{% elif department == 'wheels' %}<label>Zollgröße<input type="number" name="diameter" inputmode="numeric" min="8" max="30" step="1" placeholder="19"></label>{% endif %}<label>Kategorie<select name="category"><option value="">Alle Kategorien</option>{% if not department or department == 'tyres' %}<option value="tyre">Reifen</option>{% endif %}{% if not department or department == 'wheels' %}<option value="alloy_wheel">Alufelgen</option><option value="steel_wheel">Stahlfelgen</option>{% endif %}{% if not department or department == 'parts' %}<option value="body_part">Karosserieteile</option>{% endif %}{% if not department or department == 'accessories' %}<option value="oil">Motoröl</option><option value="care">Pflege</option><option value="accessory">Zubehör</option>{% endif %}</select></label><button class="shop-button" type="submit">Anzeigen</button></form>
   {% if department == 'wheels' %}<details class="shop-vehicle" id="vehicle-filter"><summary>Nach Fahrzeug und bestätigtem Gutachten filtern</summary><form id="vehicle-filters" class="shop-filters"><label>HSN<input name="hsn" pattern="[0-9]{4}" maxlength="4" placeholder="0588"></label><label>TSN<input name="tsn" pattern="[A-Za-z0-9]{3}" maxlength="3" placeholder="BHT"></label><span class="shop-filter-or">oder</span><label>Marke<input name="make" maxlength="80" placeholder="Audi"></label><label>Modell<input name="model" maxlength="120" placeholder="A3"></label><label>Baujahr<input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><button class="shop-button" type="submit">Fahrzeug anwenden</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur einzeln geprüfte Zuordnungen werden angezeigt. Auflagen und die konkrete Ausführung im Gutachten beachten.</p></details>{% endif %}
