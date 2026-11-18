@@ -146,10 +146,19 @@ def validated_inquiry_prices(rows, released_ids, procurement_ids, values):
                 or row.get('department') != 'parts' or row.get('category') not in {'body_part', 'accessory'}
                 or not isinstance(value, Mapping) or set(value) != {'identity_hash', 'price'}
                 or value['identity_hash'] != variant_fingerprint(row)
-                or not isinstance(value['price'], Mapping)
-                or value['price'].get('kind') != 'merchant_pricebook' or value['price'].get('source') != 'RSU'):
+                or not isinstance(value['price'], Mapping)):
             raise CatalogError('invalid_inquiry_prices')
-        quote = _quote({'category': row['category'], 'quote_public': value['price']}, allow_published_prices=True)
+        price = value['price']
+        if price.get('kind') == 'partner_inquiry_pricebook' and price.get('source') == 'ALZURA':
+            from shop_parts_partner_inquiry import normalize_partner_inquiry_price
+            try:
+                quote = normalize_partner_inquiry_price(price)
+            except ValueError:
+                raise CatalogError('invalid_inquiry_prices') from None
+        elif price.get('kind') == 'merchant_pricebook' and price.get('source') == 'RSU':
+            quote = _quote({'category': row['category'], 'quote_public': price}, allow_published_prices=True)
+        else:
+            raise CatalogError('invalid_inquiry_prices')
         if quote is None:
             raise CatalogError('invalid_inquiry_prices')
         # Keep this detached projection valid across the bootstrap preflight

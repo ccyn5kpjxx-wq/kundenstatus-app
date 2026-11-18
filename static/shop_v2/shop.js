@@ -18,7 +18,10 @@
         !Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity(product.id || '') ||
         !Number.isSafeInteger(p.stock_reported) || p.stock_reported < 0) return null;
     const observed = Date.parse(p.observed_at), expires = Date.parse(p.expires_at);
-    const published = p.kind === 'merchant_pricebook' && p.source === 'RSU';
+    const partnerInquiry = p.kind === 'partner_inquiry_pricebook' && p.source === 'ALZURA';
+    if (partnerInquiry && (!inquiryOnly(product) || !product.id.startsWith('parts:') || product.department !== 'parts' ||
+        !['body_part', 'accessory'].includes(product.category))) return null;
+    const published = p.kind === 'merchant_pricebook' && p.source === 'RSU' || partnerInquiry;
     if (!Number.isFinite(observed) || !Number.isFinite(expires) || observed > now || expires <= now || expires - observed > (published ? 604800000 : 900000) || expires <= observed) return null;
     const line = p.prices_by_quantity && p.prices_by_quantity[String(quantity)];
     if (!line || line.quantity !== quantity || !Number.isSafeInteger(line.unit_gross_cent) || line.unit_gross_cent < 1 || line.unit_gross_cent > 10000000 ||
@@ -33,7 +36,9 @@
   function displayPrice(product, quantity, now = Date.now()) {
     if (!inquiryOnly(product)) return quotedPrice(product, quantity, now);
     const p = product.price;
-    if (!p || p.kind !== 'merchant_pricebook' || p.source !== 'RSU') return null;
+    if (!p || !(p.kind === 'merchant_pricebook' && p.source === 'RSU' ||
+        p.kind === 'partner_inquiry_pricebook' && p.source === 'ALZURA' && product.department === 'parts' &&
+        typeof product.id === 'string' && product.id.startsWith('parts:') && ['body_part', 'accessory'].includes(product.category))) return null;
     const observed = Date.parse(p.observed_at), reviewed = Date.parse(p.review_at), stockObserved = Date.parse(p.stock_observed_at), stockExpires = Date.parse(p.stock_expires_at);
     if (![observed, reviewed, stockObserved, stockExpires].every(Number.isFinite) || reviewed !== observed + 432000000 ||
         stockObserved < observed || stockObserved > now || stockObserved >= stockExpires || stockExpires - stockObserved > 900000) return null;

@@ -121,8 +121,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
     Checkout is deliberately not inferred from a catalogue or provider login.
     Until its required frozen legal/delivery/payment/workflow configuration is
     fully supplied, this release serves real catalogue browsing and quotes only.
-    Prices are RSU-only. provider_factory remains accepted for call compatibility
-    but is never invoked; ALZURA supplies released product/media data only.
+    Purchasable prices are RSU-only. Separately approved original ALZURA parts
+    prices can be shown for inquiries without procurement or payment authority.
+    provider_factory remains accepted for compatibility but is never invoked.
     """
     env = os.environ if environ is None else environ
     app = portal.app
@@ -152,10 +153,17 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         from shop_nominal_overlay import load_nominal_tyre_overlay, unavailable_document_product_ids
         bundle = load_nominal_tyre_overlay(root, descriptor.get('nominal_tyre_overlay'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'])
+        from shop_rim_width_extension import load_rim_width_extension
+        bundle = load_rim_width_extension(root, descriptor.get('rim_width_extension'), bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'])
         from shop_document_overlay import local_product_document_resources
         document_resources = local_product_document_resources(root, descriptor.get('local_product_documents'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'],
             overlay_sha256=(descriptor.get('nominal_tyre_overlay') or {}).get('sha256'))
+        from shop_width_document_overlay import local_rim_width_document_resources
+        document_resources = local_rim_width_document_resources(root, descriptor.get('rim_width_documents'),
+            bundle, document_resources, base_bundle_sha256=descriptor['bundle']['sha256'],
+            extension_sha256=(descriptor.get('rim_width_extension') or {}).get('sha256'))
         from shop_parts_release import load_parts_release
         parts_record = descriptor.get('parts_direct_sales')
         if parts_record is not None and not _parts_api_channel_supported():
@@ -203,6 +211,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             raise ProductionError('rsu_parts_api_not_supported')
         procurement_ids = set(bindings)
         inquiry_prices = {}
+        partner_inquiry_count = 0
         inquiry_record = descriptor.get('parts_inquiry_prices')
         if inquiry_record is not None:
             if descriptor.get('parts_inquiry_prices_approved') is not True:
@@ -215,6 +224,24 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 base_bundle_sha256=descriptor['bundle']['sha256'], allowed_ids=allowed_inquiries)
             inquiry_prices = validated_inquiry_prices(rows, released_ids, procurement_ids,
                 {identifier: inquiry_source.get(identifier) for identifier in inquiry_source.ids})
+        partner_record = descriptor.get('parts_partner_inquiry_prices')
+        if partner_record is not None:
+            if descriptor.get('parts_partner_inquiry_prices_approved') is not True:
+                raise ProductionError('partner_inquiry_prices_not_approved')
+            from shop_parts_partner_inquiry import load_parts_partner_prices
+            from shop_catalog_enriched import validated_inquiry_prices
+            allowed_partner_ids = {identifier for identifier in released_ids - procurement_ids - inquiry_prices.keys()
+                if identifier in identities and identities[identifier]['category'] in {'body_part', 'accessory'}}
+            partner_source = load_parts_partner_prices(root, partner_record, bundle,
+                base_bundle_sha256=descriptor['bundle']['sha256'], allowed_ids=allowed_partner_ids)
+            partner_prices = validated_inquiry_prices(rows, released_ids, procurement_ids,
+                {identifier: partner_source.get(identifier) for identifier in partner_source.ids})
+            # Supplier-verified RSU display prices retain precedence. This
+            # separate partner source cannot seed or widen procurement scope.
+            if partner_prices.keys() & inquiry_prices.keys():
+                raise ProductionError('partner_inquiry_scope_conflict')
+            partner_inquiry_count = len(partner_prices)
+            inquiry_prices.update(partner_prices)
         supplier_config, supplier, rsu_cache = None, None, None
         rsu_reads_approved = descriptor.get('rsu_reads_approved') is True
         if descriptor.get('buyer_and_quotes_enabled') is True and not rsu_reads_approved:
@@ -330,6 +357,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                     'purchasing_enabled': False}
         if inquiry_record is not None:
             adapters['inquiry_price_count'] = len(inquiry_prices)
+        if partner_record is not None:
+            adapters['partner_inquiry_price_count'] = partner_inquiry_count
         adapters['complete_wheel_review_requested'] = descriptor.get('complete_wheel_checkout_approved') is True
         if supplier is not None:
             adapters['supplier_quotes'] = supplier

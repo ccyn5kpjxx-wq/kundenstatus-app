@@ -422,6 +422,24 @@ for(const delta of [{source:'ALZURA'},{kind:'supplier_quote'},{currency:'USD'},{
  {prices_by_quantity:{'4':{quantity:4,unit_gross_cent:12000,items_gross_cent:1}}}])
  assert.equal(logic.displayPrice({...pricedInquiry,price:{...pricedInquiry.price,...delta}},4,now),null);
 assert.equal(logic.displayPrice({...product,purchase_status:'inquiry_only'},4,now),null,'raw short supplier quotes cannot be used as retained inquiry prices');
+const partnerId='parts:'+'c'.repeat(24), partnerInquiry={...pricedInquiry,id:partnerId,category:'body_part',department:'parts',
+ price:{...pricedInquiry.price,kind:'partner_inquiry_pricebook',source:'ALZURA',stock_current:false}};
+const partnerBefore=JSON.stringify(partnerInquiry);
+assert.equal(logic.displayPrice(partnerInquiry,4,now).total,48000);
+assert.equal(logic.displayPrice(partnerInquiry,4,now).stockCurrent,false);
+assert.equal(logic.currentPrice(partnerInquiry,4,now),null);
+assert.equal(logic.quotedPrice(partnerInquiry,4,now),null);
+const partnerRows=[{product:partnerInquiry,selection:{id:partnerId,quantity:4,services:{}}}];
+assert.equal(logic.cartSourceReady(partnerRows),false);
+assert.equal(logic.cartPurchaseFlow(partnerRows,true),'inquiry');
+for(const delta of [{purchase_status:'supplier_check_required'},{department:'accessories'},{id:null},{category:'tyre'},{id,category:'tyre',department:'tyres'}]){
+ assert.equal(logic.displayPrice({...partnerInquiry,...delta},4,now),null);
+ assert.equal(logic.currentPrice({...partnerInquiry,...delta},4,now),null);
+}
+for(const delta of [{source:'RSU'},{currency:'USD'},{vat_percent:'7.00'},
+ {review_at:'2026-11-21T12:00:00Z'},{expires_at:'2026-11-23T12:00:00Z'}])
+ assert.equal(logic.displayPrice({...partnerInquiry,price:{...partnerInquiry.price,...delta}},4,now),null);
+assert.equal(JSON.stringify(partnerInquiry),partnerBefore);
 assert.equal(logic.currentPrice(product,4,Date.parse('2026-11-17T12:10:00Z')),null);
 assert.equal(logic.currentPrice({...product,price_status:'update_required'},1,now),null);
 assert.equal(logic.currentPrice({...product,price:{...product.price,currency:'USD'}},1,now),null);
