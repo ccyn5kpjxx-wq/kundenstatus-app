@@ -452,9 +452,22 @@ def create_shop_buyer_blueprint(buyer):
             # Keep legacy contexts readable by all old workers until every
             # service has the compatible validator and the flag is activated.
             raise BuyerError('invalid_address')
-        if (isinstance(payload, dict) and 'vehicle_ref' in payload
-                and current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is not True):
-            raise BuyerError('invalid_address')
+        if isinstance(payload, dict) and 'vehicle_ref' in payload:
+            value = payload['vehicle_ref']
+            wheels = current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True
+            parts = current_app.config.get('SHOP_PARTS_DIRECT_ENABLED') is True
+            # One saved field serves both flows. A parts reference must be an
+            # exact current registry choice, independently of complete wheels;
+            # freeform wheel descriptions cannot become a parts fitment proof.
+            canonical = isinstance(value, str) and value.strip().casefold().startswith('alzura-vehicle:')
+            if canonical or parts and not wheels:
+                from shop_frontend import _parts_vehicle_options
+                allowed = {row['vehicle_ref'] for row in _parts_vehicle_options(
+                    current_app.config.get('SHOP_PARTS_VEHICLE_OPTIONS'))} if parts else set()
+                if value != '' and (not isinstance(value, str) or value not in allowed):
+                    raise BuyerError('invalid_address')
+            elif not wheels:
+                raise BuyerError('invalid_address')
         return reply(buyer.save_address(request, payload))
 
     @bp.delete('/session')

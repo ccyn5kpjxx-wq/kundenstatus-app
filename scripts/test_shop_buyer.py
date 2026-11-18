@@ -116,6 +116,53 @@ class BuyerChecks(unittest.TestCase):
         self.assertEqual(self.save(csrf).status_code, 200)
         self.assertNotIn('delivery_mainland', self.establish().get_json())
 
+    def test_parts_vehicle_selection_does_not_require_complete_wheel_activation(self):
+        vehicle = {'vehicle_ref': 'alzura-vehicle:120604', 'car_id': 120604,
+                   'manufacturer_id': 5, 'model_id': 10253, 'make': 'Audi', 'model': 'A3 (8V1, 8VK)',
+                   'engine': '1.0 TFSI', 'engine_codes': ['CHZD'], 'date_from_yyyymm': 201607,
+                   'date_to_yyyymm': 201712, 'hsn_tsn': ['0588BHT'], 'power_kw_from': 85, 'power_kw_to': 85}
+        self.app.config.update(SHOP_PARTS_DIRECT_ENABLED=True, SHOP_PARTS_VEHICLE_OPTIONS=[vehicle],
+                               SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED=False)
+        csrf = self.establish().get_json()['csrf_token']
+        payload = {**deepcopy(PAYLOAD), 'vehicle_ref': vehicle['vehicle_ref']}
+        response = self.save(csrf, payload)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.establish().get_json()['vehicle_ref'], vehicle['vehicle_ref'])
+        self.assertEqual(self.callback(csrf).get_json()['context']['vehicle_ref'], vehicle['vehicle_ref'])
+        # The generic accessories flow can clear a former parts selection.
+        self.assertEqual(self.save(csrf, {**payload, 'vehicle_ref': ''}).status_code, 200)
+        self.assertEqual(self.establish().get_json()['vehicle_ref'], '')
+        for wheels in (False, True):
+            self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = wheels
+            for ref in ('alzura-vehicle:999999', 'alzura-vehicle:0120604', 'ALZURA-VEHICLE:120604',
+                        'alzura-vehicle:120604 ', ' alzura-vehicle:999999', 'alzura-vehicle:120604\n', None, True, {}):
+                with self.subTest(wheels=wheels, ref=ref):
+                    response = self.save(csrf, {**payload, 'vehicle_ref': ref})
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(self.establish().get_json()['vehicle_ref'], '')
+        self.app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = False
+        self.assertEqual(self.save(csrf, {**payload, 'vehicle_ref': 'Audi'}).status_code, 400)
+
+    def test_parts_vehicle_reference_needs_literal_flag_and_valid_current_registry(self):
+        vehicle = {'vehicle_ref': 'alzura-vehicle:120604', 'car_id': 120604,
+                   'manufacturer_id': 5, 'model_id': 10253, 'make': 'Audi', 'model': 'A3',
+                   'engine': '1.0 TFSI', 'engine_codes': ['CHZD'], 'date_from_yyyymm': 201607,
+                   'date_to_yyyymm': 201712, 'hsn_tsn': ['0588BHT'], 'power_kw_from': 85, 'power_kw_to': 85}
+        self.app.config.update(SHOP_PARTS_VEHICLE_OPTIONS=[vehicle], SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED=True)
+        csrf = self.establish().get_json()['csrf_token']
+        payload = {**deepcopy(PAYLOAD), 'vehicle_ref': vehicle['vehicle_ref']}
+        for flag in (None, False, 1, 'true'):
+            self.app.config['SHOP_PARTS_DIRECT_ENABLED'] = flag
+            self.assertEqual(self.save(csrf, payload).status_code, 400)
+            self.assertFalse(self.establish().get_json()['address_ready'])
+        self.app.config['SHOP_PARTS_DIRECT_ENABLED'] = True
+        for invalid in ([], None, [vehicle, vehicle], [{**vehicle, 'car_id': 100043}],
+                        [{**vehicle, 'date_from_yyyymm': 201613}], [{**vehicle, 'engine': 'bad\nengine'}]):
+            self.app.config['SHOP_PARTS_VEHICLE_OPTIONS'] = invalid
+            self.assertEqual(self.save(csrf, payload).status_code, 400)
+        # The wheel flow remains freeform, independent of the parts registry.
+        self.assertEqual(self.save(csrf, {**payload, 'vehicle_ref': 'BMW 3er 2020 / 0005 ABC'}).status_code, 200)
+
     def test_saved_mainland_declaration_requires_csrf_and_is_bound_to_exact_address(self):
         from shop_freight import _hash
         self.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = True
