@@ -14,12 +14,12 @@ class Node {
   close() { this.open = false; }
 }
 const walk = node => [node, ...node.children.flatMap(child => typeof child === 'object' ? walk(child) : [])];
-async function render(notes, department = 'parts') {
+async function render(notes, department = 'parts', price = null) {
   const nodes = Object.fromEntries(['close-product', 'product-dialog', 'product-detail', 'shop-announcement'].map(key => [key, new Node()]));
   const body = new Node('body'); body.dataset = {api:'/shop/api/v2', page:'ersatzteile'};
   const product = {id:ID,category:'accessory',department,name:'SYNTHETIC PART',size:'',images:[],
     description:'SYNTHETIC DESCRIPTION',specifications:{Ausführung:'SYNTHETIC SPEC'},purchase_status:'inquiry_only',
-    application_notes:notes,fitment:{status:'not_confirmed',vehicles:[],reports:[]}};
+    application_notes:notes,price,price_status:price?'current':'not_offered',fitment:{status:'not_confirmed',vehicles:[],reports:[]}};
   const calls = [], window = {document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key] || null,
     querySelector:()=>({content:''}),querySelectorAll:()=>[]},localStorage:{getItem:()=>null},
     location:{pathname:'/shop/ersatzteile/'},setTimeout(){},clearTimeout(){},setInterval(){},
@@ -44,6 +44,18 @@ async function render(notes, department = 'parts') {
     assert.equal(value.all.some(node => node.className === 'shop-application-notes'), false);
   }
   assert.equal((await render(['Not a vehicle-parts notice'], 'accessories')).all.some(node => node.className === 'shop-application-notes'), false);
+  const now=Date.now(),observed=now-3600000,stockObserved=observed;
+  const price={source:'RSU',kind:'merchant_pricebook',currency:'EUR',vat_percent:'19.00',stock_reported:20,
+    observed_at:new Date(observed).toISOString(),review_at:new Date(observed+432000000).toISOString(),
+    expires_at:new Date(observed+604800000).toISOString(),stock_observed_at:new Date(stockObserved).toISOString(),
+    stock_expires_at:new Date(stockObserved+900000).toISOString(),prices_by_quantity:{'1':{quantity:1,unit_gross_cent:1155,items_gross_cent:1155}}};
+  const inquiry=await render([], 'parts',price),inquiryText=inquiry.all.map(node=>node.textContent).join(' ');
+  assert.match(inquiryText,/11,55\s*€/);assert.match(inquiryText,/Nur auf Anfrage/);assert.match(inquiryText,/Preis und Lieferbarkeit bestätigen/);
+  assert.ok(inquiry.all.some(node=>node.tagName==='BUTTON'&&node.textContent==='Zur Anfrage hinzufügen'));
+  assert.equal(inquiry.all.some(node=>node.className==='shop-stock'),false,'no current availability is inferred from a retained price');
+  assert.ok(inquiry.calls.every(call=>!call.options.method||call.options.method==='GET'),'no quote/payment/order request for a priced inquiry modal');
+  const rejected=await render([], 'parts',{...price,source:'ALZURA'});
+  assert.equal(rejected.all.some(node=>/11,55/.test(node.textContent)),false);
   assert.ok(visible.calls.every(call => !call.options.method || call.options.method === 'GET'));
   console.log('Parts application-notes modal checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

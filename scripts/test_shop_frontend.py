@@ -400,6 +400,28 @@ assert.equal(logic.currentPrice({...published,price:{...published.price,kind:'su
 assert.equal(logic.currentPrice({...published,price:{...published.price,expires_at:'2026-11-23T12:00:00Z'}},4,now),null);
 assert.equal(logic.quotedPrice({...product,purchase_status:'inquiry_only'},4,now),null);
 assert.equal(logic.currentPrice({...product,purchase_status:'inquiry_only'},4,now),null);
+const pricedInquiry={...published,purchase_status:'inquiry_only',price:{...published.price,review_at:'2026-11-20T12:00:00Z'}};
+const inquiryBefore=JSON.stringify(pricedInquiry);
+assert.equal(logic.displayPrice(pricedInquiry,4,now).unit,12000);
+assert.equal(logic.displayPrice(pricedInquiry,4,now).total,48000);
+assert.equal(logic.displayPrice(pricedInquiry,4,now).stockCurrent,false);
+assert.equal(logic.displayPrice(pricedInquiry,4,now).displayOnly,true);
+assert.equal(logic.currentPrice(pricedInquiry,4,now),null);
+assert.equal(logic.quotedPrice(pricedInquiry,4,now),null);
+const inquiryRows=[{product:pricedInquiry,selection:{id,quantity:4,services:{}}}];
+assert.equal(logic.cartOfferReady(inquiryRows),true,'the existing inquiry request remains available');
+assert.equal(logic.cartSourceReady(inquiryRows),false);
+assert.equal(logic.cartPurchaseFlow(inquiryRows,true),'inquiry');
+assert.equal(JSON.stringify(pricedInquiry),inquiryBefore,'display path cannot change eligibility or the original price object');
+for(const delta of [{source:'ALZURA'},{kind:'supplier_quote'},{currency:'USD'},{vat_percent:'7.00'},
+ {review_at:'2026-11-21T12:00:00Z'},{stock_observed_at:'2026-11-18T12:00:00Z'},
+ {stock_expires_at:'2026-11-15T12:16:00Z'},
+ {prices_by_quantity:{'4':{quantity:4,unit_gross_cent:'12000',items_gross_cent:48000}}},
+ {prices_by_quantity:{'4':{quantity:4,unit_gross_cent:-1,items_gross_cent:-4}}},
+ {prices_by_quantity:{'4':{quantity:4,unit_gross_cent:NaN,items_gross_cent:NaN}}},
+ {prices_by_quantity:{'4':{quantity:4,unit_gross_cent:12000,items_gross_cent:1}}}])
+ assert.equal(logic.displayPrice({...pricedInquiry,price:{...pricedInquiry.price,...delta}},4,now),null);
+assert.equal(logic.displayPrice({...product,purchase_status:'inquiry_only'},4,now),null,'raw short supplier quotes cannot be used as retained inquiry prices');
 assert.equal(logic.currentPrice(product,4,Date.parse('2026-11-17T12:10:00Z')),null);
 assert.equal(logic.currentPrice({...product,price_status:'update_required'},1,now),null);
 assert.equal(logic.currentPrice({...product,price:{...product.price,currency:'USD'}},1,now),null);

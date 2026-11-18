@@ -12,9 +12,9 @@
   const modelPhotoNote = product => product && ['alloy_wheel', 'steel_wheel'].includes(product.category) && product.image_note === MODEL_PHOTO_NOTE ? MODEL_PHOTO_NOTE : '';
   const money = n => Number.isSafeInteger(n) && n >= 0 ? new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'}).format(n / 100) : 'Wird geprüft';
   const maxQuantity = id => id.startsWith('parts:') ? 20 : 4;
-  function quotedPrice(product, quantity, now = Date.now()) {
+  function projectedPrice(product, quantity, now) {
     const p = product && product.price;
-    if (inquiryOnly(product) || !p || typeof product.id !== 'string' || !PRODUCT.test(product.id) || product.price_status !== 'current' || p.currency !== 'EUR' || p.vat_percent !== '19.00' ||
+    if (!p || typeof product.id !== 'string' || !PRODUCT.test(product.id) || product.price_status !== 'current' || p.currency !== 'EUR' || p.vat_percent !== '19.00' ||
         !Number.isInteger(quantity) || quantity < 1 || quantity > maxQuantity(product.id || '') ||
         !Number.isSafeInteger(p.stock_reported) || p.stock_reported < 0) return null;
     const observed = Date.parse(p.observed_at), expires = Date.parse(p.expires_at);
@@ -26,6 +26,21 @@
     const stockExpires = Date.parse(p.stock_expires_at);
     return {unit: line.unit_gross_cent, total: line.items_gross_cent, stock: p.stock_reported, expires,
       stockCurrent: !published || Number.isFinite(stockExpires) && stockExpires > now};
+  }
+  function quotedPrice(product, quantity, now = Date.now()) {
+    return inquiryOnly(product) ? null : projectedPrice(product, quantity, now);
+  }
+  function displayPrice(product, quantity, now = Date.now()) {
+    if (!inquiryOnly(product)) return quotedPrice(product, quantity, now);
+    const p = product.price;
+    if (!p || p.kind !== 'merchant_pricebook' || p.source !== 'RSU') return null;
+    const observed = Date.parse(p.observed_at), reviewed = Date.parse(p.review_at), stockObserved = Date.parse(p.stock_observed_at), stockExpires = Date.parse(p.stock_expires_at);
+    if (![observed, reviewed, stockObserved, stockExpires].every(Number.isFinite) || reviewed !== observed + 432000000 ||
+        stockObserved < observed || stockObserved > now || stockObserved >= stockExpires || stockExpires - stockObserved > 900000) return null;
+    const price = projectedPrice(product, quantity, now);
+    // Retained retail information only. No current stock, quote, procurement
+    // permission or checkout readiness follows from displaying this number.
+    return price ? {...price, stockCurrent: false, displayOnly: true} : null;
   }
   function currentPrice(product, quantity, now = Date.now()) {
     const price = quotedPrice(product, quantity, now);
@@ -264,7 +279,7 @@
       return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|g\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
     } catch (_) { return false; }
   }
-  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsPartsVehicle, partsVehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
+  const logic = {currentPrice, quotedPrice, displayPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsPartsVehicle, partsVehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
@@ -314,9 +329,17 @@
     return 'Die Angaben können gerade nicht sicher geprüft werden. Bitte später erneut versuchen.';
   }
   function updatePrice(node, product, quantity) {
-    const price = quotedPrice(product, quantity), inquiry = inquiryOnly(product);
+    const price = displayPrice(product, quantity), inquiry = inquiryOnly(product);
     node.replaceChildren();
-    if (inquiry) { node.append(el('strong', 'Preis und Lieferbarkeit auf Anfrage'), el('small', 'Zur lokalen Anfrage hinzufügen. Ein Gesamtangebot wird vor einer Bezahlung bestätigt.')); appendTyreDocuments(node, product); return; }
+    if (inquiry) {
+      if (price) {
+        node.append(el('strong', money(price.unit)), el('small', 'pro ' + (product.unit_label || 'Stück') + ' · inkl. 19 % MwSt.'));
+        if (quantity > 1) node.append(el('small', quantity + ' ×: ' + money(price.total)));
+        node.append(el('small', 'Preisstand: ' + new Intl.DateTimeFormat('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'}).format(Date.parse(product.price.observed_at))));
+      } else node.append(el('strong', 'Preis und Lieferbarkeit auf Anfrage'));
+      node.append(el('small', 'Nur auf Anfrage. Preis und Lieferbarkeit bestätigen wir im Angebot. Keine direkte Bestellung oder Zahlung.'));
+      appendTyreDocuments(node, product); return;
+    }
     if (!price) { node.append(el('strong', 'Preis wird aktualisiert'), el('small', 'Preis oder Verfügbarkeit für diese Menge noch nicht bestätigt.')); appendTyreDocuments(node, product); return; }
     node.append(el('strong', money(price.unit)), el('small', 'pro ' + (product.unit_label || 'Stück') + ' · inkl. 19 % MwSt.'));
     if (quantity > 1) node.append(el('small', quantity + ' Stück: ' + money(price.total)));
