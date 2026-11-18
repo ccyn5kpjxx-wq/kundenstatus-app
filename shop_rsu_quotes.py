@@ -78,6 +78,13 @@ def _binding(identifier, value):
             raise ValueError()
         candidate = value["mapping"]
         proof = candidate["evidence"]
+        from shop_rsu_parts_evidence import RULE as PARTS_RULE, validate_parts_mapping
+        if isinstance(proof, Mapping) and proof.get('rule') == PARTS_RULE:
+            supplier = validate_parts_mapping(candidate, product_id=identifier,
+                category=value['category'], expected_ean=value['expected_ean'], identity_hash=value['identity_hash'])
+            safe = {'product_id': identifier, 'identity_hash': value['identity_hash'],
+                    'category': value['category'], **supplier}
+            return {**safe, 'evidence_id': _hash(safe)}
         from shop_rsu_rim_evidence import RULES, validate_expansion_mapping
         if isinstance(proof, Mapping) and proof.get('rule') in RULES:
             supplier = validate_expansion_mapping(candidate, product_id=identifier,
