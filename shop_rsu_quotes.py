@@ -30,6 +30,7 @@ TTL = timedelta(minutes=15)
 FAILURE_COOLDOWN = timedelta(seconds=30)
 MAX_BINDINGS = 100_000
 MAX_CACHE_ENTRIES = 256
+MAX_RETAINED_INQUIRIES = 1024
 _PRODUCT_CATEGORIES = {"tyre", "alloy_wheel", "steel_wheel", "body_part", "oil", "care", "accessory"}
 
 
@@ -203,6 +204,9 @@ class RSUQuoteProvider:
         self._policy, self._inquiry = policy, inquiry
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._cache, self._lock, self._limit = OrderedDict(), threading.RLock(), max_cache_entries
+        # Private original observations only; never populated from a published
+        # merchant price or a browser value and never exposed by retail_quote.
+        self._retained_inquiries, self._retained_limit = OrderedDict(), MAX_RETAINED_INQUIRIES
 
     def __repr__(self):
         return "<RSUQuoteProvider approved_bindings=private Inquiry_GET_only>"
@@ -248,12 +252,7 @@ class RSUQuoteProvider:
                 'supplier':'RSU','evidence_id':value['evidence_id'],'geometry':deepcopy(dict(geometry)),
                 'model_photo_only':value.get('model_photo_only') is True}
 
-    def fresh_inquiry(self, item, exact_quantity):
-        """New private GET for an already frozen supplier position; no cache.
-
-        This method is deliberately separate from public display prices. It
-        returns the net amount only to the internal procurement saga.
-        """
+    def _frozen_binding(self, item, exact_quantity):
         if (not isinstance(item, Mapping) or not isinstance(item.get('id'), str)
                 or type(exact_quantity) is not int or not 1 <= exact_quantity <= 20):
             return None
@@ -264,25 +263,73 @@ class RSUQuoteProvider:
                 or mapping.get('supplier_article_id') != binding['supplier_article_id']
                 or self._policy.currency != 'EUR' or self._policy.net_unit_price_confirmed is not True):
             return None
-        try:
-            before = _stamp(self._clock())
-            value = self._inquiry.inquire(binding['supplier_article_id'], exact_quantity)
-            now = _stamp(self._clock())
-            observed = _stamp(value.retrieved_at)
-            if (not isinstance(value, ArticleInquiry) or value.article_id != binding['supplier_article_id']
-                    or type(value.amount) is not int or value.amount != exact_quantity or value.ean != binding['expected_ean']
-                    or value.configured_mode != self._policy.mode or not isinstance(value.price, Decimal)
-                    or not Decimal('0') < value.price <= Decimal('100000')
-                    or type(value.stock) is not int or not exact_quantity <= value.stock <= 1_000_000_000
-                    or not before <= observed <= now < observed + TTL):
-                return None
-            return {'confirmed': True, 'product_id': binding['product_id'], 'identity_hash': binding['identity_hash'],
-                    'supplier_article_id': binding['supplier_article_id'], 'mapping_evidence_id': binding['evidence_id'],
-                    'expected_ean': binding['expected_ean'], 'ean': value.ean, 'quantity': exact_quantity,
-                    'unit_net': format(value.price, 'f'), 'currency': 'EUR', 'mode': self._policy.mode,
-                    'stock': value.stock, 'observed_at': observed.isoformat(), 'expires_at': (observed + TTL).isoformat()}
-        except Exception:
+        return binding
+
+    def _retain_inquiry(self, binding, value, observed):
+        key = (binding['evidence_id'], value.amount)
+        if not Decimal('0') < value.price <= Decimal('100000'):
+            self._retained_inquiries.pop(key, None)
             return None
+        result = {'confirmed': True, 'product_id': binding['product_id'], 'identity_hash': binding['identity_hash'],
+                  'supplier_article_id': binding['supplier_article_id'], 'mapping_evidence_id': binding['evidence_id'],
+                  'expected_ean': binding['expected_ean'], 'ean': value.ean, 'quantity': value.amount,
+                  'unit_net': format(value.price, 'f'), 'currency': 'EUR', 'mode': self._policy.mode,
+                  'stock': value.stock, 'observed_at': observed.isoformat(), 'expires_at': (observed + TTL).isoformat()}
+        self._retained_inquiries[key] = deepcopy(result)
+        self._retained_inquiries.move_to_end(key)
+        while len(self._retained_inquiries) > self._retained_limit:
+            self._retained_inquiries.popitem(last=False)
+        return result
+
+    def retained_inquiry(self, item, exact_quantity):
+        """Cache-only private observation; no HTTP and no timestamp rebasing."""
+        binding = self._frozen_binding(item, exact_quantity)
+        if binding is None:
+            return None
+        key = (binding['evidence_id'], exact_quantity)
+        with self._lock:
+            result = self._retained_inquiries.get(key)
+            if result is None:
+                return None
+            try:
+                now = _stamp(self._clock())
+                observed = _stamp(datetime.fromisoformat(result['observed_at']))
+                expiry = _stamp(datetime.fromisoformat(result['expires_at']))
+                if not observed <= now < expiry or not timedelta(0) < expiry - observed <= TTL:
+                    raise ValueError()
+                self._retained_inquiries.move_to_end(key)
+                return deepcopy(result)
+            except Exception:
+                self._retained_inquiries.pop(key, None)
+                return None
+
+    def fresh_inquiry(self, item, exact_quantity):
+        """Always perform a new private GET; retain only the verified result.
+
+        Reads share the retail lock so an older concurrent response cannot
+        overwrite a newer successful observation or a failed-read invalidation.
+        """
+        binding = self._frozen_binding(item, exact_quantity)
+        if binding is None:
+            return None
+        key = (binding['evidence_id'], exact_quantity)
+        with self._lock:
+            try:
+                before = _stamp(self._clock())
+                value = self._inquiry.inquire(binding['supplier_article_id'], exact_quantity)
+                now = _stamp(self._clock())
+                observed = _stamp(value.retrieved_at)
+                if (not isinstance(value, ArticleInquiry) or value.article_id != binding['supplier_article_id']
+                        or type(value.amount) is not int or value.amount != exact_quantity or value.ean != binding['expected_ean']
+                        or value.configured_mode != self._policy.mode or not isinstance(value.price, Decimal)
+                        or not Decimal('0') < value.price <= Decimal('100000')
+                        or type(value.stock) is not int or not exact_quantity <= value.stock <= 1_000_000_000
+                        or not before <= observed <= now < observed + TTL):
+                    raise ValueError()
+                return self._retain_inquiry(binding, value, observed)
+            except Exception:
+                self._retained_inquiries.pop(key, None)
+                return None
 
     def _remember(self, key, quote, until):
         self._cache[key] = {"quote": deepcopy(quote), "until": until}
@@ -325,11 +372,13 @@ class RSUQuoteProvider:
                          "mode": self._policy.mode, "currency": "eur", "vat_percent": "19.00",
                          "unit_gross_cent": unit, "stock": value.stock, "observed_at": observed.isoformat(),
                          "expires_at": (observed + TTL).isoformat(), "procurement_confirmed": True}
+                self._retain_inquiry(binding, value, observed)
                 self._remember(key, quote, observed + TTL)
                 return deepcopy(quote)
             except Exception:
                 # No provider body, price, auth value or exception message is
                 # retained/exposed. Cooldown also bounds repeated failed reads.
+                self._retained_inquiries.pop(key, None)
                 self._remember(key, None, now + FAILURE_COOLDOWN)
                 return None
 

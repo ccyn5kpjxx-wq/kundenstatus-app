@@ -10,6 +10,7 @@ import socket
 import sqlite3
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import shop_rsu_parts_evidence as evidence
 from shop_rsu_parts_evidence import PartsEvidenceError, build_parts_binding, parts_source_record
 from shop_rsu_quotes import RSUQuoteError, RSUQuoteProvider, RSUQuotePolicy
+import shop_rsu_quotes
 from shop_rsu_orders import freeze_order_request
 from shop_order_store import OrderStore, init_schema
 from shop_fulfillment import ShopFulfillment, FulfillmentJournal, init_fulfillment_schema
@@ -295,6 +297,100 @@ class PartsFulfillmentChecks(unittest.TestCase):
             with self.assertRaises(ValueError): freeze_order_request(changed)
         self.assertEqual(self.transport.calls, [])
         self.assertEqual(self.payment.actions, [])
+
+
+class RetainedInquiryChecks(unittest.TestCase):
+    def setUp(self):
+        network = patch.object(socket, 'socket', side_effect=AssertionError('Network forbidden'))
+        network.start(); self.addCleanup(network.stop)
+        self.now = NOW
+        self.inquiry = FakeInquiry(lambda: self.now)
+        self.provider = RSUQuoteProvider(bindings={SID: binding()}, approved_ids={SID},
+            policy=RSUQuotePolicy('test', 'EUR', True, 'SYNTHETIC-net-policy'), inquiry=self.inquiry, clock=lambda: self.now)
+        self.product = {'id': SID, 'identity_hash': IDENTITY, 'category': 'accessory'}
+        self.item = {**self.product, 'mapping': self.provider.rsu_mapping(self.product)}
+
+    def test_empty_or_wrong_owner_identity_quantity_never_reads_or_returns_retained_data(self):
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1)); self.assertEqual(self.inquiry.calls, [])
+        self.provider.retail_quote(self.product, 1)
+        for changes in ({'id': 'parts:' + '2' * 24}, {'identity_hash': 'd' * 64},
+                        {'mapping': {**self.item['mapping'], 'supplier_article_id': '900002'}},
+                        {'mapping': {**self.item['mapping'], 'evidence_id': 'f' * 64}}):
+            self.assertIsNone(self.provider.retained_inquiry({**self.item, **changes}, 1))
+        for quantity in (True, 0, 2, 21): self.assertIsNone(self.provider.retained_inquiry(self.item, quantity))
+        self.assertEqual(self.inquiry.calls, [(ARTICLE, 1)])
+
+    def test_retail_success_retains_private_net_once_without_rebasing_or_public_leak(self):
+        quote = self.provider.retail_quote(self.product, 1)
+        first = self.provider.retained_inquiry(self.item, 1)
+        self.assertEqual((first['unit_net'], first['supplier_article_id'], first['expected_ean']), ('50', ARTICLE, EAN))
+        self.now += timedelta(minutes=1)
+        again = self.provider.retained_inquiry(self.item, 1)
+        self.assertEqual(again, first)
+        again['unit_net'] = '1'
+        self.assertEqual(self.provider.retained_inquiry(self.item, 1)['unit_net'], '50')
+        self.provider.retail_quote(self.product, 1)  # existing public-cache hit, no inferred fresh timestamp
+        self.assertEqual(self.provider.retained_inquiry(self.item, 1), first)
+        self.assertEqual(self.inquiry.calls, [(ARTICLE, 1)])
+        for private in ('unit_net', 'supplier_article_id', 'mapping_evidence_id', 'expected_ean'):
+            self.assertNotIn(private, json.dumps(quote))
+        self.now = NOW + timedelta(minutes=15)
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
+
+    def test_fresh_success_replaces_private_observation_and_failed_fresh_invalidates_it(self):
+        self.provider.retail_quote(self.product, 1)
+        self.now += timedelta(seconds=1); self.inquiry.changes = {'price': Decimal('51'), 'stock': 19}
+        fresh = self.provider.fresh_inquiry(self.item, 1)
+        self.assertEqual(self.provider.retained_inquiry(self.item, 1), fresh)
+        self.assertEqual((fresh['unit_net'], fresh['stock']), ('51', 19))
+        self.inquiry.changes = {'stock': 0}
+        self.assertIsNone(self.provider.fresh_inquiry(self.item, 1))
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
+        self.assertEqual(len(self.inquiry.calls), 3)
+        self.provider.retail_quote(self.product, 1)  # may return a cached public quote, never resurrects private net
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
+        self.assertEqual(len(self.inquiry.calls), 3)
+
+    def test_failed_retail_and_backwards_clock_never_preserve_old_private_quote(self):
+        self.provider.retail_quote(self.product, 1)
+        self.now -= timedelta(seconds=1)
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
+        self.now = NOW + timedelta(minutes=16); self.inquiry.changes = {'stock': 0}
+        self.assertIsNone(self.provider.retail_quote(self.product, 1))
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
+
+    def test_retained_lru_is_independent_bounded_and_eviction_cannot_invent_observations(self):
+        with patch.object(shop_rsu_quotes, 'MAX_RETAINED_INQUIRIES', 2):
+            provider = RSUQuoteProvider(bindings={SID: binding()}, approved_ids={SID},
+                policy=RSUQuotePolicy('test', 'EUR', True, 'SYNTHETIC-net-policy'), inquiry=self.inquiry, clock=lambda: self.now)
+        for quantity in (1, 2): provider.retail_quote(self.product, quantity)
+        self.assertIsNotNone(provider.retained_inquiry(self.item, 1))  # make q1 the newest
+        provider.retail_quote(self.product, 3)
+        self.assertEqual(len(provider._retained_inquiries), 2)
+        self.assertIsNone(provider.retained_inquiry(self.item, 2))
+        self.assertIsNotNone(provider.retained_inquiry(self.item, 1))
+        self.assertEqual(self.inquiry.calls, [(ARTICLE, 1), (ARTICLE, 2), (ARTICLE, 3)])
+
+    def test_concurrent_failed_fresh_cannot_be_overwritten_by_older_success(self):
+        entered, release = threading.Event(), threading.Event()
+        calls, results = [], []
+        original = self.inquiry.inquire
+        def controlled(article, quantity):
+            calls.append((article, quantity))
+            if len(calls) == 1:
+                entered.set()
+                if not release.wait(3): raise AssertionError('synthetic wait expired')
+                return original(article, quantity)
+            raise RuntimeError('PRIVATE_CANARY')
+        self.inquiry.inquire = controlled
+        first = threading.Thread(target=lambda: results.append(self.provider.fresh_inquiry(self.item, 1)))
+        second = threading.Thread(target=lambda: results.append(self.provider.fresh_inquiry(self.item, 1)))
+        first.start(); self.assertTrue(entered.wait(3)); second.start(); release.set()
+        first.join(3); second.join(3)
+        self.assertFalse(first.is_alive()); self.assertFalse(second.is_alive())
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sum(result is not None for result in results), 1)
+        self.assertIsNone(self.provider.retained_inquiry(self.item, 1))
 
 
 if __name__ == '__main__':
