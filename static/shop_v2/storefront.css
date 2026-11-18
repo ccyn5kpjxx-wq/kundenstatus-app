@@ -106,6 +106,12 @@
   .shop-storefront .modern-wrap { width: calc(100% - 48px); }
 }
 @media(max-width:720px) {
+  .shop-storefront #gaertner-ads-settings {
+    position: static;
+    display: block;
+    min-height: 44px;
+    margin: 12px auto;
+  }
   .shop-storefront .modern-wrap { width: calc(100% - 32px); }
   .shop-storefront .modern-header-inner { min-height: 0; gap: 4px 10px; padding-block: 4px 0; }
   .shop-storefront .modern-brand img { width: 112px; height: 43px; }
