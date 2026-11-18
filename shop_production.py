@@ -156,6 +156,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         from shop_rim_width_extension import load_rim_width_extension
         bundle = load_rim_width_extension(root, descriptor.get('rim_width_extension'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'])
+        from shop_tyre_source_extension import load_tyre_source_extension
+        bundle = load_tyre_source_extension(root, descriptor.get('tyre_recommendation_sources'), bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'])
+        from shop_rim_width_supplement import load_rim_width_supplement
+        bundle = load_rim_width_supplement(root, descriptor.get('rim_width_supplement'), bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'])
         from shop_document_overlay import local_product_document_resources
         document_resources = local_product_document_resources(root, descriptor.get('local_product_documents'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'],
@@ -164,6 +170,18 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         document_resources = local_rim_width_document_resources(root, descriptor.get('rim_width_documents'),
             bundle, document_resources, base_bundle_sha256=descriptor['bundle']['sha256'],
             extension_sha256=(descriptor.get('rim_width_extension') or {}).get('sha256'))
+        from shop_recommendation_documents import local_recommendation_document_resources
+        document_resources = local_recommendation_document_resources(root, descriptor.get('tyre_recommendation_documents'),
+            bundle, document_resources, base_bundle_sha256=descriptor['bundle']['sha256'],
+            source_extension_sha256=(descriptor.get('tyre_recommendation_sources') or {}).get('sha256'))
+        recommendation_document_ids = set()
+        for identifier, pair in bundle.get('product_documents', {}).items():
+            if isinstance(pair, Mapping) and all(isinstance(pair.get(key), str) and
+                    isinstance(document_resources.get(pair[key].removeprefix('/shop/documents/')), Mapping) and
+                    document_resources[pair[key].removeprefix('/shop/documents/')].get('file') == pair[key].removeprefix('/shop/documents/') and
+                    document_resources[pair[key].removeprefix('/shop/documents/')].get('sha256')
+                    for key in ('tyre_label_url', 'tyre_sheet_url')):
+                recommendation_document_ids.add(identifier)
         from shop_parts_release import load_parts_release
         parts_record = descriptor.get('parts_direct_sales')
         if parts_record is not None and not _parts_api_channel_supported():
@@ -330,7 +348,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
             preferred_ids=set(seeds['records']) if fixed_prices else None,
-            shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices)
+            shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
+            recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
+            recommendation_document_ids=recommendation_document_ids)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,

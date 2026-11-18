@@ -95,6 +95,38 @@ class ReleaseChecks(unittest.TestCase):
                 self.assertFalse(self.portal.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'])
         self.assertFalse((self.data / 'shop-v2').exists())
 
+    def test_recommendation_policy_and_source_document_chain_are_explicit_and_read_only(self):
+        self.descriptor.update(tyre_recommendation_selection_approved=True,
+            tyre_recommendation_sources={'path':'sources.json','sha256':'1'*64},
+            tyre_recommendation_documents={'path':'documents.json','sha256':'2'*64})
+        self.install()
+        observed=[]
+        def sources(root, record, bundle, **pins):
+            observed.append(('sources',record,pins));return bundle
+        def documents(root, record, bundle, resources, **pins):
+            observed.append(('documents',record,pins));return resources
+        with patch('shop_tyre_source_extension.load_tyre_source_extension',side_effect=sources), \
+                patch('shop_recommendation_documents.local_recommendation_document_resources',side_effect=documents):
+            dependencies=self.prepare()
+        catalogue=dependencies['catalogue']
+        self.assertTrue(catalogue._recommendation_ladder)
+        self.assertEqual(catalogue._recommendation_document_ids,set())
+        self.assertEqual([item[0] for item in observed],['sources','documents'])
+        self.assertEqual(observed[0][2]['base_bundle_sha256'],self.descriptor['bundle']['sha256'])
+        self.assertEqual(observed[1][2]['source_extension_sha256'],'1'*64)
+        self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+        self.assertFalse(self.portal.app.config['SHOP_PARTS_DIRECT_ENABLED'])
+        self.assertFalse((self.data/'shop-v2').exists())
+
+    def test_invalid_recommendation_originals_close_release_before_database_or_provider(self):
+        self.descriptor['tyre_recommendation_sources']={'path':'missing.json','sha256':'1'*64,
+            'base_bundle_sha256':self.descriptor['bundle']['sha256']}
+        self.install()
+        factory=Mock(side_effect=AssertionError('No provider construction'))
+        self.assertEqual(self.prepare(provider_factory=factory),{})
+        self.assert_closed();factory.assert_not_called()
+        self.assertFalse((self.data/'shop-v2').exists())
+
     def test_approved_browse_release_exposes_only_allowlisted_projection_and_original_image(self):
         dependencies = self.prepare()
         self.assertEqual(set(dependencies), {'catalogue', 'media_service', 'catalogue_warmup', 'feature_links'})

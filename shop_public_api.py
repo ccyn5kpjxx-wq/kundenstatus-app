@@ -211,7 +211,7 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         if not callable(getattr(catalogue, 'compatible_tyres', None)):
             return reply({'rim_id': product_id, 'items': [], 'scope': 'blocked',
                           'reason': 'Passende Reifenausführungen werden geprüft.'})
-        if (set(request.args) - {'quantity', 'season', 'make', 'model', 'year', 'hsn', 'tsn'}
+        if (set(request.args) - {'quantity', 'season', 'tyre_size', 'make', 'model', 'year', 'hsn', 'tsn'}
                 or any(len(v) != 1 for _, v in request.args.lists())
                 or any(len(v) > 160 for v in request.args.values())):
             return reply({'error': 'invalid_query'}, 400)

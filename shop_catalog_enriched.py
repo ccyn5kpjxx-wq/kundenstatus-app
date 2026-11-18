@@ -174,9 +174,13 @@ class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
                  rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
-                 checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None, **kwargs):
+                 checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None,
+                 recommendation_ladder=False, recommendation_document_ids=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
+        if type(recommendation_ladder) is not bool:
+            raise CatalogError('invalid_recommendation_policy')
+        self._recommendation_ladder = recommendation_ladder
         rows = deepcopy(list(products))
         notices = validated_parts_notices(rows, kwargs.get('released_ids'), parts_notices)
         display_prices = validated_inquiry_prices(rows, kwargs.get('released_ids'), procurement_ids, inquiry_prices)
@@ -194,6 +198,12 @@ class EnrichedPublicCatalog(PublicCatalog):
         # A known unavailable mandatory document removes checkout eligibility,
         # not the actual source identity, procurement mapping or merchant price.
         self._checkout_excluded_ids = frozenset(checkout_excluded_ids or ())
+        if (recommendation_document_ids is not None and
+                (not isinstance(recommendation_document_ids, (set, frozenset))
+                 or not recommendation_document_ids <= self._rows.keys())):
+            raise CatalogError('invalid_recommendation_documents')
+        self._recommendation_document_ids = (frozenset(recommendation_document_ids)
+            if recommendation_document_ids is not None else None)
         if (shipping_ready_ids is not None and
                 (not isinstance(shipping_ready_ids, (set, frozenset, list, tuple))
                  or any(not isinstance(i, str) for i in shipping_ready_ids)
@@ -316,6 +326,12 @@ class EnrichedPublicCatalog(PublicCatalog):
                 if not isinstance(tyre_id, str) or tyre_id not in self._rows or tyre_id in seen:
                     continue
                 tyre = self._rows[tyre_id]['public']
+                docs = tyre.get('product_documents', {})
+                if self._recommendation_ladder and (
+                        tyre_id in self._checkout_excluded_ids
+                        or self._recommendation_document_ids is not None and tyre_id not in self._recommendation_document_ids
+                        or not docs.get('tyre_label_url') or not docs.get('tyre_sheet_url')):
+                    continue
                 if (tyre['category'] != 'tyre' or pair.get('rim_identity') != identities[identifier]
                         or pair.get('tyre_identity') != identities[tyre_id]):
                     continue
@@ -429,7 +445,7 @@ class EnrichedPublicCatalog(PublicCatalog):
         return {'items': [self._project(entry, current) for entry in rows[offset:offset + page_size]], 'page': page,
                 'page_size': page_size, 'total': len(ids), 'has_more': offset + page_size < len(ids)}
 
-    def compatible_tyres(self, identifier, *, quantity=4, season=None, **filters):
+    def compatible_tyres(self, identifier, *, quantity=4, season=None, tyre_size=None, **filters):
         if type(quantity) is not int or not 1 <= quantity <= 4 or season not in (None, 'summer', 'winter', 'allseason'):
             raise CatalogError('invalid_filter')
         rim = self.get(identifier)
@@ -448,6 +464,17 @@ class EnrichedPublicCatalog(PublicCatalog):
             if tyre_id in self._checkout_excluded_ids or season and canonical_season != season:
                 continue
             candidates.append(self._cached_entry(self._rows[tyre_id]))
+        if self._recommendation_ladder:
+            from shop_tyre_recommendations import select_priced_tyres
+            try:
+                comparison = select_priced_tyres([self._project(entry, current) for entry in candidates],
+                    quantity=quantity, now=current, size_key=tyre_size)
+            except ValueError:
+                raise CatalogError('invalid_filter') from None
+            result.update(comparison)
+            return result
+        if tyre_size is not None:
+            raise CatalogError('invalid_filter')
         # Prefer actual merchant offers for the requested quantity. Do not pad
         # a short, priced recommendation list with unpriced enquiry cards.
         # This is display selection only: reported stock may be older than the
