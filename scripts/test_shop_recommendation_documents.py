@@ -66,6 +66,22 @@ class RecommendationDocumentChecks(unittest.TestCase):
             self.bundle, self.resources, base_bundle_sha256=kwargs.get('base', self.base),
             source_extension_sha256=kwargs.get('epoch', self.epoch))
 
+    def add_attestation(self):
+        owners = overlay._source_owners(self.bundle, self.resources)
+        self.attestation = {'schema_version': 1, 'base_bundle_sha256': self.base,
+            'source_extension_sha256': self.epoch, 'document_manifest_sha256': self.record['sha256'],
+            'records': {asset: {'sha256': entry['sha256'], 'owners': overlay._attestation_owners(owners[asset])}
+                for asset, entry in self.manifest['records'].items() if asset.endswith('.pdf')}}
+        for asset, entry in self.attestation['records'].items():
+            for owner in entry['owners']:
+                ReleasedProductDocuments._validate_tyre_identity(self.payloads[asset], owner['tyre_identity'])
+        self.pin_attestation()
+
+    def pin_attestation(self, raw=None):
+        raw = encoded(self.attestation) if raw is None else raw
+        (self.root / 'identity-attestation.json').write_bytes(raw)
+        self.record['identity_attestation'] = {'path': 'identity-attestation.json', 'sha256': sha256(raw).hexdigest()}
+
     def test_absence_returns_exact_resources_without_io(self):
         with patch.object(overlay, '_read', side_effect=AssertionError('No IO')):
             self.assertIs(overlay.local_recommendation_document_resources(None, None, None, self.resources,
@@ -161,6 +177,70 @@ class RecommendationDocumentChecks(unittest.TestCase):
         for name in ('recommendation-documents.json', next(iter(self.records)), 'documents'):
             with patch.object(Path, 'is_symlink', lambda p: p.name == name or real(p)):
                 with self.subTest(name=name), self.assertRaises(DocumentOverlayError): self.load()
+
+    def test_pinned_identity_attestation_skips_only_redundant_text_and_still_binds_all_bytes(self):
+        self.add_attestation(); before = deepcopy(self.bundle)
+        with patch.object(ReleasedProductDocuments, '_validate_tyre_identity', side_effect=AssertionError('Already attested')) as identity:
+            result = self.load(); identity.assert_not_called()
+        self.assertEqual(self.bundle, before)
+        self.assertEqual(set(result), set(self.resources))
+        asset = next(a for a in self.records if a.endswith('.pdf'))
+        (self.root / 'documents' / asset).write_bytes(pdf('Continental 225/40 R18 92 V'))
+        with self.assertRaisesRegex(DocumentOverlayError, 'content_hash_mismatch'): self.load()
+
+    def test_absent_attestation_retains_original_actual_pdf_identity_validation(self):
+        actual = ReleasedProductDocuments._validate_tyre_identity
+        with patch.object(ReleasedProductDocuments, '_validate_tyre_identity', wraps=actual) as validate:
+            self.load()
+        self.assertEqual(validate.call_count, 2)
+
+    def test_attestation_owner_product_variant_proof_eprel_geometry_and_membership_must_match(self):
+        self.add_attestation(); original = deepcopy(self.attestation)
+        asset = next(iter(self.attestation['records']))
+        for field, value in (('product_id', 'tyre:' + 'f' * 24), ('identity_hash', 'f' * 64),
+                ('nominal_proof_sha256', 'f' * 64), ('eprel_id', '99999'),
+                ('tyre_identity', {'manufacturer': 'Continental', 'width_mm': '225', 'aspect_ratio_percent': '40',
+                    'diameter_inch': '18', 'load_index': '92', 'speed_index': 'V'})):
+            self.attestation = deepcopy(original)
+            self.attestation['records'][asset]['owners'][0][field] = value; self.pin_attestation()
+            with self.subTest(field=field), self.assertRaisesRegex(DocumentOverlayError, 'attestation_identity_mismatch'): self.load()
+        for mode in ('missing_asset', 'unknown_asset', 'missing_owner', 'duplicate_owner', 'changed_byte_sha'):
+            self.attestation = deepcopy(original)
+            if mode == 'missing_asset': self.attestation['records'].pop(asset)
+            elif mode == 'unknown_asset': self.attestation['records']['f' * 64 + '.pdf'] = deepcopy(self.attestation['records'][asset])
+            elif mode == 'missing_owner': self.attestation['records'][asset]['owners'] = []
+            elif mode == 'duplicate_owner': self.attestation['records'][asset]['owners'] *= 2
+            else: self.attestation['records'][asset]['sha256'] = 'f' * 64
+            self.pin_attestation()
+            with self.subTest(mode=mode), self.assertRaises(DocumentOverlayError): self.load()
+
+    def test_present_bad_attestation_never_falls_back_to_text_or_enables_changed_manifest(self):
+        self.add_attestation(); original = deepcopy(self.attestation)
+        for delta in ({'path': '../escape'}, {'sha256': 'f' * 64}, {'unexpected': True}):
+            record = deepcopy(self.record); record['identity_attestation'].update(delta)
+            with self.subTest(delta=delta), self.assertRaises(DocumentOverlayError): self.load(record)
+        for field, value in (('schema_version', True), ('base_bundle_sha256', 'f' * 64),
+                ('source_extension_sha256', 'f' * 64), ('document_manifest_sha256', 'f' * 64)):
+            self.attestation = deepcopy(original); self.attestation[field] = value; self.pin_attestation()
+            with self.subTest(field=field), self.assertRaises(DocumentOverlayError): self.load()
+        self.attestation = deepcopy(original); self.pin_attestation()
+        asset = next(a for a in self.records if a.endswith('.pdf'))
+        wrong = pdf('Continental 225/40 R18 92 V'); (self.root / 'documents' / asset).write_bytes(wrong)
+        self.records[asset].update(sha256=sha256(wrong).hexdigest(), size=len(wrong)); self.pin(); self.pin_attestation()
+        with self.assertRaisesRegex(DocumentOverlayError, 'attestation_manifest_invalid'): self.load()
+        self.attestation['document_manifest_sha256'] = self.record['sha256']; self.pin_attestation()
+        with self.assertRaisesRegex(DocumentOverlayError, 'attestation_identity_mismatch'): self.load()
+        record = deepcopy(self.record); record['identity_attestation'] = None
+        with self.assertRaisesRegex(DocumentOverlayError, 'attestation_descriptor_invalid'): self.load(record)
+
+    def test_attestation_duplicate_nonfinite_oversize_and_symlink_are_rejected(self):
+        self.add_attestation()
+        for raw in (b'{"x":1,"x":2}', b'{"x":NaN}', b' ' * (overlay.MAX_MANIFEST + 1)):
+            self.pin_attestation(raw)
+            with self.subTest(length=len(raw)), self.assertRaises(DocumentOverlayError): self.load()
+        self.pin_attestation(); real = Path.is_symlink
+        with patch.object(Path, 'is_symlink', lambda p: p.name == 'identity-attestation.json' or real(p)):
+            with self.assertRaises(DocumentOverlayError): self.load()
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)
