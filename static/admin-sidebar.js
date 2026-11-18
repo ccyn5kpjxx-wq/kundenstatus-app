@@ -1,6 +1,8 @@
 (() => {
  const nav=document.querySelector('.admin-sidebar');
  if(!nav)return;
+ const currentGroup = nav.querySelector('.is-active, [aria-current="page"]')?.closest('.sidebar-group');
+ if (currentGroup) currentGroup.open = true;
  const open=document.querySelector('.sidebar-open'),close=nav.querySelector('.sidebar-close');
  const mobile=matchMedia('(max-width:991px)');
  function sync(){open.setAttribute('aria-expanded',String(mobile.matches ? document.body.classList.contains('sidebar-mobile-open') : !document.body.classList.contains('sidebar-hidden')));}

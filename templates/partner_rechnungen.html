@@ -21,33 +21,40 @@
   <main class="invoice-shell">
     <a class="invoice-back" href="{{ url_for('partner_dashboard', slug=autohaus.slug) }}"><span aria-hidden="true">←</span> Zur Übersicht</a>
     <section class="invoice-intro" aria-labelledby="rechnungen-titel">
-      <h1 id="rechnungen-titel">Ihre Rechnungen <span>{{ rechnungen_gesamt }}</span></h1>
+      <h1 id="rechnungen-titel">Ihre Rechnungen</h1>
       <p>Hier finden Sie Ihre Rechnungen als PDF, auch zu archivierten Aufträgen.</p>
     </section>
     {% if rechnungen_gesamt or rechnungen_suche %}
-    <form class="invoice-search" method="get" action="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug) }}" role="search">
+    <form class="invoice-search" method="get" action="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, _anchor='rechnungsergebnisse') }}" role="search">
       <label for="rechnungssuche">Rechnungsnummer, Kennzeichen, Auftrag oder Fahrzeug</label>
       <div class="invoice-search-fields">
         <input type="search" name="q" id="rechnungssuche" value="{{ rechnungen_suche }}" placeholder="z. B. RE0618" enterkeyhint="search">
         <button class="invoice-button invoice-open" type="submit">Suchen</button>
-        {% if rechnungen_suche %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug) }}">Suche zurücksetzen</a>{% endif %}
       </div>
     </form>
     {% endif %}
+    {% if rechnungen_suche or rechnungen_gesamt %}
+    <div class="invoice-results-bar">
+      <h2 id="rechnungsergebnisse" class="invoice-results" tabindex="-1">
+        {% if rechnungen_suche %}{{ rechnungen_treffer }} Treffer für „<bdi>{{ rechnungen_suche|truncate(64, true) }}</bdi>“
+        {% else %}{{ rechnungen_gesamt }} {{ 'Rechnung' if rechnungen_gesamt == 1 else 'Rechnungen' }}{% endif %}
+      </h2>
+      {% if rechnungen_suche %}<a class="invoice-reset" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, _anchor='rechnungsergebnisse') }}">Alle Rechnungen anzeigen</a>{% endif %}
+    </div>
+    {% endif %}
     {% if rechnungen_suche and not kunden_rechnungen %}
     <div class="invoice-empty">
-      <h2>Keine passenden Rechnungen gefunden</h2>
-      <p>Prüfen Sie die Eingabe oder suchen Sie nach dem Kennzeichen oder der Auftragsnummer.</p>
+      <h3>Keine passenden Rechnungen gefunden</h3>
+      <p>Prüfen Sie die Schreibweise oder suchen Sie nach Kennzeichen oder Auftragsnummer.</p>
     </div>
     {% else %}
-    {% if rechnungen_suche %}<p class="invoice-results">{{ rechnungen_treffer }} Treffer</p>{% endif %}
-    {% include '_kunden_rechnungen.html' %}
+    {% with partner_rechnungsliste=true %}{% include '_kunden_rechnungen.html' %}{% endwith %}
     {% endif %}
     {% if rechnungen_seiten > 1 %}
     <nav class="invoice-pagination" aria-label="Rechnungsseiten">
-      {% if rechnungen_seite > 1 %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite-1, q=rechnungen_suche or none) }}">← Zurück</a>{% endif %}
+      {% if rechnungen_seite > 1 %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite-1, q=rechnungen_suche or none, _anchor='rechnungsergebnisse') }}">← Zurück</a>{% endif %}
       <span>Seite {{ rechnungen_seite }} von {{ rechnungen_seiten }}</span>
-      {% if rechnungen_seite < rechnungen_seiten %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite+1, q=rechnungen_suche or none) }}">Weiter →</a>{% endif %}
+      {% if rechnungen_seite < rechnungen_seiten %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite+1, q=rechnungen_suche or none, _anchor='rechnungsergebnisse') }}">Weiter →</a>{% endif %}
     </nav>
     {% endif %}
   </main>

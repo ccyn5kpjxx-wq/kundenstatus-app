@@ -24352,8 +24352,14 @@ def list_admin_auftrag_suche(query, limit=8):
         return []
     query_text = query.lower()
     query_key = normalize_auftrag_search_key(query)
+    order_number = re.fullmatch(r"(?:auftrag\s*|#\s*)?(\d+)", query_text)
+    requested_id = int(order_number.group(1)) if order_number else None
+    exact_id = requested_id is not None and query_text.startswith("#")
     treffer = []
     for index, auftrag in enumerate(list_auftrag_navigation_rows(include_angebote=True, planning=True)):
+        matches_id = requested_id == auftrag["id"]
+        if exact_id and not matches_id:
+            continue
         suchfelder = [
             auftrag.get("fahrzeug"),
             auftrag.get("auftragsart_label"),
@@ -24366,10 +24372,12 @@ def list_admin_auftrag_suche(query, limit=8):
         suchtext = " ".join(clean_text(value).lower() for value in suchfelder if clean_text(value))
         suchkey = " ".join(normalize_auftrag_search_key(value) for value in suchfelder if clean_text(value))
         kennzeichen_key = normalize_auftrag_search_key(auftrag.get("kennzeichen"))
-        if not (query_text in suchtext or (query_key and query_key in suchkey)):
+        if not (matches_id or query_text in suchtext or (query_key and query_key in suchkey)):
             continue
 
-        if query_key and kennzeichen_key == query_key:
+        if matches_id:
+            score = -1
+        elif query_key and kennzeichen_key == query_key:
             score = 0
         elif query_key and kennzeichen_key.startswith(query_key):
             score = 1

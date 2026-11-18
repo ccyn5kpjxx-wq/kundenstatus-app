@@ -1,18 +1,26 @@
 {% if kunden_rechnungen %}
 <ul class="invoice-list" aria-label="Ihre Rechnungsdokumente">
   {% for rechnung in kunden_rechnungen %}
+  {% set partner_view = partner_rechnungsliste|default(false) %}
+  {% set document_label = (rechnung.belegnummer or rechnung.name) ~ ' · Werkstattauftrag ' ~ rechnung.auftrag_id %}
   <li class="invoice-card">
     <span class="invoice-file-icon" aria-hidden="true">PDF</span>
     <div class="invoice-details">
-      {% if rechnung.belegnummer %}<strong class="invoice-number">{{ rechnung.belegnummer }}</strong>{% endif %}
-      <div class="invoice-order">Auftrag {{ rechnung.auftrag_id }}{% if rechnung.partner_auftragsnummer %}<span>Ihre Auftragsnr. {{ rechnung.partner_auftragsnummer }}</span>{% endif %}{% if rechnung.archiviert %}<span class="invoice-archive">Archiviert</span>{% endif %}</div>
+      {% if partner_view %}
+      <h3 class="invoice-doc-heading">{% if rechnung.belegnummer %}{{ 'Beleg' if rechnung.belegnummer.startswith('GS') else 'Rechnung' }} <strong class="invoice-number">{{ rechnung.belegnummer }}</strong>{% else %}{{ rechnung.name }}{% endif %}</h3>
+      {% endif %}
+      <div class="invoice-order">{{ 'Werkstattauftrag' if partner_view else 'Auftrag' }} {{ rechnung.auftrag_id }}{% if rechnung.partner_auftragsnummer %}<span>Ihre Auftragsnr. {{ rechnung.partner_auftragsnummer }}</span>{% endif %}{% if rechnung.archiviert %}<span class="invoice-archive">Archiviert</span>{% endif %}</div>
+      {% if partner_view %}
+      {% if rechnung.fahrzeug or rechnung.kennzeichen %}<p class="invoice-vehicle">{{ rechnung.fahrzeug or '' }}{% if rechnung.fahrzeug and rechnung.kennzeichen %} · {% endif %}{{ rechnung.kennzeichen or '' }}</p>{% endif %}
+      {% else %}
       <h3>{{ rechnung.fahrzeug or 'Werkstattauftrag' }}{% if rechnung.kennzeichen %} · {{ rechnung.kennzeichen }}{% endif %}</h3>
-      <p class="invoice-name">{{ rechnung.name }}</p>
+      {% endif %}
+      {% if rechnung.belegnummer or not partner_view %}<p class="invoice-name">{{ rechnung.name }}</p>{% endif %}
       {% if rechnung.datum %}<p class="invoice-date">Bereitgestellt: {{ rechnung.datum }}</p>{% endif %}
     </div>
     <div class="invoice-actions">
-      <a class="invoice-button invoice-open" href="{{ rechnung.open_url }}" target="_blank" rel="noopener" aria-label="{{ rechnung.name }} öffnen (neuer Tab)">PDF öffnen <span aria-hidden="true">↗</span></a>
-      <a class="invoice-button" href="{{ rechnung.download_url }}" aria-label="{{ rechnung.name }} herunterladen">Herunterladen <span aria-hidden="true">↓</span></a>
+      <a class="invoice-button invoice-open" href="{{ rechnung.open_url }}" target="_blank" rel="noopener" aria-label="{% if partner_view %}PDF öffnen · {{ document_label }}{% else %}{{ rechnung.name }} öffnen{% endif %} (neuer Tab)">PDF öffnen <span aria-hidden="true">↗</span></a>
+      <a class="invoice-button" href="{{ rechnung.download_url }}" aria-label="{% if partner_view %}Herunterladen · {{ document_label }}{% else %}{{ rechnung.name }} herunterladen{% endif %}">Herunterladen <span aria-hidden="true">↓</span></a>
     </div>
   </li>
   {% endfor %}

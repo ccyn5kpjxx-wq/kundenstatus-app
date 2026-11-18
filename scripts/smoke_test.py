@@ -928,9 +928,11 @@ def main():
         quick_links = partner_dashboard_html.find('aria-label="Schnellzugriff"')
         new_vehicle = partner_dashboard_html.find('href="/partner/kaesmann/neu"')
         invoices = partner_dashboard_html.find('href="/partner/kaesmann/rechnungen"')
+        active_orders = partner_dashboard_html.find('id="fahrzeuge-tabelle"')
+        calendar = partner_dashboard_html.find('id="partner-kalender"')
         workshop_info = partner_dashboard_html.find('<details class="portal-context">')
         partner_start_reduced_ok = (
-            -1 < search_input < quick_links < new_vehicle < invoices < workshop_info
+            -1 < search_input < quick_links < new_vehicle < invoices < active_orders < calendar < workshop_info
             and "Nächste Termine" not in partner_dashboard_html
             and "Schneller Tagesblick für Dispo und Annahme." not in partner_dashboard_html
             and "Angebotsanfragen" not in partner_dashboard_html

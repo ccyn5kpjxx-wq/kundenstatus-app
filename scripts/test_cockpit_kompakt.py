@@ -63,7 +63,7 @@ class CompactCockpitTest(unittest.TestCase):
         self.assertIn("In diesen vier Bereichen ist aktuell nichts offen.", html)
         self.assertNotIn("0 offene Aktionen", html)
         alert_start = html.index('id="cockpit-hinweise">Dringende Hinweise')
-        alert_end = html.index('aria-label="Fahrzeuge heute"')
+        alert_end = html.index('aria-labelledby="cockpit-fahrzeuge-heute"')
         alerts = html[alert_start:alert_end]
         for text in ("2 Mahnungen fällig", "1 offene Reklamation", "1 Verzögerung prüfen", "1 Fertigstellung überfällig", "/admin_mahnungen", "/dashboard#reklamationen", "auftrag_id=72", "auftrag_id=73"):
             self.assertIn(text, alerts)
@@ -79,6 +79,15 @@ class CompactCockpitTest(unittest.TestCase):
         inputs = [attrs for tag, attrs in tags if tag == "input"]
         self.assertEqual(sum(a.get("name") == "csrf_token" and a.get("value") == "synthetic-token" for a in inputs), 4)
         self.assertEqual(sum(a.get("name") == "next" and a.get("value") == "/betriebs_cockpit" for a in inputs), 4)
+
+    def test_buero_freigaben_open_when_review_is_needed(self):
+        for invoices, payroll, vacation, is_open in ((0,0,0,False),(1,0,0,True),(0,1,0,True),(0,0,1,True)):
+            data = context()
+            data.update(belegfreigabe={"offen_anzahl":invoices}, lohnfreigabe_count=payroll, urlaubfreigabe_count=vacation)
+            html = self.render(data)
+            details = next(attrs for tag, attrs in Page(html).tags if "data-cockpit-freigaben" in attrs)
+            self.assertEqual("open" in details, is_open)
+            self.assertIn("Rechnungen und Belege zur Freigabe öffnen", html)
 
     def test_customer_text_is_escaped_and_search_is_read_only(self):
         data = context()
@@ -111,9 +120,9 @@ class CompactCockpitTest(unittest.TestCase):
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const timers = new Map(); let sequence=0; const pending=[]; let requests=0;
-function node(kind) { return {kind, childNodes:[], textContent:'', hidden:false, handlers:{}, append(...items){for(const item of items) this.childNodes.push(...(item.kind==='fragment'?item.childNodes:[item]));}, replaceChildren(...items){this.childNodes=[];this.append(...items);}, addEventListener(name,fn){this.handlers[name]=fn;}}; }
+function node(kind) { return {kind, childNodes:[], textContent:'', hidden:false, handlers:{}, append(...items){for(const item of items) this.childNodes.push(...(item.kind==='fragment'?item.childNodes:[item]));}, replaceChildren(...items){this.childNodes=[];this.append(...items);}, addEventListener(name,fn){this.handlers[name]=fn;},querySelectorAll(){return this.childNodes.filter(item=>item.kind==='a');},focus(){doc.activeElement=this;}}; }
 const input=node('input'); input.value=''; const results=node('results'); results.hidden=true;
-const root={dataset:{searchUrl:'/admin/cockpit/auftraege-suche'},querySelector:q=>q==='input'?input:results, contains:target=>target===input};
+const root=Object.assign(node('root'),{dataset:{searchUrl:'/admin/cockpit/auftraege-suche'},querySelector:q=>q==='input'?input:results, contains:target=>target===input});
 const doc={querySelector:()=>root,createElement:node,createDocumentFragment:()=>node('fragment'),addEventListener(){}};
 vm.runInNewContext(SCRIPT,{document:doc,window:{location:{origin:'http://localhost:5071'}},URL,AbortController,
  setTimeout:fn=>{timers.set(++sequence,fn);return sequence;},clearTimeout:id=>timers.delete(id),
@@ -122,13 +131,15 @@ function type(value){input.value=value;input.handlers.input();}
 function tick(){const entries=[...timers.values()];timers.clear();entries.forEach(fn=>fn());}
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 (async()=>{
- type('A');tick();assert.equal(requests,0);assert.equal(results.hidden,true);
+ type('A');tick();assert.equal(requests,0);assert.match(results.childNodes[0].textContent,/ein Zeichen/);
  type('AB');tick();type('CD');tick();assert.equal(requests,2);
  pending[1]({ok:true,json:async()=>({items:[{url:'/admin/auftrag/72',fahrzeug:'New result',kennzeichen:'TEST',meta:'<b>Text</b>',status:'Offen'},{url:'https://external.invalid/admin/auftrag/9',fahrzeug:'Unsafe'}]})});await flush();
- assert.equal(results.childNodes.length,1);assert.equal(results.childNodes[0].href,'/admin/auftrag/72');assert.equal(results.childNodes[0].childNodes[1].textContent,'<b>Text</b> · Offen');
+ assert.equal(results.childNodes.length,1);assert.equal(results.childNodes[0].href,'/admin/auftrag/72');assert.equal(results.childNodes[0].childNodes[1].textContent,'Werkstattauftrag 72 · <b>Text</b> · Offen');
+ root.handlers.keydown({key:'ArrowDown',preventDefault(){}});assert.equal(doc.activeElement,results.childNodes[0]);
+ root.handlers.keydown({key:'ArrowUp',preventDefault(){}});assert.equal(doc.activeElement,input);
  pending[0]({ok:true,json:async()=>({items:[{url:'/admin/auftrag/71',fahrzeug:'Old result'}]})});await flush();
  assert.equal(results.childNodes[0].href,'/admin/auftrag/72');
- type('EF');input.handlers.keydown({key:'Escape'});tick();assert.equal(requests,2);assert.equal(results.hidden,true);
+ type('EF');root.handlers.keydown({key:'Escape',preventDefault(){}});tick();assert.equal(requests,2);assert.equal(results.hidden,true);
  type('GH');tick();pending[2]({ok:false});await flush();assert.match(results.childNodes[0].textContent,/nicht verfügbar/);
  type('');tick();assert.equal(results.hidden,true);assert.equal(results.childNodes.length,0);
  console.log('PASS: search debounce, stale response, URL safety, text rendering, Escape and failure handling');

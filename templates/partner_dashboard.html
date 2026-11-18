@@ -66,8 +66,7 @@
     .portal-search-results[hidden] {
       display:none;
     }
-    .portal-search-result,
-    .portal-search-empty {
+    .portal-search-result {
       display:block;
       border:1px solid var(--portal-line);
       border-radius:14px;
@@ -103,8 +102,18 @@
       font-size:.78rem;
       font-weight:700;
     }
-    .portal-search-empty {
+    .portal-search-hint,
+    .portal-search-message {
+      margin:5px 0 0;
       color:var(--portal-muted);
+      font-size:.88rem;
+    }
+    .portal-search-message:empty { margin:0; }
+    .portal-search-message:not(:empty) {
+      padding:8px 10px;
+      border-left:3px solid var(--portal-focus);
+      color:var(--portal-ink);
+      background:var(--portal-bg);
     }
     .portal-heading {
       display:flex;
@@ -226,12 +235,51 @@
       border-color:var(--portal-action-hover);
       color:#fff;
     }
-    .portal-secondary-links {
+    .portal-destinations {
       display:flex;
       flex-wrap:wrap;
-      gap:8px;
-      margin:14px var(--inset) 18px;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:6px 12px;
+      margin:15px var(--inset) 12px;
+      padding-top:8px;
+      border-top:1px solid var(--portal-line);
     }
+    .portal-jumps { display:flex; flex-wrap:wrap; gap:0 18px; }
+    .portal-jumps a {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:44px;
+      color:var(--portal-ink);
+      font-weight:600;
+      text-decoration:underline;
+      text-underline-offset:3px;
+    }
+    .portal-jumps a:hover { color:var(--portal-action); }
+    .portal-count {
+      min-width:1.6em;
+      border:1px solid var(--portal-line);
+      border-radius:5px;
+      background:var(--portal-bg);
+      text-align:center;
+      font-size:.82rem;
+      font-variant-numeric:tabular-nums;
+    }
+    .portal-offers-link .portal-count { background:var(--portal-warn-bg); color:var(--portal-warn); }
+    .portal-more summary {
+      width:fit-content;
+      min-height:44px;
+      padding:10px 0;
+      color:var(--portal-muted);
+      font-weight:600;
+      cursor:pointer;
+    }
+    .portal-more summary:hover { color:var(--portal-ink); text-decoration:underline; }
+    .portal-secondary-links { display:grid; gap:6px; padding-block:2px 8px; }
+    .portal-workshop-info { margin-top:1.5rem; }
+    .panel.portal-workshop-info { padding-block:0; }
+
     .portal-secondary-links a { padding:7px 12px; background:var(--portal-bg); font-size:.92rem; }
     .partner-dashboard .shell :focus-visible {
       outline:3px solid var(--portal-focus);
@@ -239,10 +287,9 @@
     }
     .portal-heading .portal-logout-link:focus-visible { outline-color:#98ddec; }
     .portal-context {
-      padding:0 var(--inset);
-      border-top:1px solid var(--portal-line);
+      padding:0;
     }
-    .portal-context[open] { padding-bottom:var(--inset); }
+    .portal-context[open] { padding-bottom:20px; }
     .portal-context summary {
       width:fit-content;
       max-width:100%;
@@ -813,10 +860,17 @@
       .portal-partner-caption { max-width:80px; line-height:1.15; }
       .portal-logout-link { padding:6px 9px; font-size:.88rem; }
       .portal-workbar { grid-template-columns:1fr; margin-top:16px; }
-      .portal-primary-links { display:grid; grid-auto-columns:minmax(0,1fr); grid-auto-flow:column; padding:0; }
-      .portal-primary-links a { padding:8px 5px; }
+      .metric { padding:12px; }
+      .metric .small { font-size:.76rem; overflow-wrap:anywhere; }
+      .portal-primary-links { display:flex; padding:0; }
+      .portal-primary-links a { flex:1 1 0; min-width:0; padding:8px 5px; }
+      .portal-primary-links a:first-child { flex-grow:1.35; }
       .portal-primary-links a:first-child::before { display:none; }
-      .portal-secondary-links { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .portal-jumps { gap:0 14px; }
+      .portal-destinations { display:block; }
+      .portal-more { border-top:1px solid var(--portal-line); }
+      .portal-secondary-links { justify-items:start; }
+
       .portal-secondary-links a { padding:8px 6px; overflow-wrap:anywhere; hyphens:auto; }
       .portal-header-top, .portal-services-grid { grid-template-columns:1fr; }
       .portal-clock-panel { width:100%; text-align:left; }
@@ -836,6 +890,11 @@
       .portal-weather-hour-wind { margin-top:0; }
     }
   </style>
+  <noscript><style>
+    .portal-workbar { display:block; }
+    .portal-search { display:none; }
+    .portal-primary-links { padding-top:0; }
+  </style></noscript>
 </head>
 <body class="partner-dashboard">
   <div class="shell">
@@ -869,67 +928,36 @@
       <div class="portal-workbar">
         <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
           <label for="partner-fahrzeugsuche" class="form-label">Fahrzeug suchen</label>
-          <input id="partner-fahrzeugsuche" type="search" class="form-control" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
-          <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
+          <input id="partner-fahrzeugsuche" type="search" class="form-control" placeholder="Kennzeichen oder Fahrzeugmodell" autocomplete="off" maxlength="80" aria-describedby="portal-suchhinweis" data-portal-search-input>
+          <p class="portal-search-hint" id="portal-suchhinweis">Ab 2 Zeichen, auch im Archiv.</p>
+          <p class="portal-search-message" role="status" data-search-message></p>
+          <div class="portal-search-results" data-portal-search-results hidden></div>
         </div>
         <nav class="portal-primary-links" aria-label="Schnellzugriff">
-          <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}">Neues Fahrzeug</a>
+          <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}">Fahrzeug anmelden</a>
           {% if kunden_rechnungen_enabled %}<a href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus['slug']) }}">Rechnungen</a>{% endif %}
         </nav>
       </div>
-      <nav class="portal-secondary-links" aria-label="Weitere Portalbereiche">
-        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
-        <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}">Angebot anfordern</a>
-        <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}">Versicherungsfall melden</a>
-        <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
-      </nav>
-      <details class="portal-context">
-        <summary>Wetter, Uhrzeit und Werkstattleistungen</summary>
-        {% if autohaus['willkommen_text'] %}<p class="text-muted">{{ autohaus['willkommen_text'] }}</p>{% endif %}
-        <div class="portal-context-content">
-          <div class="portal-header-top">
-            <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
-              <div class="portal-weather-head">
-                <div>
-                  <div class="portal-weather-label">Wetter</div>
-                  <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
-                    <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
-                  </select>
-                </div>
-                <div class="portal-weather-current">
-                  <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
-                  <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
-                </div>
-              </div>
-              <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
-              <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
-            </div>
-            <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-              <div class="portal-clock-label">Heute</div>
-              <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
-              <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
-            </div>
-          </div>
-          <div class="portal-services-panel" aria-label="Unsere Leistungen">
-            <div class="portal-services-title">Unsere Leistungen</div>
-            <div class="portal-services-grid">
-              <div class="portal-service-item"><span><strong>Lackiererei / Fahrzeuglackierung:</strong> Spot-Repair, Teil- und Komplettlackierung.</span></div>
-              <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
-              <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
-              <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
-              <div class="portal-service-item"><span><strong>Softlack-Erneuerung:</strong> Armaturen im Innenraum.</span></div>
-              <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
-              <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
-              <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
-              <div class="portal-service-item"><span><strong>Felgenaufbereitung (NEU):</strong> Felgen abdrehen bei Bordsteinschäden und Pulverbeschichtung in Wunschfarbe.</span></div>
-            </div>
-          </div>
-        </div>
-      </details>
+      <div class="portal-destinations">
+        <nav class="portal-jumps" aria-label="Meine Bereiche">
+          <a href="#fahrzeuge-tabelle">Ihre Fahrzeuge <span class="portal-count">{{ auftraege|length }}</span></a>
+          {% if werkstattangebote %}<a class="portal-offers-link" href="#werkstattangebote">Angebote prüfen <span class="portal-count">{{ werkstattangebote|length }}</span></a>{% endif %}
+          <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
+          {% if mini_calendar %}<a href="#partner-kalender">Kalender</a>{% endif %}
+        </nav>
+        <details class="portal-more">
+          <summary>Anfragen &amp; Vertrag</summary>
+          <nav class="portal-secondary-links" aria-label="Anfragen und Vertrag">
+            <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}">Angebot anfordern</a>
+            <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}">Versicherungsfall melden</a>
+            <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
+          </nav>
+        </details>
+      </div>
     </div>
 
     {% if werkstattangebote %}
-    <div class="panel mb-4 offer-decision-panel" id="werkstattangebote">
+    <div class="panel mb-4 offer-decision-panel" id="werkstattangebote" tabindex="-1">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
         <div>
           <h4 class="mb-1">Werkstatt-Angebote zur Entscheidung</h4>
@@ -969,7 +997,109 @@
     </div>
     {% endif %}
 
-    {% include "_mini_month_calendar.html" %}
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-xl-3">
+        <a class="metric metric-blue metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Annahme heute" data-filter-ids="{{ cockpit['heute_bringen']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">Annahme heute</div>
+          <div class="display-5 fw-bold">{{ cockpit['heute_bringen']|length }}</div>
+        </a>
+      </div>
+      <div class="col-6 col-xl-3">
+        <a class="metric metric-warm metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="In Arbeit" data-filter-ids="{{ cockpit['in_arbeit']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">In Arbeit</div>
+          <div class="display-5 fw-bold">{{ cockpit['in_arbeit']|length }}</div>
+        </a>
+      </div>
+      <div class="col-6 col-xl-3">
+        <a class="metric metric-green metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Heute fertig" data-filter-ids="{{ cockpit['heute_fertig']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">Heute fertig</div>
+          <div class="display-5 fw-bold">{{ cockpit['heute_fertig']|length }}</div>
+        </a>
+      </div>
+      <div class="col-6 col-xl-3">
+        <a class="metric metric-gold metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Zurückgegeben gesamt" data-filter-ids="{{ cockpit['zurueckgegeben']|map(attribute='id')|join(',') }}">
+          <div class="text-uppercase small">Zurückgegeben gesamt</div>
+          <div class="display-5 fw-bold">{{ cockpit['zurueckgegeben']|length }}</div>
+        </a>
+      </div>
+    </div>
+
+    <div class="panel mb-4" id="fahrzeuge-tabelle" tabindex="-1">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
+        <div>
+          <h4 class="mb-1">Ihre Fahrzeuge</h4>
+          <div class="text-muted">Aktive Aufträge Ihres Autohauses.</div>
+        </div>
+        <div class="text-muted small" data-metric-filter-status hidden>
+          <span data-metric-filter-text></span>
+          <a href="#fahrzeuge-tabelle" data-metric-filter-reset>Filter zurücksetzen</a>
+        </div>
+      </div>
+      {% if auftraege %}
+      <form method="POST" action="{{ url_for('partner_sammelaktion', slug=autohaus['slug']) }}" data-bulk-form>
+        <div class="bulk-bar">
+          <div class="d-flex align-items-center gap-3 flex-wrap">
+            <label class="selection-badge mb-0">
+              <input type="checkbox" class="row-check" data-select-all>
+              <span>Alle markieren</span>
+            </label>
+            <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
+          </div>
+          <div class="d-flex gap-2 flex-wrap">
+            <button type="submit" name="aktion" value="archivieren" class="btn btn-outline-dark btn-sm">Ausgewählte archivieren</button>
+            <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
+          </div>
+        </div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead>
+            <tr>
+              <th class="row-select-cell">Auswahl</th>
+              <th>Fahrzeug</th>
+              <th>Schadensbeschreibung</th>
+              <th>Termine</th>
+              <th>Status</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in auftraege %}
+            <tr data-select-row data-auftrag-id="{{ a['id'] }}">
+              <td class="row-select-cell" data-label="Auswahl">
+                <label class="selection-badge mb-0">
+                  <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
+                  <span>Wählen</span>
+                </label>
+              </td>
+              <td data-label="Fahrzeug">
+                <div class="fw-bold">{{ a['fahrzeug'] }}</div>
+                {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
+                {% if a['kunde_name'] %}<div class="small text-muted">{{ a['kunde_name'] }}</div>{% endif %}
+              </td>
+              <td data-label="Schadensbeschreibung">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
+              <td data-label="Termine">
+                {% if a['annahme_datum'] %}<div class="chip">{{ a['partner_annahme_label'] }} {{ a['annahme_datum'] }}</div>{% endif %}
+                {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
+              </td>
+              <td data-label="Status">
+                <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
+                {% if a['status'] == 3 and a['produktion_schritt_label'] %}<div class="mt-1"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ a['produktion_schritt_label'] }}</span></div>{% endif %}
+              </td>
+              <td data-label="Aktion"><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      </form>
+      {% else %}
+        <div class="text-muted">Hier erscheinen Ihre angemeldeten Fahrzeuge.</div>
+      {% endif %}
+    </div>
+
+    {% if mini_calendar %}<div id="partner-kalender" tabindex="-1">
+      {% include "_mini_month_calendar.html" %}
+    </div>{% endif %}
 
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
@@ -1043,33 +1173,6 @@
     </div>
     {% endif %}
 
-    <div class="row g-3 mb-4">
-      <div class="col-md-6 col-xl-3">
-        <a class="metric metric-blue metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Annahme heute" data-filter-ids="{{ cockpit['heute_bringen']|map(attribute='id')|join(',') }}">
-          <div class="text-uppercase small">Annahme heute</div>
-          <div class="display-5 fw-bold">{{ cockpit['heute_bringen']|length }}</div>
-        </a>
-      </div>
-      <div class="col-md-6 col-xl-3">
-        <a class="metric metric-warm metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="In Arbeit" data-filter-ids="{{ cockpit['in_arbeit']|map(attribute='id')|join(',') }}">
-          <div class="text-uppercase small">In Arbeit</div>
-          <div class="display-5 fw-bold">{{ cockpit['in_arbeit']|length }}</div>
-        </a>
-      </div>
-      <div class="col-md-6 col-xl-3">
-        <a class="metric metric-green metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Heute fertig" data-filter-ids="{{ cockpit['heute_fertig']|map(attribute='id')|join(',') }}">
-          <div class="text-uppercase small">Heute fertig</div>
-          <div class="display-5 fw-bold">{{ cockpit['heute_fertig']|length }}</div>
-        </a>
-      </div>
-      <div class="col-md-6 col-xl-3">
-        <a class="metric metric-gold metric-link" href="#fahrzeuge-tabelle" data-metric-filter data-filter-label="Zurückgegeben gesamt" data-filter-ids="{{ cockpit['zurueckgegeben']|map(attribute='id')|join(',') }}">
-          <div class="text-uppercase small">Zurückgegeben gesamt</div>
-          <div class="display-5 fw-bold">{{ cockpit['zurueckgegeben']|length }}</div>
-        </a>
-      </div>
-    </div>
-
     {% if werkstatt_news %}
     <div class="panel mb-4">
       <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
@@ -1092,79 +1195,6 @@
       </div>
     </div>
     {% endif %}
-
-    <div class="panel mb-4" id="fahrzeuge-tabelle">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
-        <div>
-          <h4 class="mb-1">Ihre Fahrzeuge</h4>
-          <div class="text-muted">Aktive Aufträge Ihres Autohauses.</div>
-        </div>
-        <div class="text-muted small" data-metric-filter-status hidden>
-          <span data-metric-filter-text></span>
-          <a href="#fahrzeuge-tabelle" data-metric-filter-reset>Filter zurücksetzen</a>
-        </div>
-      </div>
-      {% if auftraege %}
-      <form method="POST" action="{{ url_for('partner_sammelaktion', slug=autohaus['slug']) }}" data-bulk-form>
-        <div class="bulk-bar">
-          <div class="d-flex align-items-center gap-3 flex-wrap">
-            <label class="selection-badge mb-0">
-              <input type="checkbox" class="row-check" data-select-all>
-              <span>Alle markieren</span>
-            </label>
-            <span class="text-muted" data-selected-count>0 Fahrzeuge ausgewählt</span>
-          </div>
-          <div class="d-flex gap-2 flex-wrap">
-            <button type="submit" name="aktion" value="archivieren" class="btn btn-outline-dark btn-sm">Ausgewählte archivieren</button>
-            <button type="submit" name="aktion" value="loeschen" class="btn btn-outline-danger btn-sm" data-confirm="Ausgewählte Fahrzeuge wirklich löschen?">Ausgewählte löschen</button>
-          </div>
-        </div>
-      <div class="table-responsive">
-        <table class="table align-middle mb-0">
-          <thead>
-            <tr>
-              <th class="row-select-cell">Auswahl</th>
-              <th>Fahrzeug</th>
-              <th>Schadensbeschreibung</th>
-              <th>Termine</th>
-              <th>Status</th>
-              <th>Aktion</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for a in auftraege %}
-            <tr data-select-row data-auftrag-id="{{ a['id'] }}">
-              <td class="row-select-cell" data-label="Auswahl">
-                <label class="selection-badge mb-0">
-                  <input type="checkbox" class="row-check" name="auftrag_ids" value="{{ a['id'] }}" data-select-item>
-                  <span>Wählen</span>
-                </label>
-              </td>
-              <td data-label="Fahrzeug">
-                <div class="fw-bold">{{ a['fahrzeug'] }}</div>
-                {% if a['kennzeichen'] %}<div class="small text-muted">{{ a['kennzeichen'] }}</div>{% endif %}
-                {% if a['kunde_name'] %}<div class="small text-muted">{{ a['kunde_name'] }}</div>{% endif %}
-              </td>
-              <td data-label="Schadensbeschreibung">{{ a['analyse_text'] or a['beschreibung'] or '—' }}</td>
-              <td data-label="Termine">
-                {% if a['annahme_datum'] %}<div class="chip">{{ a['partner_annahme_label'] }} {{ a['annahme_datum'] }}</div>{% endif %}
-                {% if a['abholtermin'] %}<div class="chip">{{ a['partner_abholung_label'] }} {{ a['abholtermin'] }}</div>{% endif %}
-              </td>
-              <td data-label="Status">
-                <span class="badge text-bg-{{ a['status_meta']['farbe'] }}">{{ a['status_meta']['icon'] }} {{ a['status_meta']['label'] }}</span>
-                {% if a['status'] == 3 and a['produktion_schritt_label'] %}<div class="mt-1"><span class="badge text-bg-light border text-dark prod-schritt-badge">{{ a['produktion_schritt_label'] }}</span></div>{% endif %}
-              </td>
-              <td data-label="Aktion"><a href="{{ url_for('partner_auftrag', slug=autohaus['slug'], auftrag_id=a['id']) }}" class="btn btn-outline-dark btn-sm">Öffnen</a></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      </form>
-      {% else %}
-        <div class="text-muted">Noch keine Fahrzeuge vorhanden.</div>
-      {% endif %}
-    </div>
 
     <div class="panel">
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
@@ -1227,16 +1257,54 @@
         <div class="text-muted">Noch keine archivierten Aufträge.</div>
       {% endif %}
     </div>
+    <div class="panel portal-workshop-info">
+      <details class="portal-context">
+        <summary>Wetter, Uhrzeit und Werkstattleistungen</summary>
+        {% if autohaus['willkommen_text'] %}<p class="text-muted">{{ autohaus['willkommen_text'] }}</p>{% endif %}
+        <div class="portal-context-content">
+          <div class="portal-header-top">
+            <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+              <div class="portal-weather-head">
+                <div>
+                  <div class="portal-weather-label">Wetter</div>
+                  <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
+                    <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
+                  </select>
+                </div>
+                <div class="portal-weather-current">
+                  <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
+                  <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
+                </div>
+              </div>
+              <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
+              <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
+            </div>
+            <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+              <div class="portal-clock-label">Heute</div>
+              <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
+              <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
+            </div>
+          </div>
+          <div class="portal-services-panel" aria-label="Unsere Leistungen">
+            <div class="portal-services-title">Unsere Leistungen</div>
+            <div class="portal-services-grid">
+              <div class="portal-service-item"><span><strong>Lackiererei / Fahrzeuglackierung:</strong> Spot-Repair, Teil- und Komplettlackierung.</span></div>
+              <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
+              <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
+              <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
+              <div class="portal-service-item"><span><strong>Softlack-Erneuerung:</strong> Armaturen im Innenraum.</span></div>
+              <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
+              <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
+              <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
+              <div class="portal-service-item"><span><strong>Felgenaufbereitung (NEU):</strong> Felgen abdrehen bei Bordsteinschäden und Pulverbeschichtung in Wunschfarbe.</span></div>
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
   {% include "ki_assistent_widget.html" %}
   <script>
-    (() => {
-      const details = document.querySelector('.portal-context');
-      const desktop = window.matchMedia('(min-width: 992px)');
-      const setInitialView = () => { details.open = desktop.matches; };
-      setInitialView();
-      desktop.addEventListener('change', setInitialView);
-    })();
     (() => {
       const root = document.querySelector('[data-live-clock-root]');
       if (!root) {
@@ -1450,31 +1518,25 @@
       }
       const input = searchBox.querySelector('[data-portal-search-input]');
       const results = searchBox.querySelector('[data-portal-search-results]');
+      const message = searchBox.querySelector('[data-search-message]');
       const endpoint = searchBox.dataset.searchUrl;
-      if (!input || !results || !endpoint) {
-        return;
-      }
-      let debounceTimer = null;
-      let controller = null;
+      let debounceTimer;
+      let controller;
 
       const clearResults = () => {
+        window.clearTimeout(debounceTimer);
+        controller?.abort();
         results.replaceChildren();
         results.hidden = true;
+        message.textContent = '';
       };
-
-      const renderEmpty = () => {
-        const empty = document.createElement('div');
-        empty.className = 'portal-search-empty';
-        empty.textContent = 'Kein Fahrzeug gefunden.';
-        results.replaceChildren(empty);
-        results.hidden = false;
-      };
-
       const renderItems = (items) => {
         if (!items.length) {
-          renderEmpty();
+          message.textContent = 'Kein Treffer. Prüfen Sie das Kennzeichen oder suchen Sie nach dem Modell.';
           return;
         }
+        const count = items.length === 8 ? 'Erste 8 Treffer' : `${items.length} Treffer`;
+        message.textContent = `${count}. Zum Öffnen einen Treffer auswählen.`;
         const fragment = document.createDocumentFragment();
         items.forEach((item) => {
           const link = document.createElement('a');
@@ -1501,37 +1563,42 @@
         results.hidden = false;
       };
 
-      const search = async () => {
-        const query = input.value.trim();
-        if (query.length < 2) {
-          clearResults();
-          return;
-        }
-        if (controller) {
-          controller.abort();
-        }
-        controller = new AbortController();
+      const search = async (query) => {
+        const request = new AbortController();
+        controller = request;
         try {
-          const response = await fetch(`${endpoint}?q=${encodeURIComponent(query)}`, {
+          const url = new URL(endpoint, window.location.href);
+          url.searchParams.set('q', query);
+          const response = await fetch(url, {
             headers: { Accept: 'application/json' },
-            signal: controller.signal,
+            signal: request.signal,
           });
-          if (!response.ok) {
-            clearResults();
-            return;
-          }
+          if (!response.ok) throw new Error('Suche fehlgeschlagen');
           const data = await response.json();
-          renderItems(Array.isArray(data.items) ? data.items : []);
+          if (!request.signal.aborted) renderItems(data.items);
         } catch (error) {
-          if (error.name !== 'AbortError') {
-            clearResults();
+          if (!request.signal.aborted) {
+            message.textContent = 'Suche derzeit nicht verfügbar. Öffnen Sie „Ihre Fahrzeuge“ weiter unten.';
           }
         }
       };
 
       input.addEventListener('input', () => {
-        window.clearTimeout(debounceTimer);
-        debounceTimer = window.setTimeout(search, 160);
+        clearResults();
+        const query = input.value.trim();
+        if (query.length >= 2) debounceTimer = window.setTimeout(() => search(query), 160);
+      });
+      searchBox.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && input.value) {
+          event.preventDefault();
+          clearResults();
+          input.value = '';
+          input.focus();
+        }
+        if (event.target === input && event.key === 'ArrowDown' && results.firstElementChild) {
+          event.preventDefault();
+          results.firstElementChild.focus();
+        }
       });
     })();
 
@@ -1591,6 +1658,7 @@
           tableRoot.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
       });
+      document.querySelector('.portal-jumps a[href="#fahrzeuge-tabelle"]').addEventListener('click', clearFilter);
       if (resetLink) {
         resetLink.addEventListener('click', (event) => {
           event.preventDefault();
@@ -1603,11 +1671,13 @@
       const selectAll = form.querySelector('[data-select-all]');
       const items = Array.from(form.querySelectorAll('[data-select-item]'));
       const counter = form.querySelector('[data-selected-count]');
+      const bulkButtons = form.querySelectorAll('button[type="submit"]');
       const rows = Array.from(form.querySelectorAll('[data-select-row]'));
       let submitter = null;
       const refresh = () => {
         const selected = items.filter((item) => item.checked).length;
-        counter.textContent = `${selected} Fahrzeuge ausgewählt`;
+        counter.textContent = selected === 1 ? '1 Fahrzeug ausgewählt' : `${selected} Fahrzeuge ausgewählt`;
+        bulkButtons.forEach(button => { button.disabled = selected === 0; });
         if (selectAll) {
           selectAll.checked = selected > 0 && selected === items.length;
           selectAll.indeterminate = selected > 0 && selected < items.length;

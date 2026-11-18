@@ -11,6 +11,19 @@ body:has(.admin-sidebar) {--sidebar-width:244px}
 .admin-sidebar .nav-link {display:flex;align-items:center;justify-content:space-between;border-radius:9px;padding:9px 12px!important;font-size:14px;min-height:40px}
 .admin-sidebar .nav-link.is-active {box-shadow:inset 3px 0 #f1c232;background:#ffffff18}
 .admin-sidebar .nav-badge {flex-shrink:0}
+.admin-sidebar .sidebar-group {width:100%;border-top:1px solid #ffffff24}
+.admin-sidebar .sidebar-group summary {
+  display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;
+  padding:9px 12px;border-radius:8px;color:#e5edf1;cursor:pointer;list-style:none;font-size:14px;font-weight:600;
+}
+.admin-sidebar .sidebar-group summary::-webkit-details-marker {display:none}
+.admin-sidebar .sidebar-group summary::after {
+  content:"";flex:none;width:8px;height:8px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);
+}
+.admin-sidebar .sidebar-group[open] > summary::after {transform:rotate(225deg)}
+.admin-sidebar .sidebar-group summary:hover {background:#ffffff12}
+.admin-sidebar .sidebar-group summary:focus-visible {outline:2px solid #a8e5ef;outline-offset:-2px}
+.admin-sidebar .sidebar-group-links {margin:0 0 8px 11px;border-left:1px solid #ffffff38;padding-left:5px}
 .admin-sidebar .sidebar-close {display:block;text-align:left;background:transparent;color:#ccd5dc;border:1px solid #ffffff30;border-radius:8px;padding:7px 10px;font-size:13px}
 body:has(.admin-sidebar) > main,body:has(.admin-sidebar) > footer {margin-left:var(--sidebar-width)}
 body:has(.admin-sidebar) > main > .container {max-width:1600px;padding-left:28px;padding-right:28px}

@@ -9,7 +9,10 @@
 <div class="cockpit-compact">
   <div class="cockpit-command">
     <header class="cockpit-head" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-      <div><div class="cockpit-eyebrow">Werkstatt · Tagesüberblick</div><h1>{{ tages_gruss }}, Christopher.</h1><p class="cockpit-subtitle" data-live-date>{{ current_date_label }}</p></div>
+      <div>
+        <p class="cockpit-eyebrow" data-live-date>{{ current_date_label }}</p>
+        <h1>Heute in der Werkstatt</h1>
+      </div>
       <div class="cockpit-clock">
         <div class="cockpit-time" data-live-clock>{{ current_time_label }}</div>
         <details class="cockpit-weather" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
@@ -20,10 +23,12 @@
     </header>
     <div class="cockpit-tools">
       <div class="cockpit-search" data-cockpit-search data-search-url="{{ url_for('admin_cockpit_auftraege_suche') }}">
-        <label for="cockpit-auftrag-suche">Auftrag finden</label><input id="cockpit-auftrag-suche" type="search" autocomplete="off" placeholder="z. B. Kennzeichen oder Name" aria-controls="cockpit-suchergebnisse" aria-describedby="cockpit-suchhinweis"><span id="cockpit-suchhinweis" class="visually-hidden">Nach Kennzeichen, Auftragsnummer, Fahrzeug oder Kunde suchen. Ab zwei Zeichen erscheinen Treffer. Mit Tab auswählen.</span>
+        <label for="cockpit-auftrag-suche">Auftrag suchen</label>
+        <input id="cockpit-auftrag-suche" type="search" autocomplete="off" placeholder="Kennzeichen, Name oder Auftragsnummer" aria-controls="cockpit-suchergebnisse" aria-describedby="cockpit-suchhinweis">
+        <small id="cockpit-suchhinweis">Ab zwei Zeichen erscheinen passende Aufträge.</small>
         <div id="cockpit-suchergebnisse" class="cockpit-search-results" data-search-results aria-live="polite" hidden></div>
       </div>
-      <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">+ Fahrzeug neu</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Lackierportal öffnen</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Versicherungsschaden</a></nav>
+      <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">Fahrzeug anlegen</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Auftragsübersicht</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Schaden aufnehmen</a></nav>
     </div>
   </div>
   {% if mahn_cockpit_badge or cockpit.get('offene_reklamationen') or cockpit.get('offene_verzoegerungen') or cockpit.get('ueberfaellig') %}
@@ -54,32 +59,56 @@
     </div>
   </section>
   {% endif %}
-  <section class="cockpit-day" aria-label="Fahrzeuge heute">
-    {% for key, label, sub in [('heute_bringen','Übernehmen','Anlieferung & Holservice'),('heute_starten','Starten','Arbeitsbeginn heute'),('heute_fertig','Fertig','Fertigstellung heute'),('heute_abholen','Zurückgeben','Abholung & Rückbringung')] %}
-    <details><summary><span>{{ label }}<small>{{ sub }}</small></span><strong>{{ cockpit[key]|length }}</strong></summary><div class="cockpit-day-list">{% for item in cockpit[key] %}<a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}"><strong>{{ item['kennzeichen'] or item['fahrzeug'] }}</strong> {% if item['auftragsart_label'] %}<span class="badge-soft" style="background:{{ item['auftragsart_bg'] }}; color:{{ item['auftragsart_farbe'] }};">{{ item['auftragsart_label'] }}</span>{% endif %}<br>{{ item['fahrzeug'] }}{% if key == 'heute_bringen' and item['annahme_uhrzeit'] %} · {{ item['annahme_uhrzeit'] }} Uhr{% elif key == 'heute_abholen' and item['abhol_uhrzeit'] %} · {{ item['abhol_uhrzeit'] }} Uhr{% endif %}</a>{% else %}<span class="text-muted">Heute kein Eintrag.</span>{% endfor %}</div></details>
-    {% endfor %}
-  </section>
-  <div class="cockpit-billing cockpit-card">
-    <a class="cockpit-approval" href="{{ url_for('buero_belege.admin_index') }}" aria-label="Rechnungen und Belege zur Freigabe öffnen">
-      <span><strong>Rechnungen zur Freigabe</strong><small>Rechnungen, Gebühren und private Belege prüfen</small></span>
-      <span class="cockpit-approval-count">{% if belegfreigabe.neue_anzahl %}<strong>{{ belegfreigabe.neue_anzahl }} neu</strong> · {% endif %}{{ belegfreigabe.offen_anzahl }} offen <span aria-hidden="true">→</span></span>
-    </a>
-    <div class="cockpit-billing-links">
-      <a href="{{ url_for('office_inbox_bindings.admin') }}">E-Mail-Rechnungen prüfen</a>
-      <a href="/werkstatt/buero">Büroansicht öffnen</a>
+  <section class="cockpit-schedule" aria-labelledby="cockpit-fahrzeuge-heute">
+    <h2 class="h5" id="cockpit-fahrzeuge-heute">Fahrzeuge heute</h2>
+    <div class="cockpit-day">
+      {% for key, label, sub in [('heute_bringen','Annahme','Anlieferung und Holservice'),('heute_starten','Arbeitsbeginn','Geplanter Reparaturstart'),('heute_fertig','Fertigstellung','Geplanter Abschluss'),('heute_abholen','Rückgabe','Abholung und Rückbringung')] %}
+        <details{% if cockpit[key] %} class="has-vehicles"{% endif %}>
+          <summary><span>{{ label }}<small>{{ sub }}</small></span><strong>{{ cockpit[key]|length }}</strong></summary>
+          <div class="cockpit-day-list">
+            {% for item in cockpit[key] %}
+              <a href="{{ url_for('auftrag_detail', auftrag_id=item['id']) }}">
+                <strong>{{ item['kennzeichen'] or item['fahrzeug'] or ('Auftrag ' ~ item['id']) }}</strong>
+                {% if item['auftragsart_label'] %}<span class="badge-soft" style="background:{{ item['auftragsart_bg'] }}; color:{{ item['auftragsart_farbe'] }};">{{ item['auftragsart_label'] }}</span>{% endif %}
+                {% if item['kennzeichen'] and item['fahrzeug'] %}<span class="cockpit-day-vehicle">{{ item['fahrzeug'] }}</span>{% endif %}
+                {% if key == 'heute_bringen' and item['annahme_uhrzeit'] %}{{ item['annahme_uhrzeit'] }} Uhr{% elif key == 'heute_abholen' and item['abhol_uhrzeit'] %}{{ item['abhol_uhrzeit'] }} Uhr{% endif %}
+              </a>
+            {% else %}
+              <span class="text-muted">Für heute ist kein Fahrzeug eingetragen.</span>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
     </div>
-  </div>
+  </section>
   {% include "_cockpit_aktionen.html" %}
-  <div class="cockpit-bottom">
-    <a class="cockpit-card cockpit-approval" href="{{ url_for('office_payroll.admin') }}">
-      <span><strong>Löhne zur Freigabe</strong><small>Monatsauswertung ansehen und freigeben</small></span>
-      <span class="cockpit-approval-count">{{ lohnfreigabe_count }} offen <span aria-hidden="true">→</span></span>
-    </a>
-    <a class="cockpit-card cockpit-approval" href="{{ url_for('assistent.vacation_admin') }}">
-      <span><strong>Urlaub zur Freigabe</strong><small>Anträge der Mitarbeiter prüfen</small></span>
-      <span class="cockpit-approval-count">{{ urlaubfreigabe_count }} offen <span aria-hidden="true">→</span></span>
-    </a>
-  </div>
+  {% set offene_freigaben = (belegfreigabe.offen_anzahl or 0) + (lohnfreigabe_count or 0) + (urlaubfreigabe_count or 0) %}
+  <details class="cockpit-card cockpit-office" data-cockpit-freigaben{% if offene_freigaben or belegfreigabe.neue_anzahl %} open{% endif %}>
+    <summary class="cockpit-section-summary">
+      <span><strong class="cockpit-section-title">Freigaben im Büro</strong><small>Rechnungen, Löhne und Urlaub</small></span>
+      <span class="cockpit-approval-count">{{ offene_freigaben }} offen</span>
+    </summary>
+    <div class="cockpit-billing">
+      <a class="cockpit-approval" href="{{ url_for('buero_belege.admin_index') }}" aria-label="Rechnungen und Belege zur Freigabe öffnen">
+        <span><strong>Rechnungen zur Freigabe</strong><small>Rechnungen, Gebühren und private Belege prüfen</small></span>
+        <span class="cockpit-approval-count">{% if belegfreigabe.neue_anzahl %}<strong>{{ belegfreigabe.neue_anzahl }} neu</strong> · {% endif %}{{ belegfreigabe.offen_anzahl }} offen <span aria-hidden="true">→</span></span>
+      </a>
+      <div class="cockpit-billing-links">
+        <a href="{{ url_for('office_inbox_bindings.admin') }}">E-Mail-Rechnungen prüfen</a>
+        <a href="/werkstatt/buero">Büroansicht öffnen</a>
+      </div>
+    </div>
+    <div class="cockpit-office-links">
+      <a class="cockpit-approval" href="{{ url_for('office_payroll.admin') }}">
+        <span><strong>Löhne zur Freigabe</strong><small>Monatsauswertung ansehen und freigeben</small></span>
+        <span class="cockpit-approval-count">{{ lohnfreigabe_count }} offen <span aria-hidden="true">→</span></span>
+      </a>
+      <a class="cockpit-approval" href="{{ url_for('assistent.vacation_admin') }}">
+        <span><strong>Urlaub zur Freigabe</strong><small>Anträge der Mitarbeiter prüfen</small></span>
+        <span class="cockpit-approval-count">{{ urlaubfreigabe_count }} offen <span aria-hidden="true">→</span></span>
+      </a>
+    </div>
+  </details>
   <details class="cockpit-card" data-cockpit-eingang>
     <summary class="cockpit-section-summary"><span class="cockpit-section-title">Eingang</span><span class="cockpit-counts"><span>Fahrzeuge <strong>{{ start_inbox['fahrzeuge_count'] or 0 }}</strong></span><span>Anfragen <strong>{{ start_inbox['anfragen_count'] or 0 }}</strong></span><span>Aufgaben <strong>{{ start_inbox['aufgaben_count'] or 0 }}</strong></span></span></summary>
     <div class="cockpit-detail-body"><div class="cockpit-detail-head"><span>Neue Fahrzeuge, Anfragen und Rückmeldungen.</span><a href="{{ url_for('admin_postfach') }}">Vollständiges Postfach →</a></div>
@@ -103,8 +132,8 @@
     <a class="cockpit-module" href="{{ url_for('admin_reifentermine') }}">Reifenportal <span class="module-count {% if reifentermine %}is-alert{% endif %}">{{ reifentermine|length }}</span></a>
     {% if session.get('admin') and (config.get('SHOP_BUYER_ENABLED') or shop_admin_available) %}<a class="cockpit-module" href="{{ url_for('shop_admin.orders') }}">Shopbestellungen</a><a class="cockpit-module" href="{{ url_for('shop_admin.withdrawals') }}">Widerrufe{% if shop_withdrawal_pending %} ({{ shop_withdrawal_pending }}){% endif %}{% if shop_withdrawal_unavailable %} · Status prüfen{% endif %}</a>{% endif %}
     <a class="cockpit-module" href="{{ url_for('admin_aufgaben') }}">Aufgabenplanung <span class="module-count">{{ aufgaben_offen_heute_count() }}</span></a>
-    <a class="cockpit-module" href="{{ url_for('admin_versicherungsschaden') }}" title="Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten.">Versicherungsportal <span class="module-count">{{ admin_versicherung_count() }}</span></a>
-    <a class="cockpit-module" href="{{ url_for('admin_fahrzeugsuche') }}">Fahrzeugsuche <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_versicherungsschaden') }}" title="Versicherungsschaden aufnehmen und danach im Portal weiterbearbeiten.">Schaden aufnehmen <span class="module-count">{{ admin_versicherung_count() }}</span></a>
+    <a class="cockpit-module" href="{{ url_for('admin_fahrzeugsuche') }}">Fahrzeugauktionen <span class="module-count">{{ fahrzeugsuche_auktion_alert_count() or fahrzeugsuche_count() }}</span></a>
     <a class="cockpit-module" href="{{ url_for('admin_fahrzeugverkauf') }}">Fahrzeugverkauf <span class="module-count">{{ fahrzeugverkauf_count() }}</span></a>
     <a class="cockpit-module" href="{{ url_for('admin_dellen_kalkulator') }}">Dellen-Kalkulator</a><a class="cockpit-module" href="{{ url_for('admin_zugaenge') }}">Zugänge</a>
   </nav>
@@ -361,7 +390,6 @@
         const data = await response.json();
         if (requestId !== requestNumber) return;
         const items = Array.isArray(data.items) ? data.items : [];
-        if (!items.length) { message('Kein Auftrag gefunden. Bitte Kennzeichen oder Namen prüfen.'); return; }
         const fragment = document.createDocumentFragment();
         for (const item of items) {
           const url = new URL(item.url || '', window.location.origin);
@@ -370,38 +398,62 @@
           link.className = 'cockpit-search-result';
           link.href = url.pathname;
           const title = document.createElement('strong');
-          title.textContent = [item.kennzeichen, item.fahrzeug].filter(Boolean).join(' · ');
+          title.textContent = [item.kennzeichen, item.fahrzeug].filter(Boolean).join(' · ') || 'Auftrag öffnen';
           const meta = document.createElement('span');
-          meta.textContent = [item.auftragsart_label, item.meta, item.status].filter(Boolean).join(' · ');
+          const id = url.pathname.split('/').pop();
+          meta.textContent = [`Werkstattauftrag ${id}`, item.auftragsart_label, item.meta, item.status].filter(Boolean).join(' · ');
           link.append(title, meta);
           fragment.append(link);
         }
-        if (!fragment.childNodes.length) { message('Keine passenden Aufträge gefunden.'); return; }
+        if (!fragment.childNodes.length) { message('Kein Auftrag gefunden. Prüfe die Nummer oder suche nach dem Namen.'); return; }
         results.replaceChildren(fragment);
         results.hidden = false;
       } catch (error) {
-        if (error.name !== 'AbortError' && requestId === requestNumber) message('Suche gerade nicht verfügbar. Bitte das Lackierportal öffnen.');
+        if (error.name !== 'AbortError' && requestId === requestNumber) message('Suche gerade nicht verfügbar. Alle Aufträge findest du in der Auftragsübersicht.');
       }
     };
-    input.addEventListener('input', () => {
+    const dismiss = () => {
       clearTimeout(timer);
       controller?.abort();
-      const requestId = ++requestNumber;
-      const query = input.value.trim();
+      ++requestNumber;
       results.hidden = true;
       results.replaceChildren();
+    };
+    const search = () => {
+      dismiss();
+      const query = input.value.trim();
+      const requestId = requestNumber;
+      if (query.length === 1) message('Noch ein Zeichen eingeben.');
       if (query.length >= 2) timer = setTimeout(() => lookup(query, requestId), 250);
+    };
+    input.addEventListener('input', search);
+    input.addEventListener('focus', (event) => {
+      if (!root.contains(event.relatedTarget)) search();
     });
-    input.addEventListener('keydown', (event) => {
+    root.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
-        clearTimeout(timer);
-        controller?.abort();
-        ++requestNumber;
-        results.hidden = true;
+        if (!results.hidden) event.preventDefault();
+        input.focus();
+        dismiss();
+        return;
       }
+      if (results.hidden || !['ArrowDown','ArrowUp'].includes(event.key)) return;
+      const links = [...results.querySelectorAll('a')];
+      if (!links.length) return;
+      event.preventDefault();
+      const index = links.indexOf(document.activeElement);
+      if (event.key === 'ArrowUp' && index <= 0) {
+        input.focus();
+        return;
+      }
+      const next = event.key === 'ArrowDown' ? Math.min(index + 1, links.length - 1) : index - 1;
+      links[next].focus();
+    });
+    root.addEventListener('focusout', (event) => {
+      if (!root.contains(event.relatedTarget)) dismiss();
     });
     document.addEventListener('click', (event) => {
-      if (!root.contains(event.target)) results.hidden = true;
+      if (!root.contains(event.target)) dismiss();
     });
   })();
 </script>

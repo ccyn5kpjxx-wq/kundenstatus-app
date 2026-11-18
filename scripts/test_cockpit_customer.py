@@ -7,7 +7,7 @@ Backend authorization and phase filtering are covered separately by integration 
 from pathlib import Path
 import mimetypes
 from types import SimpleNamespace
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from jinja2 import ChainableUndefined, ChoiceLoader, DictLoader, Environment, FileSystemLoader
 from playwright.sync_api import expect, sync_playwright
@@ -262,7 +262,7 @@ def run():
         for width in (320, 390, 768, 1440):
             context, page, _ = fresh(dashboard, width=width)
             search = page.get_by_role("searchbox", name="Fahrzeug suchen")
-            new_vehicle = page.get_by_role("link", name="Neues Fahrzeug", exact=True)
+            new_vehicle = page.get_by_role("link", name="Fahrzeug anmelden", exact=True)
             invoices = page.get_by_role("link", name="Rechnungen", exact=True)
             expect(page.get_by_text("Demoautohaus Standort West", exact=True)).to_be_visible()
             expect(new_vehicle).to_have_attribute("href", "/partner_neuer_auftrag?slug=standort-west")
@@ -276,14 +276,76 @@ def run():
             expect(new_vehicle).to_be_focused()
             page.keyboard.press("Tab")
             expect(invoices).to_be_focused()
+            expect(page.get_by_role("link", name="Ihre Fahrzeuge 1")).to_have_attribute("href", "#fahrzeuge-tabelle")
+            expect(page.get_by_role("link", name="Angebote prüfen 1")).to_have_attribute("href", "#werkstattangebote")
+            more = page.locator(".portal-more")
+            expect(more.get_by_role("link", name="Angebot anfordern")).not_to_be_visible()
+            more.locator("summary").focus()
+            page.keyboard.press("Enter")
+            expect(more.get_by_role("link", name="Angebot anfordern")).to_be_visible()
             context_details = page.locator(".portal-context")
-            expanded = width >= 992
-            assert context_details.evaluate("el => el.open") == expanded
+            assert not context_details.evaluate("el => el.open")
             context_details.locator("summary").focus()
             page.keyboard.press("Enter")
-            assert context_details.evaluate("el => el.open") != expanded
+            assert context_details.evaluate("el => el.open")
             context.close()
-        print("PASS dashboard account, scoped quick links, mobile visibility and keyboard order")
+        print("PASS dashboard account, quick actions, local counts and keyboard order")
+
+        context, page, _ = fresh(dashboard)
+        page.locator("[data-metric-filter]").first.click()
+        expect(page.locator("[data-metric-filter-status]")).to_be_visible()
+        page.get_by_role("link", name="Ihre Fahrzeuge 1").click()
+        expect(page.locator("[data-metric-filter-status]")).not_to_be_visible()
+        table = page.locator("#fahrzeuge-tabelle")
+        archive = table.get_by_role("button", name="Ausgewählte archivieren")
+        expect(archive).to_be_disabled()
+        table.locator("[data-select-item]").first.check()
+        expect(archive).to_be_enabled()
+        expect(table.locator("[data-selected-count]")).to_have_text("1 Fahrzeug ausgewählt")
+        search = page.get_by_role("searchbox", name="Fahrzeug suchen")
+        notice = page.locator("[data-search-message]")
+        calls = []
+        def search_response(route):
+            query = parse_qs(urlparse(route.request.url).query)["q"][0]
+            calls.append(query)
+            if query == "Fehler":
+                route.fulfill(status=503)
+            else:
+                items = [] if query == "Leer" else [
+                    {"fahrzeug": "Demo Kombi", "kennzeichen": "TEST-12", "url": "/example"}
+                ]
+                route.fulfill(json={"items": items})
+        page.route("**/partner_auftraege_suche?*", search_response)
+        search.fill("T")
+        search.fill("TEST")
+        result = page.get_by_role("link", name="Demo Kombi", exact=False)
+        expect(result).to_have_attribute("href", "/example")
+        expect(notice).to_contain_text("1 Treffer")
+        search.press("ArrowDown")
+        expect(result).to_be_focused()
+        page.keyboard.press("Escape")
+        expect(search).to_be_focused()
+        expect(search).to_have_value("")
+        expect(result).to_have_count(0)
+        search.fill("Leer")
+        expect(notice).to_contain_text("Kein Treffer")
+        search.fill("Fehler")
+        expect(notice).to_contain_text("Suche derzeit nicht verfügbar")
+        assert calls == ["TEST", "Leer", "Fehler"]
+        context.close()
+        print("PASS scoped search handles hits, empty/error states, keyboard selection and Escape")
+
+        context = browser.new_context(java_script_enabled=False, viewport={"width": 390, "height": 844})
+        page = context.new_page()
+        Scenario(page, dashboard)
+        page.goto(BASE + "/test")
+        expect(page.get_by_role("searchbox")).to_have_count(0)
+        page.get_by_role("link", name="Ihre Fahrzeuge 1").click()
+        expect(page.locator("#fahrzeuge-tabelle")).to_be_in_viewport()
+        page.locator(".portal-more summary").click()
+        expect(page.get_by_role("link", name="Angebot anfordern")).to_be_visible()
+        context.close()
+        print("PASS vehicle list, offer links and native action menu work without JavaScript")
 
         context, page, scenario = fresh(pages["partner_angebot.html"])
         offer = page.locator('#werkstatt-angebot')

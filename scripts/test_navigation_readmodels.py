@@ -141,6 +141,10 @@ class NavigationReadModelsTests(unittest.TestCase):
                         self.assertEqual(actual,expected)
             offer_results=p.list_admin_auftrag_suche('NAV-A 101',limit=50)
             self.assertIn(62002,[row['id'] for row in offer_results])
+            for reference in ('62002', '#62002', 'Auftrag 62002'):
+                self.assertEqual(p.list_admin_auftrag_suche(reference)[0]['id'],62002)
+            self.assertEqual([row['id'] for row in p.list_admin_auftrag_suche('#62002')], [62002])
+            self.assertEqual(p.list_admin_auftrag_suche('#103'), [])
 
     def test_statistics_matches_full_models_with_archive_dates_and_service_types(self):
         with p.app.test_request_context('/admin/lackier-statistik'):

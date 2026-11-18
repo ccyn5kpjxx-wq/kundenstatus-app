@@ -332,6 +332,25 @@ class CustomerInvoiceTests(unittest.TestCase):
         other = self.client.get(f'/partner/{self.other_slug}/rechnungen', query_string={'q': '819'})
         self.assertEqual(other.status_code, 302)
 
+    def test_partner_results_and_document_actions_keep_context_without_javascript(self):
+        document(self.order, 'Unbenannter-Scan.pdf')
+        single = self.client.get(self.index).text
+        self.assertIn('1 Rechnung</h2>', ''.join(line.strip() for line in single.splitlines()))
+        self.assertNotIn('Alle Rechnungen anzeigen', single)
+        document(self.archived, 'Unbenannter-Scan.pdf')
+        both = self.client.get(self.index, query_string={'q': 'Scan'}).text
+        self.assertIn('2 Treffer für „<bdi>Scan</bdi>“', both)
+        self.assertIn('id="rechnungsergebnisse" class="invoice-results" tabindex="-1"', both)
+        self.assertIn(f'action="{self.index}#rechnungsergebnisse"', both)
+        self.assertIn(f'href="{self.index}#rechnungsergebnisse">Alle Rechnungen anzeigen</a>', both)
+        for order_id in (self.order, self.archived):
+            context = f'Unbenannter-Scan.pdf · Werkstattauftrag {order_id}'
+            self.assertIn(f'aria-label="PDF öffnen · {context} (neuer Tab)"', both)
+            self.assertIn(f'aria-label="Herunterladen · {context}"', both)
+        empty = self.client.get(self.index, query_string={'q': '<keine>'}).text
+        self.assertIn('0 Treffer für „<bdi>&lt;keine&gt;</bdi>“', empty)
+        self.assertIn('Alle Rechnungen anzeigen', empty)
+
     def test_search_filters_before_pagination_and_keeps_query_on_next_page(self):
         older, _ = document(self.archived, 'Rechnung_RE0819_Altes-Original.pdf')
         for index in range(50):
