@@ -924,8 +924,13 @@ def main():
             {200},
         )
         partner_dashboard_html = partner_dashboard_response.get_data(as_text=True)
+        search_input = partner_dashboard_html.find('id="partner-fahrzeugsuche"')
+        quick_links = partner_dashboard_html.find('aria-label="Schnellzugriff"')
+        new_vehicle = partner_dashboard_html.find('href="/partner/kaesmann/neu"')
+        invoices = partner_dashboard_html.find('href="/partner/kaesmann/rechnungen"')
+        workshop_info = partner_dashboard_html.find('<details class="portal-context">')
         partner_start_reduced_ok = (
-            "Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten." in partner_dashboard_html
+            -1 < search_input < quick_links < new_vehicle < invoices < workshop_info
             and "Nächste Termine" not in partner_dashboard_html
             and "Schneller Tagesblick für Dispo und Annahme." not in partner_dashboard_html
             and "Angebotsanfragen" not in partner_dashboard_html
@@ -937,7 +942,7 @@ def main():
         print(
             "[OK] Käsmann-Dashboard zeigt reduzierte Startseite"
             if partner_start_reduced_ok
-            else "[FEHLER] Käsmann-Dashboard zeigt entfernte Startseiten-Blöcke noch an"
+            else "[FEHLER] Käsmann-Dashboard: Schnellzugriff oder erwartete Startseiten-Blöcke stimmen nicht"
         )
         ok &= partner_start_reduced_ok
         partner_weather_ui_ok = (

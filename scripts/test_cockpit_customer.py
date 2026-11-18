@@ -252,8 +252,38 @@ def run():
         context, page, _ = fresh(pages["partner_dashboard.html"])
         assert page.locator('form[action^="/partner_angebot_annehmen"]').count() == 0
         expect(page.get_by_role("link", name="Vollständiges Angebot prüfen")).to_have_attribute("href", "/partner_angebot_detail?slug=test&auftrag_id=12#werkstatt-angebot")
+        expect(page.get_by_role("link", name="Rechnungen", exact=True)).to_have_count(0)
         print("PASS dashboard has review navigation instead of direct acceptance")
         context.close()
+
+        dashboard = render("partner_dashboard.html", kunden_rechnungen_enabled=True,
+                           autohaus=dict(name="Demoautohaus Standort West", slug="standort-west",
+                                         portal_label="Portal Demoautohaus"))
+        for width in (320, 390, 768, 1440):
+            context, page, _ = fresh(dashboard, width=width)
+            search = page.get_by_role("searchbox", name="Fahrzeug suchen")
+            new_vehicle = page.get_by_role("link", name="Neues Fahrzeug", exact=True)
+            invoices = page.get_by_role("link", name="Rechnungen", exact=True)
+            expect(page.get_by_text("Demoautohaus Standort West", exact=True)).to_be_visible()
+            expect(new_vehicle).to_have_attribute("href", "/partner_neuer_auftrag?slug=standort-west")
+            expect(invoices).to_have_attribute("href", "/kundenrechnungen.partner_index?slug=standort-west")
+            for target in (search, new_vehicle, invoices):
+                box = target.bounding_box()
+                assert box and 0 <= box["x"] and box["x"] + box["width"] <= width + 1
+                assert box["y"] + box["height"] <= 568
+            search.focus()
+            page.keyboard.press("Tab")
+            expect(new_vehicle).to_be_focused()
+            page.keyboard.press("Tab")
+            expect(invoices).to_be_focused()
+            context_details = page.locator(".portal-context")
+            expanded = width >= 992
+            assert context_details.evaluate("el => el.open") == expanded
+            context_details.locator("summary").focus()
+            page.keyboard.press("Enter")
+            assert context_details.evaluate("el => el.open") != expanded
+            context.close()
+        print("PASS dashboard account, scoped quick links, mobile visibility and keyboard order")
 
         context, page, scenario = fresh(pages["partner_angebot.html"])
         offer = page.locator('#werkstatt-angebot')

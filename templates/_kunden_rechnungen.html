@@ -4,7 +4,8 @@
   <li class="invoice-card">
     <span class="invoice-file-icon" aria-hidden="true">PDF</span>
     <div class="invoice-details">
-      <div class="invoice-order">Auftrag {{ rechnung.auftrag_id }}{% if rechnung.archiviert %}<span class="invoice-archive">Archiviert</span>{% endif %}</div>
+      <div class="invoice-order">Auftrag {{ rechnung.auftrag_id }}{% if rechnung.partner_auftragsnummer %}<span>Ihre Auftragsnr. {{ rechnung.partner_auftragsnummer }}</span>{% endif %}{% if rechnung.archiviert %}<span class="invoice-archive">Archiviert</span>{% endif %}</div>
+      {% if rechnung.belegnummer %}<strong class="invoice-number">{{ rechnung.belegnummer }}</strong>{% endif %}
       <h3>{{ rechnung.fahrzeug or 'Werkstattauftrag' }}{% if rechnung.kennzeichen %} · {{ rechnung.kennzeichen }}{% endif %}</h3>
       <p class="invoice-name">{{ rechnung.name }}</p>
       {% if rechnung.datum %}<p class="invoice-date">Bereitgestellt: {{ rechnung.datum }}</p>{% endif %}

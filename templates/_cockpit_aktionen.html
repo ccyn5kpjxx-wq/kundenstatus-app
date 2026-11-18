@@ -2,8 +2,14 @@
 <section class="cockpit-card p-3" aria-labelledby="aktionen-titel">
   <div class="section-title gap-3 flex-wrap">
     <div>
-      <h2 class="h5 mb-1" id="aktionen-titel">Das steht jetzt an <span class="badge-soft">{{ aktionsuebersicht.total }} offene Aktion{{ '' if aktionsuebersicht.total == 1 else 'en' }}</span></h2>
-      <p class="small text-muted mb-0">Bereich öffnen und direkt am Vorgang weiterarbeiten.</p>
+      <h2 class="h5 mb-1" id="aktionen-titel">Anfragen und Aufträge</h2>
+      <p class="small text-muted mb-0">
+        {% if aktionsuebersicht.total %}
+          {{ aktionsuebersicht.total }} {{ 'offener Schritt' if aktionsuebersicht.total == 1 else 'offene Schritte' }} in diesen vier Bereichen.
+        {% else %}
+          In diesen vier Bereichen ist aktuell nichts offen.
+        {% endif %}
+      </p>
     </div>
     <a class="btn btn-brand btn-sm" href="{{ url_for('admin_aufgaben') }}">Tagesaufgaben zuteilen{% if offene_zuweisung_count is defined and offene_zuweisung_count %} · {{ offene_zuweisung_count }} {{ 'Auftrag' if offene_zuweisung_count == 1 else 'Aufträge' }}{% endif %}</a>
   </div>

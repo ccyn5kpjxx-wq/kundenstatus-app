@@ -48,7 +48,7 @@ def main():
     with client.session_transaction() as session:session['admin']=True
     response=client.get('/admin/cockpit')
     html=response.get_data(as_text=True)
-    assert response.status_code==200 and 'id="aktionen-titel">Das steht jetzt an' in html
+    assert response.status_code==200 and 'id="aktionen-titel">Anfragen und Aufträge' in html
     assert 'data-cockpit-kalender' in html
     print('PASS: Gruppen, Wartezustand, Terminbestaetigung, Archiv/Verlust und Adminschutz')
 

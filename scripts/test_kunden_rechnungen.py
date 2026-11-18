@@ -295,6 +295,59 @@ class CustomerInvoiceTests(unittest.TestCase):
         self.assertNotIn('<img src=x', html)
         self.assertIn('Seite 2 von 2', html)
 
+    def test_partner_search_uses_visible_file_and_vehicle_details(self):
+        doc, _ = document(self.archived, 'Rechnung_RE0618_Auftrag_443_Original.pdf')
+        sql("UPDATE auftraege SET auftragsnummer=? WHERE id=?", ('AH-9617', self.archived))
+        document(self.order, 'Unbenannter-Scan.pdf')
+        for query in ('RE0618', 're-0618', 'RE618', 'Rechnung 618', '0618', '618', 'Archivfahrzeug',
+                      '9617', 'Auftrag AH-9617', 'ah9617',
+                      f'Auftrag {self.archived}', 'demoa123'):
+            with self.subTest(query=query):
+                response = self.client.get(self.index, query_string={'q': query})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(self.file_url(doc, download=True), response.text)
+                self.assertIn('Ihre Auftragsnr. AH-9617', response.text)
+                self.assertIn('<strong class="invoice-number">RE0618</strong>', response.text)
+                self.assertIn('Archiviert', response.text)
+        generic = self.client.get(self.index, query_string={'q': 'unbenannter'})
+        self.assertIn('1 Treffer', generic.text)
+        self.assertNotIn('class="invoice-number"', generic.text)
+
+    def test_search_respects_release_and_partner_identity_and_escapes_query(self):
+        document(self.order, 'Rechnung_RE0618_Eigenes-Original.pdf')
+        document(self.order, 'Rechnung_RE0618_Interner-Beleg.pdf', partner_visible=False)
+        document(self.foreign_order, 'Rechnung_RE0618_Fremder-Beleg.pdf')
+        document(self.foreign_order, 'Rechnung_RE0819_Anderer-Beleg.pdf')
+        page = self.client.get(self.index, query_string={'q': '618'})
+        self.assertIn('1 Treffer', page.text)
+        self.assertNotIn('Interner-Beleg', page.text)
+        self.assertNotIn('Fremder-Beleg', page.text)
+        for query in ('819', '<img src=x>', '+++'):
+            page = self.client.get(self.index, query_string={'q': query})
+            self.assertIn('Keine passenden Rechnungen gefunden', page.text)
+            self.assertNotIn('class="invoice-card"', page.text)
+            self.assertNotIn('Noch keine Rechnung bereitgestellt', page.text)
+            self.assertNotIn('<img src=x>', page.text)
+        self.assertEqual(self.anonymous.get(self.index, query_string={'q': '618'}).status_code, 302)
+        other = self.client.get(f'/partner/{self.other_slug}/rechnungen', query_string={'q': '819'})
+        self.assertEqual(other.status_code, 302)
+
+    def test_search_filters_before_pagination_and_keeps_query_on_next_page(self):
+        older, _ = document(self.archived, 'Rechnung_RE0819_Altes-Original.pdf')
+        for index in range(50):
+            document(self.order, f'Scan-{index:02}_Original.pdf')
+        document(self.order, 'Unpassend.pdf')
+        first = self.client.get(self.index, query_string={'q': 'Original'})
+        self.assertIn('51 Treffer', first.text)
+        self.assertIn('Seite 1 von 2', first.text)
+        self.assertIn('seite=2&amp;q=Original', first.text)
+        self.assertNotIn('Unpassend.pdf', first.text)
+        second = self.client.get(self.index, query_string={'q': 'Original', 'seite': 2})
+        self.assertIn(self.file_url(older, download=True), second.text)
+        single = self.client.get(self.index, query_string={'q': '819'})
+        self.assertIn(self.file_url(older), single.text)
+        self.assertNotIn('Seite 1 von 2', single.text)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

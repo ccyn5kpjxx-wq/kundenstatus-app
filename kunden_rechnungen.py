@@ -5,6 +5,7 @@ OCR, publication, notification, invoice creation or customer-name matching.
 """
 from datetime import datetime
 from pathlib import PurePath
+import re
 
 from flask import Blueprint, abort, make_response, render_template, request, url_for
 
@@ -12,7 +13,27 @@ from flask import Blueprint, abort, make_response, render_template, request, url
 _FIELDS = """d.id, d.auftrag_id, d.original_name, d.stored_name, d.mime_type,
     d.size, d.quelle, d.kategorie, d.sichtbarkeit_geprueft, d.kunde_sichtbar,
     d.partner_sichtbar, d.versicherung_sichtbar, d.hochgeladen_am,
-    a.fahrzeug, a.kennzeichen, a.archiviert"""
+    a.fahrzeug, a.kennzeichen, a.auftragsnummer, a.archiviert"""
+
+# Match complete Lexware document numbers in public filenames, including
+# underscore-separated exports. A file or order ID is not an invoice number.
+_VOUCHER_NUMBER = re.compile(r"(?:^|[\W_])((?:RE|RG|GS)[ -]?\d{3,}(?:[-/]\d+)*)(?=$|[\W_])", re.I)
+
+
+def _search_key(text):
+    return re.sub(r"[\W_]+", "", str(text or "").casefold())
+
+
+def _matches_search(document, query):
+    fields = (document["original_name"], document["fahrzeug"], document["kennzeichen"],
+              f"Auftrag {document['auftrag_id']}", f"Auftrag {document['auftragsnummer'] or ''}")
+    if any(query in _search_key(field) for field in fields):
+        return True
+    # The shop often quotes an invoice as RE618 although the file says RE0618.
+    compact_numbers = (_search_key(number) for number in _VOUCHER_NUMBER.findall(document["original_name"]))
+    query = re.sub(r"^rechnung(?:snummer)?(?:re)?(?=\d)", "re", query)
+    query = re.sub(r"^(re|rg|gs)0+(?=\d)", r"\1", query)
+    return any(re.sub(r"^(re|rg|gs)0+(?=\d)", r"\1", number) == query for number in compact_numbers)
 
 
 def register_customer_invoices(p):
@@ -76,7 +97,10 @@ def register_customer_invoices(p):
             legacy_date = p.parse_date(date_label.split(" ", 1)[0])
             if legacy_date:
                 date_label = legacy_date.strftime("%d.%m.%Y")
+        numbers = set(_VOUCHER_NUMBER.findall(document["original_name"].upper())) if "slug" in route else set()
         return {
+            "belegnummer": numbers.pop() if len(numbers) == 1 else "",
+            "partner_auftragsnummer": document["auftragsnummer"] if "slug" in route else "",
             "auftrag_id": document["auftrag_id"],
             "fahrzeug": document["fahrzeug"],
             "kennzeichen": document["kennzeichen"],
@@ -125,6 +149,11 @@ def register_customer_invoices(p):
         if redirect_response:
             return private(redirect_response)
         items = documents("partner", partner_id=partner["id"])
+        total = len(items)
+        search = request.args.get("q", "").strip()
+        if search:
+            key = _search_key(search)
+            items = [item for item in items if key and _matches_search(item, key)]
         try:
             page = max(1, int(request.args.get("seite", "1")))
         except ValueError:
@@ -134,7 +163,8 @@ def register_customer_invoices(p):
         return private(render_template(
             "partner_rechnungen.html", autohaus=partner,
             kunden_rechnungen=[card(d, slug=slug) for d in items[(page-1)*50:page*50]],
-            rechnungen_gesamt=len(items), rechnungen_seite=page, rechnungen_seiten=pages,
+            rechnungen_gesamt=total, rechnungen_treffer=len(items), rechnungen_suche=search,
+            rechnungen_seite=page, rechnungen_seiten=pages,
         ))
 
     def partner_original(slug, document_id, attachment):

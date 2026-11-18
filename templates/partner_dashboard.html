@@ -29,27 +29,24 @@
     tr[data-select-row].is-selected { background:#f8f1e6; }
     .selection-badge { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border:1px solid #d9cab4; border-radius:999px; background:#fffaf2; }
     .portal-search {
-      grid-column:1 / -1;
-      display:grid;
-      grid-template-columns:160px minmax(0,1fr);
-      align-items:center;
-      gap:12px 14px;
-      max-width:none;
-      width:100%;
-      border:1px solid #e4d6c3;
-      border-radius:18px;
-      background:#fffaf2;
-      padding:14px 16px;
+      min-width:0;
     }
     .portal-search .form-label {
-      margin-bottom:0 !important;
-      white-space:nowrap;
+      margin-bottom:6px;
+      color:#263b33;
+      font-size:.92rem;
+      font-weight:700;
+    }
+    .portal-search input {
+      min-height:46px;
+      border-color:#b9c3ba;
+      border-radius:10px;
+      background:#fff;
     }
     .portal-search-results {
       display:grid;
       gap:8px;
-      grid-column:2;
-      margin-top:0;
+      margin-top:8px;
     }
     .portal-search-results[hidden] {
       display:none;
@@ -94,85 +91,118 @@
     .portal-search-empty {
       color:#6c6255;
     }
-    .portal-hero {
-      display:grid;
-      grid-template-columns:minmax(0,1fr) minmax(560px,602px);
-      gap:18px 28px;
-      align-items:start;
-    }
-    .portal-hero-copy {
-      min-width:0;
-    }
-    .portal-brand-stage {
+    .portal-heading {
       display:flex;
+      flex-wrap:wrap;
       align-items:center;
-      min-height:304px;
-      min-width:0;
-      margin-top:24px;
+      justify-content:space-between;
+      gap:10px 24px;
+      margin-bottom:22px;
+    }
+    .portal-heading h1 {
+      margin:0;
+      color:#1c3129;
+      font-size:clamp(1.65rem,3.7vw,2.7rem);
+      line-height:1.12;
+      overflow-wrap:anywhere;
+    }
+    .portal-account-name {
+      margin:4px 0 0;
+      color:#526258;
+      overflow-wrap:anywhere;
     }
     .portal-brand-lockup {
-      display:grid;
-      grid-template-columns:minmax(0,1fr);
-      align-items:stretch;
-      gap:12px;
-      width:100%;
-      max-width:680px;
-      min-width:0;
-    }
-    .portal-brand-card {
       display:flex;
-      min-width:0;
-      min-height:146px;
-      flex-direction:column;
+      flex-wrap:wrap;
       align-items:center;
-      justify-content:center;
-      gap:10px;
-      padding:10px 22px;
-      text-align:center;
+      gap:14px;
+      min-width:0;
     }
-    .portal-brand-eyebrow {
-      color:#7a6b58;
-      font-size:.68rem;
-      line-height:1;
-      font-weight:800;
-      letter-spacing:.1em;
-      text-transform:uppercase;
-    }
-    .portal-brand-card img {
+    .portal-brand-lockup img {
       display:block;
-      width:auto;
-      max-width:100%;
+      max-width:130px;
+      max-height:42px;
       object-fit:contain;
     }
-    .portal-gaertner-logo {
-      max-height:95px;
-    }
-    .portal-partner-logo {
-      max-height:78px;
-    }
-    .portal-partner-caption,
-    .portal-partner-name {
-      color:#182533;
-      font-size:.82rem;
-      line-height:1.2;
-      font-weight:800;
-    }
-    .portal-header-actions {
-      display:contents;
-    }
-    .portal-side-stack {
+    .portal-partner-brand {
       display:grid;
-      gap:18px;
-      min-width:0;
-      width:100%;
-      justify-self:end;
+      gap:2px;
+      padding-left:14px;
+      border-left:1px solid #d7ddd4;
+    }
+    .portal-partner-caption {
+      color:#526258;
+      font-size:.75rem;
+    }
+    .portal-workbar {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) auto;
+      align-items:start;
+      gap:12px 20px;
+    }
+    .portal-primary-links {
+      display:flex;
+      gap:8px;
+      padding-top:28px;
+    }
+    .portal-primary-links a {
+      display:inline-flex;
+      min-height:46px;
+      align-items:center;
+      justify-content:center;
+      padding:8px 18px;
+      border:1px solid #244031;
+      border-radius:10px;
+      color:#244031;
+      font-weight:700;
+      line-height:1.2;
+      text-align:center;
+      text-decoration:none;
+    }
+    .portal-primary-links a:first-child { background:#244031; color:white; }
+    .portal-primary-links a:hover { background:#e6eee5; }
+    .portal-primary-links a:first-child:hover { background:#163023; }
+    .portal-secondary-links {
+      display:flex;
+      flex-wrap:wrap;
+      gap:0 20px;
+      margin-top:8px;
+    }
+    .portal-secondary-links a,
+    .portal-logout-link {
+      display:inline-flex;
+      align-items:center;
+      min-height:44px;
+      color:#305640;
+      font-weight:600;
+      text-decoration:underline;
+      text-underline-offset:3px;
+    }
+    .portal-secondary-links a:hover,
+    .portal-logout-link:hover { color:#122b1d; }
+    .portal-start :focus-visible { outline:3px solid #2c744c; outline-offset:2px; }
+    .portal-context {
+      margin-top:8px;
+      border-top:1px solid #e0e2d7;
+    }
+    .portal-context summary {
+      width:fit-content;
+      max-width:100%;
+      padding:14px 0;
+      color:#526258;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .portal-context-content {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+      align-items:start;
+      gap:20px;
     }
     .portal-header-top {
       display:grid;
-      grid-template-columns:minmax(320px,380px) 210px;
-      align-items:stretch;
-      gap:12px;
-      width:100%;
+      grid-template-columns:minmax(0,1fr) minmax(128px, .42fr);
+      gap:10px;
     }
     .portal-services-panel {
       min-width:0;
@@ -347,19 +377,6 @@
     .portal-weather-error {
       color:#8a4d12;
     }
-    .portal-logout {
-      text-align:right;
-      margin-bottom:4px;
-    }
-    .portal-logout-link {
-      color:#6c6255;
-      font-size:.9rem;
-      text-decoration:none;
-    }
-    .portal-logout-link:hover {
-      color:#132635;
-      text-decoration:underline;
-    }
     .metric-link {
       display:block;
       color:#fff;
@@ -379,61 +396,6 @@
     }
     .metric-filter-hidden {
       display:none !important;
-    }
-    .portal-action-row {
-      display:flex;
-      flex-wrap:wrap;
-      grid-column:1 / -1;
-      justify-content:flex-start;
-      gap:8px;
-      padding-top:18px;
-      border-top:1px solid #eadfce;
-    }
-    .portal-action-row .btn {
-      border-radius:10px;
-      white-space:nowrap;
-    }
-    .whatsapp-quick-status {
-      display:flex;
-      align-items:center;
-      gap:8px;
-      min-height:38px;
-      margin-left:auto;
-      padding:6px 10px;
-      border:1px solid #b9ddc6;
-      border-radius:10px;
-      background:#eef9f2;
-      color:#173f2b;
-      flex:0 0 auto;
-      max-width:190px;
-    }
-    .whatsapp-mark {
-      display:inline-flex;
-      width:24px;
-      height:24px;
-      flex:0 0 24px;
-      align-items:center;
-      justify-content:center;
-      border-radius:999px;
-      background:#1fae62;
-      color:#fff;
-      font-size:.56rem;
-      font-weight:800;
-      letter-spacing:.02em;
-      box-shadow:0 4px 10px rgba(31,174,98,.18);
-    }
-    .whatsapp-quick-status strong {
-      display:block;
-      color:#102f21;
-      font-size:.86rem;
-      line-height:1.1;
-    }
-    .whatsapp-quick-status small {
-      display:block;
-      color:#3f6d54;
-      font-size:.72rem;
-      line-height:1.2;
-      margin-top:2px;
     }
     .offer-decision-panel {
       border:1px solid #d9b56a;
@@ -616,48 +578,8 @@
       min-height:44px;
       font-size:16px;
     }
-    @media (max-width: 1199.98px) {
-      .portal-hero {
-        grid-template-columns:1fr;
-      }
-      .portal-header-top {
-        grid-template-columns:minmax(320px,440px) 220px;
-        width:100%;
-      }
-      .portal-side-stack {
-        width:100%;
-        justify-self:start;
-      }
-      .portal-action-row {
-        justify-content:flex-start;
-      }
-      .whatsapp-quick-status {
-        margin-left:0;
-        flex:1 1 260px;
-      }
-      .portal-brand-stage {
-        min-height:auto;
-      }
-    }
     @media (max-width: 991.98px) {
-      .portal-hero {
-        gap:18px;
-      }
-      .portal-header-top {
-        grid-template-columns:1fr;
-      }
-      .portal-services-grid {
-        grid-template-columns:1fr;
-      }
-      .portal-search {
-        grid-template-columns:1fr;
-      }
-      .portal-search-results {
-        grid-column:1;
-      }
-      .portal-action-row .btn {
-        flex:1 1 220px;
-      }
+      .portal-context-content { grid-template-columns:1fr; }
       .offer-decision-card {
         grid-template-columns:1fr;
         align-items:start;
@@ -671,9 +593,6 @@
       .offer-actions {
         justify-content:flex-start;
       }
-      .portal-brand-stage {
-        margin-top:20px;
-      }
     }
     @media (max-width: 575.98px) {
       .shell { padding:14px; }
@@ -682,10 +601,6 @@
       .panel .btn,
       .bulk-bar .btn {
         width:100%;
-      }
-      .whatsapp-quick-status {
-        width:100%;
-        flex-basis:100%;
       }
       .bulk-bar {
         align-items:stretch;
@@ -763,23 +678,17 @@
       .bonus-summary { gap:0; }
       .bonus-order { align-items:start; }
       .bonus-source { width:max-content; max-width:100%; white-space:normal; }
-      .portal-hero { grid-template-columns:1fr; }
-      .portal-side-stack,
-      .portal-header-top { width:100%; }
-      .portal-brand-stage { min-height:0; }
-      .portal-brand-lockup {
-        grid-template-columns:minmax(0,1fr);
-        gap:10px;
-      }
-      .portal-brand-card {
-        min-height:112px;
-        gap:8px;
-        padding:10px 14px;
-      }
-      .portal-gaertner-logo { max-height:72px; }
-      .portal-partner-logo { max-height:58px; }
-      .portal-partner-caption,
-      .portal-partner-name { font-size:.7rem; }
+      .portal-heading { margin-bottom:14px; }
+      .portal-brand-lockup { width:100%; gap:8px; }
+      .portal-brand-lockup img { max-width:88px; max-height:28px; }
+      .portal-partner-brand { padding-left:8px; }
+      .portal-partner-caption { max-width:115px; line-height:1.1; }
+      .portal-logout-link { margin-left:auto; font-size:.9rem; }
+      .portal-workbar { grid-template-columns:1fr; }
+      .portal-primary-links { display:grid; grid-auto-columns:minmax(0,1fr); grid-auto-flow:column; padding:0; }
+      .portal-primary-links a { padding:8px; }
+      .portal-secondary-links { gap:0 14px; }
+      .portal-header-top, .portal-services-grid { grid-template-columns:1fr; }
       .portal-clock-panel { width:100%; text-align:left; }
       .portal-weather-panel { min-width:0; width:100%; }
       .portal-weather-hours { grid-template-columns:1fr; gap:8px; }
@@ -806,97 +715,85 @@
       {% endfor %}
     {% endwith %}
 
-    <div class="panel mb-4">
-      <div class="portal-logout">
-        <a href="{{ url_for('partner_logout') }}" class="portal-logout-link">Logout</a>
-      </div>
-      <div class="portal-hero">
-        <div class="portal-hero-copy">
-          <div>
-            <div class="text-muted">{{ autohaus['portal_welcome'] }}</div>
-            <h1 class="mb-2">{{ autohaus['portal_label'] }}</h1>
-            <div class="text-muted">Fahrzeuge suchen, neue Aufträge anlegen und Hinweise im Blick behalten.</div>
-          </div>
-          <div class="portal-brand-stage">
-            <div class="portal-brand-lockup" aria-label="Gärtner GmbH Karosserie + Lack in Zusammenarbeit mit {{ autohaus['name'] }}">
-              <div class="portal-brand-card">
-                <span class="portal-brand-eyebrow">Werkstatt</span>
-                <img class="portal-gaertner-logo" src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack">
-              </div>
-              <div class="portal-brand-card portal-brand-card--partner">
-                <span class="portal-brand-eyebrow">Partnerbetrieb</span>
-                {% if autohaus['partner_logo'] %}
-                <img class="portal-partner-logo" src="{{ url_for('static', filename=autohaus['partner_logo']) }}" alt="{{ autohaus['partner_logo_alt'] }}">
-                {% else %}
-                <strong class="portal-partner-name">{{ autohaus['name'] }}</strong>
-                {% endif %}
-                {% if autohaus['partner_logo_caption'] %}<span class="portal-partner-caption">{{ autohaus['partner_logo_caption'] }}</span>{% endif %}
-              </div>
-            </div>
-          </div>
+    <div class="panel mb-4 portal-start">
+      <header class="portal-heading">
+        <div>
+          <h1>{{ autohaus['portal_label'] }}</h1>
+          {% if autohaus['name'] and autohaus['name']|lower not in autohaus['portal_label']|lower %}
+          <p class="portal-account-name">{{ autohaus['name'] }}</p>
+          {% endif %}
         </div>
-        <div class="portal-header-actions">
-          <div class="portal-side-stack">
-            <div class="portal-header-top">
-              <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
-                <div class="portal-weather-head">
-                  <div>
-                    <div class="portal-weather-label">Wetter</div>
-                    <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
-                      <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
-                    </select>
-                  </div>
-                  <div class="portal-weather-current">
-                    <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
-                    <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
-                  </div>
+        <div class="portal-brand-lockup">
+          <img src="{{ url_for('static', filename='logo-transparent.png') }}" alt="Gärtner GmbH Karosserie + Lack">
+          {% if autohaus['partner_logo'] or autohaus['partner_logo_caption'] %}
+          <div class="portal-partner-brand">
+            {% if autohaus['partner_logo'] %}<img src="{{ url_for('static', filename=autohaus['partner_logo']) }}" alt="{{ autohaus['partner_logo_alt'] }}">{% endif %}
+            {% if autohaus['partner_logo_caption'] %}<span class="portal-partner-caption">{{ autohaus['partner_logo_caption'] }}</span>{% endif %}
+          </div>
+          {% endif %}
+          <a href="{{ url_for('partner_logout') }}" class="portal-logout-link">Abmelden</a>
+        </div>
+      </header>
+      <div class="portal-workbar">
+        <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
+          <label for="partner-fahrzeugsuche" class="form-label">Fahrzeug suchen</label>
+          <input id="partner-fahrzeugsuche" type="search" class="form-control" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
+          <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
+        </div>
+        <nav class="portal-primary-links" aria-label="Schnellzugriff">
+          <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}">Neues Fahrzeug</a>
+          {% if kunden_rechnungen_enabled %}<a href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus['slug']) }}">Rechnungen</a>{% endif %}
+        </nav>
+      </div>
+      <nav class="portal-secondary-links" aria-label="Weitere Portalbereiche">
+        <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
+        <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}">Angebot anfordern</a>
+        <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}">Versicherungsfall melden</a>
+        <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
+      </nav>
+      <details class="portal-context">
+        <summary>Wetter, Uhrzeit und Werkstattleistungen</summary>
+        {% if autohaus['willkommen_text'] %}<p class="text-muted">{{ autohaus['willkommen_text'] }}</p>{% endif %}
+        <div class="portal-context-content">
+          <div class="portal-header-top">
+            <div class="portal-weather-panel" data-weather-widget data-weather-url="{{ url_for('wetter_mosbach') }}">
+              <div class="portal-weather-head">
+                <div>
+                  <div class="portal-weather-label">Wetter</div>
+                  <select class="portal-weather-select" data-weather-location aria-label="Wetterort auswählen">
+                    <option value="mosbach" data-latitude="49.3536" data-longitude="9.1517" selected>Mosbach</option>
+                  </select>
                 </div>
-                <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
-                <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
+                <div class="portal-weather-current">
+                  <span class="portal-weather-icon" data-weather-current-icon aria-hidden="true">--</span>
+                  <strong class="portal-weather-temp" data-weather-current-temp>--°C</strong>
+                </div>
               </div>
-              <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
-                <div class="portal-clock-label">Heute</div>
-                <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
-                <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
-              </div>
+              <div class="portal-weather-meta" data-weather-current-text>Wetter wird geladen.</div>
+              <div class="portal-weather-hours" data-weather-hours aria-label="Wetter in den nächsten 3 Stunden"></div>
             </div>
-            <div class="portal-services-panel" aria-label="Unsere Leistungen">
-              <div class="portal-services-title">Unsere Leistungen</div>
-              <div class="portal-services-grid">
-                <div class="portal-service-item"><span><strong>Lackiererei / Fahrzeuglackierung:</strong> Spot-Repair, Teil- und Komplettlackierung.</span></div>
-                <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
-                <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
-                <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
-                <div class="portal-service-item"><span><strong>Softlack-Erneuerung:</strong> Armaturen im Innenraum.</span></div>
-                <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
-                <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
-                <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
-                <div class="portal-service-item"><span><strong>Felgenaufbereitung (NEU):</strong> Felgen abdrehen bei Bordsteinschäden und Pulverbeschichtung in Wunschfarbe.</span></div>
-              </div>
+            <div class="portal-clock-panel" data-live-clock-root data-server-now="{{ current_datetime_iso }}">
+              <div class="portal-clock-label">Heute</div>
+              <div class="portal-clock-time" data-live-clock>{{ current_time_label }}</div>
+              <div class="portal-clock-date" data-live-date>{{ current_date_label }}</div>
             </div>
           </div>
-          <div class="portal-action-row">
-            <a href="{{ url_for('partner_neuer_auftrag', slug=autohaus['slug']) }}" class="btn btn-dark btn-lg">Neues Fahrzeug</a>
-            <a href="{{ url_for('partner_neues_angebot', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Angebot anfordern</a>
-            <a href="{{ url_for('partner_versicherung_schaden_neu', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Versicherungsfall melden</a>
-            <a href="{{ url_for('partner_bonusmodell', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg" title="Rahmenvertrag und Bonusmodell ansehen">{{ rahmenvertrag['button_label'] }}</a>
-            <a href="{{ url_for('partner_postfach', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Postfach{% if postfach_count %}<span class="mail-badge">{{ postfach_count }}</span>{% endif %}</a>
-            {% if kunden_rechnungen_enabled %}<a href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus['slug']) }}" class="btn btn-outline-dark btn-lg">Rechnungen</a>{% endif %}
-            <div class="whatsapp-quick-status" role="status" aria-label="WhatsApp Verbindung aktiv">
-              <span class="whatsapp-mark" aria-hidden="true">WA</span>
-              <div>
-                <strong>WhatsApp aktiv</strong>
-                <small>Schnelle Antwort</small>
-              </div>
+          <div class="portal-services-panel" aria-label="Unsere Leistungen">
+            <div class="portal-services-title">Unsere Leistungen</div>
+            <div class="portal-services-grid">
+              <div class="portal-service-item"><span><strong>Lackiererei / Fahrzeuglackierung:</strong> Spot-Repair, Teil- und Komplettlackierung.</span></div>
+              <div class="portal-service-item"><span><strong>Unfallinstandsetzung &amp; Smart Repair:</strong> Richtbank, Kunststoffreparatur, Kleinschäden.</span></div>
+              <div class="portal-service-item"><span><strong>Dellendoktor:</strong> Ausbeulen bei Park- und Hageldellen.</span></div>
+              <div class="portal-service-item"><span><strong>Fahrzeugpflege:</strong> Innenreinigung, Politur und Versiegelung.</span></div>
+              <div class="portal-service-item"><span><strong>Softlack-Erneuerung:</strong> Armaturen im Innenraum.</span></div>
+              <div class="portal-service-item"><span><strong>Industrielackierung:</strong> Bauteile und Kleinserien.</span></div>
+              <div class="portal-service-item"><span><strong>Glas-Rep.:</strong> Steinschlagreparatur und Scheibentausch.</span></div>
+              <div class="portal-service-item"><span><strong>Mechanikarbeiten:</strong> Ölwechsel, Service und Bremsen wechseln.</span></div>
+              <div class="portal-service-item"><span><strong>Felgenaufbereitung (NEU):</strong> Felgen abdrehen bei Bordsteinschäden und Pulverbeschichtung in Wunschfarbe.</span></div>
             </div>
-          </div>
-          <div class="portal-search" data-portal-search data-search-url="{{ url_for('partner_auftraege_suche', slug=autohaus['slug']) }}">
-            <label class="form-label fw-bold mb-2">Fahrzeug suchen</label>
-            <input type="text" class="form-control form-control-lg" placeholder="Kennzeichen oder Fahrzeug eingeben" autocomplete="off" data-portal-search-input>
-            <div class="portal-search-results" data-portal-search-results aria-live="polite" hidden></div>
           </div>
         </div>
-      </div>
+      </details>
     </div>
 
     {% if werkstattangebote %}
@@ -1201,6 +1098,13 @@
   </div>
   {% include "ki_assistent_widget.html" %}
   <script>
+    (() => {
+      const details = document.querySelector('.portal-context');
+      const desktop = window.matchMedia('(min-width: 992px)');
+      const setInitialView = () => { details.open = desktop.matches; };
+      setInitialView();
+      desktop.addEventListener('change', setInitialView);
+    })();
     (() => {
       const root = document.querySelector('[data-live-clock-root]');
       if (!root) {

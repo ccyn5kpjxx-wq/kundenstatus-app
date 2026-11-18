@@ -49,7 +49,7 @@ class CompactCockpitTest(unittest.TestCase):
         groups = [attrs for tag, attrs in tags if tag == "details" and "data-action-group" in attrs]
         self.assertEqual(len(groups), 4)
         self.assertTrue(all("open" not in attrs for attrs in groups))
-        for text in ("Neue Nachricht", "Ersatzwagen", "08:30 Uhr", "16:15 Uhr", "2 Angebote warten", "1 offene Aktion"):
+        for text in ("Neue Nachricht", "Ersatzwagen", "08:30 Uhr", "16:15 Uhr", "2 Angebote warten", "1 offener Schritt in diesen vier Bereichen."):
             self.assertIn(text, html)
         self.assertNotIn('class="cockpit-rail"', html)
         self.assertNotIn('class="page-card module-tile"', html)
@@ -58,11 +58,14 @@ class CompactCockpitTest(unittest.TestCase):
         self.env.globals["mahnungen_faellig_count"] = lambda: 2
         data = context()
         data["cockpit"].update({"offene_reklamationen": [{"id": 8}], "offene_verzoegerungen": [{"auftrag_id": 72, "kennzeichen": "DEMO 72"}], "ueberfaellig": [{"id": 73, "kennzeichen": "DEMO 73"}]})
+        data["aktionsuebersicht"] = {"groups": {}, "total": 0, "waiting": 0}
         html = self.render(data)
-        alert_start = html.index('aria-label="Dringende Hinweise"')
+        self.assertIn("In diesen vier Bereichen ist aktuell nichts offen.", html)
+        self.assertNotIn("0 offene Aktionen", html)
+        alert_start = html.index('id="cockpit-hinweise">Dringende Hinweise')
         alert_end = html.index('aria-label="Fahrzeuge heute"')
         alerts = html[alert_start:alert_end]
-        for text in ("2 Mahnungen fällig", "1 offene Reklamation", "1 · Verzögerung(en) prüfen", "1 · Fertigstellung überfällig", "/admin_mahnungen", "/dashboard#reklamationen", "auftrag_id=72", "auftrag_id=73"):
+        for text in ("2 Mahnungen fällig", "1 offene Reklamation", "1 Verzögerung prüfen", "1 Fertigstellung überfällig", "/admin_mahnungen", "/dashboard#reklamationen", "auftrag_id=72", "auftrag_id=73"):
             self.assertIn(text, alerts)
 
     def test_existing_inbox_actions_keep_csrf_and_return_target(self):

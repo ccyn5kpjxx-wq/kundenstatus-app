@@ -16,14 +16,32 @@
     <section class="invoice-intro" aria-labelledby="rechnungen-titel">
       <p class="invoice-eyebrow">{{ autohaus.portal_label }}</p>
       <h1 id="rechnungen-titel">Ihre Rechnungen <span>{{ rechnungen_gesamt }}</span></h1>
-      <p>Alle für Sie bereitgestellten Rechnungs-PDFs, nach Auftrag zugeordnet. Auch abgeschlossene und archivierte Aufträge bleiben hier erreichbar.</p>
+      <p>Hier finden Sie Ihre Rechnungen als PDF, auch zu archivierten Aufträgen.</p>
     </section>
+    {% if rechnungen_gesamt or rechnungen_suche %}
+    <form class="invoice-search" method="get" action="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug) }}" role="search">
+      <label for="rechnungssuche">Rechnungsnummer, Kennzeichen, Auftrag oder Fahrzeug</label>
+      <div class="invoice-search-fields">
+        <input type="search" name="q" id="rechnungssuche" value="{{ rechnungen_suche }}" placeholder="z. B. RE0618" enterkeyhint="search">
+        <button class="invoice-button invoice-open" type="submit">Suchen</button>
+        {% if rechnungen_suche %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug) }}">Suche zurücksetzen</a>{% endif %}
+      </div>
+    </form>
+    {% endif %}
+    {% if rechnungen_suche and not kunden_rechnungen %}
+    <div class="invoice-empty">
+      <h2>Keine passenden Rechnungen gefunden</h2>
+      <p>Prüfen Sie die Eingabe oder suchen Sie nach dem Kennzeichen oder der Auftragsnummer.</p>
+    </div>
+    {% else %}
+    {% if rechnungen_suche %}<p class="invoice-results">{{ rechnungen_treffer }} Treffer</p>{% endif %}
     {% include '_kunden_rechnungen.html' %}
+    {% endif %}
     {% if rechnungen_seiten > 1 %}
     <nav class="invoice-pagination" aria-label="Rechnungsseiten">
-      {% if rechnungen_seite > 1 %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite-1) }}">← Zurück</a>{% endif %}
+      {% if rechnungen_seite > 1 %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite-1, q=rechnungen_suche or none) }}">← Zurück</a>{% endif %}
       <span>Seite {{ rechnungen_seite }} von {{ rechnungen_seiten }}</span>
-      {% if rechnungen_seite < rechnungen_seiten %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite+1) }}">Weiter →</a>{% endif %}
+      {% if rechnungen_seite < rechnungen_seiten %}<a class="invoice-button" href="{{ url_for('kundenrechnungen.partner_index', slug=autohaus.slug, seite=rechnungen_seite+1, q=rechnungen_suche or none) }}">Weiter →</a>{% endif %}
     </nav>
     {% endif %}
   </main>

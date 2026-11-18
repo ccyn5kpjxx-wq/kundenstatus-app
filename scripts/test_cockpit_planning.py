@@ -35,6 +35,8 @@ def template_environment():
         get_flashed_messages=lambda **kwargs: [],
         request=SimpleNamespace(args={}),
         session={},
+        config={},
+        static_asset_url=lambda filename: "/static/" + filename,
         mahnungen_faellig_count=lambda: 0,
         admin_leads_count=lambda: 0,
         fahrzeugsuche_auktion_alert_count=lambda: 0,
@@ -89,7 +91,7 @@ class PlanningTemplatesTest(unittest.TestCase):
         self.assertNotRegex(html, r'<details class="aktion-gruppe"[^>]*\bopen(?:\s|>)')
         self.assertIn('aria-label="1 Vorgang"', html)
         self.assertIn("3 Dateien in diesem Auftrag", html)
-        self.assertIn("1 offene Aktion", html)
+        self.assertIn("1 offener Schritt in diesen vier Bereichen.", html)
 
     def test_calendar_navigation_keeps_calendar_open(self):
         self.env.globals["request"] = SimpleNamespace(args={"monat": "2026-10"})
