@@ -10,7 +10,7 @@ import math
 import re
 import unicodedata
 
-from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, variant_fingerprint
+from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, _quote, _stamp, variant_fingerprint
 
 
 def _norm(value):
@@ -130,21 +130,54 @@ def validated_parts_notices(rows, released_ids, parts_notices):
     return result
 
 
+def validated_inquiry_prices(rows, released_ids, procurement_ids, values):
+    """Validate a separate display snapshot; it grants no supplier authority."""
+    if values is None:
+        return {}
+    if not isinstance(values, Mapping) or len(values) > 5000:
+        raise CatalogError('invalid_inquiry_prices')
+    source = {r.get('selection_id', r.get('id')): r for r in rows if isinstance(r, Mapping)}
+    released, purchasing = set(released_ids or ()), set(procurement_ids or ())
+    result = {}
+    for identifier, value in values.items():
+        row = source.get(identifier)
+        if (not isinstance(identifier, str) or not re.fullmatch(r'parts:[a-f0-9]{24}', identifier)
+                or identifier not in released or identifier in purchasing or not isinstance(row, Mapping)
+                or row.get('department') != 'parts' or row.get('category') not in {'body_part', 'accessory'}
+                or not isinstance(value, Mapping) or set(value) != {'identity_hash', 'price'}
+                or value['identity_hash'] != variant_fingerprint(row)
+                or not isinstance(value['price'], Mapping)
+                or value['price'].get('kind') != 'merchant_pricebook' or value['price'].get('source') != 'RSU'):
+            raise CatalogError('invalid_inquiry_prices')
+        quote = _quote({'category': row['category'], 'quote_public': value['price']}, allow_published_prices=True)
+        if quote is None:
+            raise CatalogError('invalid_inquiry_prices')
+        # Keep this detached projection valid across the bootstrap preflight
+        # and the catalogue constructor's independent validation.
+        for line in quote['prices_by_quantity'].values():
+            line.update(currency='EUR', vat_percent='19.00')
+        quote['stock_current'] = False
+        result[identifier] = {'identity_hash': value['identity_hash'], 'price': quote}
+    return result
+
+
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
                  rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
-                 checkout_excluded_ids=None, parts_notices=None, **kwargs):
+                 checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         rows = deepcopy(list(products))
         notices = validated_parts_notices(rows, kwargs.get('released_ids'), parts_notices)
+        display_prices = validated_inquiry_prices(rows, kwargs.get('released_ids'), procurement_ids, inquiry_prices)
         super().__init__(rows, **kwargs)
         if (procurement_ids is not None and (not isinstance(procurement_ids, (set, frozenset, list, tuple))
                 or any(not isinstance(i, str) for i in procurement_ids))):
             raise CatalogError('invalid_procurement_ids')
         procurement = frozenset(procurement_ids or ())
         self._rsu_only_prices, self._procurement_ids = rsu_only_prices, procurement
+        self._inquiry_quotes = {identifier: value['price'] for identifier, value in display_prices.items()}
         if (checkout_excluded_ids is not None and
                 (not isinstance(checkout_excluded_ids, (set, frozenset))
                  or not checkout_excluded_ids <= self._rows.keys())):
@@ -284,6 +317,9 @@ class EnrichedPublicCatalog(PublicCatalog):
             entry['public']['tyre_seasons'] = [season for season in ('summer', 'winter', 'allseason') if season in seasons]
 
     def _cached_entry(self, entry):
+        identifier = entry['public']['id']
+        if identifier in self._inquiry_quotes:
+            return {**entry, 'quote': deepcopy(self._inquiry_quotes[identifier])}
         # An unbound article is outside this merchant's RSU offer, regardless
         # of an imported quote or a stale/misconfigured display cache. Do not
         # even consult that cache for an article we cannot procure.
@@ -299,6 +335,9 @@ class EnrichedPublicCatalog(PublicCatalog):
         public = entry['public']
         identifier = public['id']
         if identifier not in self._procurement_ids or identifier in self._checkout_excluded_ids:
+            if self._inquiry_quotes:
+                quote = entry.get('quote')
+                return 4 if identifier in self._inquiry_quotes and quote and _stamp(quote['observed_at']) <= now < _stamp(quote['expires_at']) else 5
             return 4
         price_rank = super()._offer_rank(entry, now)
         if price_rank == 2:
@@ -317,7 +356,11 @@ class EnrichedPublicCatalog(PublicCatalog):
 
     def _project(self, entry, now, *, detail=True):
         product = super()._project(entry, now, detail=detail)
-        if self._rsu_only_prices and product['id'] not in self._procurement_ids:
+        if product['id'] in self._inquiry_quotes:
+            product.update(purchase_status='inquiry_only', order_enabled=False, price_label='')
+            if product['price'] is not None:
+                product['price']['stock_current'] = False
+        elif self._rsu_only_prices and product['id'] not in self._procurement_ids:
             product.update(price=None, price_status='not_offered', price_label='')
         return product
 

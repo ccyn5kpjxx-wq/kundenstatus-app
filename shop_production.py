@@ -202,6 +202,19 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             # the supplier's unsupported ordering-channel boundary either.
             raise ProductionError('rsu_parts_api_not_supported')
         procurement_ids = set(bindings)
+        inquiry_prices = {}
+        inquiry_record = descriptor.get('parts_inquiry_prices')
+        if inquiry_record is not None:
+            if descriptor.get('parts_inquiry_prices_approved') is not True:
+                raise ProductionError('inquiry_prices_not_approved')
+            from shop_parts_inquiry import load_parts_inquiry
+            from shop_catalog_enriched import validated_inquiry_prices
+            allowed_inquiries = {identifier for identifier in released_ids - procurement_ids
+                if identifier in identities and identities[identifier]['category'] in {'body_part', 'accessory'}}
+            inquiry_source = load_parts_inquiry(root, inquiry_record, bundle,
+                base_bundle_sha256=descriptor['bundle']['sha256'], allowed_ids=allowed_inquiries)
+            inquiry_prices = validated_inquiry_prices(rows, released_ids, procurement_ids,
+                {identifier: inquiry_source.get(identifier) for identifier in inquiry_source.ids})
         supplier_config, supplier, rsu_cache = None, None, None
         rsu_reads_approved = descriptor.get('rsu_reads_approved') is True
         if descriptor.get('buyer_and_quotes_enabled') is True and not rsu_reads_approved:
@@ -244,8 +257,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                     proof = supplier.rim_geometry(identities[identifier])
                     if proof is not None:
                         rim_sales[identifier] = proof
-        # Only a currently bound RSU quote can supply a price. Unbound rows
-        # remain visible with their released media, without numeric Richtpreise.
+        # Purchasing prices come only from currently bound RSU goods. A separate
+        # original-verified inquiry snapshot may display a retained retail
+        # amount; it is never added to supplier, stock-refresh or checkout IDs.
         display_rows = [{**row, 'quote_public': None, 'price': None, 'sample_price_cents': None} for row in rows]
         compatible_pairs = bundle.get('compatible_pairs')
         if fixed_prices and bundle.get('reviewed_rim_width_registry') is not None:
@@ -289,7 +303,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
             preferred_ids=set(seeds['records']) if fixed_prices else None,
-            shipping_ready_ids=shipping_ready, parts_notices=parts_notices)
+            shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -314,6 +328,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         adapters = {'catalogue': catalogue, 'media': media, 'documents': documents, 'price_cache': cache,
                     'read_provider': None, 'release_id': descriptor.get('release_id', ''),
                     'purchasing_enabled': False}
+        if inquiry_record is not None:
+            adapters['inquiry_price_count'] = len(inquiry_prices)
         adapters['complete_wheel_review_requested'] = descriptor.get('complete_wheel_checkout_approved') is True
         if supplier is not None:
             adapters['supplier_quotes'] = supplier
