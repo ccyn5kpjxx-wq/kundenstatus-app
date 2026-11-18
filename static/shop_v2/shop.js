@@ -167,6 +167,15 @@
   function vehicleReference(value) {
     return typeof value === 'string' && value.trim().length <= 200 && !/[\x00-\x1f\x7f\ud800-\udfff]/.test(value) ? value.trim() : null;
   }
+  function cartNeedsPartsVehicle(items) {
+    return Array.isArray(items) && items.some(item => item?.product?.department === 'parts' || item?.product?.category === 'body_part');
+  }
+  function partsVehicleReference(value, allowed) {
+    const canonical = /^alzura-vehicle:[1-9][0-9]{0,8}$/;
+    if (typeof value !== 'string' || !canonical.test(value) || !Array.isArray(allowed) || !allowed.length || allowed.length > 512 ||
+        allowed.some(ref => typeof ref !== 'string' || !canonical.test(ref)) || new Set(allowed).size !== allowed.length) return null;
+    return allowed.includes(value) ? value : null;
+  }
   function cartPurchaseFlow(items, deferredCompleteWheels = false) {
     if (!cartOfferReady(items)) return 'unavailable';
     if (items.some(item => inquiryOnly(item.product))) return 'inquiry';
@@ -255,7 +264,7 @@
       return u.protocol === 'https:' && u.hostname === 'checkout.stripe.com' && !u.username && !u.password && (!u.port || u.port === '443') && /^\/(c\/pay|g\/pay|pay)\/cs_(test|live)_[A-Za-z0-9]+$/.test(u.pathname);
     } catch (_) { return false; }
   }
-  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
+  const logic = {currentPrice, quotedPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsPartsVehicle, partsVehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
@@ -295,6 +304,7 @@
   function errorText(error) {
     const code = error && error.message;
     if (['authorization_required', 'invalid_session', 'session_expired', 'csrf_invalid'].includes(code)) return 'Die Sitzung ist abgelaufen. Bitte diese Seite neu laden und Ihre Anschrift erneut bestätigen.';
+    if (code === 'parts_vehicle_required') return 'Bitte das genaue Fahrzeug mit Motorisierung und Bauzeit auswählen und die Anschrift erneut bestätigen.';
     if (['invalid_query', 'invalid_vehicle_filter'].includes(code)) return 'Bitte die Filter prüfen. HSN und TSN gemeinsam eingeben oder Marke, Modell und Baujahr auswählen.';
     if (code === 'invalid_request' || code === 'invalid_address') return 'Bitte Ihre Eingaben prüfen. Es werden vollständige Anschriften in Deutschland benötigt.';
     if (code === 'not_found' || code === 'catalogue_unavailable') return 'Das Sortiment ist derzeit noch nicht verfügbar. Bitte versuchen Sie es später erneut.';
@@ -947,7 +957,7 @@
     const result = await requestJSON('/buyer/session');
     if (typeof result.csrf_token !== 'string' || !/^[A-Za-z0-9_\-.:]{16,256}$/.test(result.csrf_token) || typeof result.address_ready !== 'boolean') throw new Error('invalid_session');
     csrf = result.csrf_token;
-    if (requestedRevision === revision) { restoreWorkshopDelivery(result); addressReady = result.address_ready; }
+    if (requestedRevision === revision) { restoreWorkshopDelivery(result); addressReady = result.address_ready; updateVehicleRequirement(byId('buyer-address')); }
     return result;
   }
   function restoreWorkshopDelivery(result) {
@@ -968,6 +978,11 @@
       vehicle.value = result.vehicle_ref === undefined ? '' : vehicleReference(result.vehicle_ref);
       if (completeWheelGroups(offerSelection) && vehicle.value.length < 3 && result.address_ready === true) throw new Error('invalid_session');
     }
+    if (body.dataset.partsDirectEnabled === 'true') {
+      const choice = form?.elements.namedItem('parts_vehicle_ref');
+      if (!choice || result.vehicle_ref !== undefined && vehicleReference(result.vehicle_ref) === null) throw new Error('invalid_session');
+      choice.value = partsVehicleReference(result.vehicle_ref, partsVehicleChoices(form)) || '';
+    }
     updateMainlandRequirement(form);
     updateVehicleRequirement(form);
   }
@@ -979,13 +994,27 @@
     field.required = required; field.disabled = !required; region.hidden = !required;
   }
   function updateVehicleRequirement(form) {
-    if (!form || body.dataset.deferredCompleteWheelsEnabled !== 'true') return;
-    const field = form.elements.namedItem('vehicle_ref'), region = byId('complete-wheel-vehicle');
-    if (!field || !region) return;
-    const required = Boolean(completeWheelGroups(offerSelection));
-    field.required = required; region.hidden = !required;
-    // Restored address sessions without this cart's vehicle reference cannot skip review input.
-    if (required && (vehicleReference(field.value) === null || vehicleReference(field.value).length < 3)) addressReady = false;
+    if (!form) return;
+    const parts = body.dataset.partsDirectEnabled === 'true' && cartNeedsPartsVehicle(offerSelection);
+    if (body.dataset.partsDirectEnabled === 'true') {
+      const field = form.elements.namedItem('parts_vehicle_ref'), region = byId('parts-vehicle-choice');
+      if (region) region.hidden = !parts;
+      if (field) { field.required = parts; field.disabled = !parts || !partsVehicleChoices(form).length; }
+      if (parts && !partsVehicleReference(field?.value, partsVehicleChoices(form))) addressReady = false;
+    }
+    if (body.dataset.deferredCompleteWheelsEnabled === 'true') {
+      const field = form.elements.namedItem('vehicle_ref'), region = byId('complete-wheel-vehicle');
+      if (!field || !region) return;
+      const required = !parts && Boolean(completeWheelGroups(offerSelection));
+      field.required = required; region.hidden = !required;
+      if (required && (vehicleReference(field.value) === null || vehicleReference(field.value).length < 3)) addressReady = false;
+    }
+  }
+  function partsVehicleChoices(form) {
+    const field = form?.elements.namedItem('parts_vehicle_ref');
+    if (!field || field.tagName !== 'SELECT' || !field.options) return [];
+    const values = Array.from(field.options).map(option => option.value).filter(Boolean);
+    return values.length <= 512 && values.every(value => /^alzura-vehicle:[1-9][0-9]{0,8}$/.test(value)) && new Set(values).size === values.length ? values : [];
   }
   function currentDeliverySignature(form) {
     const values = {};
@@ -1011,10 +1040,17 @@
       if (!field || field.type !== 'checkbox' || typeof field.checked !== 'boolean') throw new Error('invalid_address');
       payload.delivery_mainland = field.checked;
     }
-    if (body.dataset.deferredCompleteWheelsEnabled === 'true') {
+    if (body.dataset.partsDirectEnabled === 'true' && cartNeedsPartsVehicle(offerSelection)) {
+      const field = form.elements.namedItem('parts_vehicle_ref');
+      const value = partsVehicleReference(field?.value, partsVehicleChoices(form));
+      if (!value) throw new Error('parts_vehicle_required');
+      payload.vehicle_ref = value;
+    } else if (body.dataset.deferredCompleteWheelsEnabled === 'true') {
       const field = form.elements.namedItem('vehicle_ref'), value = field && vehicleReference(field.value);
       if (!field || value === null || completeWheelGroups(offerSelection) && value.length < 3) throw new Error('invalid_address');
       payload.vehicle_ref = value;
+    } else if (body.dataset.partsDirectEnabled === 'true') {
+      payload.vehicle_ref = '';
     }
     return payload;
   }
@@ -1122,7 +1158,7 @@
           const result = await requestJSON('/buyer/address', {method: 'PUT', body: JSON.stringify(addressPayload(form))});
           if (result.address_ready !== true || typeof result.csrf_token !== 'string') throw new Error('invalid_session');
           if (submittedRevision !== revision) { byId('address-status').textContent = 'Die Anschrift wurde während der Prüfung geändert. Bitte erneut bestätigen.'; return; }
-          csrf = result.csrf_token; restoreWorkshopDelivery(result); addressReady = true; byId('address-status').textContent = 'Anschrift für diese Bestellung gespeichert.'; renderCart();
+          csrf = result.csrf_token; restoreWorkshopDelivery(result); addressReady = true; updateVehicleRequirement(form); byId('address-status').textContent = addressReady ? 'Anschrift für diese Bestellung gespeichert.' : 'Bitte das genaue Fahrzeug auswählen und die Anschrift erneut bestätigen.'; renderCart();
         } catch (error) { byId('address-status').textContent = errorText(error); }
       });
     }

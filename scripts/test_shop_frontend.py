@@ -141,6 +141,47 @@ class FrontendChecks(unittest.TestCase):
                     self.assertEqual(fields, [])
                 self.assertIn('data-checkout-enabled="false"', source)
 
+    def test_parts_exact_vehicle_options_require_explicit_flag_and_strict_registry_projection(self):
+        self.app.config.update(SHOP_FRONTEND_ENABLED=True, SHOP_BUYER_ENABLED=True)
+        fixture={'vehicle_ref':'alzura-vehicle:120604','car_id':120604,'manufacturer_id':5,'model_id':10253,
+            'make':'Audi','model':'A3 (8V1, 8VK)','engine':'1.0 TFSI','engine_codes':['CHZD'],
+            'date_from_yyyymm':201607,'date_to_yyyymm':201712,'hsn_tsn':['0588BHT'],
+            'power_kw_from':85,'power_kw_to':85}
+        vehicles=[]
+        for car in (100043,117083,120604,802380):
+            item={**fixture,'vehicle_ref':'alzura-vehicle:'+str(car),'car_id':car}
+            vehicles.append(item)
+        vehicles[-1].update(make='BMW',model='3er Touring',engine='M340i xDrive',date_from_yyyymm=202509,date_to_yyyymm=None)
+        self.app.config['SHOP_PARTS_VEHICLE_OPTIONS']=vehicles
+        for flag in (None,False,'true',1,True):
+            self.app.config['SHOP_PARTS_DIRECT_ENABLED']=flag
+            source=self.client.get('/shop/warenkorb/').get_data(as_text=True)
+            selects=[attrs for tag,attrs in Markup(source).tags if tag=='select' and attrs.get('name')=='parts_vehicle_ref']
+            self.assertEqual(bool(selects),flag is True)
+            self.assertIn('data-parts-direct-enabled="'+('true' if flag is True else 'false')+'"',source)
+            if flag is True:
+                self.assertIn('07/2016–12/2017',source);self.assertIn('09/2025–offen',source)
+                self.assertIn('0588/BHT',source);self.assertIn('CHZD',source)
+                for car in (100043,117083,120604,802380):self.assertIn('value="alzura-vehicle:'+str(car)+'"',source)
+                self.assertIn('für jeden gewählten Artikel',source)
+        for change in [{'vehicle_ref':'alzura-vehicle:999'},{'car_id':True},{'date_from_yyyymm':201613},
+                       {'date_to_yyyymm':201501},{'hsn_tsn':[['0588BHT']]},{'engine_codes':['BAD\nCODE']}]:
+            self.app.config['SHOP_PARTS_VEHICLE_OPTIONS']=[{**fixture,**change}]
+            source=self.client.get('/shop/warenkorb/').get_data(as_text=True)
+            self.assertNotIn('value="alzura-vehicle:',source)
+            self.assertIn('keine bestätigte Fahrzeugauswahl verfügbar',source)
+        malicious={**fixture,'make':'<script>UNTRUSTED</script>'}
+        self.app.config['SHOP_PARTS_VEHICLE_OPTIONS']=[malicious]
+        source=self.client.get('/shop/warenkorb/').get_data(as_text=True)
+        self.assertIn('&lt;script&gt;UNTRUSTED&lt;/script&gt;',source)
+        self.assertNotIn('<script>UNTRUSTED</script>',source)
+
+    def test_parts_vehicle_selection_saved_context_and_payload_are_checked_offline(self):
+        result=subprocess.run(['node',str(ROOT/'scripts/test_shop_parts_vehicle_ui.js'),str(ROOT/'static/shop_v2/shop.js')],
+                              capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('Exact parts vehicle UI checks passed',result.stdout)
+
     def test_complete_wheel_review_ui_uses_only_synthetic_saved_context(self):
         result = subprocess.run(['node', str(ROOT / 'scripts/test_shop_complete_wheel_ui.js'),
                                  str(ROOT / 'static/shop_v2/shop.js')],

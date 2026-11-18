@@ -61,12 +61,13 @@ class Node {
 }
 const walk=node=>[node,...node.children.flatMap(child=>typeof child==='object'?walk(child):[])];
 const flush=async()=>{await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));};
-async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='SYNTHETIC Audi A3 2016',quoteValue=quote(),missingTerms=false,waitQuote=false}={}){
+async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='SYNTHETIC Audi A3 2016',quoteValue=quote(),missingTerms=false,waitQuote=false,partsEnabled=false}={}){
  const nodes={};for(const key of ['close-product','product-dialog','product-detail','shop-announcement','cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note','buyer-address','address-status','delivery-fields','cart-workflow-note','complete-wheel-vehicle'])nodes[key]=new Node();
  const form=nodes['buyer-address'];for(const key of ['name','email','recipient','street','postcode','city','workshop_delivery','different_delivery','vehicle_ref'])form.fields[key]=new Node('input');
  form.fields.workshop_delivery.value='collection';form.fields.different_delivery.type='checkbox';form.fields.vehicle_ref.value='';
  if(missing)delete form.fields.vehicle_ref;
- const body=new Node('body');body.dataset={api:'/shop/api/v2',page:'warenkorb',buyerEnabled:'true',quoteEnabled:'true',consumerEnabled:'true',orderEnabled:'true',checkoutEnabled:'true',deferredCompleteWheelsEnabled:String(enabled),cartRequestUrl:'/anfrage?anliegen=allgemein&shop_anfrage=1'};
+ if(partsEnabled){const field=form.fields.parts_vehicle_ref=new Node('select');field.options=[{value:''},{value:'alzura-vehicle:120604'}];nodes['parts-vehicle-choice']=new Node();}
+ const body=new Node('body');body.dataset={api:'/shop/api/v2',page:'warenkorb',buyerEnabled:'true',quoteEnabled:'true',consumerEnabled:'true',orderEnabled:'true',checkoutEnabled:'true',deferredCompleteWheelsEnabled:String(enabled),partsDirectEnabled:String(partsEnabled),cartRequestUrl:'/anfrage?anliegen=allgemein&shop_anfrage=1'};
  const calls=[],stored=[],redirects=[];let resolveQuote;const pending=waitQuote?new Promise(resolve=>resolveQuote=resolve):null;
  const session=()=>({address_ready:true,csrf_token:TOKEN,workshop_delivery:'collection',...(storedVehicle===undefined?{}:{vehicle_ref:storedVehicle})});
  const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:TOKEN}),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:()=>JSON.stringify(rows),setItem:(_key,value)=>stored.push(value)},sessionStorage:{getItem:()=>null,setItem(){}},location:{pathname:'/shop/warenkorb/',assign:url=>redirects.push(url)},setTimeout(){},clearTimeout(){},setInterval(){},crypto:{randomUUID:()=> 'SYNTHETIC'},
@@ -92,6 +93,7 @@ async function statusPage(status, technical){
 }
 (async()=>{
  const f=await boot();assert.equal(f.nodes['buyer-address'].hidden,false);assert.equal(f.form.fields.vehicle_ref.required,true);assert.equal(f.form.fields.vehicle_ref.value,'SYNTHETIC Audi A3 2016');
+ const wheelWithPartsFeature=await boot({partsEnabled:true});assert.equal(wheelWithPartsFeature.form.fields.vehicle_ref.required,true);assert.equal(wheelWithPartsFeature.form.fields.parts_vehicle_ref.required,false);assert.equal(wheelWithPartsFeature.nodes['parts-vehicle-choice'].hidden,true);await wheelWithPartsFeature.submit();assert.equal(JSON.parse(wheelWithPartsFeature.calls.filter(c=>c.url.endsWith('/buyer/address')).at(-1).options.body).vehicle_ref,'SYNTHETIC Audi A3 2016','parts feature preserves complete-wheel freeform context');
  assert.equal(f.nodes['request-quote'].disabled,false);await f.request();
  const rendered=walk(f.nodes['quote-review']);assert.ok(rendered.some(n=>n.textContent==='890,00 €'));assert.ok(f.nodes['checkout-note'].textContent.includes('zunächst auf Ihrer Karte reserviert'));
  assert.ok(f.nodes['checkout-note'].textContent.includes('Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab.'));

@@ -5,6 +5,7 @@ The browser uses bounded public projections and the independently gated buyer,
 quote and checkout APIs. A return URL is never evidence of payment.
 """
 import re
+import unicodedata
 from urllib.parse import urlsplit
 
 from flask import Blueprint, abort, current_app, render_template
@@ -43,6 +44,44 @@ def _link(value):
             or any(part in ('.', '..') for part in parsed.path.split('/'))):
         raise ValueError('invalid_shop_link')
     return value
+
+
+def _parts_vehicle_options(values):
+    """Expose only exact validated public registry labels, never source records."""
+    if not isinstance(values,(list,tuple)) or not 1<=len(values)<=512:
+        return []
+    def text(value,maximum):
+        return isinstance(value,str) and 0<len(value)<=maximum and not any(unicodedata.category(c).startswith('C') for c in value)
+    def month(value):
+        return type(value) is int and 190001<=value<=210012 and 1<=value%100<=12
+    result=[];seen=set()
+    for vehicle in values:
+        if (not isinstance(vehicle,dict) or not {'vehicle_ref','car_id','manufacturer_id','model_id',
+                'make','model','engine','engine_codes','date_from_yyyymm','date_to_yyyymm','hsn_tsn',
+                'power_kw_from','power_kw_to'}<=vehicle.keys()):return []
+        identifier,ref=vehicle.get('car_id'),vehicle.get('vehicle_ref')
+        if (type(identifier) is not int or not 1<=identifier<1000000000 or ref!='alzura-vehicle:'+str(identifier)
+                or ref in seen or any(type(vehicle.get(key)) is not int or not 1<=vehicle[key]<1000000000 for key in ['manufacturer_id','model_id'])
+                or not all(text(vehicle.get(key),200) for key in ['make','model','engine'])
+                or not month(vehicle.get('date_from_yyyymm'))
+                or vehicle.get('date_to_yyyymm') is not None and (not month(vehicle['date_to_yyyymm']) or vehicle['date_to_yyyymm']<vehicle['date_from_yyyymm'])):
+            return []
+        codes,keys=vehicle.get('engine_codes'),vehicle.get('hsn_tsn')
+        if (not isinstance(codes,list) or not 1<=len(codes)<=20 or any(not text(code,80) for code in codes)
+                or not isinstance(keys,list) or not 1<=len(keys)<=100
+                or any(not isinstance(key,str) or re.fullmatch(r'[0-9]{4}[A-Z0-9]{3}',key) is None for key in keys)
+                or len(set(keys))!=len(keys)):
+            return []
+        power=[vehicle.get(key) for key in ['power_kw_from','power_kw_to']]
+        if any(value is not None and (type(value) is not int or not 1<=value<=2000) for value in power):return []
+        if None not in power and power[1]<power[0]:return []
+        date=lambda value:f'{value%100:02d}/{value//100:04d}'
+        label=' · '.join(part for part in [vehicle['make'],vehicle['model'],vehicle['engine'],
+            (' / '.join(codes)) if codes else '',date(vehicle['date_from_yyyymm'])+'–'+(date(vehicle['date_to_yyyymm']) if vehicle.get('date_to_yyyymm') is not None else 'offen'),
+            'HSN/TSN '+', '.join(key[:4]+'/'+key[4:] for key in keys) if keys else '',
+            (str(power[0])+('–'+str(power[1]) if power[1]!=power[0] else '')+' kW') if None not in power else ''] if part)
+        result.append({'vehicle_ref':ref,'label':label});seen.add(ref)
+    return result
 
 
 def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
@@ -113,6 +152,9 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
                                buyer_enabled=current_app.config.get('SHOP_BUYER_ENABLED') is True,
                                mainland_delivery_enabled=current_app.config.get('SHOP_MAINLAND_DELIVERY_ENABLED') is True,
                                deferred_complete_wheels_enabled=current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True,
+                               parts_direct_enabled=current_app.config.get('SHOP_PARTS_DIRECT_ENABLED') is True,
+                               parts_vehicle_options=_parts_vehicle_options(current_app.config.get('SHOP_PARTS_VEHICLE_OPTIONS'))
+                                   if current_app.config.get('SHOP_PARTS_DIRECT_ENABLED') is True else [],
                                quote_enabled=current_app.config.get('SHOP_CART_QUOTE_ENABLED') is True,
                                order_enabled=current_app.config.get('SHOP_ORDER_DRAFT_ENABLED') is True,
                                checkout_enabled=current_app.config.get('SHOP_CHECKOUT_ENABLED') is True,
