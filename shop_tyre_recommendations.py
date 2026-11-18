@@ -6,11 +6,11 @@ fitment, stock or checkout permission. Price position is not a quality rating.
 """
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import timedelta
 import re
 import unicodedata
 
 from shop_catalog_public import _stamp
+from shop_wheel_prices import published_wheel_tier
 
 ID = re.compile(r'tyre:[a-f0-9]{24}')
 SIZE = re.compile(r'([1-9][0-9]{2})/([1-9][0-9]{1,2}) R([1-9][0-9]?)')
@@ -54,36 +54,15 @@ def tyre_size_key(product):
 
 def _offer(product, quantity, now):
     if (not isinstance(product, Mapping) or product.get('category') != 'tyre'
-            or product.get('department') != 'tyres' or product.get('purchase_status') != 'supplier_check_required'
-            or product.get('price_status') != 'current' or not isinstance(product.get('id'), str)
+            or product.get('department') != 'tyres' or not isinstance(product.get('id'), str)
             or not ID.fullmatch(product['id']) or not isinstance(product.get('brand'), str)
             or not 1 <= len(product['brand']) <= 90 or not _norm(product['brand'])
             or not isinstance(product.get('name'), str) or not 1 <= len(product['name']) <= 180
             or not _norm(product['name'])):
         return None
     size = tyre_size_key(product)
-    price = product.get('price')
-    if (size is None or not isinstance(price, Mapping) or price.get('kind') != 'merchant_pricebook'
-            or price.get('source') != 'RSU' or price.get('currency') != 'EUR' or price.get('vat_percent') != '19.00'
-            or type(price.get('stock_reported')) is not int or not quantity <= price['stock_reported'] <= 1000000):
-        return None
-    try:
-        observed, expires = _stamp(price.get('observed_at')), _stamp(price.get('expires_at'))
-        if not observed <= now < expires or not timedelta(0) < expires - observed <= timedelta(days=7):
-            return None
-        review = _stamp(price.get('review_at'))
-        stock_observed, stock_expires = _stamp(price.get('stock_observed_at')), _stamp(price.get('stock_expires_at'))
-        if (review != observed + timedelta(days=5) or not observed <= stock_observed <= now
-                or not stock_observed < stock_expires <= stock_observed + timedelta(minutes=15)):
-            return None
-    except ValueError:
-        return None
-    amounts = price.get('prices_by_quantity')
-    line = amounts.get(str(quantity)) if isinstance(amounts, Mapping) else None
-    if (not isinstance(line, Mapping) or type(line.get('quantity')) is not int or line['quantity'] != quantity
-            or type(line.get('unit_gross_cent')) is not int or not 1 <= line['unit_gross_cent'] <= 10000000
-            or type(line.get('items_gross_cent')) is not int
-            or line['items_gross_cent'] != quantity * line['unit_gross_cent']):
+    line = published_wheel_tier(product, quantity, now)
+    if size is None or line is None:
         return None
     family = (_norm(product['brand']), _norm(product['name']))
     return {'product': product, 'size': size, 'family': family, 'unit': line['unit_gross_cent']}

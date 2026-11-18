@@ -301,6 +301,7 @@
           <p class="info-note">{% if ist_reifenangebot %}Vor dem Bestellabschluss sehen Sie Reifen, Leistungen, Termin und Zahlungsart in einer Übersicht. Bei unklarer Größe helfen wir Ihnen persönlich.{% elif formdata.get('anliegen') == 'bremsenservice' %}Teile, Kosten und Termin stimmen wir vor den Arbeiten persönlich mit Ihnen ab.{% else %}Wir prüfen die Anfrage persönlich und klären alles Weitere direkt mit Ihnen.{% endif %}</p>
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" novalidate>
+          {% if shop_service %}<input type="hidden" name="shop_leistung" value="{{ formdata.shop_leistung }}"><p>Gewählte Leistung · <strong>{{ shop_service.label }}</strong></p>{% endif %}
           {{ csrf_field()|safe }}
           {% if formdata.get("service_context") %}<input type="hidden" name="service_context" value="{{ formdata.get('service_context') }}"><p class="hint">Dem ausgewählten Firmenfahrzeug zugeordnet. <a href="/service">Zur Service-App</a>. Kostenfreigabe durch die zuständige Person.</p>{% endif %}
           <input type="hidden" name="anliegen" value="{{ formdata.get('anliegen') }}">
@@ -433,6 +434,7 @@
           <p class="info-note" data-anliegen-visible="leasingrueckgabe" {% if ausgewaehltes_anliegen != 'leasingrueckgabe' %}hidden{% endif %}>Bei einem Leasing-Check zeigen wir mögliche Aufbereitungs- und Reparaturmaßnahmen. Die endgültige Bewertung bleibt bei der Leasinggesellschaft.</p>
         </aside>
         <form class="form-card" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data" data-shop-offer-form="true" novalidate>
+          {% if shop_service %}<input type="hidden" name="shop_leistung" value="{{ formdata.shop_leistung }}"><p>Gewählte Leistung · <strong>{{ shop_service.label }}</strong></p>{% endif %}
           {{ csrf_field()|safe }}
           {% if formdata.get('shop_anfrage') or formdata.get('shop_auswahl') %}
           <input type="hidden" name="shop_anfrage" value="{{ formdata.get('shop_anfrage','') }}">

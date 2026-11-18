@@ -9,6 +9,7 @@ import unicodedata
 from urllib.parse import urlsplit
 
 from flask import Blueprint, abort, current_app, render_template
+from shop_service_requests import WORKSHOP_SERVICES
 
 
 PAGES = {
@@ -140,6 +141,7 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
         return render_template('shop_v2/page.html', page_key=key, title=values[0], department=values[1],
                                hero=values[2], description=values[3], navigation=NAV,
                                company_url=company, feature_links=links, csrf_token=token,
+                               workshop_services=WORKSHOP_SERVICES if key == 'service' else {},
                                order_id=order_id, return_kind=return_kind,
                                studio_config={'products': [], 'demo': {
                                    'src': '/static/shop_v2/felgenstudio-demo.png',

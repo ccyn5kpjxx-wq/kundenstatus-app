@@ -1,6 +1,8 @@
 """Existing appointment intake link; no submissions, network or real data."""
 import ast
+import html
 from pathlib import Path
+import re
 import socket
 import sys
 from types import SimpleNamespace
@@ -10,6 +12,7 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from flask import Flask, request, session
+from shop_frontend import create_shop_frontend_blueprint
 from shop_service_requests import SERVICE_REQUEST_PATH, prepare_service_request_links
 
 
@@ -92,7 +95,37 @@ class ServiceRequestLinkChecks(unittest.TestCase):
         self.assertEqual(response, ('SYNTHETIC FORM', 200))
         self.assertEqual(rendered.call_args.kwargs['formdata']['anliegen'], 'reifenservice')
         self.assertFalse(rendered.call_args.kwargs['gesendet'])
+        namespace['WEBSITE_ANLIEGEN']['mechanikanfrage'] = 'Mechanik'
+        for key, intent, field, option in (
+                ('oelservice', 'mechanikanfrage', 'mechanik_kategorie', 'oelwechsel'),
+                ('reifenmontage', 'reifenservice', 'reifen_leistung', 'montage'),
+                ('raederwechsel', 'reifenservice', 'reifen_leistung', 'radwechsel'),
+                ('reifencheck', 'reifenservice', 'reifen_leistung', 'pruefung'),
+                ('oelservice', 'reifenservice', 'reifen_leistung', None)):
+            with self.subTest(service=key, intent=intent), self.app.test_request_context(
+                    f'/anfrage?anliegen={intent}&shop_leistung={key}'):
+                namespace['website_anfrage']()
+                data = rendered.call_args.kwargs['formdata']
+                self.assertEqual(data[field], [option] if option else [])
+                self.assertEqual(data['shop_leistung'], key if option else '')
         denied.assert_not_called()
+
+    def test_shop_cards_lead_to_their_own_intake_and_preserve_the_service(self):
+        links = prepare_service_request_links(self.portal, enabled=True)
+        self.app.register_blueprint(create_shop_frontend_blueprint(feature_links=links))
+        self.app.config['SHOP_FRONTEND_ENABLED'] = True
+        response = self.app.test_client().get('/shop/service/')
+        self.assertEqual(response.status_code, 200)
+        targets = re.findall(r'<a [^>]*href="(/anfrage\?[^"]+)"', html.unescape(response.text))
+        expected = {'reifenmontage': 'reifenservice', 'raederwechsel': 'reifenservice',
+                    'reifencheck': 'reifenservice', 'oelservice': 'mechanikanfrage',
+                    'lackierarbeiten': 'lackanfrage', 'aufbereitung': 'fahrzeugpflege',
+                    'karosserie': 'reparaturanfrage', 'dellen': 'dellenreparatur',
+                    'autoglas': 'glasschaden', 'mechanik': 'mechanikanfrage', 'softlack': 'lackanfrage'}
+        self.assertCountEqual(targets, [
+            f'/anfrage?anliegen={intent}&shop_leistung={key}#kurzanfrage'
+            for key, intent in expected.items()])
+        self.handler.assert_not_called()
 
 
 if __name__ == '__main__':

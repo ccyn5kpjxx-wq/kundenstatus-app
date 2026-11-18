@@ -98,13 +98,29 @@
       }
       const group = item.assembly_group || '';
       if (typeof group !== 'string' || (group && !/^[A-Za-z0-9_:|.\-]{1,180}$/.test(group))) invalid = true;
+      // A customer may select a wheel pair delivered as individual goods. This
+      // key only links its quantity controls and never represents assembly.
+      const pair = item.selection_pair || '';
+      if (pair) {
+        const parts = typeof pair === 'string' && /^set\|((?:alloy_wheel|steel_wheel):[a-f0-9]{24})\|(tyre:[a-f0-9]{24})$/.exec(pair);
+        if (group || !parts || ![parts[1], parts[2]].includes(item.id)) invalid = true;
+      }
       if (invalid) continue;
       const line = {id: item.id, quantity: item.quantity, services};
       if (group) line.assembly_group = group;
+      if (pair) line.selection_pair = pair;
       const signature = JSON.stringify(line);
       if (!seen.has(signature)) { rows.push(line); seen.add(signature); }
     }
     return rows;
+  }
+  function wheelSetFor(cart, row) {
+    const key = row.assembly_group ? 'assembly_group' : 'selection_pair';
+    if (!row[key]) return null;
+    const members = cart.filter(item => item[key] === row[key]);
+    const rim = members.find(item => item.id.startsWith('alloy_wheel:') || item.id.startsWith('steel_wheel:'));
+    const tyre = members.find(item => item.id.startsWith('tyre:'));
+    return members.length === 2 && rim && tyre ? {rim, tyre} : null;
   }
   function removeCartLine(value, index) {
     if (!Array.isArray(value) || !Number.isInteger(index) || index < 0 || index >= value.length) return null;
@@ -451,9 +467,9 @@
     };
     img.src = source;
   }
-  function quantitySelect(id, value, onChange) {
+  function quantitySelect(id, value, onChange, label = 'Anzahl') {
     const select = el('select', null, 'shop-quantity');
-    select.setAttribute('aria-label', 'Anzahl');
+    select.setAttribute('aria-label', label);
     for (let n = 1; n <= maxQuantity(id); n++) { const option = el('option', n); option.value = String(n); select.append(option); }
     select.value = String(value); select.addEventListener('change', () => onChange(Number(select.value))); return select;
   }
@@ -469,7 +485,7 @@
     const candidate = normaliseCart([{id: product.id, quantity, services}]);
     if (!candidate.length) { notice('Bitte Ihre Auswahl und den Farbcode prüfen.'); return; }
     const row = candidate[0];
-    const existing = cart.find(item => item.id === row.id && JSON.stringify(item.services) === JSON.stringify(row.services) && !item.assembly_group);
+    const existing = cart.find(item => item.id === row.id && JSON.stringify(item.services) === JSON.stringify(row.services) && !item.assembly_group && !item.selection_pair);
     if (existing) existing.quantity = Math.min(maxQuantity(row.id), existing.quantity + quantity);
     else if (cart.length < 40) cart.push(row);
     else { notice('Maximal 40 Positionen möglich. Bitte die Auswahl im Warenkorb prüfen.'); return; }
@@ -477,7 +493,8 @@
   }
   function card(product, active) {
     const family = ['alloy_wheel', 'steel_wheel'].includes(product.category) && Number.isSafeInteger(product.family?.variant_count) && product.family.variant_count > 1;
-    const view = () => family ? openFamily(product, 1, typeof filters.diameter === 'string' ? filters.diameter : '') : openProduct(product.id);
+    const configure = body.dataset.page === 'komplettraeder' && ['alloy_wheel', 'steel_wheel'].includes(product.category);
+    const view = () => family ? openFamily(product, 1, typeof filters.diameter === 'string' ? filters.diameter : '', configure) : openProduct(product.id, configure);
     const node = el('article', null, 'shop-card'), media = button('', view, 'shop-card-media');
     media.setAttribute('aria-label', product.name + ' ansehen'); media.append(productImage(product, ''));
     node.append(media);
@@ -488,15 +505,18 @@
     if (family) {
       node.append(el('p', product.family.variant_count + ' Ausführungen' + (Array.isArray(product.family.diameters) ? ' · ' + product.family.diameters.slice(0, 15).join(' / ') + ' Zoll' : ''), 'shop-card-meta'));
       node.append(el('p', 'Preis der gezeigten Ausführung', 'shop-card-meta'));
+    }
+    if (configure || family) {
       controls.className += ' shop-family-controls';
-      controls.append(button('Ausführung wählen', view));
+      controls.append(button(configure ? 'Komplettrad zusammenstellen' : 'Ausführung wählen', view));
     } else {
       label.append(quantitySelect(product.id, count, value => { count = value; changePriceQuantity(price, value); }));
       add = button(inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb', () => addToCart(product, count));
       controls.append(label, add);
     }
     if (product.department === 'parts') node.append(el('p', 'Lieferzeit wird bestätigt', 'shop-card-meta'));
-    node.append(price, controls, button(family ? 'Felge ansehen' : 'Artikel ansehen', view, 'shop-detail-link'));
+    node.append(price, controls);
+    if (!configure) node.append(button(family ? 'Felge ansehen' : 'Artikel ansehen', view, 'shop-detail-link'));
     return {node, price, product};
   }
   let page = 1, sequence = 0, filters = {}, vehicleFilters = {}, pageTimer = null, pendingPageRefresh = null;
@@ -537,6 +557,8 @@
   }
   async function loadPage() {
     const run = ++sequence, status = byId('catalog-status'), grid = byId('catalog-products');
+    const modelPicker = byId('parts-model-refinement');
+    if (modelPicker) { modelPicker.parentElement.hidden = true; modelPicker.disabled = true; }
     if (pageTimer != null) root.clearTimeout(pageTimer); pageTimer = null;
     pendingPageRefresh = null;
     for (const target of visibleCards.values()) {
@@ -554,6 +576,22 @@
       const cards = result.items.filter(validProduct).map(product => card(product, () => run === sequence));
       for (const item of cards) visibleCards.set(item.product.id, item);
       grid.replaceChildren(...cards.map(item => item.node));
+      if (modelPicker && Array.isArray(result.vehicle_models) && result.vehicle_models.length) {
+        const prompt = el('option', 'Baureihe wählen');
+        prompt.value = ''; prompt.disabled = true;
+        modelPicker.replaceChildren(prompt);
+        for (const series of result.vehicle_models.slice(0, 128)) {
+          if (typeof series?.make !== 'string' || !series.make || typeof series.model !== 'string' || !series.model) continue;
+          const option = el('option', series.model);
+          option.value = series.model; option.dataset.make = series.make;
+          modelPicker.append(option);
+        }
+        modelPicker.value = vehicleFilters.model || '';
+        if (modelPicker.selectedIndex === -1) modelPicker.selectedIndex = 0;
+        modelPicker.parentElement.hidden = modelPicker.options.length < 2 ||
+          (modelPicker.options.length === 2 && modelPicker.value !== '');
+        modelPicker.disabled = modelPicker.parentElement.hidden;
+      }
       status.textContent = result.total ? result.total + ' Artikel · ' + result.items.length + ' auf dieser Seite' : 'Keine bestätigten Treffer für diese Auswahl. Bitte die Filter ändern.';
       byId('page-label').textContent = 'Seite ' + page;
       byId('previous-page').disabled = page <= 1; byId('next-page').disabled = result.has_more !== true;
@@ -582,10 +620,18 @@
       byId('vehicle-filters').addEventListener('submit', event => { event.preventDefault(); if (vehicleTimer != null) root.clearTimeout(vehicleTimer); applyVehicle(event.currentTarget); });
       byId('vehicle-filters').addEventListener('input', event => {
         if (vehicleTimer != null) root.clearTimeout(vehicleTimer);
+        if (event.target.id === 'parts-model-refinement') return;
         const form = event.currentTarget;
         vehicleTimer = root.setTimeout(() => applyVehicle(form), 450);
       });
       byId('vehicle-filters').addEventListener('reset', () => { vehicleFilters = {}; page = 1; loadPage(); });
+      byId('parts-model-refinement')?.addEventListener('change', event => {
+        const form = byId('vehicle-filters'), option = event.currentTarget.selectedOptions[0];
+        if (!option?.value || !option.dataset.make) return;
+        form.elements.make.value = option.dataset.make;
+        form.elements.model.value = option.value;
+        form.requestSubmit();
+      });
     }
     byId('previous-page').addEventListener('click', () => { if (page > 1) { page--; loadPage(); } });
     byId('next-page').addEventListener('click', () => { page++; loadPage(); });
@@ -596,7 +642,7 @@
     wrap.append(input, el('span', label)); form.append(wrap); return input;
   }
   let detailSequence = 0;
-  async function openFamily(representative, variantPage = 1, diameter = '') {
+  async function openFamily(representative, variantPage = 1, diameter = '', configure = false) {
     const run = ++detailSequence, dialog = byId('product-dialog'), content = byId('product-detail');
     content.replaceChildren(el('p', 'Ausführungen werden geladen …')); if (!dialog.open) dialog.showModal();
     try {
@@ -612,17 +658,17 @@
         const label = el('label', 'Zollgröße'), select = el('select', null, 'shop-quantity');
         const all = el('option', 'Alle Größen'); all.value = ''; select.append(all);
         for (const size of representative.family.diameters.slice(0, 30)) { const value = String(size); if (!/^\d{1,2}(?:[.,]\d{1,2})?$/.test(value)) continue; const option = el('option', value + ' Zoll'); option.value = value; select.append(option); }
-        select.value = diameter; select.addEventListener('change', () => openFamily(representative, 1, select.value)); label.append(select); heading.append(label);
+        select.value = diameter; select.addEventListener('change', () => openFamily(representative, 1, select.value, configure)); label.append(select); heading.append(label);
       }
       for (const product of result.items.filter(validProduct)) {
         if (!['alloy_wheel', 'steel_wheel'].includes(product.category)) continue;
         const row = el('article', null, 'shop-family-variant'), description = el('div');
         description.append(el('h3', product.size || product.name), el('p', [product.specifications?.Ausführung, product.article_number && 'Art.-Nr. ' + product.article_number].filter(Boolean).join(' · '), 'shop-muted'));
         const price = priceBox(product, 1, {active: () => run === detailSequence && dialog.open});
-        row.append(description, price, button('Diese Felge ansehen', () => openProduct(product.id))); grid.append(row);
+        row.append(description, price, button(configure ? 'Passende Reifen wählen' : 'Diese Felge ansehen', () => openProduct(product.id, configure))); grid.append(row);
         Promise.resolve().then(() => scheduleQuantityPrice(price, result, 0));
       }
-      const navigation = el('nav', null, 'shop-pagination'), previous = button('← Zurück', () => openFamily(representative, variantPage - 1, diameter), 'shop-button shop-button-light'), next = button('Weiter →', () => openFamily(representative, variantPage + 1, diameter), 'shop-button shop-button-light');
+      const navigation = el('nav', null, 'shop-pagination'), previous = button('← Zurück', () => openFamily(representative, variantPage - 1, diameter, configure), 'shop-button shop-button-light'), next = button('Weiter →', () => openFamily(representative, variantPage + 1, diameter, configure), 'shop-button shop-button-light');
       previous.disabled = variantPage <= 1; next.disabled = result.has_more !== true;
       navigation.append(previous, el('span', 'Seite ' + variantPage + ' · ' + result.total + ' Ausführungen'), next);
       content.replaceChildren(heading, grid, navigation);
@@ -633,17 +679,27 @@
     if (!Array.isArray(rows) || clean.length !== rows.length || !clean.length) return false;
     const next = normaliseCart(JSON.parse(JSON.stringify(cart)));
     for (const row of clean) {
-      const existing = next.find(item => item.id === row.id && JSON.stringify(item.services) === JSON.stringify(row.services) && (item.assembly_group || '') === (row.assembly_group || ''));
+      const existing = next.find(item => item.id === row.id && JSON.stringify(item.services) === JSON.stringify(row.services) && item.assembly_group === row.assembly_group && item.selection_pair === row.selection_pair);
       if (existing) { if (existing.quantity + row.quantity > maxQuantity(row.id)) return false; existing.quantity += row.quantity; }
       else next.push(row);
     }
     if (next.length > 40) return false;
     cart = next; saveCart(); notice('Felgen und Reifen sind gemeinsam im Warenkorb.'); return true;
   }
-  function bundlePanel(rim, getQuantity, active) {
+  function bundlePanel(rim, getQuantity, active, configure) {
     const panel = el('section', null, 'shop-bundle-panel'), heading = el('h2', 'Felge + Reifen. Ihre Wahl.');
     panel.append(el('p', 'Komplettrad zusammenstellen', 'shop-eyebrow'), heading);
     const status = el('p', 'Reifen erst auf Ihren Wunsch suchen. Es wird noch nichts in den Warenkorb gelegt.', 'shop-muted'), choices = el('div', null, 'shop-bundle-choices');
+    const choicePrices = new Set();
+    function clearChoices() {
+      for (const box of choicePrices) {
+        const state = priceNodes.get(box);
+        if (state?.timer != null) root.clearTimeout(state.timer);
+        priceNodes.delete(box);
+      }
+      choicePrices.clear();
+      choices.replaceChildren();
+    }
     const seasonLabel = el('label', 'Welche Reifen möchten Sie?'), season = el('select', null, 'shop-quantity');
     const seasons = [['summer', 'Sommerreifen'], ['winter', 'Winterreifen'], ['allseason', 'Ganzjahresreifen']].filter(([value]) => Array.isArray(rim.tyre_seasons) && rim.tyre_seasons.includes(value));
     for (const [value, name] of seasons) { const option = el('option', name); option.value = value; season.append(option); }
@@ -702,9 +758,9 @@
       if ((!inquiryOnly(rim) && !selectionPrice(rim, quantity)) || (!inquiryOnly(selected) && !selectionPrice(selected, quantity))) {
         updateSummary(); showFeedback('error', 'Noch nicht hinzugefügt', 'Bitte die aktuellen Preise und die gewünschte Anzahl prüfen.'); return;
       }
-      const group = mounting.checked ? 'set|' + rim.id + '|' + selected.id : '';
+      const group = 'set|' + rim.id + '|' + selected.id;
       const lines = [{id: rim.id, quantity, services: {}}, {id: selected.id, quantity, services: mounting.checked ? {mounting: true} : {}}];
-      if (group) for (const line of lines) line.assembly_group = group;
+      for (const line of lines) line[mounting.checked ? 'assembly_group' : 'selection_pair'] = group;
       if (!addLines(lines)) {
         showFeedback('error', 'Nicht hinzugefügt', 'Bitte die vorhandenen Mengen im Warenkorb prüfen. Es wurde nichts hinzugefügt.'); return;
       }
@@ -720,17 +776,22 @@
       if (!selected) return;
       summary.append(el('p', quantity + ' × Felge + ' + quantity + ' × Reifen', 'shop-muted'));
       if (inquiry) summary.append(el('p', 'Diese Kombination wird als Gesamtangebot angefragt. Noch keine Bestellung oder Zahlung.', 'shop-inquiry-note'));
-      if (rimPrice && tyrePrice) summary.append(el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
+      if (rimPrice && tyrePrice && mounting.checked && !inquiry) {
+        const output = el('div');
+        summary.append(output);
+        showMountedTotal(output, rimPrice.total + tyrePrice.total, [{rim, tyre: selected, quantity, services: {mounting: true}}], true);
+      } else if (rimPrice && tyrePrice) summary.append(el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
       else if (!inquiry) summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
-      summary.append(el('p', mounting.checked ? 'Montagepreis und Versand werden im Warenkorb verbindlich ergänzt. Den Termin vereinbaren wir nach Wareneingang.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
+      summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Den Montagetermin vereinbaren wir nach Wareneingang.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrage hinzufügen' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
-    function clear() { serial++; selected = null; clearFeedback(); choices.replaceChildren(); summary.replaceChildren(); size.replaceChildren(); size.value = ''; sizeLabel.hidden = true; size.disabled = false; add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
-    async function searchTyres() {
+    function clear() { serial++; selected = null; clearFeedback(); clearChoices(); summary.replaceChildren(); size.replaceChildren(); size.value = ''; sizeLabel.hidden = true; size.disabled = false; add.disabled = true; search.disabled = !seasons.length; status.textContent = seasons.length ? 'Auswahl geändert. Bitte passende Reifen erneut suchen.' : 'Für diese Felgenausführung sind noch keine dokumentierten Reifenvorschläge hinterlegt.'; }
+    async function searchTyres(previousTyre = '') {
       if (!seasons.some(([value]) => value === season.value)) return;
       clearFeedback();
-      const run = ++serial, quantity = getQuantity(), requestedSize = size.value; selected = null; choices.replaceChildren(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true; size.disabled = true;
+      if (configure) search.hidden = true;
+      const run = ++serial, quantity = getQuantity(), requestedSize = size.value; selected = null; clearChoices(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true; size.disabled = true;
       try {
         const query = new URLSearchParams({quantity: String(quantity), season: season.value, ...vehicleFilters});
         if (exactSize(requestedSize)) query.set('tyre_size', requestedSize);
@@ -748,25 +809,70 @@
           const row = el('label', null, 'shop-bundle-option'), radio = el('input'); radio.type = 'radio'; radio.name = 'bundle_tyre'; radio.value = tyre.id;
           const details = el('div'); details.append(el('h3', tyre.name), el('p', tyre.size, 'shop-muted'));
           const price = priceBox(tyre, quantity, {active: () => run === serial && active(), onUpdate: updateSummary});
+          choicePrices.add(price);
           details.append(price);
           const quality = qualityFacts(tyre);
           for (const [label, value] of quality) details.append(el('p', label + ': ' + value, 'shop-card-meta'));
           if (!quality.length) for (const label of ['Nasshaftung', 'Kraftstoffeffizienz', 'Außengeräusch']) if (tyre.specifications?.[label]) details.append(el('p', label + ': ' + tyre.specifications[label], 'shop-card-meta'));
           row.append(radio, productImage(tyre, ''), details); choices.append(row);
           radio.addEventListener('change', () => { if (radio.checked) { clearFeedback(); selected = tyre; updateSummary(); } });
+          if (previousTyre === tyre.id) { radio.checked = true; selected = tyre; updateSummary(); }
           scheduleQuantityPrice(price, result, 0);
         }
-      } catch (_) { if (run === serial && active()) status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.'; }
+      } catch (_) {
+        if (run === serial && active()) {
+          status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.';
+          if (configure) { search.hidden = false; search.textContent = 'Reifenauswahl erneut laden'; }
+        }
+      }
       finally { if (run === serial && active()) { search.disabled = false; size.disabled = false; } }
     }
     const search = button('Passende Reifen zu dieser Felge suchen', searchTyres);
+    search.hidden = Boolean(configure);
     search.disabled = !seasons.length;
-    mounting.addEventListener('change', () => { clearFeedback(); updateSummary(); }); season.addEventListener('change', clear);
+    mounting.addEventListener('change', () => { clearFeedback(); updateSummary(); });
+    season.addEventListener('change', () => { clear(); if (configure) searchTyres(); });
     size.addEventListener('change', () => { if (exactSize(size.value)) searchTyres(); });
-    panel.append(search, seasonLabel, sizeLabel, status, choices, mountingLabel, summary, add, feedback, el('p', 'Kein Vorabtermin. Montage wird auf Wunsch mitgekauft; Terminabstimmung nach Eingang der Ware.', 'shop-muted'));
-    return {node: panel, quantityChanged: clear, priceChanged: updateSummary};
+    panel.append(seasonLabel, sizeLabel, search, status, choices, mountingLabel, summary, add, feedback);
+    return {node: panel, search: searchTyres, quantityChanged: () => configure ? searchTyres(selected?.id) : clear(), priceChanged: updateSummary};
   }
-  async function openProduct(id) {
+  const setPriceRequests = new Map();
+  async function readSetPrice({rim, tyre, services, quantity}) {
+    const query = new URLSearchParams({tyre_id: tyre.id, quantity: String(quantity)});
+    for (const extra of ['runflat', 'disposal']) if (services[extra] === true) query.set(extra, '1');
+    const url = '/products/' + encodeURIComponent(rim.id) + '/complete-wheel-price?' + query;
+    let entry = setPriceRequests.get(url);
+    if (!entry || entry.until <= Date.now()) {
+      if (setPriceRequests.size >= 40) setPriceRequests.delete(setPriceRequests.keys().next().value);
+      entry = {until: Date.now() + 30000, result: requestJSON(url).catch(() => null)};
+      setPriceRequests.set(url, entry);
+    }
+    const value = await entry.result;
+    const rimPrice = selectionPrice(rim, quantity), tyrePrice = selectionPrice(tyre, quantity);
+    if (!value || !rimPrice || !tyrePrice || value.rim_id !== rim.id || value.tyre_id !== tyre.id ||
+        value.quantity !== quantity || value.currency !== 'EUR' || value.goods_gross_cent !== rimPrice.total + tyrePrice.total ||
+        !Number.isSafeInteger(value.mounting_gross_cent) || value.mounting_gross_cent < 0) return null;
+    if (!(value.freight_gross_cent === null && value.total_gross_cent === null ||
+        Number.isSafeInteger(value.freight_gross_cent) && value.freight_gross_cent >= 0 &&
+        value.total_gross_cent === value.goods_gross_cent + value.mounting_gross_cent + value.freight_gross_cent)) return null;
+    return value;
+  }
+  async function showMountedTotal(target, goods, sets, pickupPrice) {
+    // Each render owns its nodes. A late reply cannot change a newer quantity or delivery choice.
+    const details = el('dl', null, 'shop-cost-lines'), mount = el('dd', 'Wird geprüft'), freight = el('dd', 'Wird geprüft');
+    const label = el('p', 'Ware inkl. Montage', 'shop-muted'), total = el('strong', 'Wird geprüft', 'shop-summary-total');
+    details.append(el('dt', 'Warenwert'), el('dd', money(goods)), el('dt', 'Montage'), mount, el('dt', 'Versand'), freight);
+    target.replaceChildren(details, label, total);
+    const prices = await Promise.all(sets.map(readSetPrice));
+    if (prices.some(value => !value)) { mount.textContent = 'Im Gesamtangebot'; freight.textContent = 'Im Gesamtangebot'; total.textContent = 'Gesamtpreis wird geprüft'; return; }
+    const mounting = prices.reduce((sum, value) => sum + value.mounting_gross_cent, 0);
+    mount.textContent = money(mounting);
+    const confirmed = pickupPrice && prices.length === 1 && Number.isSafeInteger(prices[0].total_gross_cent);
+    freight.textContent = confirmed ? money(prices[0].freight_gross_cent) : 'Wird für die Lieferung bestätigt';
+    label.textContent = confirmed ? 'Gesamtpreis inkl. Montage und Versand zur Werkstatt' : 'Zwischensumme inkl. Montage · zzgl. Versand';
+    total.textContent = money(confirmed ? prices[0].total_gross_cent : goods + mounting);
+  }
+  async function openProduct(id, configure = false) {
     const run = ++detailSequence;
     const dialog = byId('product-dialog'), content = byId('product-detail');
     content.replaceChildren(el('p', 'Artikel wird geladen …')); if (!dialog.open) dialog.showModal();
@@ -789,15 +895,18 @@
       }
       const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', product.size, 'shop-muted'));
       const dimensions = rimDimensions(product);
+      const details = configure && isRim ? el('details', null, 'shop-rim-details') : copy;
+      if (details !== copy) details.append(el('summary', 'Felgendetails, Gutachten und Einzelkauf'));
       if (dimensions.length) {
         const specification = el('dl', null, 'shop-specs');
         for (const [label, value] of dimensions) specification.append(el('dt', label), el('dd', value));
-        copy.append(el('h3', 'Genaue Felgenausführung'), specification,
+        details.append(el('h3', 'Genaue Felgenausführung'), specification,
           el('p', 'Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.', 'shop-muted'));
       }
       let count = 1, bundle = null, add = null;
       const price = priceBox(product, count, {active: () => run === detailSequence && dialog.open, onUpdate: () => { if (add) { add.disabled = false; add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb'; } bundle?.priceChanged(); }}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
-      const quantity = el('label', 'Anzahl'); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); })); form.append(quantity);
+      const quantityLabel = configure ? 'Anzahl Kompletträder' : 'Anzahl';
+      const quantity = el('label', quantityLabel); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); }, quantityLabel)); form.append(quantity);
       if (product.category === 'tyre') {
         checkbox('Montage bei uns in Mosbach dazu wählen', 'mounting', form);
         form.append(el('small', 'Terminvereinbarung erst nach Wareneingang. Servicepreis wird im Gesamtpreis geprüft.', 'shop-muted'));
@@ -819,10 +928,13 @@
         if (services.painting) services.paint_color = form.elements.namedItem('paint_color').value;
         const care = form.elements.namedItem('care'); if (care && care.value) services.care = care.value;
         addToCart(product, count, services);
-      }); copy.append(price, form, add);
-      if (product.description) copy.append(el('p', product.description, 'shop-muted'));
+      });
+      copy.append(price, form);
+      if (details === copy) copy.append(add);
+      else { add.className = 'shop-detail-link'; details.append(add); }
+      if (product.description) details.append(el('p', product.description, 'shop-muted'));
       const specs = el('dl', null, 'shop-specs');
-      for (const [key, value] of Object.entries(product.specifications || {}).slice(0, 40)) specs.append(el('dt', key), el('dd', value)); copy.append(specs);
+      for (const [key, value] of Object.entries(product.specifications || {}).slice(0, 40)) specs.append(el('dt', key), el('dd', value)); details.append(specs);
       if (product.department === 'parts' && Array.isArray(product.application_notes) && product.application_notes.length >= 1 && product.application_notes.length <= 12 &&
           product.application_notes.every(note => typeof note === 'string' && note.length >= 1 && note.length <= 2000)) {
         const notes = el('section', null, 'shop-application-notes'), list = el('ul');
@@ -857,13 +969,16 @@
         'Verkauf nach den angegebenen Felgenmaßen. Fahrzeugpassung und Auflagen sind vor der Montage zu prüfen.' :
         'Für diese Ausführung ist hier noch keine bestätigte Fahrzeugzuordnung mit Gutachten hinterlegt. Passung vor einer Bestellung prüfen lassen.'));
       if (product.department === 'parts' || product.department === 'accessories') copy.append(el('p', 'Lieferzeit wird bestätigt. Gemeldeter Bestand ist keine Lieferzusage.', 'shop-muted'));
-      copy.append(fitment);
+      details.append(fitment);
       if (isRim) {
         const rimPane = el('section', null, 'shop-rim-pane'); rimPane.append(gallery, copy);
-        bundle = bundlePanel(product, () => count, () => run === detailSequence && dialog.open);
+        bundle = bundlePanel(product, () => count, () => run === detailSequence && dialog.open, configure);
         grid.append(rimPane, bundle.node);
+        if (details !== copy) grid.append(details);
       } else grid.append(gallery, copy);
       content.replaceChildren(grid);
+      dialog.scrollTop = 0;
+      if (configure && bundle) bundle.search();
       scheduleQuantityPrice(price, result, 0);
     } catch (error) { if (run === detailSequence && dialog.open) content.replaceChildren(el('p', errorText(error))); }
   }
@@ -895,6 +1010,17 @@
       if (!cart.includes(target)) { status.textContent = 'Die Auswahl hat sich geändert. Bitte den Dialog erneut öffnen.'; return; }
       if (date.value && (!/^\d{4}-\d{2}-\d{2}$/.test(date.value) || date.value < date.min)) { status.textContent = 'Bitte einen zukünftigen Terminwunsch auswählen.'; return; }
       if (!target.assembly_group && Boolean(target.services.mounting) !== mounting.checked) {
+        const pair = wheelSetFor(cart, target);
+        if (pair && target.selection_pair && mounting.checked) {
+          if (cart.some(item => item.assembly_group === target.selection_pair)) {
+            status.textContent = 'Dieser Satz mit Montage liegt bereits im Warenkorb. Bitte dort die Menge anpassen.';
+            return;
+          }
+          for (const member of [pair.rim, pair.tyre]) {
+            member.assembly_group = member.selection_pair;
+            delete member.selection_pair;
+          }
+        }
         if (mounting.checked) target.services.mounting = true; else delete target.services.mounting;
         saveCart(); renderCart();
       }
@@ -959,6 +1085,7 @@
     updateCartAction();
     if (!cart.length) return;
     let subtotal = 0, complete = true, subtotalExpires = Infinity, subtotalOutput = null, subtotalLabel = null, inquiryNote = null;
+    const mountedSummary = el('div'), summaryNote = el('p', 'Zuzüglich bestätigter Montage, Lackierung und Versand. Noch kein Gesamtangebot.', 'shop-muted');
     const subtotalItems = [];
     let unavailable = false;
     function refreshSubtotal() {
@@ -976,6 +1103,18 @@
       if (inquiryNote) inquiryNote.hidden = !inquiry;
       if (ready) subtotalOutput.dataset.subtotalExpires = String(until);
       else delete subtotalOutput.dataset.subtotalExpires;
+      const sets = ready && !inquiry ? completeWheelGroups(offerSelection) : null;
+      mountedSummary.hidden = !sets;
+      subtotalOutput.hidden = Boolean(sets); subtotalLabel.hidden = Boolean(sets); summaryNote.hidden = Boolean(sets);
+      if (sets) {
+        const prices = sets.map(set => {
+          const members = offerSelection.filter(item => item.selection.assembly_group === set.group);
+          const tyre = members.find(item => item.product.id === set.tyreId);
+          return {rim: members.find(item => item.product.id === set.rimId).product, tyre: tyre.product, quantity: set.quantity, services: tyre.selection.services};
+        });
+        const delivery = byId('buyer-address')?.elements.namedItem('workshop_delivery')?.value || 'collection';
+        showMountedTotal(mountedSummary, value, prices, delivery === 'collection');
+      }
     }
     // At most 40 exact public details, in batches of four; never fetch the feed.
     for (let offset = 0; offset < cart.length; offset += 4) {
@@ -984,6 +1123,7 @@
       if (run !== cartRun) return;
       rows.forEach((row, i) => {
         const result = results[i], product = result && result.item, index = offset + i, article = el('article', null, 'shop-cart-item'), copy = el('div');
+        const wheelSet = wheelSetFor(cart, row);
         offerSelection.push({product: validProduct(product) && product.id === row.id ? product : null, selection: row});
         let pendingPrice = null;
         if (!validProduct(product) || product.id !== row.id) { complete = false; unavailable = true; copy.append(el('h3', 'Artikel nicht mehr verfügbar'), el('p', 'Bitte aus der Auswahl entfernen.', 'shop-muted')); article.append(el('div'), copy); }
@@ -1002,15 +1142,42 @@
           const service = serviceDescription(row); if (service) copy.append(el('p', service, 'shop-muted'));
           copy.append(el('p', service || row.assembly_group ? 'Lieferziel zur Prüfung: Werkstatt Mosbach' : 'Lieferziel zur Prüfung: Kundenanschrift', 'shop-muted'));
           if (product.category === 'tyre') copy.append(el('p', TYRE_PURCHASE_NOTE, 'shop-muted'));
-          if (product.category === 'tyre' || row.assembly_group) {
+          if (product.category === 'tyre' || (row.assembly_group && !wheelSet)) {
             const deferredMontage = row.assembly_group && body.dataset.deferredCompleteWheelsEnabled === 'true';
             const action = el('div', null, 'shop-mounting-action'); action.append(button(deferredMontage ? 'Montage nach Wareneingang abstimmen' : 'Montagetermin in Mosbach buchen', () => mountingRequest(row, product), 'shop-button shop-button-secondary'), el('small', deferredMontage ? 'Montage ist ausgewählt. Terminvereinbarung nach Wareneingang.' : 'Terminbestätigung nach Lieferklärung', 'shop-muted')); copy.append(action);
           }
           article.append(copy);
         }
-        const controls = el('div', null, 'shop-cart-controls'), quantity = el('label', 'Anzahl');
-        quantity.append(quantitySelect(row.id, row.quantity, n => { cart[index].quantity = n; saveCart(); renderCart(); }));
-        controls.append(quantity, button('Entfernen', () => { const next = removeCartLine(cart, index); if (!next) { notice('Die verbleibende Auswahl überschneidet sich mit einem anderen Artikel. Bitte zuerst die Mengen oder eine der anderen Positionen anpassen.'); return; } cart = next; saveCart(); renderCart(); }, 'shop-detail-link')); copy.append(controls); container.append(article);
+        if (!wheelSet || wheelSet.rim === row) {
+          const controls = el('div', null, 'shop-cart-controls'), name = wheelSet ? 'Anzahl Kompletträder' : 'Anzahl', quantity = el('label', name);
+          const select = quantitySelect(row.id, row.quantity, n => {
+            if (run !== cartRun || !Number.isInteger(n) || n < 1 || n > maxQuantity(row.id)) return;
+            row.quantity = n;
+            if (wheelSet) wheelSet.tyre.quantity = n;
+            saveCart(); renderCart();
+          }, name);
+          if (wheelSet && wheelSet.rim.quantity !== wheelSet.tyre.quantity) {
+            const choose = el('option', 'Gemeinsame Menge wählen'); choose.value = ''; choose.disabled = true;
+            select.append(choose); select.value = '';
+          }
+          quantity.append(select);
+          controls.append(quantity, button(wheelSet ? 'Satz entfernen' : 'Entfernen', () => {
+            const next = wheelSet ? cart.filter(item => item !== wheelSet.rim && item !== wheelSet.tyre) : removeCartLine(cart, index);
+            if (!next) { notice('Die verbleibende Auswahl überschneidet sich mit einem anderen Artikel. Bitte zuerst die Mengen oder eine der anderen Positionen anpassen.'); return; }
+            cart = next; saveCart(); renderCart();
+          }, 'shop-detail-link'));
+          if (wheelSet) controls.append(button('Satz aufteilen', () => {
+            const next = cart.map(item => {
+              if (item !== wheelSet.rim && item !== wheelSet.tyre) return item;
+              const {assembly_group, selection_pair, ...single} = item;
+              return single;
+            });
+            if (normaliseCart(next).length !== next.length) { notice('Die Einzelartikel sind bereits im Warenkorb. Bitte zuerst die vorhandenen Positionen prüfen.'); return; }
+            cart = next; saveCart(); renderCart();
+          }, 'shop-detail-link'));
+          copy.append(controls);
+        } else copy.append(el('p', row.quantity + ' Reifen im Komplettradsatz', 'shop-muted'));
+        container.append(article);
         if (pendingPrice) scheduleQuantityPrice(pendingPrice, result, 0);
       });
     }
@@ -1018,7 +1185,7 @@
     subtotalOutput = total;
     if (complete) total.dataset.subtotalExpires = String(subtotalExpires);
     subtotalLabel = el('p', 'Artikel-Zwischensumme', 'shop-muted'); inquiryNote = el('p', 'Anfrageartikel bleiben in Ihrer Auswahl. Preis und Lieferbarkeit bestätigen wir im Gesamtangebot.', 'shop-inquiry-note'); inquiryNote.hidden = true;
-    summary.append(subtotalLabel, total, inquiryNote, el('p', 'Zuzüglich bestätigter Montage, Lackierung und Versand. Noch kein Gesamtangebot.', 'shop-muted'));
+    summary.append(subtotalLabel, total, inquiryNote, summaryNote, mountedSummary);
     refreshSubtotal();
     byId('cart-status').textContent = '';
     updateCartAction();
@@ -1217,7 +1384,7 @@
       };
       const addressChanged = () => { resetChangedDelivery(); revision++; invalidateQuote(); addressReady = false; updateCartAction(); };
       form.elements.namedItem('different_delivery').addEventListener('change', event => { byId('delivery-fields').hidden = !event.target.checked; byId('delivery-fields').disabled = !event.target.checked; addressChanged(); });
-      form.elements.namedItem('workshop_delivery')?.addEventListener('change', addressChanged);
+      form.elements.namedItem('workshop_delivery')?.addEventListener('change', () => { addressChanged(); renderCart(); });
       form.addEventListener('input', addressChanged);
       form.addEventListener('change', addressChanged);
       form.addEventListener('submit', async event => {
@@ -1238,7 +1405,7 @@
       if (cartFlow !== 'checkout' || body.dataset.quoteEnabled !== 'true' || !addressReady || !cart.length || !sourceReady || !offerReady || quoteBusy || checkoutInProgress) return;
       invalidateQuote(); quoteBusy = true; const quoteRun = ++quoteRequestRun;
       updateCartAction(); byId('quote-status').textContent = 'Gesamtpreis und Lieferwege werden geprüft …';
-      const submittedRevision = revision, submitted = JSON.stringify({lines: cart});
+      const submittedRevision = revision, submitted = JSON.stringify({lines: cart.map(({selection_pair, ...line}) => line)});
       try {
         const result = await requestJSON('/cart/quote', {method: 'POST', body: submitted});
         if (submittedRevision !== revision || !addressReady) { byId('quote-status').textContent = 'Ihre Auswahl wurde geändert. Bitte den Gesamtpreis erneut prüfen.'; return; }
@@ -1314,7 +1481,7 @@
   });
   if (body.dataset.page === 'komplettraeder') {
     const linked = new URLSearchParams(root.location.search).get('artikel');
-    if (typeof linked === 'string' && /^(alloy_wheel|steel_wheel):[a-f0-9]{24}$/.test(linked)) openProduct(linked);
+    if (typeof linked === 'string' && /^(alloy_wheel|steel_wheel):[a-f0-9]{24}$/.test(linked)) openProduct(linked, true);
   }
   root.setInterval(() => {
     for (const [node, item] of priceNodes) { if (!node.isConnected) priceNodes.delete(node); else priceChanged(node, item); }

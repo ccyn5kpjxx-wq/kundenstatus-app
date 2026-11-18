@@ -235,6 +235,29 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except Exception:
             return reply({'error': 'catalogue_unavailable'}, 503)
 
+    @bp.get('/products/<string:product_id>/complete-wheel-price')
+    def complete_wheel_price(product_id):
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if not callable(getattr(catalogue, 'complete_wheel_price', None)):
+            return reply({'error': 'catalogue_unavailable'}, 503)
+        args = request.args
+        if (set(args) - {'tyre_id', 'quantity', 'runflat', 'disposal'}
+                or any(len(values) != 1 for _, values in args.lists())
+                or not re.fullmatch(r'(?:alloy_wheel|steel_wheel):[a-f0-9]{24}', product_id)
+                or not re.fullmatch(r'tyre:[a-f0-9]{24}', args.get('tyre_id', ''))
+                or not re.fullmatch(r'[1-4]', args.get('quantity', ''))
+                or any(args[key] != '1' for key in ('runflat', 'disposal') if key in args)):
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            result = catalogue.complete_wheel_price(product_id, args['tyre_id'], quantity=int(args['quantity']),
+                                                    runflat='runflat' in args, disposal='disposal' in args)
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
+        if result is None:
+            return reply({'error': 'combination_not_found'}, 404)
+        return reply(result)
+
     @bp.post('/cart/quote')
     def cart_quote():
         if not catalogue_enabled() or current_app.config.get('SHOP_CART_QUOTE_ENABLED') is not True:

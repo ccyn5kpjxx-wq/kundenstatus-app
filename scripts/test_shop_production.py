@@ -525,12 +525,13 @@ class ReleaseChecks(unittest.TestCase):
         app = Flask('public-enriched-gate')
         app.before_request(namespace['restrict_public_site_service'])
         for index, endpoint in enumerate(('shop_public_v2.product_variants', 'shop_public_v2.compatible_tyres',
-                                          'shop_frontend.felgenstudio', 'shop_public_v2.create_order_draft', 'internal_admin')):
+                                          'shop_frontend.felgenstudio', 'shop_public_v2.create_order_draft', 'internal_admin',
+                                          'shop_public_v2.complete_wheel_price')):
             app.add_url_rule('/' + str(index), endpoint, lambda: ('', 204), methods=['GET', 'POST'])
         client = app.test_client()
-        for index in range(3):
+        for index in (0, 1, 2, 5):
             self.assertEqual(client.get('/' + str(index)).status_code, 204)
-        for index in (3, 4):
+        for index in (3, 4, 5):
             self.assertEqual(client.post('/' + str(index)).status_code, 404)
 
 

@@ -3216,7 +3216,8 @@ def restrict_public_site_service():
     # portal (including its configured public hostname), the exact v2 handlers
     # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
     if request.endpoint in {"shop_public_v2.products", "shop_public_v2.product", "shop_media_v2.image", "shop_documents.document",
-                            "shop_public_v2.product_variants", "shop_public_v2.compatible_tyres"} and request.method == "GET":
+                            "shop_public_v2.product_variants", "shop_public_v2.compatible_tyres",
+                            "shop_public_v2.complete_wheel_price"} and request.method == "GET":
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {
             "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
@@ -46295,6 +46296,7 @@ def reifen_buchung_termin(lead_id):
     return redirect(url_for("admin_reifentermine"))
 
 def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_code=200, ads_event=None):
+    from shop_service_requests import selected_workshop_service
     formdata = formdata or {}
     ausgewaehltes_anliegen = clean_text(formdata.get("anliegen")) or "allgemein"
     if ausgewaehltes_anliegen == "reifenangebot":
@@ -46353,6 +46355,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
             kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden", "auswahl"},
             ausgewaehltes_anliegen=ausgewaehltes_anliegen,
+            shop_service=selected_workshop_service(formdata.get("shop_leistung"), ausgewaehltes_anliegen),
             besichtigungsarten=WEBSITE_BESICHTIGUNGSARTEN,
             today_iso=date.today().isoformat(),
         ),
@@ -46366,6 +46369,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
 @app.route("/anfrage", methods=["GET", "POST"])
 def website_anfrage():
     """Zentrales Anfrageformular des Portals für Homepage-Kontakte."""
+    from shop_service_requests import selected_workshop_service
     if request.method == "POST":
         service_context = None
         if request.form.get('service_context'):
@@ -46586,6 +46590,9 @@ def website_anfrage():
         anliegen_label = WEBSITE_ANLIEGEN[anliegen]
         besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
+        shop_service = selected_workshop_service(request.form.get("shop_leistung"), anliegen)
+        if shop_service:
+            beschreibungsteile.append(f"Im Shop gewählte Leistung: {shop_service.label}")
         if ist_reifenangebot:
             beschreibungsteile.append(reifenangebot_summary(reifenangebot_daten))
         if anliegen == "reifenservice":
@@ -46826,8 +46833,14 @@ def website_anfrage():
         value for value in request.args.getlist("mechanik_kategorie")
         if vorauswahl == "mechanikanfrage" and value in WEBSITE_MECHANIK_KATEGORIEN
     ))
+    service_key = request.args.get("shop_leistung")
+    service = selected_workshop_service(service_key, vorauswahl)
+    if service and service.intent == "mechanikanfrage" and service.option and not mechanik_vorauswahl:
+        mechanik_vorauswahl = [service.option]
     return render_website_anfrage(
         formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart,
+                  "shop_leistung": service_key if service else "",
+                  "reifen_leistung": [service.option] if service and service.intent == "reifenservice" else [],
                   "mechanik_kategorie": mechanik_vorauswahl,
                   "leistungsart": clean_text(request.args.get("leistungsart")) if HOMEPAGE_LEISTUNGEN.get(clean_text(request.args.get("leistungsart")), {}).get("anliegen") == vorauswahl else ""},
         gesendet=bestaetigt,

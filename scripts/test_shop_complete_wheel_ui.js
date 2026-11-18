@@ -73,6 +73,10 @@ async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='S
  const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:TOKEN}),querySelectorAll:()=>[],addEventListener(){}},localStorage:{getItem:()=>JSON.stringify(rows),setItem:(_key,value)=>stored.push(value)},sessionStorage:{getItem:()=>null,setItem(){}},location:{pathname:'/shop/warenkorb/',assign:url=>redirects.push(url)},setTimeout(){},clearTimeout(){},setInterval(){},crypto:{randomUUID:()=> 'SYNTHETIC'},
   fetch:async(url,options)=>{calls.push({url,options});let value;
    if(url.endsWith('/buyer/session'))value=session();
+   else if(url.includes('/complete-wheel-price?')){
+     const q=Number(new URL(url,'https://synthetic.test').searchParams.get('quantity'));
+     value={rim_id:RIM,tyre_id:TYRE,quantity:q,currency:'EUR',goods_gross_cent:20000*q,mounting_gross_cent:2250*q,freight_gross_cent:0,total_gross_cent:22250*q};
+   }
    else if(url.includes('/products/'))value={item:url.includes(encodeURIComponent(RIM))||url.includes(RIM)?rim():tyre(),prices_refreshing:false};
    else if(url.endsWith('/buyer/address')){const payload=JSON.parse(options.body);value={...session(),...(Object.hasOwn(payload,'vehicle_ref')?{vehicle_ref:payload.vehicle_ref}:{})};}
    else if(url.endsWith('/cart/quote')){if(pending)await pending;value={quote:quoteValue,quote_retained:true};}
@@ -104,8 +108,39 @@ async function statusPage(status, technical){
  const checkboxes=rendered.filter(n=>n.type==='checkbox');assert.equal(checkboxes.length,2);for(const input of checkboxes){input.checked=true;input.listeners.change();}assert.equal(f.nodes['checkout-button'].disabled,false);
  f.form.fields.vehicle_ref.value='SYNTHETIC BMW 3er 2018';f.change();assert.equal(f.nodes['checkout-button'].hidden,true);assert.equal(f.nodes['request-quote'].disabled,true);
  await f.submit();assert.equal(JSON.parse(f.calls.filter(c=>c.url.endsWith('/buyer/address')).at(-1).options.body).vehicle_ref,'SYNTHETIC BMW 3er 2018');
- const stale=await boot();await stale.request();const quantity=walk(stale.nodes['cart-items']).find(n=>n.tagName==='SELECT');quantity.value='3';quantity.listeners.change();await flush();assert.equal(stale.nodes['checkout-button'].hidden,true);assert.equal(stale.nodes['request-quote'].textContent,'Gesamtangebot anfragen','mismatched pair cannot keep checkout');
- const pending=await boot({waitQuote:true});const request=pending.request();const remove=walk(pending.nodes['cart-items']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Entfernen');remove.listeners.click();await flush();pending.resolveQuote();await request;assert.equal(pending.nodes['checkout-button'].hidden,true,'late quote cannot authorize changed pair');
+ const stale=await boot();await stale.request();
+ const setSelectors=walk(stale.nodes['cart-items']).filter(n=>n.tagName==='SELECT');
+ assert.equal(setSelectors.length,1);
+ assert.equal(setSelectors[0]['aria-label'],'Anzahl Kompletträder');
+ assert.ok(walk(stale.nodes['cart-summary']).some(n=>n.textContent===logic.money(89000)));
+ setSelectors[0].value='3';setSelectors[0].listeners.change();await flush();
+ assert.deepEqual(JSON.parse(stale.stored.at(-1)).map(r=>r.quantity),[3,3]);
+ assert.equal(stale.nodes['checkout-button'].hidden,true,'editing invalidates the old binding');
+ assert.equal(stale.nodes['request-quote'].textContent,'Gesamtpreis prüfen');
+ assert.ok(walk(stale.nodes['cart-summary']).some(n=>n.textContent===logic.money(66750)));
+ const reloaded=await boot({rows:JSON.parse(stale.stored.at(-1))});
+ assert.equal(walk(reloaded.nodes['cart-items']).find(n=>n.tagName==='SELECT').value,'3');
+ reloaded.form.fields.workshop_delivery.value='customer_reshipment';reloaded.form.fields.workshop_delivery.listeners.change();await flush();
+ assert.ok(walk(reloaded.nodes['cart-summary']).some(n=>n.textContent.includes('zzgl. Versand')));
+ assert.ok(!walk(reloaded.nodes['cart-summary']).some(n=>n.textContent.includes('Gesamtpreis inkl. Montage und Versand')));
+ const mismatched=selected();mismatched[0].quantity=2;
+ const repair=await boot({rows:mismatched});
+ const repairSelect=walk(repair.nodes['cart-items']).find(n=>n.tagName==='SELECT');
+ assert.equal(repairSelect.value,'');assert.equal(repair.nodes['request-quote'].textContent,'Gesamtangebot anfragen');
+ repairSelect.value='3';repairSelect.listeners.change();await flush();
+ assert.deepEqual(JSON.parse(repair.stored.at(-1)).map(r=>r.quantity),[3,3]);assert.equal(repair.nodes['request-quote'].textContent,'Gesamtpreis prüfen');
+ walk(repair.nodes['cart-items']).find(n=>n.textContent==='Satz aufteilen').listeners.click();await flush();
+ assert.equal(walk(repair.nodes['cart-items']).filter(n=>n.tagName==='SELECT').length,2);
+ assert.ok(JSON.parse(repair.stored.at(-1)).every(row=>!row.assembly_group));
+ const looseSet=selected().map(({assembly_group,...line})=>({...line,services:{},selection_pair:'set|'+RIM+'|'+TYRE}));
+ const loose=await boot({rows:looseSet});
+ assert.equal(loose.nodes['request-quote'].textContent,'Gesamtangebot anfragen','linking quantities does not authorize procurement');
+ const looseSelectors=walk(loose.nodes['cart-items']).filter(n=>n.tagName==='SELECT');
+ assert.equal(looseSelectors.length,1);looseSelectors[0].value='2';looseSelectors[0].listeners.change();await flush();
+ assert.deepEqual(JSON.parse(loose.stored.at(-1)).map(r=>r.quantity),[2,2]);
+ assert.ok(JSON.parse(loose.stored.at(-1)).every(r=>r.selection_pair&&!r.assembly_group));
+ const pending=await boot({waitQuote:true});const request=pending.request();const remove=walk(pending.nodes['cart-items']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Satz entfernen');remove.listeners.click();await flush();pending.resolveQuote();await request;
+ assert.deepEqual(JSON.parse(pending.stored.at(-1)),[]);assert.equal(pending.nodes['checkout-button'].hidden,true,'late quote cannot authorize removed set');
  for(const storedVehicle of [7,'x'.repeat(201),'SYNTHETIC\nA3']){const bad=await boot({storedVehicle});assert.equal(bad.nodes['request-quote'].disabled,true);}
  const missing=await boot({missing:true});await missing.submit();assert.equal(missing.calls.filter(c=>c.url.endsWith('/buyer/address')).length,0);
  const blank=await boot();blank.form.fields.vehicle_ref.value='';blank.change();await blank.submit();assert.equal(blank.calls.filter(c=>c.url.endsWith('/buyer/address')).length,0);

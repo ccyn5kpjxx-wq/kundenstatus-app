@@ -7,6 +7,7 @@ This module does not reserve stock, approve checkout or infer vehicle fitment.
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from functools import cached_property
 from hashlib import sha256
 from html.parser import HTMLParser
 import json
@@ -67,6 +68,27 @@ def _text(value, maximum=180):
 def _fold(value):
     text = unicodedata.normalize("NFKD", value.casefold())
     return "".join(c for c in text if not unicodedata.combining(c))
+
+
+def _model_terms(model):
+    """Whole leading model words for browsing, plus the exact series with its type codes."""
+    full = " ".join(_fold(model).split())
+    words = full.partition("(")[0].split()
+    return {full, *(" ".join(words[:end]) for end in range(1, len(words) + 1))}
+
+
+def _matches_vehicle(vehicle, criteria, hsn, tsn, parts):
+    if hsn is not None and (vehicle["hsn"], vehicle["tsn"]) != (hsn, tsn):
+        return False
+    make = _fold(vehicle["make"])
+    models = _model_terms(vehicle["model"]) if parts else {_fold(vehicle["model"])}
+    for wanted_make, wanted_model, year in criteria:
+        if wanted_make != make or wanted_model is not None and wanted_model not in models:
+            return False
+        if year is not None and not (type(vehicle["year_from"]) is int and type(vehicle["year_to"]) is int
+                                     and vehicle["year_from"] <= year <= vehicle["year_to"]):
+            return False
+    return True
 
 
 def _condition(value):
@@ -380,6 +402,28 @@ class PublicCatalog:
     def _ranked_order(self, entry, now):
         return (self._offer_rank(entry, now), *self._browse_order(entry))
 
+    @cached_property
+    def _parts_vehicle_terms(self):
+        # Built after source enrichment, solely from the immutable published fitments.
+        terms = {}
+        for entry in self._rows.values():
+            product = entry["public"]
+            if product["department"] == "parts":
+                for vehicle in product["fitment"]["vehicles"]:
+                    make = _fold(vehicle["make"])
+                    for model in _model_terms(vehicle["model"]):
+                        terms[make + " " + model] = (make, model)
+        return terms
+
+    def _parts_text_vehicle(self, q):
+        text = " ".join(_fold(q).split())
+        if text in self._parts_vehicle_terms:
+            return (*self._parts_vehicle_terms[text], None)
+        dated = re.fullmatch(r"(.+?)(?:\s*,\s*|\s+)([0-9]{4})", text)
+        if dated and dated[1] in self._parts_vehicle_terms:
+            return (*self._parts_vehicle_terms[dated[1]], int(dated[2]))
+        return None
+
     def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
              width=None, ratio=None, diameter=None, now=None):
@@ -410,7 +454,13 @@ class PublicCatalog:
             size_conflict = any(sizes[k] is not None and sizes[k] != parsed[k] for k in sizes)
             sizes = {k: sizes[k] if sizes[k] is not None else parsed[k] for k in sizes}
         current = self._now(now)
-        tokens = [] if nominal else _fold(q).split()
+        text_vehicle = self._parts_text_vehicle(q) if q and department == "parts" else None
+        tokens = [] if nominal or text_vehicle else _fold(q).split()
+        criteria = []
+        if make is not None:
+            criteria.append((_fold(make.strip()), " ".join(_fold(model).split()) if model is not None else None, year))
+        if text_vehicle:
+            criteria.append(text_vehicle)
         rows = []
         for entry in self._rows.values():
             public = entry["public"]
@@ -429,15 +479,14 @@ class PublicCatalog:
                 continue
             if any(token not in entry["search"] for token in tokens):
                 continue
-            if any(value is not None for value in (make, model, year, hsn, tsn)):
-                def matches(vehicle):
-                    return ((make is None or _fold(vehicle["make"]) == _fold(make.strip()))
-                            and (model is None or _fold(vehicle["model"]) == _fold(model.strip()))
-                            and (year is None or type(vehicle["year_from"]) is int and type(vehicle["year_to"]) is int
-                                 and vehicle["year_from"] <= year <= vehicle["year_to"])
-                            and (hsn is None or (vehicle["hsn"], vehicle["tsn"]) == (hsn, tsn)))
-                if not any(matches(v) for v in public["fitment"]["vehicles"]):
+            if criteria or hsn is not None:
+                parts = public["department"] == "parts"
+                matched = [vehicle for vehicle in public["fitment"]["vehicles"]
+                           if _matches_vehicle(vehicle, criteria, hsn, tsn, parts)]
+                if not matched:
                     continue
+                if parts and department == "parts" and criteria:
+                    entry = {**entry, "matching_models": {(v["make"], v["model"]) for v in matched}}
             # One cache-only snapshot per matching product. Grouped/family
             # callers reuse this pass instead of rescanning every source page.
             rows.append(self._cached_entry(entry))
@@ -446,9 +495,13 @@ class PublicCatalog:
 
     def _page_result(self, rows, current, *, page, page_size):
         offset = (page - 1) * page_size
-        return {"items": [self._project(row, current, detail=False) for row in rows[offset:offset + page_size]],
-                "page": page, "page_size": page_size, "total": len(rows),
-                "has_more": offset + page_size < len(rows), "as_of": current.isoformat()}
+        result = {"items": [self._project(row, current, detail=False) for row in rows[offset:offset + page_size]],
+                  "page": page, "page_size": page_size, "total": len(rows),
+                  "has_more": offset + page_size < len(rows), "as_of": current.isoformat()}
+        if rows and "matching_models" in rows[0]:
+            models = sorted({pair for row in rows for pair in row["matching_models"]})
+            result["vehicle_models"] = [{"make": make, "model": model} for make, model in models[:128]]
+        return result
 
     def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None,

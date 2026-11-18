@@ -19,6 +19,7 @@ from shop_catalog_public import variant_fingerprint
 from shop_cart_quotes import CartQuoteService
 from shop_buyer import ShopBuyer
 from shop_freight import RSURetailFreight, MainlandDeliveryEligibility
+from shop_wheel_prices import tyre_service_gross_cent
 from shop_media import ReleasedMedia
 from shop_documents import ReleasedProductDocuments
 from shop_price_cache import PublicPriceCache
@@ -95,23 +96,17 @@ def existing_shop_backup_storage(*, environ=None):
 
 def _service_quote(code, product, quantity, options):
     """Existing published tyre-service tariff; other services require a quote."""
-    if code not in {'mounting', 'runflat', 'disposal'} or product['category'] != 'tyre':
+    if product['category'] != 'tyre':
         return None
-    diameter = product.get('diameter')
-    if type(diameter) is not int or not 13 <= diameter <= 20:
+    amount = tyre_service_gross_cent(code, product.get('diameter'), quantity, options)
+    if amount is None:
         return None
-    unit = {'runflat': 500, 'disposal': 400}.get(code)
-    if code == 'mounting':
-        unit = 2250 if diameter <= 16 else 2500 if diameter <= 18 else 3000
-        if not isinstance(options, Mapping) or any(type(options.get(k, False)) is not bool for k in ('runflat', 'disposal')):
-            return None
-        unit += (500 if options.get('runflat') else 0) + (400 if options.get('disposal') else 0)
     now = datetime.now(timezone.utc)
     return {'confirmed': True, 'product_id': product['id'], 'identity_hash': product['identity_hash'],
             'quantity': quantity, 'options_hash': sha256(json.dumps(options, ensure_ascii=False,
                 sort_keys=True, separators=(',', ':')).encode()).hexdigest(),
             'mode': 'live', 'currency': 'eur', 'vat_percent': '19.00',
-            'gross_cent': quantity * unit, 'observed_at': now.isoformat(),
+            'gross_cent': amount, 'observed_at': now.isoformat(),
             'expires_at': (now + timedelta(minutes=15)).isoformat()}
 
 
@@ -317,6 +312,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
             evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
             destination_eligibility=delivery_eligibility)
+        wheel_pickup_freight = freight.workshop_collection_gross_cent
         shipping_ready = set(freight.classes) & procurement_ids
         if parts_release:
             if supplier is None:
@@ -350,7 +346,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             preferred_ids=set(seeds['records']) if fixed_prices else None,
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
-            recommendation_document_ids=recommendation_document_ids)
+            recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,

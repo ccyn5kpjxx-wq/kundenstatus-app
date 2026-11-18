@@ -9,10 +9,38 @@ concern; a shop cart must never trigger an appointment implicitly.
 
 import json
 import unicodedata
+from typing import NamedTuple
 
 SERVICE_REQUEST_PATH = '/anfrage?anliegen=reifenservice'
 CART_REQUEST_PATH = '/anfrage?anliegen=allgemein&shop_anfrage=1'
 MAX_CART_REQUEST_BYTES = 32768
+
+
+class WorkshopService(NamedTuple):
+    label: str
+    description: str
+    intent: str
+    option: str = ''
+
+
+WORKSHOP_SERVICES = {
+    'reifenmontage': WorkshopService('Reifenmontage', 'Reifen aufziehen, auswuchten und am Fahrzeug montieren.', 'reifenservice', 'montage'),
+    'raederwechsel': WorkshopService('Räderwechsel', 'Vorhandene Kompletträder wechseln, Sichtkontrolle und Luftdruck prüfen.', 'reifenservice', 'radwechsel'),
+    'reifencheck': WorkshopService('Reifencheck', 'Profil, Zustand und Luftdruck kontrollieren lassen.', 'reifenservice', 'pruefung'),
+    'oelservice': WorkshopService('Ölwechsel / Ölservice', 'Herstellerfreigabe, Füllmenge und Ölfilter passend zum Fahrzeug prüfen.', 'mechanikanfrage', 'oelwechsel'),
+    'lackierarbeiten': WorkshopService('Lackierarbeiten', 'Neuteile in Wunschfarbe, Teil- und Komplettlackierung oder Spot-Repair.', 'lackanfrage'),
+    'aufbereitung': WorkshopService('Fahrzeugaufbereitung', 'Innen, außen oder komplett. Den Umfang wählen Sie im Formular.', 'fahrzeugpflege'),
+    'karosserie': WorkshopService('Karosserie / Smart Repair', 'Unfallschäden, Kunststoffreparatur und Kleinschäden.', 'reparaturanfrage'),
+    'dellen': WorkshopService('Dellen entfernen', 'Park- und Hageldellen prüfen und instand setzen.', 'dellenreparatur'),
+    'autoglas': WorkshopService('Autoglas', 'Steinschlagreparatur oder Scheibentausch nach Prüfung.', 'glasschaden'),
+    'mechanik': WorkshopService('Mechanik / Service', 'Fahrzeugservice und Bremsenarbeiten nach Abstimmung.', 'mechanikanfrage'),
+    'softlack': WorkshopService('Softlack / Industrielackierung', 'Oberflächen im Innenraum und geeignete Industriebauteile.', 'lackanfrage'),
+}
+
+
+def selected_workshop_service(key, intent):
+    service = WORKSHOP_SERVICES.get(key)
+    return service if service and service.intent == intent else None
 
 
 class ShopOfferError(ValueError):

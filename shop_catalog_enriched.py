@@ -11,6 +11,7 @@ import re
 import unicodedata
 
 from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, _quote, _stamp, variant_fingerprint
+from shop_wheel_prices import published_wheel_tier, tyre_service_gross_cent
 
 
 def _norm(value):
@@ -175,12 +176,13 @@ class EnrichedPublicCatalog(PublicCatalog):
                  procurement_ids=None, product_documents=None, standalone_rims=None,
                  rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
                  checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None,
-                 recommendation_ladder=False, recommendation_document_ids=None, **kwargs):
+                 recommendation_ladder=False, recommendation_document_ids=None, wheel_pickup_freight=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         if type(recommendation_ladder) is not bool:
             raise CatalogError('invalid_recommendation_policy')
         self._recommendation_ladder = recommendation_ladder
+        self._wheel_pickup_freight = wheel_pickup_freight
         rows = deepcopy(list(products))
         notices = validated_parts_notices(rows, kwargs.get('released_ids'), parts_notices)
         display_prices = validated_inquiry_prices(rows, kwargs.get('released_ids'), procurement_ids, inquiry_prices)
@@ -496,6 +498,32 @@ class EnrichedPublicCatalog(PublicCatalog):
             if len(result['items']) == 5:
                 break
         return result
+
+    def complete_wheel_price(self, rim_id, tyre_id, *, quantity, runflat=False, disposal=False):
+        """Display the selected quantity at workshop pickup, without a buyer or supplier call."""
+        if type(quantity) is not int or not 1 <= quantity <= 4 or type(runflat) is not bool or type(disposal) is not bool:
+            raise CatalogError('invalid_set_options')
+        if not any(candidate == tyre_id for candidate, _ in self._candidate_tyres.get(rim_id, ())):
+            return None
+        now = self._now(None)
+        rim, tyre = self.get(rim_id, now=now), self.get(tyre_id, now=now)
+        rim_line, tyre_line = (published_wheel_tier(product, quantity, now) for product in (rim, tyre))
+        goods = None
+        if rim_line is not None and tyre_line is not None:
+            goods = rim_line['items_gross_cent'] + tyre_line['items_gross_cent']
+        diameter = tyre['geometry'].get('diameter', '')
+        mounting = None
+        if diameter == rim['geometry'].get('diameter') and re.fullmatch(r'[0-9]{2}', diameter):
+            mounting = tyre_service_gross_cent('mounting', int(diameter), quantity,
+                                              {'runflat': runflat, 'disposal': disposal})
+        freight = None
+        if (self._wheel_pickup_freight is not None and rim_id in self._procurement_ids
+                and tyre_id in self._procurement_ids):
+            freight = self._wheel_pickup_freight(rim_id, tyre_id, quantity)
+        total = goods + mounting + freight if None not in (goods, mounting, freight) else None
+        return {'rim_id': rim_id, 'tyre_id': tyre_id, 'quantity': quantity, 'currency': 'EUR',
+                'goods_gross_cent': goods, 'mounting_gross_cent': mounting, 'freight_gross_cent': freight,
+                'total_gross_cent': total}
 
     def assembly_proposal(self, rim, tyre, vehicle_ref):
         """Return an exact documented nominal proposal, never vehicle approval.

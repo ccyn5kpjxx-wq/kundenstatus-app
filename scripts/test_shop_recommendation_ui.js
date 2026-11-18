@@ -52,7 +52,7 @@ function recommendations(query) {
   return {rim_id: RIM, items, scope: 'rim_width_candidate', available_sizes: SIZES,
     selected_size: selected, prices_refreshing: false};
 }
-async function boot(responder = recommendations) {
+async function boot(responder = recommendations, {configure = false, setPrice} = {}) {
   const nodes = Object.fromEntries(['close-product', 'product-dialog', 'product-detail', 'shop-announcement'].map(id => [id, new Node()]));
   const body = new Node('body'); body.dataset = {api: '/shop/api/v2', page: 'komplettraeder'};
   const link = new Node('a'); link.href = '/shop/warenkorb/';
@@ -66,12 +66,14 @@ async function boot(responder = recommendations) {
       assert.equal(options.method || 'GET', 'GET', 'product selection must remain read only');
       const parsed = new URL(url, 'https://synthetic.invalid');
       assert.ok(parsed.pathname.startsWith('/shop/api/v2/products/'), 'no financial or order endpoint');
-      const value = parsed.pathname.endsWith('/compatible-tyres')
-        ? await responder(parsed.searchParams) : {item: rim(), prices_refreshing: false};
+      let value;
+      if (parsed.pathname.endsWith('/compatible-tyres')) value = await responder(parsed.searchParams);
+      else if (parsed.pathname.endsWith('/complete-wheel-price') && setPrice) value = await setPrice(parsed.searchParams);
+      else value = {item: rim(), prices_refreshing: false};
       return {ok: true, text: async () => JSON.stringify(value)};
     }};
   vm.runInNewContext(source, {window, URL, URLSearchParams, Intl, Date, console});
-  await window.ShopStorefront.openProduct(RIM); await flush();
+  await window.ShopStorefront.openProduct(RIM, configure); await flush();
   const panel = walk(nodes['product-detail']).find(node => node.className === 'shop-bundle-panel');
   assert.ok(panel);
   const labels = panel.children.filter(node => node.tagName === 'LABEL');
@@ -79,7 +81,7 @@ async function boot(responder = recommendations) {
     season: labels.find(node => node.textContent === 'Welche Reifen möchten Sie?').children[0],
     sizeLabel: labels.find(node => node.textContent === 'Reifengröße für den Vergleich'),
     size: labels.find(node => node.textContent === 'Reifengröße für den Vergleich').children[0],
-    quantity: walk(nodes['product-detail']).find(node => node.tagName === 'SELECT' && node['aria-label'] === 'Anzahl'),
+    quantity: walk(nodes['product-detail']).find(node => node.tagName === 'SELECT' && node['aria-label'] === (configure ? 'Anzahl Kompletträder' : 'Anzahl')),
     search: panel.children.find(node => node.tagName === 'BUTTON'),
     add: panel.children.find(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Felgen + Reifen')),
     mounting: walk(panel).find(node => node.name === 'bundle_mounting'),
@@ -90,6 +92,22 @@ const requestQueries = state => state.calls.filter(call => call.url.includes('/c
   .map(call => new URL(call.url, 'https://synthetic.invalid').searchParams);
 
 (async () => {
+  let releaseFirstPreview;
+  const direct=await boot(recommendations,{configure:true,setPrice:async query=>{
+    const q=Number(query.get('quantity')), value={rim_id:RIM,tyre_id:query.get('tyre_id'),quantity:q,currency:'EUR',
+      goods_gross_cent:10000*q,mounting_gross_cent:2500*q,freight_gross_cent:0,total_gross_cent:12500*q};
+    if(q===1) await new Promise(resolve=>{releaseFirstPreview=resolve;});
+    return value;
+  }});
+  assert.equal(radios(direct).length,5,'the primary configure path loads candidates immediately');
+  const first=radios(direct)[0];first.checked=true;first.listeners.change();
+  direct.mounting.checked=true;direct.mounting.listeners.change();
+  direct.quantity.value='3';direct.quantity.listeners.change();await flush();
+  assert.equal(radios(direct)[0].checked,true,'matching selection is kept at the new quantity');
+  const amounts=()=>walk(direct.panel).filter(n=>n.className==='shop-summary-total').map(n=>n.textContent);
+  assert.deepEqual(amounts(),['375,00\u00a0€']);
+  releaseFirstPreview();await flush();assert.deepEqual(amounts(),['375,00\u00a0€'],'delayed one-wheel total cannot replace three-wheel selection');
+  assert.deepEqual(JSON.parse(direct.stored.at(-1)),[],'configuring alone does not add a set');
   const f = await boot();
   assert.equal(f.sizeLabel.hidden, true);
   await f.search.listeners.click();

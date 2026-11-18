@@ -411,6 +411,52 @@ class EnrichmentChecks(unittest.TestCase):
         self.assertEqual(catalog.page(make='BMW')['total'], 0)
         self.assertNotIn('PRIVATE_CANARY', json.dumps(result))
 
+    def test_parts_search_matches_whole_model_family_and_refines_to_documented_series(self):
+        hatch = 'A3 (8V1, 8VK)'
+        cabrio = 'A3 Cabrio (8V7, 8VE)'
+        fixture = [
+            ('a', [('Audi', hatch, 2016, 2017, 'BHT')]),
+            ('b', [('Audi', cabrio, 2014, 2018, 'AZU')]),
+            ('c', [('Audi', 'A30 (XX)', 2015, 2017, 'XXX')]),
+            ('d', [('Audi', hatch, 2018, 2020, 'YZZ'), ('Audi', 'A4 B9', 2014, 2016, 'ABC')]),
+            ('e', [('BMW', '3er Touring (G21, G81)', 2020, 2024, 'KLM')]),
+        ]
+        rows, evidence = [], {}
+        for letter, vehicles in fixture:
+            body = part(letter, category='body_part', department='parts', name='Synthetic grill')
+            rows.append(body)
+            evidence[body['id']] = {
+                'variant_fingerprint': variant_fingerprint(body), 'provider_reviewed': True,
+                'provider_vehicles': [dict(make=make, model=model, year_from=start, year_to=end,
+                                           hsn='0588', tsn=tsn, label='Synthetic engine')
+                                      for make, model, start, end, tsn in vehicles]}
+        # Even a literal vehicle name/year in a product title is insufficient evidence.
+        rows.append(part('f', category='body_part', department='parts', name='Audi A3 2016 Audi A3 2019'))
+        catalog = catalogue(rows, browsing_evidence=evidence)
+        search = lambda **kw: catalog.page(department='parts', **kw)
+        for args in [dict(make='audi', model='a3', year=2016), dict(q='AUDI A3, 2016'),
+                     dict(q='Audi  A3  2016'), dict(q='Audi A3', make='Audi', model='A3', year=2016)]:
+            with self.subTest(args=args):
+                result = search(**args)
+                self.assertEqual({r['id'] for r in result['items']}, {rows[0]['id'], rows[1]['id']})
+                self.assertEqual(result['vehicle_models'], [{'make': 'Audi', 'model': hatch}, {'make': 'Audi', 'model': cabrio}])
+                self.assertTrue(all(r['fitment']['status'] == 'provider_vehicle' for r in result['items']))
+        self.assertEqual(search(make='Audi', model='A3', year=2016, page_size=1)['vehicle_models'],
+                         search(make='Audi', model='A3', year=2016)['vehicle_models'])
+        for model in ('A3 Cabrio', cabrio):
+            self.assertEqual(search(make='Audi', model=model, year=2016)['items'][0]['id'], rows[1]['id'])
+        self.assertEqual(search(make='Audi', model=hatch, year=2016)['total'], 1)
+        self.assertEqual(search(make='Audi', model='A3 (8V1)', year=2016)['total'], 0)
+        self.assertEqual(search(make='Audi', model='A', year=2016)['total'], 0)
+        self.assertEqual(search(q='Audi A3 2019', hsn='0588', tsn='ABC')['total'], 0)
+        self.assertEqual(search(q='Audi A3 2019', hsn='0588', tsn='YZZ')['total'], 1)
+        self.assertEqual(search(make='BMW', model='3er')['total'], 1)
+        self.assertEqual(search(make='BMW', model='A3')['total'], 0)
+        self.assertEqual(search(make='Audi', model='A30', year=2016)['total'], 1)
+        self.assertEqual(search(q='Synthetic grill')['total'], 5)
+        self.assertNotIn('vehicle_models', search(q='Synthetic grill'))
+        self.assertEqual(catalog.get(rows[0]['id'])['fitment']['vehicles'][0]['model'], hatch)
+
     def test_normalized_german_seasons_match_api_season_keys_without_vehicle_approval(self):
         rim, tire = wheel(), tyre()
         catalog = catalogue([rim, tire], compatible_pairs={rim['selection_id']: [pair(rim, tire)]})
