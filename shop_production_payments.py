@@ -7,11 +7,12 @@ after the complete reviewed release is registered.
 """
 from contextlib import closing
 from copy import deepcopy
+from hashlib import sha256
 
 from mailbox_client import Mailbox
 from mailbox_outbox import MailOutbox
 from shop_checkout import ShopCheckout
-from shop_consumer import ShopConsumer, init_consumer_schema
+from shop_consumer import ShopConsumer, init_consumer_schema, _freeze_pack
 from shop_fulfillment import FulfillmentJournal, ShopFulfillment, init_fulfillment_schema
 from shop_order_receipts import ShopOrderReceipts, init_order_receipt_schema
 from shop_order_workflow import WorkflowJournal, ShopOrderWorkflow, WorkflowCheckout, init_order_workflow_schema
@@ -72,13 +73,12 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         raise PaymentProfileError('complete_wheel_review_not_approved')
     if complete_wheel_review:
         from shop_complete_wheels import NOTICE
-        if (not isinstance(pack.get('texts'), dict) or not isinstance(pack.get('version'), str)
-                or not pack['version'].strip() or len(pack['version']) > 80):
-            raise PaymentProfileError('consumer_terms_or_withdrawal_unavailable')
-        pack = deepcopy(pack)
-        pack['version'] = str(pack.get('version', ''))[:80] + '/rad-review-v1'
-        pack['texts']['bestellhinweis'] = (NOTICE + '\n\n' + pack['texts'].get('bestellhinweis', '')).strip()
-        pack['texts']['komplettraeder_zahlung'] = NOTICE
+        frozen = _freeze_pack(pack)
+        if (not isinstance(pack.get('texts'), dict) or pack['texts'].get('komplettraeder_zahlung') != NOTICE
+                or frozen is None
+                or profile.get('complete_wheel_notice_sha256') != sha256(NOTICE.encode('utf-8')).hexdigest()
+                or profile.get('complete_wheel_frozen_pack_hash') != sha256(frozen.encode('utf-8')).hexdigest()):
+            raise PaymentProfileError('complete_wheel_terms_not_approved')
     supplier_quotes = adapters['supplier_quotes']
     if (not storage.ready or not buyer.readiness()['ready'] or getattr(buyer, 'mode', None) != 'live'
             or stripe_config.get('SHOP_STRIPE_PUBLIC_ORIGIN') != buyer.public_origin):

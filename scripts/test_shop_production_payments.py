@@ -2,6 +2,7 @@
 from contextlib import closing
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from pathlib import Path
 import re
 import socket
@@ -16,7 +17,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from flask import Flask
 from shop_buyer import ShopBuyer
-from shop_consumer import ConsumerError, DOCS, create_consumer_blueprint
+from shop_consumer import ConsumerError, DOCS, create_consumer_blueprint, _freeze_pack
+from shop_complete_wheels import NOTICE
 from shop_production_payments import PaymentProfileError, prepare_production_payments
 from shop_runtime import register_shop_runtime, FLAGS
 from shop_storage import ShopStorage
@@ -38,6 +40,20 @@ def pack():
     return {'version': 'SYNTHETIC-REVIEWED-1', 'status': 'approved', 'approved': True,
             'scope': 'mixed_retail', 'texts': {key: 'SYNTHETIC text ' + key for key in DOCS},
             'attachments': [{'filename': 'SYNTHETIC.txt', 'mimetype': 'text/plain', 'content': b'SYNTHETIC annex'}]}
+
+
+def reviewed_complete_pack():
+    value = pack()
+    value['version'] = 'SYNTHETIC-REVIEWED-rad-review-v1'
+    value['texts']['komplettraeder_zahlung'] = NOTICE
+    value['texts']['bestellhinweis'] = 'SYNTHETIC reviewed complete order notice'
+    return value
+
+
+def reviewed_complete_profile(value):
+    return {**profile(), 'complete_wheel_review_approved': True,
+        'complete_wheel_notice_sha256': sha256(NOTICE.encode('utf-8')).hexdigest(),
+        'complete_wheel_frozen_pack_hash': sha256(_freeze_pack(value).encode('utf-8')).hexdigest()}
 
 
 class FakeOutbox:
@@ -130,8 +146,10 @@ class ProductionPaymentChecks(unittest.TestCase):
                 prepare_production_payments(self.portal, self.adapters, supplied, pack=pack(),
                     supplier_config=self.supplier_config, stripe_config=self.stripe_config)
         self.assertEqual(self.client.mock_calls, [])
-        supplied = {**profile(), 'complete_wheel_review_approved': True}
-        dependencies, _ = prepare_production_payments(self.portal, self.adapters, supplied, pack=pack(),
+        candidate = reviewed_complete_pack()
+        supplied = reviewed_complete_profile(candidate)
+        original = deepcopy(candidate)
+        dependencies, _ = prepare_production_payments(self.portal, self.adapters, supplied, pack=candidate,
             supplier_config=self.supplier_config, stripe_config=self.stripe_config)
         review = self.adapters['order_review']
         self.assertTrue(review.readiness()['ready'])
@@ -142,9 +160,38 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.assertIn('komplettraeder_zahlung', terms['texts'])
         self.assertIn('reserviert', terms['texts']['komplettraeder_zahlung'])
         self.assertIn('rad-review-v1', terms['version'])
+        self.assertEqual(terms['version'], candidate['version'])
+        self.assertEqual(terms['before_order_notice'], candidate['texts']['bestellhinweis'])
+        self.assertEqual(terms['pack_hash'], supplied['complete_wheel_frozen_pack_hash'])
+        self.assertEqual(candidate, original, 'Activation must validate, never rewrite, approved legal text')
         self.assertEqual(self.portal.app.config['SHOP_REVIEW_ADMIN_ORIGIN'], ORIGIN)
         self.assertEqual(self.client.mock_calls, [])
         self.assertEqual(self.outbox.sent, [])
+
+    def test_complete_wheel_terms_need_exact_reviewed_document_and_frozen_pack_pins_before_io(self):
+        self.adapters['complete_wheel_review_requested'] = True
+        candidate = reviewed_complete_pack()
+        valid = reviewed_complete_profile(candidate)
+        cases = [(pack(), valid), (candidate, {**valid, 'complete_wheel_frozen_pack_hash': None}),
+            (candidate, {**valid, 'complete_wheel_frozen_pack_hash': 'f'*64}),
+            (candidate, {**valid, 'complete_wheel_notice_sha256': None}),
+            (candidate, {**valid, 'complete_wheel_notice_sha256': 'f'*64})]
+        for field in ('agb', 'lieferung', 'bestellhinweis', 'komplettraeder_zahlung'):
+            altered = deepcopy(candidate)
+            altered['texts'][field] += ' SYNTHETIC changed'
+            cases.append((altered, valid))
+        altered = deepcopy(candidate)
+        altered['attachments'][0]['content'] += b' changed'
+        cases.append((altered, valid))
+        for value, supplied in cases:
+            with self.subTest(pack=value['version'], profile=supplied), self.assertRaisesRegex(
+                    PaymentProfileError, 'complete_wheel_terms_not_approved'):
+                prepare_production_payments(self.portal, self.adapters, supplied, pack=value,
+                    supplier_config=self.supplier_config, stripe_config=self.stripe_config)
+        self.construct_gateway.assert_not_called()
+        self.construct_outbox.assert_not_called()
+        self.portal.get_werkstatt_smtp_config.assert_not_called()
+        self.assertNotIn('order_review', self.adapters)
 
     def test_missing_or_draft_legal_pack_never_arms_checkout(self):
         bad = [None, {}, {**pack(), 'approved': False}, {**pack(), 'scope': 'tyres_only'},
