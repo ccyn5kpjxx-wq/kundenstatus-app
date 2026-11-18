@@ -191,7 +191,7 @@ def main():
     dellen_html = dellen.get_data(as_text=True)
 
     checks += [
-        check("Homepage verlinkt neue Auswahl", "/anfrage?anliegen=auswahl" in homepage_html and "Anfrage mit Foto" in homepage_html),
+        check("Homepage verlinkt neue Auswahl", "/anfrage?anliegen=auswahl" in homepage_html and "Reparatur mit Foto anfragen" in homepage_html),
         check("Alle Anfragewege sind auswählbar", auswahl.status_code == 200 and all(
             text in auswahl_html for text in (
                 "Lackanfrage", "Glasschaden", "Reparaturanfrage", "Mechanik &amp; Wartung",

@@ -100,7 +100,7 @@ class HomepageShopNavigationChecks(unittest.TestCase):
         response = self.client.get('/homepage')
         self.assertEqual(response.status_code, 200)
         links = {item['data-shop-click']: item for item in Links(response.text).links if 'data-shop-click' in item}
-        for key in ('home-nav-shop', 'home-card-shop'):
+        for key in ('home-nav-shop', 'home-hero-shop', 'home-card-shop'):
             self.assertEqual(links[key]['href'], '/shop/')
         self.assertEqual(links['home-felgen']['href'], '/shop/felgen/')
         self.assertEqual(links['home-card-reifen']['href'], '/shop/reifen/')
@@ -141,6 +141,7 @@ class HomepageShopNavigationChecks(unittest.TestCase):
         self.app.config['SHOP_FRONTEND_ENABLED'] = False
         links = {item.get('data-shop-click'): item['href'] for item in Links(self.client.get('/homepage').text).links}
         self.assertEqual(links['home-card-shop'], '/shop')
+        self.assertEqual(links['home-hero-shop'], '/shop')
         service = Links(self.client.get('/leistungen/reifenservice').text).links
         self.assertEqual(next(item['href'] for item in service if 'Neue Reifen im Shop auswählen' in item['text']), '/shop/reifen')
 

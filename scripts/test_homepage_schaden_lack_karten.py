@@ -67,7 +67,8 @@ def main():
     with patch.object(portal, 'PORTAL_BASE_URL', ''):
         home = client.get('/homepage')
     cards = Cards(home.text).cards
-    check('Existing five cards and exactly two additions are present', len(cards) == 7)
+    check('Insurance and paint actions are present in the seasonal cards',
+          {'Versicherungsschaden', 'Lackierarbeiten'} <= cards.keys())
     damage = cards['Versicherungsschaden']
     paint = cards['Lackierarbeiten']
     check('Insurance card keeps its heading and has one short description', damage['heading'] == 'Versicherungsschaden? Wir kümmern uns.' and damage['paragraphs'] == 1)

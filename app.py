@@ -31142,6 +31142,7 @@ SHOP_NAV_KLICKS = {
 SHOP_KLICK_ELEMENTE = {
     "/": {
         "home-nav-shop": "Hauptmenü · Reifen & Felgen Shop",
+        "home-hero-shop": "Startseite · Reifen & Felgen",
         "home-felgen": "Startseite · Felgen ansehen",
         "home-card-shop": "Shopkarte · Zum Shop",
         "home-show-shop": "Themenwahl · Shopkarte anzeigen",

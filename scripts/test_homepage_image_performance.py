@@ -56,28 +56,31 @@ class HomepageImagePerformanceTest(unittest.TestCase):
             self.assertLess((ROOT / "static" / data["src"]).stat().st_size, data["original_bytes"] * .2)
 
     def test_homepage_first_images_have_a_mobile_payload_budget(self):
-        # Representative 390px phone at DPR2; include all five visible stack edges.
-        files = ["homepage/hero-herbst-20261021.webp", "logo-transparent.png"] + [
-            "homepage/" + name for name in ("karte-reifen-v2-20261021.webp", "karte-bremsen-v2-20261021.webp",
-            "karte-oelservice-20261021.webp", "karte-pflege-v2-20261021.webp", "karte-leasing-v2-20261021.webp")]
-        before = sum(self.data[name]["original_bytes"] for name in files)
-        after = 0
-        for name in files:
-            wanted = 460 if name == "logo-transparent.png" else (780 if "hero-" in name else 600)
-            variant = next(v for v in self.data[name]["variants"] if v["width"] >= wanted)
-            after += variant["bytes"]
-        self.assertLess(after, 450_000)
-        self.assertLess(after, before * .3)
-        print(f"First images, representative mobile: {before:,} -> {after:,} bytes")
+        html = self.client.get("/homepage").get_data(as_text=True)
+        eager = [img for img in Markup(html).images if img.get("loading") != "lazy"]
+        self.assertEqual(len(eager), 2, "Only the logo and cover photo load eagerly")
+        logo, cover = eager
+        self.assertIn("logo-transparent", logo["src"])
+        logo_mobile = next(v for v in self.data["logo-transparent.png"]["variants"] if v["width"] >= 460)
+        self.assertLess(logo_mobile["bytes"] + static_path(cover["src"]).stat().st_size, 150_000)
+        deck_html = html.split("data-current-deck", 1)[1].split("</section>", 1)[0]
+        cards = Markup(deck_html).images
+        self.assertEqual(len(cards), 8)
+        self.assertTrue(all(image.get("loading") == "lazy" for image in cards))
 
     def test_hero_preload_selects_the_same_resource_as_the_image(self):
         markup = Markup(self.client.get("/homepage").get_data(as_text=True))
-        hero = next(image for image in markup.images if image.get("fetchpriority") == "high")
+        priority_images = [image for image in markup.images if image.get("fetchpriority") == "high"]
+        self.assertEqual(len(priority_images), 1)
+        hero = priority_images[0]
+        self.assertEqual(hero["src"], "/static/homepage/fahrzeuglackierung.webp")
+        with Image.open(static_path(hero["src"])) as photo:
+            self.assertEqual(photo.size, (int(hero["width"]), int(hero["height"])))
         self.assertEqual(len(markup.preloads), 1)
         preload = markup.preloads[0]
         self.assertEqual(preload["href"], hero["src"])
-        self.assertEqual(preload["imagesrcset"], hero["srcset"])
-        self.assertEqual(preload["imagesizes"], hero["sizes"])
+        self.assertEqual(preload.get("imagesrcset"), hero.get("srcset"))
+        self.assertEqual(preload.get("imagesizes"), hero.get("sizes"))
 
     def test_public_pages_render_responsive_reachable_images(self):
         paths = ["/homepage", "/team", "/leistungen", "/geschaeftspartner", "/portale", "/karriere", "/anfrage?anliegen=reifenservice"]
