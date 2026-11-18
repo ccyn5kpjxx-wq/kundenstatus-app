@@ -247,11 +247,14 @@ class CartQuoteService:
                  service_quote=None, freight_quote=None, assembly_fitment=None,
                  *, mode='test', clock=None, manual_mixed_orders=None, require_tyre_documents=None,
                  require_delivery_salutation=None, allow_standalone_rims=False,
-                 complete_wheel_review=False, assembly_proposal=None):
+                 complete_wheel_review=False, assembly_proposal=None, fitment_lookup=None):
         if not isinstance(mode, str) or mode not in {'test', 'live'}:
             raise ValueError('invalid_quote_mode')
         self.catalogue_lookup, self.retail_quote, self.rsu_mapping = catalogue_lookup, retail_quote, rsu_mapping
         self.service_quote, self.freight_quote, self.assembly_fitment = service_quote, freight_quote, assembly_fitment
+        if fitment_lookup is not None and not callable(fitment_lookup):
+            raise ValueError('invalid_fitment_lookup')
+        self.fitment_lookup = fitment_lookup
         self.mode, self.clock = mode, clock or (lambda: datetime.now(timezone.utc))
         if manual_mixed_orders is not None and type(manual_mixed_orders) is not bool:
             raise ValueError('invalid_mixed_order_policy')
@@ -377,6 +380,13 @@ class CartQuoteService:
             p = {key: p.get(key) for key in ('id', 'name', 'category', 'identity_hash', 'fitment_required',
                  'fitment', 'new_part', 'painting_eligible', 'required_fees_confirmed', 'required_fees', 'diameter', 'tyre_size',
                  'required_documents_confirmed', 'standalone_rim_geometry')}
+            # Optional server-owned parts evidence is authoritative when enabled.
+            # It never relaxes a rim/tyre policy or turns a source association
+            # into an approval. None/errors still fail the existing typed gate.
+            if (self.fitment_lookup is not None and identifier.startswith('parts:')
+                    and p['category'] in {'body_part', 'oil', 'care', 'accessory'}
+                    and p['fitment_required'] is True):
+                p['fitment'] = call(self.fitment_lookup, p, vehicle_ref)
             products[identifier] = p
             if self.require_tyre_documents and p['category'] == 'tyre' and p['required_documents_confirmed'] is not True:
                 block('product_documents_unconfirmed', product_id=identifier)
