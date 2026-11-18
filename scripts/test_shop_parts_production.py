@@ -251,6 +251,30 @@ class PartsProductionChecks(unittest.TestCase):
         self.install(); self.install_vehicle(mutate_review=lambda review: review.update(conditions_hash='d' * 64))
         self.prepare(success=False); self.no_early_db()
 
+    def test_identity_bound_manufacturer_notice_is_public_without_private_review_sources(self):
+        self.part.update(category='body_part', department='parts')
+        self.install(); self.install_vehicle()
+        path=self.f.root/'parts-conditions.json'
+        profile=json.loads(path.read_bytes())
+        profile['public_notices']={self.pid:{'identity_hash':variant_fingerprint(self.part),
+            'notes':['Nur zur Reparatur des ursprünglichen Erscheinungsbilds.']}}
+        self.f.descriptor['parts_vehicle_fitments']['approvals']=production_fixture.write_json(path,profile)
+        production_fixture.write_json(self.f.root/'current.json',self.f.descriptor)
+        dependencies=self.prepare()
+        product=dependencies['catalogue'].get(self.pid)
+        self.assertEqual(product['application_notes'],profile['public_notices'][self.pid]['notes'])
+        self.assertNotIn('approved_conditions',json.dumps(product))
+        self.assertEqual(self.inquiry.calls,[])
+
+    def test_wrong_identity_notice_closes_before_any_provider_or_database(self):
+        self.part.update(category='body_part', department='parts')
+        self.install(); self.install_vehicle()
+        path=self.f.root/'parts-conditions.json';profile=json.loads(path.read_bytes())
+        profile['public_notices']={self.pid:{'identity_hash':'f'*64,'notes':['Unrelated article notice']}}
+        self.f.descriptor['parts_vehicle_fitments']['approvals']=production_fixture.write_json(path,profile)
+        production_fixture.write_json(self.f.root/'current.json',self.f.descriptor)
+        self.prepare(success=False);self.no_early_db()
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

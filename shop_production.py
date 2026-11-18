@@ -118,6 +118,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
     app = portal.app
     app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = False
     app.config['SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'] = False
+    app.config['SHOP_PARTS_DIRECT_ENABLED'] = False
+    app.config['SHOP_PARTS_VEHICLE_OPTIONS'] = []
     if env.get('SHOP_RELEASE_ENABLED') != '1':
         return {}
     # A failure cannot retain a previously requested purchasing flag.
@@ -144,6 +146,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         document_resources = local_product_document_resources(root, descriptor.get('local_product_documents'), bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'],
             overlay_sha256=(descriptor.get('nominal_tyre_overlay') or {}).get('sha256'))
+        from shop_parts_release import load_parts_release
+        parts_record = descriptor.get('parts_direct_sales')
+        if parts_record is not None and descriptor.get('parts_direct_sales_approved') is not True:
+            raise ProductionError('parts_release_not_approved')
+        bundle, parts_release = load_parts_release(root, parts_record, bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'])
         blocked_document_ids = unavailable_document_product_ids(bundle, descriptor.get('unavailable_product_documents'))
         rows, publication = bundle['products'], bundle['publication']
         if not isinstance(rows, list) or not 1 <= len(rows) <= 100000 or not isinstance(publication, dict):
@@ -151,6 +159,27 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         identities = {r.get('selection_id', r.get('id')): {'id': r.get('selection_id', r.get('id')),
                         'identity_hash': variant_fingerprint(r), 'category': r.get('category')}
                       for r in rows if isinstance(r, dict)}
+        parts_fitments, parts_notices = None, {}
+        fitment_record = descriptor.get('parts_vehicle_fitments')
+        if fitment_record is not None:
+            if (not parts_release or not isinstance(fitment_record, Mapping)
+                    or set(fitment_record) != {'source', 'approvals'}):
+                raise ProductionError('parts_vehicle_release_invalid')
+            from shop_parts_fitment import PartsVehicleFitments
+            vehicle_source = _private_file(root, fitment_record['source'])
+            reviews = _json(_private_file(root, fitment_record['approvals']), 1024 * 1024)
+            if (not isinstance(reviews, dict) or set(reviews) not in (
+                    {'approved_conditions', 'approved_certificate_hashes'},
+                    {'approved_conditions', 'approved_certificate_hashes', 'public_notices'})):
+                raise ProductionError('parts_vehicle_release_invalid')
+            from shop_catalog_enriched import validated_parts_notices
+            parts_notices = validated_parts_notices(rows, publication['released_ids'], reviews.get('public_notices', {}))
+            if not set(parts_notices) <= parts_release['ids']:
+                raise ProductionError('parts_vehicle_release_invalid')
+            parts_fitments = PartsVehicleFitments(vehicle_source.read_bytes(),
+                artifact_sha256=fitment_record['source']['sha256'], base_bundle_sha256=descriptor['bundle']['sha256'],
+                products=identities, approved_conditions=reviews['approved_conditions'],
+                approved_certificate_hashes=reviews['approved_certificate_hashes'])
         released_ids = set(publication['released_ids'])
         bindings = bundle.get('rsu_bindings', {})
         if not isinstance(bindings, Mapping) or not set(bindings) <= released_ids:
@@ -212,6 +241,27 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         freight = RSURetailFreight(bundle.get('shipping_classes', {}), mode='live', basis='net',
             evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
             destination_eligibility=delivery_eligibility)
+        shipping_ready = set(freight.classes) & procurement_ids
+        if parts_release:
+            if supplier is None:
+                raise ProductionError('parts_supplier_unavailable')
+            observed_freight = {pid: p for pid,p in parts_release['freight'].items()
+                                if p['rule'] == 'rsu_ui_unique_q1_freight_v1'}
+            fixed_freight = {pid: p for pid,p in parts_release['freight'].items()
+                            if p['rule'] == 'merchant_fixed_parts_freight_v1'}
+            from shop_parts_freight import PartsRetailFreight
+            freight = PartsRetailFreight(observed_freight, bindings=parts_release['bindings'], mode='live',
+                destination_eligibility=delivery_eligibility, fresh_inquiry=supplier.retained_inquiry,
+                source_refs=parts_release['source_refs'], fallback=freight, allow_retained_inquiry=True)
+            if fixed_freight:
+                from shop_parts_fixed_freight import FixedPartsRetailFreight
+                freight = FixedPartsRetailFreight(fixed_freight, bindings=parts_release['bindings'], mode='live',
+                    destination_eligibility=delivery_eligibility, retained_inquiry=supplier.retained_inquiry,
+                    source_refs=parts_release['source_refs'], fallback=freight)
+            shipping_ready.update(parts_release['freight'])
+            app.config['SHOP_PARTS_DIRECT_ENABLED'] = True
+            if parts_fitments is not None:
+                app.config['SHOP_PARTS_VEHICLE_OPTIONS'] = parts_fitments.vehicles()
         app.config['SHOP_MAINLAND_DELIVERY_ENABLED'] = mainland_approved
         catalogue = EnrichedPublicCatalog(display_rows, released_ids=publication['released_ids'],
             image_urls=publication.get('image_urls'), document_urls=publication.get('document_urls'),
@@ -222,7 +272,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
             preferred_ids=set(seeds['records']) if fixed_prices else None,
-            shipping_ready_ids=set(freight.classes) & procurement_ids)
+            shipping_ready_ids=shipping_ready, parts_notices=parts_notices)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -268,8 +318,10 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                     suffix = (f" · {g['width']}×{g['diameter']} Zoll · ET {g['offset']} · "
                               f"{g['bolt_count']}×{g['pcd']} · ML {g['centre_bore']} mm")
                     name = name + suffix if len(name + suffix) <= 180 else name[:178-len(suffix)].rstrip() + '…' + suffix
+                requires_vehicle = (product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'}
+                    or identifier in parts_release.get('ids', ()) and product.get('department') == 'parts')
                 return {**identities[identifier], 'name': name, '_mode': 'live',
-                        'fitment_required': product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'},
+                        'fitment_required': requires_vehicle,
                         'fitment': None, 'required_fees_confirmed': identifier in bindings,
                         'standalone_rim_geometry': rim_sales.get(identifier),
                         'required_documents_confirmed': (identifier not in blocked_document_ids and (product['category'] != 'tyre' or
@@ -283,7 +335,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
                 assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims,
-                assembly_proposal=catalogue.assembly_proposal)
+                assembly_proposal=catalogue.assembly_proposal,
+                fitment_lookup=parts_fitments.lookup if parts_fitments is not None else None)
             def sink(quote, *, customer_id, delivery_context):
                 return store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
                     customer_id=customer_id, mode='live', delivery_context=delivery_context)
@@ -325,6 +378,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                      'SHOP_BUYER_ENABLED', 'SHOP_CART_QUOTE_ENABLED', 'SHOP_ORDER_DRAFT_ENABLED', 'SHOP_CHECKOUT_ENABLED', 'SHOP_CONSUMER_ENABLED',
                      'SHOP_MAINLAND_DELIVERY_ENABLED', 'SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED'):
             app.config[flag] = False
+        app.config['SHOP_PARTS_DIRECT_ENABLED'] = False
+        app.config['SHOP_PARTS_VEHICLE_OPTIONS'] = []
         app.extensions['shop_production'] = {'ready': False, 'reason': 'release_configuration_incomplete'}
         app.logger.error('Shop release not activated: private release configuration incomplete')
         return {}

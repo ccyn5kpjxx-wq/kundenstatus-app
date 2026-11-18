@@ -10,50 +10,23 @@ from reconcile_rsu_parts import (catalogue_records,decode,read_pinned,require,st
     write_new,parts_source_record)
 
 
+from shop_rsu_parts_source import dom_product as _dom_product, retained_inquiries, PartsSourceError
+from reconcile_rsu_parts import ReconciliationError
+
+
 def dom_product(raw):
-    text=raw.decode('utf-8')
-    def field(label):
-        values=re.findall(r'^\s*- row "'+re.escape(label)+r' ([^"\r\n]+)":\s*$',text,re.M)
-        require(len(values)==1,'ui_identity_field_not_unique');return values[0]
-    headings=re.findall(r'^- heading "[^"\r\n]+" \[level=1\]:',text,re.M)
-    require(len(headings)==1,'ui_product_heading_not_unique')
-    header='row "Lieferoptionen Bestand EK Stück Versand EK Gesamt VK1":'
-    require(text.count(header)==1,'ui_offer_table_not_unique')
-    before,table=text.split(header)
-    product=before.split(headings[0],1)[1]
-    quantities=re.findall(r'^- generic: "([1-9][0-9]*)"\s*$',product,re.M)
-    require(len(quantities)==1,'ui_selected_quantity_not_unique');quantity=int(quantities[0])
-    table=table.split('- button ',1)[0]
-    rows=re.findall(r'^\s*- row "([^"\r\n]+)":\s*$',table,re.M)
-    require(1<=len(rows)<=50,'ui_offer_rows_missing')
-    offers=[]
-    for row in rows:
-        prices=list(re.finditer(r'(?<![0-9.,])([0-9]+(?:\.[0-9]{3})*,[0-9]{2})\s*€',row))
-        require(len(prices)==4,'ui_offer_price_fields_invalid')
-        prefix=row[:prices[0].start()];stock=re.search(r'\s([0-9]+)\s+$',prefix)
-        require(stock is not None,'ui_offer_stock_not_explicit')
-        values=[Decimal(match[1].replace('.','').replace(',','.')) for match in prices]
-        net,freight,total,retail=values
-        require(net>0 and freight>=0 and net*quantity+freight==total,'ui_offer_total_mismatch')
-        offers.append({'stock':int(stock[1]),'unit_net':format(net,'f'),'freight_net':format(freight,'f')})
-    return {'article_id':field('RSU Artikelnummer'),'manufacturer':field('Marke'),
-        'mpn':field('Hersteller Artikelnummer'),'ean':field('EAN'),'quantity':quantity,'offers':offers}
+    try:
+        return _dom_product(raw)
+    except PartsSourceError as error:
+        raise ReconciliationError(str(error)) from None
 
 
 def normalize(bundle,bundle_sha,known,rest,rest_ref,captures,*,capture_root):
-    require(isinstance(rest,dict) and type(rest.get('schema_version')) is int and rest['schema_version']==1
-            and rest.get('supplier')=='RSU' and rest.get('mode')=='live'
-            and type(rest.get('orders')) is int and rest['orders']==0
-            and type(rest.get('payments')) is int and rest['payments']==0
-            and isinstance(rest.get('records'),list) and type(rest.get('requests')) is int
-            and rest['requests']==len(rest['records'])<=20,'invalid_retained_rest_envelope')
-    records={};rest_index={}
-    for row in rest['records']:
-        require(row.get('ok') is True and row.get('mode')=='live' and row.get('operation')=='REST_INQUIRY_GET'
-                and type(row.get('quantity')) is int and row['quantity']==1 and row.get('ean')==row.get('expected_ean')
-                and type(row.get('stock')) is int and row['stock']>=0,'retained_rest_identity_or_quantity_invalid')
-        require(row['supplier_article_id'] not in rest_index,'duplicate_retained_rest_id')
-        stamp(row['retrieved_at']);rest_index[row['supplier_article_id']]=row
+    try:
+        rest_index = retained_inquiries(rest)
+    except PartsSourceError as error:
+        raise ReconciliationError(str(error)) from None
+    records = {}
     catalogue=catalogue_records(bundle,bundle_sha)
     receipts=list(known.get('source_receipts',[])) if known else []
     def live_row(identity,observed,unit_label):
@@ -84,7 +57,7 @@ def normalize(bundle,bundle_sha,known,rest,rest_ref,captures,*,capture_root):
         record=live_row(ui,observed,matches[0]['row'].get('unit_label'))
         ui_ref={'file':path.name,'sha256':capture['sha256']}
         unique=ui['quantity']==1 and len(ui['offers'])==1
-        correlated=unique and ui['offers'][0]['stock']==observed['stock'] and Decimal(ui['offers'][0]['unit_net'])==Decimal(observed['unit_net'])
+        correlated=unique and ui['offers'][0]['freight_net'] is not None and ui['offers'][0]['stock']==observed['stock'] and Decimal(ui['offers'][0]['unit_net'])==Decimal(observed['unit_net'])
         if correlated:
             offer=ui['offers'][0]
             record['freight']={'rule':'rsu_ui_unique_q1_freight_v1','source_ref':ui_ref,'inquiry_ref':rest_ref,
