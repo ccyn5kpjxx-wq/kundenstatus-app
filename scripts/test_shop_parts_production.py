@@ -1,6 +1,6 @@
 """Real temporary production bootstrap and quote pipeline; synthetic supplier IO."""
 from copy import deepcopy
-from contextlib import closing
+from contextlib import ExitStack, closing
 from datetime import datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
@@ -18,6 +18,7 @@ import test_shop_parts_release as release_fixture
 import test_reconcile_rsu_parts as product_fixture
 import test_shop_parts_fitment as vehicle_fixture
 from shop_catalog_public import variant_fingerprint
+from shop_production import _parts_api_channel_supported
 from shop_parts_fitment import PartsVehicleFitments
 from shop_parts_freight import _hash
 from shop_rsu_quotes import RSUQuoteProvider
@@ -71,8 +72,14 @@ class PartsProductionChecks(unittest.TestCase):
         production_fixture.write_json(self.f.root / 'current.json', self.f.descriptor)
         return record
 
-    def prepare(self, *, success=True):
-        with patch('shop_production.RSUQuoteProvider.from_config', side_effect=self.factory):
+    def prepare(self, *, success=True, prototype_channel=True):
+        with ExitStack() as isolated:
+            isolated.enter_context(patch('shop_production.RSUQuoteProvider.from_config', side_effect=self.factory))
+            if prototype_channel:
+                # An explicit TEST-ONLY override exercises the local prototype.
+                # Actual production configuration cannot override this gate.
+                self.assertIsInstance(self.inquiry, SyntheticInquiry)
+                isolated.enter_context(patch('shop_production._parts_api_channel_supported', return_value=True))
             if success:
                 dependencies = self.f.prepare()
             else:
@@ -148,13 +155,39 @@ class PartsProductionChecks(unittest.TestCase):
         for key in ('fixed_pricebook_enabled', 'buyer_and_quotes_enabled', 'rsu_reads_approved'):
             self.f.descriptor.pop(key, None)
         self.f.install()
-        dependencies = self.prepare()
+        dependencies = self.prepare(prototype_channel=False)
         self.factory.assert_not_called()
         self.assertFalse(self.f.portal.app.config['SHOP_PARTS_DIRECT_ENABLED'])
         self.assertEqual(self.f.portal.app.config['SHOP_PARTS_VEHICLE_OPTIONS'], [])
         self.assertEqual(dependencies['catalogue'].get(self.pid)['purchase_status'], 'inquiry_only')
         self.assertFalse((self.f.data / 'shop-pricebook').exists())
         self.assertFalse((self.f.data / 'shop-v2').exists())
+
+    def test_actual_supplier_capability_gate_rejects_all_parts_approvals_before_load_provider_db(self):
+        self.install()
+        # These authorizations and fictitious config switches still cannot
+        # turn an unsupported supplier ordering channel into a supported one.
+        self.f.descriptor.update(parts_direct_sales_approved=True, parts_api_channel_supported=True,
+                                 rsu_parts_api_supported=True)
+        self.f.env.update(SHOP_PARTS_API_SUPPORTED='1', RSU_PARTS_API_SUPPORTED='true')
+        production_fixture.write_json(self.f.root / 'current.json', self.f.descriptor)
+        with patch('shop_production._json', side_effect=AssertionError('Pure capability check has no IO')):
+            self.assertIs(_parts_api_channel_supported(), False)
+        with patch('shop_parts_release.load_parts_release', side_effect=AssertionError('No parts source load')) as loader:
+            self.prepare(success=False, prototype_channel=False)
+        loader.assert_not_called()
+        self.no_early_db()
+
+    def test_repacking_parts_bindings_into_base_bundle_cannot_bypass_supplier_gate(self):
+        self.install()
+        self.f.bundle['rsu_bindings'].update(deepcopy(self.release['rsu_bindings']))
+        self.f.bundle['rsu_price_seeds']['records'].update(deepcopy(self.release['rsu_price_seeds']['records']))
+        self.f.bundle['shipping_classes'][self.pid] = 'parts_standard'
+        self.f.descriptor.pop('parts_direct_sales')
+        self.f.descriptor['parts_direct_sales_approved'] = True
+        self.f.install()
+        self.prepare(success=False, prototype_channel=False)
+        self.no_early_db()
 
     def test_explicit_literal_approval_is_required_before_provider_and_databases(self):
         self.install()

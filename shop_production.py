@@ -38,6 +38,16 @@ class ProductionError(ValueError):
     pass
 
 
+def _parts_api_channel_supported():
+    """RSU-written-20261118-KFZ-not-offered: no automatic parts orders.
+
+    Successful Inquiry reads do not establish ordering support. This supplier
+    boundary is deliberately independent of environment, profiles, catalogue
+    approvals or cached observations. Private correspondence is not embedded.
+    """
+    return False
+
+
 def _json(path, maximum=MAX_RELEASE_BYTES):
     if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= maximum:
         raise ProductionError('release_file_unavailable')
@@ -148,6 +158,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             overlay_sha256=(descriptor.get('nominal_tyre_overlay') or {}).get('sha256'))
         from shop_parts_release import load_parts_release
         parts_record = descriptor.get('parts_direct_sales')
+        if parts_record is not None and not _parts_api_channel_supported():
+            raise ProductionError('rsu_parts_api_not_supported')
         if parts_record is not None and descriptor.get('parts_direct_sales_approved') is not True:
             raise ProductionError('parts_release_not_approved')
         bundle, parts_release = load_parts_release(root, parts_record, bundle,
@@ -184,6 +196,11 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         bindings = bundle.get('rsu_bindings', {})
         if not isinstance(bindings, Mapping) or not set(bindings) <= released_ids:
             raise ProductionError('procurement_bindings_invalid')
+        if (any(isinstance(identifier, str) and identifier.startswith('parts:') for identifier in bindings)
+                and not _parts_api_channel_supported()):
+            # Moving an overlay into a newly pinned base bundle must not bypass
+            # the supplier's unsupported ordering-channel boundary either.
+            raise ProductionError('rsu_parts_api_not_supported')
         procurement_ids = set(bindings)
         supplier_config, supplier, rsu_cache = None, None, None
         rsu_reads_approved = descriptor.get('rsu_reads_approved') is True

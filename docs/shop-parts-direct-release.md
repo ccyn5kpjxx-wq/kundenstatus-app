@@ -1,7 +1,27 @@
-# RSU parts direct sales
+# RSU parts: automatic API ordering unavailable
 
-The existing release is unchanged unless `current.json` explicitly contains
-`parts_direct_sales_approved: true` and a pinned `parts_direct_sales` record:
+**18 November 2026: RSU has confirmed that KFZ parts are not offered through
+its API.** Successful read-only price or stock queries do not establish a
+supported ordering channel. `shop_production._parts_api_channel_supported()`
+therefore returns `False` unconditionally. A production descriptor containing
+`parts_direct_sales` is rejected before parts loading, provider construction or
+database seeding. No environment variable, profile or previous approval can
+override this boundary. Parts bindings inserted directly into a newly pinned
+base bundle are rejected as well. The existing live release has neither such
+a parts record nor active parts bindings.
+
+The pipeline below is an **isolated local prototype**, retained for synthetic
+engine tests. It is not a production activation procedure. Those tests may
+explicitly replace the capability function only inside their fake-Inquiry
+fixture. RSU remains the requested supplier; a future manually fulfilled RSU
+channel would need its own truthful procurement and payment-confirmation
+workflow, rather than treating an Inquiry result as an API order confirmation.
+
+## Isolated local prototype contract
+
+The prototype fixture schema uses `parts_direct_sales_approved: true` and a
+pinned `parts_direct_sales` record. **The following record cannot activate
+automatic parts purchasing in production:**
 
 ```json
 {
