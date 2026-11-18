@@ -137,6 +137,10 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 or descriptor.get('publication_approved') is not True or descriptor.get('mode') != 'live'):
             raise ProductionError('release_not_approved')
         bundle = _json(_private_file(root, descriptor.get('bundle')))
+        from shop_nominal_overlay import load_nominal_tyre_overlay, unavailable_document_product_ids
+        bundle = load_nominal_tyre_overlay(root, descriptor.get('nominal_tyre_overlay'), bundle,
+            base_bundle_sha256=descriptor['bundle']['sha256'])
+        blocked_document_ids = unavailable_document_product_ids(bundle, descriptor.get('unavailable_product_documents'))
         rows, publication = bundle['products'], bundle['publication']
         if not isinstance(rows, list) or not 1 <= len(rows) <= 100000 or not isinstance(publication, dict):
             raise ProductionError('release_catalogue_invalid')
@@ -211,6 +215,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             compatible_pairs=compatible_pairs, quote_lookup=cache.get,
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
             product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
+            checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices,
             preferred_ids=set(seeds['records']) if fixed_prices else None,
             shipping_ready_ids=set(freight.classes) & procurement_ids)
@@ -263,9 +268,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                         'fitment_required': product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'},
                         'fitment': None, 'required_fees_confirmed': identifier in bindings,
                         'standalone_rim_geometry': rim_sales.get(identifier),
-                        'required_documents_confirmed': (product['category'] != 'tyre' or
+                        'required_documents_confirmed': (identifier not in blocked_document_ids and (product['category'] != 'tyre' or
                             documents is not None and all(product.get('product_documents', {}).get(k)
-                                for k in ('tyre_label_url', 'tyre_sheet_url'))),
+                                for k in ('tyre_label_url', 'tyre_sheet_url')))),
                         'required_fees': [], 'new_part': False, 'painting_eligible': False,
                         'diameter': int(diameter) if re.fullmatch(r'[0-9]{2}', diameter) else None,
                         'tyre_size': product['size']}
