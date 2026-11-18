@@ -24,6 +24,9 @@ def tyre(number=1, unit=1000, *, brand='Synthetic Brand', model=None, size=('225
             'price': {'kind': 'merchant_pricebook', 'source': 'RSU', 'currency': 'EUR', 'vat_percent': '19.00',
                       'observed_at': (NOW - timedelta(days=1)).isoformat(),
                       'expires_at': (NOW + timedelta(days=6)).isoformat(),
+                      'review_at': (NOW + timedelta(days=4)).isoformat(),
+                      'stock_observed_at': (NOW - timedelta(days=1)).isoformat(),
+                      'stock_expires_at': (NOW - timedelta(days=1) + timedelta(minutes=15)).isoformat(),
                       'stock_reported': stock, 'stock_current': False,
                       'prices_by_quantity': {str(q): {'quantity': q, 'unit_gross_cent': unit,
                           'items_gross_cent': unit * q} for q in range(1, 5)}}}
@@ -117,6 +120,13 @@ class RecommendationChecks(unittest.TestCase):
                      {'quantity': 4, 'unit_gross_cent': '1000', 'items_gross_cent': 4000}):
             row = tyre(); row['price']['prices_by_quantity']['4'] = line
             self.assertEqual(self.choose([row])['items'], [])
+
+    def test_review_and_stock_observations_are_original_bounded_not_rebased(self):
+        for change in ({'review_at': None}, {'review_at': NOW.isoformat()},
+                       {'stock_observed_at': (NOW+timedelta(seconds=1)).isoformat()},
+                       {'stock_expires_at': NOW.isoformat()}, {'stock_observed_at': 'not a date'}):
+            row = tyre(); row['price'].update(change)
+            with self.subTest(change=change): self.assertEqual(self.choose([row])['items'], [])
 
     def test_inputs_outputs_and_authority_flags_are_independent(self):
         rows = [tyre(1, 1000), tyre(2, 2000)]; before = deepcopy(rows)

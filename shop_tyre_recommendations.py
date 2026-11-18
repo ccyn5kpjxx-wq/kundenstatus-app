@@ -71,6 +71,11 @@ def _offer(product, quantity, now):
         observed, expires = _stamp(price.get('observed_at')), _stamp(price.get('expires_at'))
         if not observed <= now < expires or not timedelta(0) < expires - observed <= timedelta(days=7):
             return None
+        review = _stamp(price.get('review_at'))
+        stock_observed, stock_expires = _stamp(price.get('stock_observed_at')), _stamp(price.get('stock_expires_at'))
+        if (review != observed + timedelta(days=5) or not observed <= stock_observed <= now
+                or not stock_observed < stock_expires <= stock_observed + timedelta(minutes=15)):
+            return None
     except ValueError:
         return None
     amounts = price.get('prices_by_quantity')
