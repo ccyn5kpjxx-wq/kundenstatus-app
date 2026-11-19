@@ -39,7 +39,7 @@ class ChefLoginTests(unittest.TestCase):
         self.ns = dict(__name__=__name__, app=self.app, request=request, session=session,
                        redirect=redirect, url_for=url_for, flash=flash, render_template=render_template,
                        wraps=wraps, abort=abort, hmac=hmac, re=re, secrets=secrets, sys=sys,
-                       CSRF_FIELD_NAME='csrf_token', progress_csrf_exempt=lambda _: False,
+                       CSRF_FIELD_NAME='csrf_token', WORKSHOP_PHONE='0000', progress_csrf_exempt=lambda _: False,
                        csrf_recovery_response=lambda: None,
                        login_rate_limit_status=Mock(return_value=(False, 0)),
                        login_wait_label=lambda _: 'one minute',
