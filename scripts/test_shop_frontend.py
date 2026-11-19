@@ -45,6 +45,26 @@ class FrontendChecks(unittest.TestCase):
         self.app.config['SHOP_FRONTEND_ENABLED'] = True
         self.assertEqual(self.client.get('/shop/').status_code, 200)
 
+    def test_shop_aliases_lead_to_the_checkout_origin_and_offer_existing_cart_transfer(self):
+        origin = 'https://auto-lackierzentrum.de'
+        self.app.config.update(SHOP_FRONTEND_ENABLED=True, SHOP_BUYER_ENABLED=True, SHOP_PUBLIC_ORIGIN=origin)
+        for alias, key in (('https://kundenstatus-app.onrender.com', 'portal'), ('https://www.auto-lackierzentrum.de', 'www')):
+            with self.subTest(alias=alias):
+                for path in ('/shop/', '/shop/komplettraeder/', '/shop/felgenstudio/'):
+                    page = self.client.get(path + '?artikel=test&utm_source=ads&email=PRIVATE', base_url=alias)
+                    self.assertEqual(page.status_code, 302)
+                    self.assertEqual(page.location, origin + path + '?artikel=test&utm_source=ads')
+                previous = self.client.get('/shop/warenkorb/?auswahl=old', base_url=alias)
+                self.assertIn('data-transfer="send"', previous.text)
+                self.assertIn('href="' + origin + '/shop/warenkorb/"', previous.text)
+                self.assertNotIn('id="buyer-address"', previous.text)
+                incoming = self.client.get('/shop/warenkorb/?uebernahme=' + key, base_url=origin)
+                self.assertIn('data-transfer="receive"', incoming.text)
+                self.assertIn('data-peer-origin="' + alias + '"', incoming.text)
+        for path in ('/shop/warenkorb/', '/shop/warenkorb/?uebernahme=https://untrusted.test'):
+            self.assertIn('id="buyer-address"', self.client.get(path, base_url=origin).text)
+        self.assertNotIn('data-transfer=', self.client.get('/shop/warenkorb/', base_url='http://localhost').text)
+
     def test_all_pages_render_without_catalogue_or_inline_private_feed(self):
         self.app.config['SHOP_FRONTEND_ENABLED'] = True
         for name in ('', 'felgen', 'reifen', 'komplettraeder', 'ersatzteile', 'zubehoer', 'service', 'warenkorb', 'felgenstudio'):

@@ -353,6 +353,96 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
+  if (body.dataset.transfer) {
+    transferCart();
+    return;
+  }
+  function transferCart() {
+    const peer = body.dataset.peerOrigin, source = body.dataset.transfer === 'send';
+    const status = document.getElementById('transfer-status'), cartUrl = document.getElementById('official-cart').href;
+    function checkedRows(raw) {
+      const rows = normaliseCart(raw);
+      if (!Array.isArray(raw) || raw.length !== rows.length) throw new Error('invalid_cart');
+      return rows;
+    }
+    function storedRows() {
+      return checkedRows(JSON.parse(root.localStorage.getItem(CART_KEY) || '[]'));
+    }
+    if (source) {
+      const start = document.getElementById('transfer-start');
+      const token = new URLSearchParams(root.location.search).get('auswahl');
+      let receiver, snapshot;
+      function selection() {
+        const whole = storedRows();
+        if (token === null) return whole;
+        return TOKEN.test(token) ? selectedCartRows(whole, JSON.parse(root.sessionStorage.getItem(PARTIAL_KEY + token) || 'null')) : [];
+      }
+      try {
+        snapshot = selection();
+        if (!snapshot.length) {
+          if (token === null) root.location.replace(cartUrl);
+          else {
+            status.textContent = 'Diese Teilauswahl ist abgelaufen. Öffnen Sie bitte den vollständigen Warenkorb.';
+            document.getElementById('full-cart').hidden = false;
+          }
+          return;
+        }
+      } catch (_) {
+        status.textContent = 'Die gespeicherte Auswahl lässt sich in diesem Browser nicht lesen. Öffnen Sie den Shop und wählen Sie die Artikel erneut.';
+        return;
+      }
+      start.hidden = false;
+      start.addEventListener('click', () => {
+        try { snapshot = selection(); } catch (_) { snapshot = []; }
+        if (!snapshot.length) { status.textContent = 'Die Auswahl hat sich geändert. Bitte öffnen Sie den Warenkorb erneut.'; return; }
+        receiver = root.open(cartUrl + '?uebernahme=' + body.dataset.alias, '_blank');
+        status.textContent = receiver ? 'Die Auswahl wird im neuen Shopfenster geöffnet.' : 'Bitte erlauben Sie das neue Shopfenster und klicken Sie erneut auf Übernehmen.';
+      });
+      root.addEventListener('message', event => {
+        if (!receiver || event.source !== receiver || event.origin !== peer) return;
+        if (event.data === 'gaertner-shop-cart-ready') receiver.postMessage({type:'gaertner-shop-cart-items', rows:snapshot, partial:token !== null}, peer);
+        if (event.data === 'gaertner-shop-cart-received') {
+          status.textContent = 'Ihre Auswahl ist im neuen Shopfenster. Die Anschrift geben Sie dort ein.';
+          start.hidden = true; receiver = null;
+        }
+      });
+    } else {
+      const sender = root.opener;
+      if (!sender) { status.textContent = 'Für die Übernahme öffnen Sie den Shop aus Ihrem ursprünglichen Warenkorb.'; return; }
+      function receive(event) {
+        if (event.source !== sender || event.origin !== peer || event.data?.type !== 'gaertner-shop-cart-items') return;
+        root.removeEventListener('message', receive);
+        let destination = cartUrl, partialKey = null;
+        try {
+          const incoming = checkedRows(event.data.rows), existing = storedRows();
+          if (!incoming.length || typeof event.data.partial !== 'boolean') throw new Error('invalid_cart');
+          const signatures = new Set(existing.map(row => JSON.stringify(row)));
+          const additions = incoming.filter(row => !signatures.has(JSON.stringify(row)));
+          if (existing.length + additions.length > 40 || additions.some(row => existing.some(item => item.id === row.id))) {
+            status.textContent = 'Im Shop liegt bereits eine andere Auswahl. Bitte prüfen Sie zuerst den Shop-Warenkorb. Ihre ursprüngliche Auswahl bleibt im ersten Fenster erhalten.';
+            return;
+          }
+          if (event.data.partial) {
+            const token = root.crypto.randomUUID();
+            if (!TOKEN.test(token)) throw new Error('invalid_cart');
+            partialKey = PARTIAL_KEY + token;
+            root.sessionStorage.setItem(partialKey, JSON.stringify(incoming));
+            destination += '?auswahl=' + token;
+          }
+          if (additions.length) root.localStorage.setItem(CART_KEY, JSON.stringify([...existing, ...additions]));
+        } catch (_) {
+          if (partialKey) { try { root.sessionStorage.removeItem(partialKey); } catch (_) { /* Storage may be blocked. */ } }
+          status.textContent = 'Die Auswahl konnte nicht übernommen werden. Ihr ursprünglicher Warenkorb bleibt im ersten Fenster erhalten.';
+          return;
+        }
+        sender.postMessage('gaertner-shop-cart-received', peer);
+        root.opener = null;
+        root.location.replace(destination);
+      }
+      root.addEventListener('message', receive);
+      sender.postMessage('gaertner-shop-cart-ready', peer);
+    }
+  }
   if (api !== '/shop/api/v2') return;
   const byId = id => document.getElementById(id);
   const el = (tag, text, cls) => { const node = document.createElement(tag); if (text != null) node.textContent = String(text); if (cls) node.className = cls; return node; };
@@ -392,7 +482,14 @@
   async function requestJSON(path, options = {}) {
     const headers = {...options.headers};
     if (options.body != null) { headers['Content-Type'] = 'application/json'; if (csrf) headers['X-CSRF-Token'] = csrf; }
-    const response = await root.fetch(api + path, {...options, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'error'});
+    let response;
+    try {
+      response = await root.fetch(api + path, {...options, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'error'});
+    } catch (error) {
+      if (path.startsWith('/buyer/') && error?.name === 'TypeError') throw new Error('buyer_unavailable');
+      throw error;
+    }
+    if ([502, 503, 504].includes(response.status) && path.startsWith('/buyer/')) throw new Error('buyer_unavailable');
     const text = await response.text();
     if (text.length > 4 * 1024 * 1024) throw new Error('response_unavailable');
     let result; try { result = JSON.parse(text); } catch (_) { throw new Error('service_unavailable'); }
@@ -401,6 +498,10 @@
   }
   function errorText(error) {
     const code = error && error.message;
+    if (code === 'buyer_unavailable') return 'Der Shop ist gerade nicht erreichbar. Bitte versuchen Sie es in Kürze erneut.';
+    if (code === 'request_not_allowed') return 'Bitte öffnen Sie den Warenkorb erneut auf auto-lackierzentrum.de, um Ihre Anschrift zu bestätigen.';
+    if (code === 'buyer_session_required' || code === 'buyer_session_changed') return 'Bitte laden Sie den Warenkorb neu und bestätigen Sie die Anschrift in Ihrer aktuellen Shopsitzung.';
+    if (code === 'unsupported_delivery_address') return 'Bitte prüfen Sie Straße, Hausnummer und Postleitzahl. Für den Versand benötigen wir eine deutsche Straßenanschrift.';
     if (code === 'combined_quantity_limit') return 'Für denselben Artikel wurde die bestellbare Menge überschritten. Bitte die Menge im Warenkorb anpassen.';
     if (['authorization_required', 'invalid_session', 'session_expired', 'csrf_invalid'].includes(code)) return 'Die Sitzung ist abgelaufen. Bitte diese Seite neu laden und Ihre Anschrift erneut bestätigen.';
     if (code === 'parts_vehicle_required') return 'Bitte das genaue Fahrzeug mit Motorisierung und Bauzeit auswählen und die Anschrift erneut bestätigen.';

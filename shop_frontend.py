@@ -6,11 +6,16 @@ quote and checkout APIs. A return URL is never evidence of payment.
 """
 import re
 import unicodedata
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
-from flask import Blueprint, abort, current_app, render_template
+from flask import Blueprint, abort, current_app, redirect, render_template, request, url_for
 from shop_service_requests import WORKSHOP_SERVICES
 
+SHOP_ORIGIN = 'https://auto-lackierzentrum.de'
+SHOP_ALIASES = {
+    'https://kundenstatus-app.onrender.com': 'portal',
+    'https://www.auto-lackierzentrum.de': 'www',
+}
 
 PAGES = {
     'home': ('Felgen & Reifen.', '', 'felgen.webp',
@@ -117,6 +122,26 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
     def enabled():
         if current_app.config.get('SHOP_FRONTEND_ENABLED') is not True:
             abort(404)
+        if current_app.config.get('SHOP_PUBLIC_ORIGIN') != SHOP_ORIGIN:
+            return
+        origin = request.host_url.rstrip('/')
+        cart_path = url_for('shop_frontend.warenkorb')
+        if origin in SHOP_ALIASES:
+            if request.endpoint == 'shop_frontend.warenkorb':
+                return render_template('shop_v2/cart_transfer.html', source=True, peer_origin=SHOP_ORIGIN,
+                                       cart_url=SHOP_ORIGIN + cart_path, alias=SHOP_ALIASES[origin])
+            target = SHOP_ORIGIN + url_for(request.endpoint, **(request.view_args or {}))
+            # Carry public article deep links and campaign attribution only.
+            allowed = ('artikel', 'gclid', 'gbraid', 'wbraid', 'utm_source', 'utm_medium', 'utm_campaign',
+                       'utm_content', 'utm_term')
+            params = [(key, request.args[key]) for key in allowed
+                      if key in request.args and len(request.args[key]) <= 256]
+            return redirect(target + ('?' + urlencode(params) if params else ''), code=302)
+        if origin == SHOP_ORIGIN and request.endpoint == 'shop_frontend.warenkorb':
+            sender = next((url for url, alias in SHOP_ALIASES.items() if alias == request.args.get('uebernahme')), None)
+            if sender:
+                return render_template('shop_v2/cart_transfer.html', source=False, peer_origin=sender,
+                                       cart_url=cart_path, alias='')
 
     @bp.after_request
     def secure_response(response):

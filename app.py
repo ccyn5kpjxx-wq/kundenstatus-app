@@ -45547,7 +45547,13 @@ def get_google_reviews():
 def homepage_shop_links():
     """Use direct shop routes, with the existing read-only shop as fallback."""
     if app.config.get('SHOP_FRONTEND_ENABLED') is True:
-        return {key: url_for('shop_frontend.' + endpoint)
+        from shop_frontend import SHOP_ALIASES, SHOP_ORIGIN
+
+        origin = ''
+        if (app.config.get('SHOP_PUBLIC_ORIGIN') == SHOP_ORIGIN and has_request_context()
+                and request.host_url.rstrip('/') in SHOP_ALIASES):
+            origin = SHOP_ORIGIN
+        return {key: origin + url_for('shop_frontend.' + endpoint)
                 for key, endpoint in (('home', 'home'), ('reifen', 'reifen'), ('felgen', 'felgen'))}
     # The legacy endpoint has several category defaults. Building its URL
     # without a category can therefore select /shop/reifen instead of /shop.
@@ -47120,9 +47126,9 @@ def homepage_jahreszeit(heute=None):
 @app.get("/shop/<any(felgen,reifen):shop_category>")
 def oeffentlicher_shop(shop_category):
     """Independent public shop entry with the established offer request flow."""
-    if app.config.get('SHOP_FRONTEND_ENABLED') is True:
-        return redirect(url_for('shop_frontend.' + (shop_category or 'home')), code=302)
     shop_links = homepage_shop_links()
+    if app.config.get('SHOP_FRONTEND_ENABLED') is True:
+        return redirect(shop_links[shop_category or 'home'], code=302)
     shop_path = shop_links[shop_category or 'home']
     anfrage_url = homepage_portal_links()["anfrage"]
     return render_template(

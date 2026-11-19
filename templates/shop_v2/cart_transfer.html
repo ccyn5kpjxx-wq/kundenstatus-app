@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Warenkorb übernehmen · Gärtner Shop</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/shop.css') }}">
+  <script src="{{ url_for('static', filename='shop_v2/shop.js') }}" defer></script>
+</head>
+<body data-transfer="{{ 'send' if source else 'receive' }}" data-peer-origin="{{ peer_origin }}" data-alias="{{ alias }}">
+  <main class="shop-section">
+    <h1>Ihr Warenkorb</h1>
+    <p id="transfer-status" role="status">{% if source %}Ihre Auswahl können Sie in den Gärtner Shop übernehmen und dort zur Kasse gehen.{% else %}Ihre Auswahl wird aus dem ursprünglichen Fenster übernommen.{% endif %}</p>
+    {% if source %}<button id="transfer-start" type="button" class="shop-button" hidden>Auswahl übernehmen und Shop öffnen</button>{% endif %}
+    <p><a id="official-cart" href="{{ cart_url }}">Warenkorb auf auto-lackierzentrum.de öffnen</a></p>
+    {% if source %}<a id="full-cart" href="{{ url_for('shop_frontend.warenkorb') }}" hidden>Vollständige Auswahl ansehen</a>{% endif %}
+  </main>
+</body>
+</html>

@@ -10,7 +10,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, has_request_context, jsonify, redirect, render_template, request, url_for
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -58,6 +58,7 @@ class HomepageShopNavigationChecks(unittest.TestCase):
             return jsonify(values)
 
         self.namespace = {'app': self.app, 'url_for': url_for, 'redirect': redirect,
+                          'has_request_context': has_request_context, 'request': request,
                           'render_template': legacy_render, 'homepage_portal_links': lambda: {'anfrage': '/anfrage'},
                           'public_site_is_indexable_request': lambda: False, 'PUBLIC_BASE_URL': 'https://example.invalid'}
         exec(self.route_code, self.namespace)
@@ -90,6 +91,7 @@ class HomepageShopNavigationChecks(unittest.TestCase):
                               lambda slug: render_template('homepage_leistung_detail.html', slug=slug,
                                                            leistung=self.service, **self.context))
         for endpoint, path in (('oeffentliche_leistungen', '/leistungen'), ('oeffentliche_geschaeftspartner', '/geschaeftspartner'),
+                               ('oeffentlicher_autohaus_einstieg', '/autohaeuser'),
                                ('oeffentliches_team', '/team'), ('oeffentliche_portale', '/portale'),
                                ('impressum_seite', '/impressum'), ('datenschutz_seite', '/datenschutz'),
                                ('api_besucher_event', '/api/besucher'), ('reifen_vertrag.start', '/reifen/widerruf')):
@@ -150,6 +152,34 @@ class HomepageShopNavigationChecks(unittest.TestCase):
             result = self.client.get(old, follow_redirects=False)
             self.assertEqual(result.status_code, 302)
             self.assertEqual(result.headers['Location'], target)
+
+    def test_production_aliases_link_and_redirect_to_the_public_shop(self):
+        shop = 'https://auto-lackierzentrum.de'
+        self.app.config['SHOP_PUBLIC_ORIGIN'] = shop
+        for base in ('https://kundenstatus-app.onrender.com', 'https://www.auto-lackierzentrum.de'):
+            with self.subTest(base=base):
+                home = Links(self.client.get('/homepage', base_url=base).text).links
+                sections = {'home-nav-shop': '', 'home-hero-shop': '', 'home-card-shop': '',
+                            'home-felgen': 'felgen/', 'home-card-reifen': 'reifen/'}
+                self.assertEqual({a['data-shop-click']: a['href'] for a in home if 'data-shop-click' in a},
+                                 {key: shop + '/shop/' + value for key, value in sections.items()})
+                service = Links(self.client.get('/leistungen/reifenservice', base_url=base).text).links
+                self.assertIn(shop + '/shop/reifen/', [a['href'] for a in service])
+                for path in ('/shop', '/shop/felgen', '/shop/reifen'):
+                    response = self.client.get(path, base_url=base)
+                    self.assertEqual(response.status_code, 302)
+                    self.assertEqual(response.location, shop + path + '/')
+
+    def test_other_origins_and_local_previews_keep_shop_links_relative(self):
+        shop = 'https://auto-lackierzentrum.de'
+        portal = 'https://kundenstatus-app.onrender.com'
+        for base, configured in ((shop, shop), ('http://localhost:5000', shop),
+                                 ('https://preview.example', shop), (portal, 'https://preview.example')):
+            with self.subTest(base=base, configured=configured):
+                self.app.config['SHOP_PUBLIC_ORIGIN'] = configured
+                with self.app.test_request_context('/homepage', base_url=base):
+                    self.assertEqual(self.namespace['homepage_shop_links']()['home'], '/shop/')
+                self.assertEqual(self.client.get('/shop', base_url=base).location, '/shop/')
 
 
 if __name__ == '__main__':
