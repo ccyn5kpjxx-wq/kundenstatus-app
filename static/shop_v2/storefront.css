@@ -19,6 +19,12 @@
 .shop-storefront .shop-hero-home { min-height: clamp(320px, 32vw, 470px); }
 .shop-storefront .shop-hero>img { width: 72%; opacity: 1; object-fit: cover; object-position: center 53%; }
 .shop-storefront .shop-hero:after { background: linear-gradient(90deg,#191b19 2%,#191b19 25%,#191b19e8 39%,#191b1960 65%,#191b1908); }
+.shop-storefront[data-page="reifen"] .shop-hero>img {
+  width: min(64%, 1020px);
+  object-position: center top;
+  mask-image: linear-gradient(90deg, transparent, #000 28%);
+}
+.shop-storefront[data-page="reifen"] .shop-hero:after { content: none; }
 .shop-storefront .shop-hero-copy { padding-block: 38px; }
 .shop-storefront .shop-hero h1 { font-family: Georgia, 'Times New Roman', serif; font-weight: 400;
     max-width: 700px; margin: 12px 0 15px; font-size: clamp(42px,5.4vw,78px); letter-spacing: -.052em; line-height: 1.04; }
@@ -140,6 +146,10 @@
   .shop-storefront .tire-search-results { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .shop-storefront .modern-wrap { width: calc(100% - 48px); }
 }
+@media (min-width:721px) and (max-width:1000px) {
+  .shop-storefront[data-page="reifen"] .shop-hero>img { width: 59%; }
+  .shop-storefront[data-page="reifen"] .shop-hero-copy p:not(.shop-eyebrow) { max-width: 42vw; }
+}
 @media(max-width:720px) {
   .shop-storefront #gaertner-ads-settings {
     position: static;
@@ -159,6 +169,21 @@
   .shop-storefront .shop-hero>img { width: 100%; object-position: 71% center; }
   .shop-storefront .shop-hero:after { background: linear-gradient(90deg,#191b19ed 2%,#191b19e8 24%,#191b19ad 56%,#191b1930 100%); }
   .shop-storefront .shop-hero-copy { padding-block: 28px; }
+  .shop-storefront[data-page="reifen"] .shop-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto clamp(105px, 30vw, 165px);
+  }
+  .shop-storefront[data-page="reifen"] .shop-hero-copy { grid-row: 1; }
+  .shop-storefront[data-page="reifen"] .shop-hero>img {
+    position: static;
+    grid-row: 2;
+    justify-self: center;
+    width: 150%;
+    max-width: none;
+    height: 100%;
+    mask-image: linear-gradient(transparent, #000 12px);
+  }
   .shop-storefront .shop-hero p:not(.shop-eyebrow) { max-width: 285px; font-size: 15px; }
   .shop-storefront .shop-section { padding-block: 28px; }
   .shop-storefront .shop-category-tiles, .shop-storefront .tire-search-results { grid-template-columns: repeat(2,minmax(0,1fr)); gap:10px; }
