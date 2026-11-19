@@ -93,6 +93,8 @@ def snapshot(payload):
     }
     # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
+    if q.get('cash_at_pickup') is True and q.get('payment_method') == 'onsite':
+        contract['cash_at_pickup'] = True
     for key in ('payment_method', 'deposit_authorized_cents', 'deposit_method', 'deposit_timing',
                 'deposit_authorization_mode', 'long_rental_deposit_policy', 'cancellation_policy'):
         if key in q:
@@ -208,7 +210,8 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
     onsite = contract.get('payment_method') == 'onsite'
     if onsite:
         rows += [
-            ('Zahlungsart', 'Vor Ort bei Abholung'),
+            ('Zahlungsart', 'Vor Ort bei Abholung. Mietpreis und Kaution können bar bezahlt werden.'
+             if contract.get('cash_at_pickup') is True else 'Vor Ort bei Abholung'),
             ('Rückzahlbare Kaution', _eur(contract['deposit_cents'])),
             ('Bei Buchung online gezahlt', _eur(0)),
             ('Bei Übergabe fällig', _eur(contract['rental_cents'] + contract['deposit_cents'])),

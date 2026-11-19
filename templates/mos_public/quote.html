@@ -42,7 +42,7 @@
       <h2>{{ 'Bei Abholung zu zahlen' if onsite else 'Bei der Buchung zu zahlen' if live else 'Testbetrag bei der Buchung' }}</h2>
       <p class="quoted-total">{{ euro(q.rental_cents + q.deposit_cents if onsite else q.amount_cents) }}</p>
       <p class="quote-breakdown">
-        {% if onsite %}Du zahlst Mietpreis inkl. MwSt. und rückzahlbare Kaution vor Ort. Heute online fällig: {{ euro(q.amount_cents) }}.
+        {% if onsite %}Du zahlst Mietpreis inkl. MwSt. und rückzahlbare Kaution vor Ort.{% if q.cash_at_pickup is sameas true %} Beide Beträge kannst du bei der Abholung bar bezahlen.{% endif %} Heute online fällig: {{ euro(q.amount_cents) }}.
         {% elif reserved_deposit %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}Zahlbetrag: nur die Miete inkl. MwSt.; die Kaution wird nicht abgebucht.
         {% elif paid_deposit %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}Gesamtzahlung: {{ euro(q.rental_cents) }} Miete inkl. MwSt. + {{ euro(paid_deposit) }} rückzahlbare Kaution.
         {% else %}Mietpreis inkl. MwSt. · im Checkout ausschließlich als Testbetrag.{% endif %}

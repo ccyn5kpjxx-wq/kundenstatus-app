@@ -507,14 +507,16 @@ def register(portal):
                 quoted['deposit_authorization_mode']='extended_if_available'
         if onsite:
             quoted['payment_method']='onsite'
-            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v1'
+            quoted['cash_at_pickup']=True
+            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v2'
             quoted['terms_text'] = (
-                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 1)\n'
+                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 2)\n'
                 'Für diese Buchung gelten folgende vorrangige Regelungen: Mit der Schaltfläche '
                 'zur zahlungspflichtigen Bestellung gibst du eine verbindliche Bestellung ab. '
                 'Wir nehmen sie mit der Buchungsbestätigung an. Online werden weder eine Zahlung '
                 'noch eine Kartenautorisierung verlangt. Den vereinbarten Mietpreis und die '
                 'rückzahlbare Kaution von 500 € bezahlst du bei Abholung vor der Fahrzeugübergabe. '
+                'Mietpreis und Kaution kannst du vor Ort bar bezahlen. '
                 'Nach ordnungsgemäßer Rückgabe wird die Kaution nach den vereinbarten Bedingungen '
                 'zurückgezahlt. Diese Vereinbarung geht entgegenstehenden Regelungen zum '
                 'Vertragsschluss, zur Onlinezahlung und zur Kartenreservierung vor. '
@@ -624,6 +626,8 @@ def register(portal):
         text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt."
         if q.get('payment_method') == 'onsite':
             text+='\nZahlungsart: vor Ort bei Abholung.\nBei der Onlinebuchung gezahlt: 0,00 EUR.'
+            if q.get('cash_at_pickup') is True:
+                text+='\nMietpreis und Kaution kannst du vor Ort bar bezahlen.'
             text+=f"\nRückzahlbare Kaution: {q['deposit_cents']/100:.2f} EUR."
             text+=f"\nBei Übergabe vereinbarter Gesamtbetrag: {(q['rental_cents']+q['deposit_cents'])/100:.2f} EUR."
         elif q.get('deposit_authorized_cents'):

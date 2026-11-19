@@ -83,6 +83,8 @@ def _message(hold_id, recipient, pdf, cancelled, management_url=None, contract=N
                  f'Mietpreis inkl. MwSt.: {euro(contract["rental_cents"])}\n'
                  f'Rückzahlbare Kaution: {euro(contract["deposit_cents"])}\n'
                  f'Bei Abholung vereinbart: {euro(contract["rental_cents"] + contract["deposit_cents"])}\n')
+        if contract.get('cash_at_pickup') is True:
+            body += 'Sie können den Mietpreis und die Kaution bei der Abholung bar bezahlen.\n'
     if management_url:
         body += ('\nIhre Buchung sicher verwalten:\n' + management_url + '\n\n'
                  'Über diesen persönlichen Link können Sie Ihren Buchungsstatus und Vertrag '

@@ -52,8 +52,9 @@ class OnsiteCheckoutTests(unittest.TestCase):
         q = self.quote(token)
         self.assertEqual((q['days'], q['rental_cents'], q['deposit_cents']), (3, 14700, 50000))
         self.assertEqual((q['amount_cents'], q['deposit_authorized_cents'], q['deposit_charged_cents']), (0, 0, 0))
-        self.assertIn('Zusatzvereinbarung', q['terms_text'])
-        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v1')
+        self.assertIs(q['cash_at_pickup'], True)
+        self.assertIn('Mietpreis und Kaution kannst du vor Ort bar bezahlen.', q['terms_text'])
+        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v2')
         with (patch.object(self.service.gateway, 'create', side_effect=AssertionError('Unexpected Checkout')),
               patch.object(self.service.gateway, 'create_deposit_intent', side_effect=AssertionError('Unexpected deposit'))):
             first = self.public.checkout(token)
