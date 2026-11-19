@@ -30,6 +30,10 @@ def main():
     team_html = client.get("/team").get_data(as_text=True)
     leistungen_html = client.get("/leistungen").get_data(as_text=True)
     partner_html = client.get("/geschaeftspartner").get_data(as_text=True)
+    dealer_link = client.get("/autohaeuser")
+    dealer_path = "/anfrage?anliegen=autohaus_probeauftrag"
+    with patch.object(portal, "PORTAL_BASE_URL", "https://portal.example.test"):
+        external_dealer_link = client.get("/autohaeuser")
     css = client.get("/static/homepage/homepage-kompakt.css")
     hero_html = html.split('aria-labelledby="hero-title"', 1)[1].split('</section>', 1)[0]
     heading = re.search(r'<h1\b[^>]*>(.*?)</h1>', hero_html, re.S)
@@ -98,7 +102,11 @@ def main():
         "Shopklick aus dem Einstieg auswertbar": "home-hero-shop" in portal.SHOP_KLICK_ELEMENTE["/"]
         and 'data-shop-click="home-hero-shop"' in hero_html,
         "Alle drei Kundengruppen erreichbar": all(x in html for x in ("Privatkunden", "Autohäuser &amp;", "Werkstätten", "Firmenflotten", "/geschaeftspartner")),
-        "Beide Partner-Kacheln starten am Seitenanfang": html.count('class="audience" href="/geschaeftspartner"') == 2,
+        "Autohaus-Kachel öffnet die erste Fahrzeuganfrage": 'class="audience" href="/autohaeuser"' in html
+        and "Erstes Fahrzeug anfragen" in html and dealer_link.status_code == 302 and dealer_link.location == dealer_path,
+        "Kurzlink nutzt auch das getrennte Partnerportal": external_dealer_link.location == "https://portal.example.test" + dealer_path,
+        "Flotten-Kachel und bestehender Partnerzugang erreichbar": html.count('class="audience" href="/geschaeftspartner"') == 1
+        and 'href="/autohaeuser"' in partner_html and 'href="/partner"' in partner_html,
         "Interne Partner-Sprunglinks bleiben erhalten": all(x in partner_html for x in ('href="#autohaeuser"', 'href="#flotten"', 'id="autohaeuser"', 'id="flotten"')),
         "Portalzugang getrennt von Fotoanfrage": 'href="/portale"' in html and "Portale &amp; Zugänge" in html and "/anfrage?anliegen=auswahl" in html,
         "Ausfuehrliche Leistungen ueber Unterseite erreichbar": 'href="/leistungen"' in html and 'id="unsere-arbeiten"' not in html and all(f'id="arbeit-{slug}"' in leistungen_html for slug in ("reifenmontage", "bremsenservice", "oelservice", "inspektion", "lackierung", "karosserie", "smart-repair", "dellen-hagel", "autoglas", "reifenlager", "schadenabwicklung", "mobilitaet")),
