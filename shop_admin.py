@@ -23,13 +23,16 @@ from flask import Blueprint, abort, current_app, has_request_context, redirect, 
 from werkzeug.exceptions import HTTPException
 from shop_order_store import OrderStore
 from shop_goods_margin import admin_goods_margins
+from shop_supplier_status import supplier_status_by_line
+from shop_supplier_delivery_dates import DATE_TABLE, delivery_dates
 from shop_storage import ShopStorage
 
 ORDER=re.compile(r'sho_[a-f0-9]{32}')
 WITHDRAWAL=re.compile(r'swd_[a-f0-9]{32}')
 TABLES={'shop_orders_v2','shop_payment_attempts_v2','shop_fulfillment_v2',
         'shop_fulfillment_positions_v3','shop_order_workflow_v2','shop_order_receipts_v2','shop_withdrawals_v2',
-        'shop_order_appointment_requests_v2','shop_order_reviews_v1','shop_quote_goods_cost_v1'}
+        'shop_order_appointment_requests_v2','shop_order_reviews_v1','shop_quote_goods_cost_v1',
+        DATE_TABLE}
 BASE_TABLES={'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
              'shop_payment_events_v2','shop_buyer_sessions_v2'}
 BASE_TRIGGERS={'shop_quotes_v2_immutable','shop_orders_v2_immutable'}
@@ -224,6 +227,21 @@ class ShopAdminReader:
                                      'price':_money(service.get('gross_cent'))} for service in services if isinstance(service,dict)]})
                 shipments=snapshot.get('shipments',[])
                 if not isinstance(shipments,list) or len(shipments)>2:raise ValueError()
+                statuses = supplier_status_by_line(db, tables, order_id, row['mode'], snapshot['lines'])
+                dates = delivery_dates(db, tables, order_id)
+                shown_edits = set()
+                dates_editable = (row['mode'] == 'live' and self.storage.ready is True
+                                  and DATE_TABLE in tables)
+                for line, status in zip(lines, statuses, strict=True):
+                    key = status['position_key']
+                    recorded = dates.get(key) if status['state'] == 'accepted' else None
+                    day = recorded['date'] if recorded else ''
+                    editable = bool(dates_editable and key and status['state'] == 'accepted' and key not in shown_edits)
+                    line['supplier'] = dict(status, eta_date=day,
+                        eta_label=datetime.strptime(day, '%Y-%m-%d').strftime('%d.%m.%Y') if day else '',
+                        eta_version=recorded['version'] if recorded else 0, eta_editable=editable)
+                    if editable:
+                        shown_edits.add(key)
                 summary.update(lines=lines,shipments=[{'destination':DESTINATION.get(item.get('destination'),'Versandziel ungeklärt'),
                     'price':_money(item.get('gross_cent'))} for item in shipments if isinstance(item,dict)])
             except (ValueError,TypeError,AttributeError,KeyError,UnicodeError):
@@ -533,7 +551,7 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         detail=reader().detail(order_id,show_margin=session.get('admin') is True)
         return show_order_detail(detail)
 
-    def show_order_detail(detail,appointment_error=None):
+    def show_order_detail(detail,appointment_error=None,delivery_error=None):
         order_id=detail['id']
         attach_appointment_status([detail])
         calendar_ready=(callable(blueprint.confirm_appointment) and callable(blueprint.confirmed_appointments)
@@ -547,9 +565,38 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
                 review,_=review_status(service,store,mode,order_id,detail)
             except Exception:
                 review={'unavailable':True}
-        token=_review_csrf_token() if appointment_actionable or review and review.get('actionable') else None
+        eta_actionable = any(line['supplier']['eta_editable'] for line in detail.get('lines', []))
+        token=_review_csrf_token() if appointment_actionable or eta_actionable or review and review.get('actionable') else None
         return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,
-            review_csrf=token,appointment_actionable=appointment_actionable,appointment_error=appointment_error)
+            review_csrf=token,appointment_actionable=appointment_actionable,appointment_error=appointment_error,
+            delivery_error=delivery_error)
+
+    @blueprint.post('/admin/shop/<order_id>/liefertermin/<child_key>')
+    def update_delivery_date(order_id, child_key):
+        from shop_supplier_delivery_dates import DeliveryDateConflict, DeliveryOrderMissing, InvalidDeliveryDate, save_delivery_date
+        if not ORDER.fullmatch(order_id) or not HASH.fullmatch(child_key):
+            abort(404)
+        if (request.headers.get('Origin') not in (None, request.host_url.rstrip('/'))
+                or request.headers.get('Sec-Fetch-Site') not in (None, 'same-origin')):
+            abort(403)
+        fields = checked_form_fields()
+        if (set(fields) != {'csrf_token', 'delivery_date', 'version'}
+                or not re.fullmatch(r'0|[1-9][0-9]{0,9}', fields['version'])):
+            abort(400)
+        source = reader()
+        if not source.storage.ready or source.existing_only:
+            abort(503, description='Die Shopdaten sind momentan nur lesbar.')
+        try:
+            save_delivery_date(source.storage, order_id, child_key, fields['delivery_date'], int(fields['version']))
+        except (DeliveryDateConflict, InvalidDeliveryDate) as error:
+            detail = source.detail(order_id, show_margin=session.get('admin') is True)
+            code = 409 if isinstance(error, DeliveryDateConflict) else 400
+            return show_order_detail(detail, delivery_error=str(error)), code
+        except DeliveryOrderMissing:
+            abort(404)
+        except (ValueError, TypeError, KeyError, AttributeError, RecursionError, OSError, sqlite3.Error):
+            abort(503, description='Der Liefertermin konnte gerade nicht gespeichert werden.')
+        return redirect(url_for('shop_admin.order_detail', order_id=order_id), code=303)
 
     @blueprint.post('/admin/shop/<order_id>/termin-bestaetigen')
     def confirm_mounting_appointment(order_id):

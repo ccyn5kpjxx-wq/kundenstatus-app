@@ -108,6 +108,11 @@ def init_fulfillment_schema(connection):
           BEFORE UPDATE OF child_key,destination,item_json,reference
           ON shop_fulfillment_positions_v3
           BEGIN SELECT RAISE(ABORT,'immutable_supplier_position'); END;
+        CREATE TABLE IF NOT EXISTS shop_supplier_delivery_dates_v1 (
+          order_id TEXT NOT NULL, child_key TEXT NOT NULL, delivery_date TEXT,
+          version INTEGER NOT NULL CHECK(version > 0),
+          PRIMARY KEY(order_id,child_key),
+          FOREIGN KEY(order_id,child_key) REFERENCES shop_fulfillment_positions_v3(order_id,child_key));
     ''')
     connection.commit()
 

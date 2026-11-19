@@ -9,6 +9,21 @@
     .appointment-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px}
     .appointment-actions button{font:inherit;font-weight:700;padding:10px 16px;border:0;border-radius:5px;color:white;background:#165d49;cursor:pointer}
     .appointment-actions button:focus-visible{outline:3px solid #2b74b6;outline-offset:3px}
+    .supplier-panel{border-top:1px solid #dce3e7;margin-top:16px;padding-top:16px}
+    .supplier-panel:first-of-type{border-top:0;margin-top:0;padding-top:0}
+    .supplier-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 20px;flex-wrap:wrap}
+    .supplier-heading a{font-size:14px}
+    .supplier-panel h3{font-size:16px;margin:0 0 14px}
+    .supplier-panel dl{margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .supplier-panel dt{font-size:13px;color:#596a75;margin-bottom:6px}
+    .supplier-panel dd{margin:0;line-height:1.5}
+    .supplier-panel .accepted{color:#175b47;background:#e7f3eb}
+    .supplier-panel details{margin-top:8px}
+    .supplier-panel summary{color:#205578;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+    .supplier-panel .appointment-actions{gap:8px}
+    .supplier-panel label{display:grid;gap:5px;font-size:13px}
+    .supplier-panel input{padding:7px 8px;font:inherit;color:inherit}
+    @media(max-width:760px){.supplier-panel dl{grid-template-columns:1fr;gap:12px}.supplier-heading{margin-bottom:14px}.supplier-heading h2{margin:0}}
   </style>
 </head>
 <body>
@@ -40,6 +55,42 @@
     <div><div class="label">Zahlung</div><div class="value">{{ detail.payment }}</div>{% if detail.action %}<p>{{ detail.action }}</p>{% endif %}</div>
     <div><div class="label">Bearbeitung</div><div class="value">{{ detail.workflow }}</div><p>{{ detail.fulfillment }}</p>{% if detail.uncertain_positions %}<p class="warning">{{ detail.uncertain_positions }} Lieferantenantwort(en) ungeklärt</p>{% endif %}</div>
   </section>
+  {% if detail.lines %}
+  <section class="card" aria-labelledby="supplier-title" id="lieferant">
+    <div class="supplier-heading"><h2 id="supplier-title">Lieferantenbestellung &amp; Lieferung</h2>
+      {% if detail.mode == 'Live' %}<a href="https://www.tyresystem.de/kaufen/bestellungen" target="_blank" rel="noopener noreferrer">Bestellungen bei TYREsystem öffnen ↗</a>{% endif %}
+    </div>
+    {% if delivery_error %}<p class="note warning" role="alert">{{ delivery_error }}</p>{% endif %}
+    {% for line in detail.lines %}
+    {% set supplier = line.supplier %}
+    <div class="supplier-panel">
+      <h3>{{ line.quantity }} × {{ line.name }}</h3>
+      <dl>
+        <div><dt>Lieferantenstatus</dt><dd>
+          <span class="status {% if supplier.state == 'accepted' %}accepted{% elif supplier.state in ('uncertain','rejected') %}warning{% endif %}">{% if detail.mode == 'Test' %}Test · {% endif %}{{ supplier.label }}</span>
+          {% if supplier.order_number %}<div class="small">Bestellnummer <strong>{{ supplier.order_number }}</strong></div>{% endif %}
+        </dd></div>
+        <div><dt>Lieferziel</dt><dd>{{ line.destination }}</dd></div>
+        <div><dt>Voraussichtliche Lieferung</dt><dd>
+          {% if supplier.eta_label %}<time datetime="{{ supplier.eta_date }}"><strong>{{ supplier.eta_label }}</strong></time>
+          {% elif supplier.state == 'accepted' %}Termin noch offen
+          {% else %}Kein Termin hinterlegt{% endif %}
+          {% if supplier.eta_editable %}
+          <details><summary>{{ 'Liefertermin bearbeiten' if supplier.eta_date else 'Liefertermin eintragen' }}</summary>
+            <form class="appointment-actions" method="post" action="{{ url_for('shop_admin.update_delivery_date', order_id=detail.id, child_key=supplier.position_key) }}">
+              {% if csrf_field is not defined %}<input type="hidden" name="csrf_token" value="{{ review_csrf }}">{% endif %}
+              <input type="hidden" name="version" value="{{ supplier.eta_version }}">
+              <label>Vom Lieferanten genannter Termin<input type="date" name="delivery_date" value="{{ supplier.eta_date }}"></label>
+              <button type="submit">Speichern</button>
+            </form>
+          </details>
+          {% endif %}
+        </dd></div>
+      </dl>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
   {% if detail.margin %}
   <section class="card" aria-label="Warenmarge">
     <h2>Warenmarge</h2>
@@ -112,7 +163,7 @@
     <li>Eingang: {{ detail.receipts.get('received','Noch nicht erstellt') }}</li>
     <li>Bestätigung: {{ detail.receipts.get('confirmed','Noch nicht erstellt') }}</li>
     <li>Abbruch: {{ detail.receipts.get('cancelled','Noch nicht erstellt') }}</li>
-  </ul></div><div><h2>Rechnung</h2><p>{{ detail.invoice }}</p><p class="muted small">Bestell- und Statusbestätigungen sind keine Rechnung.</p></div><div><h2>Lieferstatus</h2><p>Noch keine Versand- oder Zustellbestätigung.</p><p class="muted small">Lieferantenannahme und Zahlungseinzug bestätigen keinen Wareneingang.</p></div></section>
+  </ul></div><div><h2>Rechnung</h2><p>{{ detail.invoice }}</p><p class="muted small">Bestell- und Statusbestätigungen sind keine Rechnung.</p></div></section>
 {% else %}
   <h1>Shopbestellungen</h1>
   <p class="muted">Reifen, Felgen, Ersatzteile und Zubehör · gespeicherte Bestellungen im Überblick</p>
