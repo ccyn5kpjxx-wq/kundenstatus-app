@@ -1,0 +1,28 @@
+.shop-wheel-hero {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 72%;
+  overflow: hidden;
+  container-type: size;
+  pointer-events: none;
+  z-index: -2;
+}
+
+/* Keep the editorial photo and cap in one coordinate system as the hero crops. */
+.shop-wheel-photo {
+  position: absolute;
+  left: 50%;
+  top: 53%;
+  width: max(100%, 200cqh);
+  height: auto;
+  display: block;
+  transform: translate(-50%, -53%);
+}
+
+@media (max-width: 720px) {
+  .shop-wheel-hero { width: 100%; }
+  .shop-wheel-photo { left: 86%; top: 50%; transform: translate(-70.8%, -50%); }
+  .shop-storefront .shop-wheel-hero + .shop-hero-copy p:not(.shop-eyebrow) {
+    max-width: min(285px, 69vw);
+  }
+}
