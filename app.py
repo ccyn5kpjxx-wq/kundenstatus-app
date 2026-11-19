@@ -51973,6 +51973,7 @@ def auftrag_detail(auftrag_id):
     return render_template(
         "auftrag_detail.html",
         auftrag=auftrag,
+        shop_invoice=workshop_shop_invoice(auftrag.get("shop_order_id")),
         autohaeuser=autohaeuser,
         transport_arten=TRANSPORT_ARTEN,
         statusliste=STATUSLISTE,
@@ -61127,7 +61128,7 @@ from shop_production import prepare_shop_runtime
 # adapters; no rental/legacy credentials or database connection are inherited.
 shop_runtime = register_shop_runtime(sys.modules[__name__],
                                     **prepare_shop_runtime(sys.modules[__name__]))
-from shop_admin import register_shop_admin
+from shop_admin import register_shop_admin, workshop_shop_invoice
 register_shop_admin(app, private_data_dir=SHOP_PRIVATE_DATA_DIR,
                     confirm_appointment=bestaetige_shop_reifentermin,
                     confirmed_appointments=bestaetigte_shop_reifentermine,

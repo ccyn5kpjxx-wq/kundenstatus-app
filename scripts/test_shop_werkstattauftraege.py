@@ -4,7 +4,7 @@ from contextlib import closing
 from datetime import date, timedelta
 from threading import Barrier
 from unittest import TestCase, main
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from smoke_test import portal
@@ -142,6 +142,42 @@ class ShopWerkstattauftragTest(TestCase):
         with partner.session_transaction() as session:
             session["partner_autohaus_id"] = 2
         self.assertNotIn(shop_url, partner.get(url).get_data(as_text=True))
+
+    def test_linked_workshop_order_opens_existing_invoice_and_keeps_extras_separate(self):
+        number = self.ensure()
+        client = portal.app.test_client()
+        with client.session_transaction() as staff:
+            staff["admin"] = True
+        service = Mock(spec=["statuses"])
+        pdf = f"/admin/shop/{self.order_id}/rechnung.pdf"
+        detail = f"/admin/auftrag/{number}"
+        with patch.dict(portal.app.extensions, shop_invoice_service=service):
+            service.statuses.return_value = {self.order_id: {"state": "ready", "voucher_number": "TEST-101"}}
+            html = client.get(detail).get_data(as_text=True)
+            self.assertIn(f'href="{pdf}"', html)
+            self.assertIn("Shoprechnung TEST-101 öffnen und drucken", html)
+            self.assertIn("Zusätzliche Reifenleistungen abrechnen", html)
+            self.assertNotIn("Noch keine Rechnungsnummer", html)
+            service.statuses.assert_called_once_with([self.order_id])
+            service.statuses.return_value = {self.order_id: {"state": "preparing"}}
+            html = client.get(detail).get_data(as_text=True)
+            self.assertIn(f'/admin/shop/{self.order_id}#rechnung', html)
+            self.assertNotIn(pdf, html)
+            service.statuses.side_effect = RuntimeError("isolated test")
+            response = client.get(detail)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Rechnungsstatus derzeit nicht verfügbar", response.get_data(as_text=True))
+            self.assertNotIn(pdf, response.get_data(as_text=True))
+
+    def test_non_admin_or_unlinked_workshop_does_not_read_invoice(self):
+        service = Mock(spec=["statuses"])
+        with patch.dict(portal.app.extensions, shop_invoice_service=service):
+            with portal.app.test_request_context():
+                portal.session["werkstatt"] = True
+                self.assertIsNone(portal.workshop_shop_invoice(self.order_id))
+                portal.session["admin"] = True
+                self.assertIsNone(portal.workshop_shop_invoice(None))
+            service.statuses.assert_not_called()
 
     def test_board_print_requires_workshop_session_and_current_operational_release(self):
         number = self.ensure()

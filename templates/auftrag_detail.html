@@ -280,6 +280,11 @@
     <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
       {% if session.get('admin') is sameas true %}
         <a class="btn btn-soft btn-sm" href="{{ url_for('shop_admin.order_detail', order_id=auftrag.shop_order_id) }}">Shopbestellung öffnen</a>
+        {% if shop_invoice and shop_invoice.state == 'ready' %}
+        <a class="btn btn-brand btn-sm" href="{{ url_for('shop_admin.invoice_pdf', order_id=auftrag.shop_order_id) }}" target="_blank" rel="noopener">Shoprechnung {{ shop_invoice.number }} öffnen und drucken</a>
+        {% elif shop_invoice %}
+        <a class="btn btn-soft btn-sm" href="{{ url_for('shop_admin.order_detail', order_id=auftrag.shop_order_id, _anchor='rechnung') }}">Shoprechnung · {{ shop_invoice.label }}</a>
+        {% endif %}
       {% endif %}
       {% if shop_wunsch %}
         <span>Montagewunsch · {{ shop_wunsch.date|werkstatt_datum }} · {{ shop_wunsch.time }} Uhr</span>
@@ -389,7 +394,7 @@
             {% endif %}
           </div>
           <div class="d-flex gap-2 flex-wrap justify-content-end">
-            {% if auftrag['ist_reifenauftrag'] %}<a class="btn btn-brand" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Reifenleistungen &amp; Rechnung →</a>{% endif %}
+            {% if auftrag['ist_reifenauftrag'] %}<a class="btn btn-brand" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">{{ 'Zusätzliche Reifenleistungen abrechnen' if auftrag.get('shop_order_id') else 'Reifenleistungen & Rechnung →' }}</a>{% endif %}
             <a href="{{ url_for('admin_auftrag_kalkulation', auftrag_id=auftrag['id']) }}" class="btn btn-soft">
               Kalkulation{% if auftrag['kalkulation_vorhanden'] %} · {{ auftrag['kalkulation_status_meta']['label'] }}{% endif %}
             </a>
@@ -406,9 +411,11 @@
               <button type="submit" class="btn btn-brand">Weiter zu {{ statusliste[next_status]['label'] }}</button>
             </form>
             {% else %}
+            {% if not (auftrag.get('shop_order_id') and auftrag['ist_reifenauftrag']) %}
             <a href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}" class="btn btn-brand">
-              Rechnung schreiben in Lexware
+              {{ 'Zusätzliche Werkstattleistungen abrechnen' if auftrag.get('shop_order_id') else 'Rechnung schreiben in Lexware' }}
             </a>
+            {% endif %}
             {% if auftrag['rechnung_status'] == 'geschrieben' %}
             <span class="badge text-bg-success px-3 py-2">Rechnung geschrieben{% if auftrag['rechnung_nummer'] %}: {{ auftrag['rechnung_nummer'] }}{% endif %}</span>
             {% elif auftrag['rechnung_status'] == 'lexware_entwurf' %}
@@ -773,7 +780,14 @@
   {% if auftrag['rep_max_kosten'] or auftrag['werkstatt_angebot_preis'] %}
   <details class="mt-3"><summary>Bisherige Preisangaben abgleichen</summary><p class="mt-2">Kostenangabe aus Auftrag: {{ auftrag['rep_max_kosten'] or '—' }}<br>Angebotstext: {{ auftrag['werkstatt_angebot_preis'] or '—' }}</p><p class="text-muted small">Diese älteren Angaben werden erst durch deine Zuordnung oben zu einem bestätigten Preis.</p></details>
   {% endif %}
-  <div class="mt-3 border-top pt-3"><strong>Rechnung:</strong> {{ auftrag['rechnung_nummer'] or 'Noch keine Rechnungsnummer' }} · {{ auftrag['rechnung_status'] or 'offen' }} <a class="btn btn-soft btn-sm ms-2" href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}">Rechnung und Empfänger prüfen</a></div>
+  <div class="mt-3 border-top pt-3">
+    {% if auftrag.get('shop_order_id') %}
+      {% if auftrag['rechnung_nummer'] %}<strong>Werkstattrechnung für Zusatzleistungen</strong> {{ auftrag['rechnung_nummer'] }} · {{ auftrag['rechnung_status'] }}{% endif %}
+      <a class="btn btn-soft btn-sm" href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag.id) }}">Abrechnung für Zusatzleistungen prüfen</a>
+    {% else %}
+      <strong>Rechnung:</strong> {{ auftrag['rechnung_nummer'] or 'Noch keine Rechnungsnummer' }} · {{ auftrag['rechnung_status'] or 'offen' }} <a class="btn btn-soft btn-sm ms-2" href="{{ url_for('rechnung_schreiben', auftrag_id=auftrag['id']) }}">Rechnung und Empfänger prüfen</a>
+    {% endif %}
+  </div>
 </section>
 
 <details class="page-card p-4 mb-4" id="dateifreigaben">

@@ -84,11 +84,32 @@ def _invoice_projection(record, order):
     edit_url = record.get('edit_url')
     number = record.get('voucher_number')
     return {'state': state, 'label': label,
-            'paid_online': state == 'ready' and order['mode'] == 'Live' and order['status'] == STATUS['paid']
-                           and order['payment'] == PAYMENT['paid'],
+            'paid_online': state == 'ready' and order.get('mode') == 'Live' and order.get('status') == STATUS['paid']
+                           and order.get('payment') == PAYMENT['paid'],
             'number': number if isinstance(number, str) and 0 < len(number) <= 80 else '',
             'edit_url': edit_url if state == 'draft' and isinstance(edit_url, str)
                          and LEXWARE_INVOICE_URL.fullmatch(edit_url) else ''}
+
+
+def _invoice_records(order_ids):
+    service = current_app.extensions.get('shop_invoice_service')
+    if service is not None:
+        try:
+            records = service.statuses(order_ids)
+            if isinstance(records, Mapping):
+                return records
+        except Exception:
+            current_app.logger.error('Rechnungsstatus der Shopbestellungen konnte nicht gelesen werden.')
+    return {}
+
+
+def workshop_shop_invoice(order_id):
+    """Read the local invoice journal only for an administrator's linked workshop order."""
+    if session.get('admin') is not True or not isinstance(order_id, str) or not ORDER.fullmatch(order_id):
+        return None
+    return _invoice_projection(_invoice_records([order_id]).get(order_id), {})
+
+
 REVIEW_REQUIREMENTS={'mixed_cart_manual_review_required':'Vollständigen Warenkorb und alle Lieferwege bestätigen',
     'fitment_unconfirmed':'Genaue Fahrzeugausführung und Felgenfreigabe prüfen',
     'assembly_fitment_unconfirmed':'Genaue Rad-Reifen-Kombination einschließlich Auflagen prüfen'}
@@ -590,14 +611,9 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         if not orders:
             return
         service = current_app.extensions.get('shop_invoice_service')
-        records = {}
-        if service is not None:
-            try:
-                records = service.statuses([order['id'] for order in orders])
-            except Exception:
-                current_app.logger.error('Rechnungsstatus der Shopbestellungen konnte nicht gelesen werden.')
+        records = _invoice_records([order['id'] for order in orders])
         for order in orders:
-            record = records.get(order['id']) if isinstance(records, Mapping) else None
+            record = records.get(order['id'])
             if not record and service is None and (order['mode'] == 'Test' or order['status'] == STATUS['cancelled']):
                 record = {'state': 'ineligible'}
             order['invoice'] = _invoice_projection(record, order)

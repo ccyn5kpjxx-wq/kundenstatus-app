@@ -473,6 +473,30 @@ class ShopAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get(pdf + '?download=1&download=1').status_code, 400)
         self.assertEqual(source.writes, [('prepare', identifier), ('refresh', identifier)])
 
+    def test_order_list_links_to_printable_pdf_only_for_ready_invoices(self):
+        identifier = self.order()['id']
+        source = InvoiceFixture(identifier)
+        self.app.extensions['shop_invoice_service'] = source
+        self.login()
+        path = '/admin/shop/' + identifier
+        pdf = path + '/rechnung.pdf'
+        details = path + '#rechnung'
+        with patch.object(source, 'pdf') as fetch_pdf:
+            for state in ('available', 'draft', 'unknown', 'preparing', 'ineligible', 'blocked', 'unavailable', 'ready'):
+                with self.subTest(state=state):
+                    source.state = state
+                    html = self.client.get('/admin/shop').get_data(as_text=True)
+                    if state == 'ready':
+                        self.assertIn(f'href="{pdf}">Rechnung TEST-101 als PDF öffnen und drucken</a>', html)
+                    else:
+                        self.assertNotIn(pdf, html)
+                    if state in ('available', 'draft', 'unknown'):
+                        self.assertIn(f'href="{details}"', html)
+                    else:
+                        self.assertNotIn(details, html)
+            fetch_pdf.assert_not_called()
+        self.assertEqual(source.writes, [])
+
     def test_uncertain_invoice_can_only_be_reconciled_and_draft_links_are_bounded(self):
         identifier = self.order()['id']
         source = InvoiceFixture(identifier)
