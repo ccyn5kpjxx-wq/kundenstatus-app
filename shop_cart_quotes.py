@@ -40,6 +40,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from shop_tyre_pricing import tyre_unit_gross_cent
 import hashlib
 import hmac
 import json
@@ -248,7 +249,7 @@ class CartQuoteService:
                  service_quote=None, freight_quote=None, assembly_fitment=None,
                  *, mode='test', clock=None, manual_mixed_orders=None, require_tyre_documents=None,
                  require_delivery_salutation=None, allow_standalone_rims=False,
-                 complete_wheel_review=False, assembly_proposal=None, fitment_lookup=None):
+                 complete_wheel_review=False, assembly_proposal=None, fitment_lookup=None, tyre_payment_costs=False):
         if not isinstance(mode, str) or mode not in {'test', 'live'}:
             raise ValueError('invalid_quote_mode')
         self.catalogue_lookup, self.retail_quote, self.rsu_mapping = catalogue_lookup, retail_quote, rsu_mapping
@@ -257,6 +258,9 @@ class CartQuoteService:
             raise ValueError('invalid_fitment_lookup')
         self.fitment_lookup = fitment_lookup
         self.mode, self.clock = mode, clock or (lambda: datetime.now(timezone.utc))
+        if type(tyre_payment_costs) is not bool:
+            raise ValueError('invalid_tyre_pricing_policy')
+        self.tyre_payment_costs = tyre_payment_costs
         if manual_mixed_orders is not None and type(manual_mixed_orders) is not bool:
             raise ValueError('invalid_mixed_order_policy')
         # Callers can require a manual offer for every multi-position cart.
@@ -450,7 +454,14 @@ class CartQuoteService:
                 elif price.get('procurement_confirmed') is not True:
                     block('procurement_price_unconfirmed', product_id=identifier, destination=destination)
                 else:
-                    prices[(identifier, destination)] = {'unit_gross_cent': price['unit_gross_cent'], 'stock': price['stock']}
+                    offered = {'unit_gross_cent': price['unit_gross_cent'], 'stock': price['stock']}
+                    if self.tyre_payment_costs and p['category'] == 'tyre':
+                        offered['base_unit_gross_cent'] = price['unit_gross_cent']
+                        offered['unit_gross_cent'] = tyre_unit_gross_cent(price['unit_gross_cent'])
+                        if offered['unit_gross_cent'] > 10_000_000:
+                            block('price_amount_unconfirmed', product_id=identifier, destination=destination)
+                            continue
+                    prices[(identifier, destination)] = offered
                     shorten(until)
 
         procurement = {}
@@ -515,6 +526,8 @@ class CartQuoteService:
                     'category': p['category'], 'quantity': row['quantity'], 'destination': destination,
                     'unit_gross_cent': price['unit_gross_cent'] if price else None,
                     'items_gross_cent': price['unit_gross_cent'] * row['quantity'] if price else None, 'services': []}
+            if price and 'base_unit_gross_cent' in price:
+                item['base_unit_gross_cent'] = price['base_unit_gross_cent']
             if item['items_gross_cent'] is not None:
                 known += item['items_gross_cent']
                 known_any = True

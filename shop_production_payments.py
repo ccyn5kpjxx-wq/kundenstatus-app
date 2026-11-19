@@ -6,7 +6,7 @@ supplier order, customer message or payment. The caller starts workers only
 after the complete reviewed release is registered.
 """
 from contextlib import closing
-from copy import deepcopy
+from copy import copy, deepcopy
 from functools import partial
 from hashlib import sha256
 
@@ -28,8 +28,20 @@ class PaymentProfileError(ValueError):
     pass
 
 
-def requote_remaining_goods(quotes, requests, snapshot, context, shipments):
+def _frozen_price_service(quotes, snapshot, legacy_retail_quote):
+    """Older unbooked tyre quotes used the fresh price at the purchased quantity."""
+    if legacy_retail_quote is not None and any(
+            line['category'] == 'tyre' and 'base_unit_gross_cent' not in line for line in snapshot['lines']):
+        legacy = copy(quotes)
+        legacy.retail_quote = legacy_retail_quote
+        legacy.tyre_payment_costs = False
+        return legacy
+    return quotes
+
+
+def requote_remaining_goods(quotes, requests, snapshot, context, shipments, *, legacy_retail_quote=None):
     """Refresh open goods, preserving the customer's freight cap for the whole shipment."""
+    quotes = _frozen_price_service(quotes, snapshot, legacy_retail_quote)
     fresh = quotes.quote({'lines': requests}, customer_id=snapshot['customer_id'],
                          vehicle_ref=snapshot['vehicle_ref'], delivery_context=context).snapshot()
     deadlines = []
@@ -143,10 +155,15 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         rejection_policy_evidence='RSU-written-20261106-production404', enabled=True, live_armed=True)
     transport = RSUOrderTransport(supplier_config, policy=policy,
         authorize=lambda envelope: holder['saga'].authorize_submission(envelope))
+    # The five-day price book already binds every quantity to the same base.
+    # Only pre-policy quotes from a shop without that book need their original adapter.
+    legacy_retail_quote = (supplier_quotes.retail_quote if adapters.get('published_prices') is None
+                           and getattr(quotes, 'tyre_payment_costs', False) else None)
     def revalidate(snapshot, context, *, destinations):
         requests = [request for request, line in zip(snapshot['request'], snapshot['lines'])
                     if line['destination'] in destinations]
-        return quotes.quote({'lines': requests}, customer_id=snapshot['customer_id'],
+        selected = _frozen_price_service(quotes, snapshot, legacy_retail_quote)
+        return selected.quote({'lines': requests}, customer_id=snapshot['customer_id'],
             vehicle_ref=snapshot['vehicle_ref'], delivery_context=context).snapshot()
     def address(destination, context):
         source = ({'recipient': 'Gärtner GmbH Karosserie & Lack', 'street': 'Alte Neckarelzer Straße 18/1',
@@ -163,7 +180,8 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
                          'mode_evidence_id': policy.mode_confirmed_evidence,
                          'acceptance_evidence_id': policy.acceptance_policy_evidence},
         fresh_inquiry=supplier_quotes.fresh_inquiry, revalidate=revalidate, delivery_address=address,
-        review_service=review, revalidate_remaining=partial(requote_remaining_goods, quotes))
+        review_service=review, revalidate_remaining=partial(requote_remaining_goods, quotes,
+                                                            legacy_retail_quote=legacy_retail_quote))
     holder['saga'] = saga
     receipts = ShopOrderReceipts(store, storage.connect, mode='live', enabled=True, delivery_enabled=True,
         sender_address='info@auto-lackierzentrum.de', outbox=outbox, smtp_config=smtp_config,

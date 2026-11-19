@@ -15,6 +15,10 @@
   {% if page_key == 'komplettraeder' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/complete.css') }}">{% endif %}
   {% set storefront = page_key not in ['felgenstudio', 'order_status'] %}
   {% if storefront %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/storefront.css') }}">{% endif %}
+  {% if hero == 'felgen.webp' %}
+  <link rel="preload" as="image" href="{{ url_for('static', filename='shop_v2/felgen.webp') }}" fetchpriority="high">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/wheel-hero.css') }}">
+  {% endif %}
   {% if page_key in ['warenkorb', 'order_status'] %}<script src="{{ url_for('static', filename='shop_v2/appointment.js') }}" defer></script>{% endif %}
   <script src="{{ url_for('static', filename='shop_v2/shop.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
@@ -43,7 +47,11 @@
 <main id="inhalt">
 {% if hero %}
 <section class="shop-hero{% if page_key == 'home' %} shop-hero-home{% endif %}" aria-labelledby="shop-title">
-  <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" alt="{{ 'Beispielreifen mit Größenangabe 205/55 R16 91V' if page_key == 'reifen' else '' }}" fetchpriority="high">
+  {% if hero == 'felgen.webp' %}
+    {% include 'shop_v2/wheel_hero.html' %}
+  {% else %}
+    <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" alt="{{ 'Beispielreifen mit Größenangabe 205/55 R16 91V' if page_key == 'reifen' else '' }}" fetchpriority="high">
+  {% endif %}
   <div class="modern-wrap shop-hero-copy">
     <p class="shop-eyebrow">Gärtner Shop · Mosbach</p>
     <h1 id="shop-title">{% if page_key == 'home' %}Felgen <em>&amp;</em> Reifen.{% else %}{{ title }}{% endif %}</h1>

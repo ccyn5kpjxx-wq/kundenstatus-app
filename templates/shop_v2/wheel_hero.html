@@ -1,0 +1,21 @@
+<div class="shop-wheel-hero" aria-hidden="true">
+  <svg class="shop-wheel-photo" viewBox="0 0 1774 887" width="1774" height="887" focusable="false">
+    <defs>
+      <filter id="wheel-cap-ink" color-interpolation-filters="sRGB">
+        <!-- The existing mark has a red roof and dark lettering on transparency. -->
+        <feColorMatrix type="matrix" values="
+          .03 -.03 0 0 .97
+          -.89 .89 0 0 .97
+          -.92 .92 0 0 .95
+          0 0 0 1 0"/>
+        <feComponentTransfer><feFuncA type="gamma" amplitude="1" exponent=".55" offset="0"/></feComponentTransfer>
+      </filter>
+    </defs>
+    <image href="{{ url_for('static', filename='shop_v2/felgen.webp') }}" width="1774" height="887"/>
+    <!-- Place the print on the face of the cap in original photo coordinates. -->
+    <g transform="translate(1256 427) rotate(3) matrix(.91 0 -.055 1 0 0)">
+      <image href="{{ url_for('static', filename='homepage/optimized/logo-transparent.png-w240-2dea4e1e7501.webp') }}"
+             x="-47" y="-18.4" width="94" height="36.8" filter="url(#wheel-cap-ink)"/>
+    </g>
+  </svg>
+</div>

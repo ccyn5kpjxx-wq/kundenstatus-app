@@ -14,6 +14,7 @@ import json
 import re
 import unicodedata
 from shop_tyre_tests import ADAC_TYRE_TESTS
+from shop_tyre_pricing import catalogue_tyre_price
 
 MAX_PRODUCTS = 100_000
 MAX_PAGE_SIZE = 48
@@ -291,7 +292,7 @@ class PublicCatalog:
     """
     def __init__(self, products: Iterable, *, released_ids, image_urls=None,
                  document_urls=None, verified_fitments=None, clock=None, quote_lookup=None,
-                 quote_lookup_authoritative=False, allow_published_prices=False):
+                 quote_lookup_authoritative=False, allow_published_prices=False, tyre_payment_costs=False):
         if (isinstance(products, (str, bytes, Mapping)) or not isinstance(products, Iterable)
                 or isinstance(released_ids, (str, bytes)) or not isinstance(released_ids, (set, frozenset, list, tuple))
                 or len(released_ids) > MAX_PRODUCTS
@@ -306,11 +307,14 @@ class PublicCatalog:
             raise CatalogError('invalid_quote_lookup')
         if type(quote_lookup_authoritative) is not bool or type(allow_published_prices) is not bool:
             raise CatalogError('invalid_quote_lookup')
+        if type(tyre_payment_costs) is not bool:
+            raise CatalogError('invalid_tyre_pricing_policy')
         # This callback reads an already populated public-price cache only;
         # it must never perform supplier IO in the HTTP browsing thread.
         self._quote_lookup = quote_lookup
         self._quote_lookup_authoritative = quote_lookup_authoritative
         self._allow_published_prices = allow_published_prices
+        self._tyre_payment_costs = tyre_payment_costs
         self._rows = {}
         for count, row in enumerate(products, 1):
             if count > MAX_PRODUCTS:
@@ -408,8 +412,7 @@ class PublicCatalog:
         except Exception:
             return {**entry, 'quote': None} if self._quote_lookup_authoritative else entry
 
-    @staticmethod
-    def _project(entry, now, *, detail=True):
+    def _project(self, entry, now, *, detail=True):
         product = deepcopy(entry["public"])
         if not detail:
             product["description"] = product["description"][:280]
@@ -421,6 +424,8 @@ class PublicCatalog:
                 vehicle["conditions"] = vehicle["conditions"][:3]
         quote = entry["quote"]
         product.update(price_status="update_required", price=None, order_enabled=False)
+        if quote and self._tyre_payment_costs and product['category'] == 'tyre':
+            quote = catalogue_tyre_price(quote)
         if quote and _stamp(quote["observed_at"]) <= now < _stamp(quote["expires_at"]):
             product.update(price_status="current", price=deepcopy(quote))
             if quote.get('kind') == 'merchant_pricebook':
