@@ -10,11 +10,15 @@
   {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
   <meta property="og:type" content="website">
   <meta property="og:locale" content="de_DE">
+  <meta property="og:site_name" content="{{ werkstatt_oeffentlich.name }}">
   <meta property="og:title" content="{{ werkstatt_oeffentlich.name }} | Meisterbetrieb in Mosbach">
   <meta property="og:description" content="Schaden digital melden, Mietwagen anfragen und Reparaturstatus sicher verfolgen.">
   <link rel="preload" as="image" href="{{ url_for('static', filename='homepage/fahrzeuglackierung.webp') }}" type="image/webp">
   <script type="application/ld+json">
   {"@context":"https://schema.org","@type":"AutoBodyShop","name":{{ werkstatt_oeffentlich.name|tojson }},"url":"https://auto-lackierzentrum.de/","telephone":{{ werkstatt_oeffentlich.telefon_e164|tojson }},"email":"info@auto-lackierzentrum.de","address":{"@type":"PostalAddress","streetAddress":{{ werkstatt_oeffentlich.strasse|tojson }},"postalCode":{{ werkstatt_oeffentlich.plz|tojson }},"addressLocality":{{ werkstatt_oeffentlich.ort|tojson }},"addressCountry":"DE"},"areaServed":"Mosbach und Umgebung"}
+  </script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebSite","name":{{ werkstatt_oeffentlich.name|tojson }},"url":"https://auto-lackierzentrum.de/"}
   </script>
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/homepage-kompakt.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='homepage/startseite.css') }}">
