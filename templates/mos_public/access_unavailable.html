@@ -1,8 +1,12 @@
 {% extends 'mos_public/base.html' %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
+{% endblock %}
 {% block content %}
-<h1>Buchungszugang nicht verfügbar</h1>
-<section class="card">
+<section class="card followup-panel">
+  <h1>Buchungszugang nicht verfügbar</h1>
   <p>Buchungszugang abgelaufen oder nicht verfügbar. Öffne den persönlichen Link aus deiner Vertrags-E-Mail.</p>
-  <p>Falls du den Link nicht findest oder er nicht mehr funktioniert, kontaktiere bitte die Werkstatt unter <a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a>.</p>
+  <p>Fehlt dir die E-Mail oder funktioniert der Link nicht mehr? Die Werkstatt hilft dir telefonisch weiter.</p>
+  <a class="button" href="{{ werkstatt_oeffentlich.telefon_url }}">Werkstatt anrufen · {{ werkstatt_oeffentlich.telefon }}</a>
 </section>
 {% endblock %}

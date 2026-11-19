@@ -1,40 +1,53 @@
 {% if contract and not deposit_link_access|default(false) %}
-<section class="card" id="mietvertrag">
-  <p class="small muted">{% if contract.test_only %}TEST – keine echte Anmietung{% elif signed %}Digital unterschriebener Vertrag{% else %}Digital unterschriebenes Buchungsangebot{% endif %}</p>
+{% macro contract_euro(cents) %}{{ '%.2f'|format(cents/100)|replace('.', ',') }} €{% endmacro %}
+<section class="card signed-contract" id="mietvertrag">
+  {% if contract.test_only %}<p class="small muted">TEST · Keine echte Anmietung</p>{% endif %}
   <h2>{{ 'Dein unterschriebener Mietvertrag' if signed else 'Dein unterschriebenes Buchungsangebot' }}</h2>
   {% if account and account.cancellation %}
-  <p><strong>Die Buchung wurde storniert.</strong> Die ursprünglich unterschriebene Vertragsfassung bleibt dokumentiert.</p>
-  {% elif h.status=='confirmed' and signed %}
-  <p><strong>Zahlung bestätigt.</strong> Du hast den Vertrag am {{ signed_local }}{% if presigned %} vor der Zahlung{% endif %} unterschrieben. Die gespeicherte Fassung steht zum Download bereit.</p>
-  {% elif h.status=='pending' %}
-  <p><strong>Unterschrift unter dem Buchungsangebot vom {{ signed_local }} gespeichert. Zahlung noch offen.</strong> Erst die bestätigte Zahlung und Verfügbarkeitsprüfung führen zur Buchungsbestätigung.</p>
-  {% elif h.status=='released' %}
-  <p><strong>Checkout beendet.</strong> Die Unterschrift unter dem Buchungsangebot wurde vor der Zahlung erfasst; es gibt keine bestätigte Buchung.</p>
+    <p><strong>Die Buchung wurde storniert.</strong> Die ursprünglich unterschriebene Vertragsfassung bleibt dokumentiert.</p>
+  {% elif h.status == 'confirmed' and signed %}
+    <p><strong>Zahlung bestätigt.</strong> Du hast den Vertrag am {{ signed_local }}{% if presigned %} vor der Zahlung{% endif %} unterschrieben. Die gespeicherte Fassung steht zum Download bereit.</p>
+  {% elif h.status == 'pending' %}
+    <p><strong>Unterschrift unter dem Buchungsangebot vom {{ signed_local }} gespeichert. Zahlung noch offen.</strong> Erst die bestätigte Zahlung und Verfügbarkeitsprüfung führen zur Buchungsbestätigung.</p>
+  {% elif h.status == 'released' %}
+    <p><strong>Checkout beendet.</strong> Die Unterschrift wurde vor der Zahlung erfasst. Es gibt keine bestätigte Buchung.</p>
   {% else %}
-  <p><strong>Manuelle Prüfung läuft.</strong> Aus dem unterschriebenen Buchungsangebot allein folgt keine bestätigte Buchung.</p>
+    <p><strong>Manuelle Prüfung läuft.</strong> Aus dem unterschriebenen Buchungsangebot allein folgt keine bestätigte Buchung.</p>
   {% endif %}
-  {% if signed %}<a class="button" href="{{ url_for('mos_public.signed_contract_pdf',hold_id=h.id) }}">Unterschriebenen Mietvertrag als PDF herunterladen</a>{% endif %}
-  <p><strong>{{ 'Vermieter und Vertragspartner' if signed else 'Vorgesehener Vermieter und Vertragspartner' }}:</strong> {{ contract.lessor_name }}, {{ contract.lessor_address }}.</p>
-  <p>„Autovermietung MOS“ bezeichnet das Mietangebot und ist keine eigene Vertragspartei.</p>
-  <dl>
-    <dt>{{ 'Mieter' if signed else 'Anfragende Person' }}</dt><dd>{{ contract.customer_name }} · {{ contract.customer_email }}</dd>
-    <dt>Fahrzeug</dt><dd>{{ contract.vehicle_name }}</dd>
-    <dt>Kennzeichen / FIN</dt><dd>{{ contract.vehicle_plate or 'Wird vor Übergabe mitgeteilt' }}{% if contract.vehicle_vin %} · {{ contract.vehicle_vin }}{% endif %}</dd>
-    <dt>Abholung und Rückgabe</dt><dd>{{ contract.start_slot|mos_slot }}<br>{{ contract.end_slot|mos_slot }}</dd>
-    <dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} Miettag(e) à {{ '%.2f'|format(contract.daily_cents/100)|replace('.', ',') }} €</dd>
-    <dt>Miete inkl. MwSt.</dt><dd>{{ '%.2f'|format(contract.rental_cents/100)|replace('.', ',') }} €</dd>
-    {% if contract.deposit_authorized_cents|default(0) %}<dt>Kaution als Kreditkartenreservierung</dt><dd>{{ '%.2f'|format(contract.deposit_authorized_cents/100)|replace('.', ',') }} € · {% if contract.deposit_timing|default('')=='before_pickup' %}separat online frühestens zwölf Stunden vor der Abholung selbst auf einer Kreditkarte zu reservieren, ohne Abbuchung; der Mietpreis wird bei der Buchung bezahlt. Die tatsächliche Autorisierungsfrist muss länger als 24 Stunden nach der Rückgabe reichen. Ein Kautionsproblem hebt die bezahlte Buchung nicht auf; ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich.{% else %}bei der Online-Reservierung zur Autorisierung vorgesehen, nicht zur Abbuchung; die Autorisierung ist zeitlich begrenzt{% endif %}</dd>
-    <dt>{{ 'Bezahlter Mietpreis' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag (nur Miete)' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>
-    {% else %}<dt>Rückzahlbare Kaution</dt><dd>{{ '%.2f'|format(contract.deposit_cents/100)|replace('.', ',') }} €{% if contract.long_rental_deposit_policy|default('')=='paid_at_booking_v1' %} · zusammen mit der Miete bei Buchung {{ 'bezahlt' if h.status=='confirmed' else 'zu bezahlen' }}; Erstattung nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe innerhalb von zwei Werktagen veranlassen. Die Gutschrift auf dem Kartenkonto kann später erfolgen.{% elif contract.deposit_charged_cents %} · im vorgesehenen Zahlbetrag enthalten{% endif %}</dd>
-    <dt>{{ 'Gesamtzahlung' if h.status=='confirmed' else 'Vorgesehener Zahlbetrag' }}</dt><dd>{{ '%.2f'|format(contract.amount_cents/100)|replace('.', ',') }} €</dd>{% endif %}
-    <dt>Vertragliche Selbstbeteiligung</dt><dd>{{ '%.2f'|format(contract.deductible_cents/100)|replace('.', ',') }} € gemäß den Mietbedingungen</dd>
-    <dt>Kilometer</dt><dd>{{ contract.included_km }} km inklusive; {{ '%.2f'|format(contract.extra_km_cents/100)|replace('.', ',') }} € je Mehrkilometer</dd>
-  </dl>
-  <h3>{{ 'Unterschriebene Mietbedingungen' if signed else 'Mietbedingungen des unterschriebenen Buchungsangebots' }}</h3>
-  <p class="small">Version {{ contract.terms_version }}. Dies ist die bei der Unterschrift angezeigte Fassung.</p>
-  <div class="terms">{{ contract.terms_text }}</div>
-  <h3>Unterschrift</h3>
-  <img src="data:image/png;base64,{{ signed.signature_png_base64 if signed else presigned }}" alt="Gespeicherte digitale Unterschrift von {{ contract.customer_name }}" style="display:block;max-width:100%;max-height:150px;border-bottom:1px solid #666">
-  <p class="small">{{ contract.customer_name }} · {{ signed_local }}{% if signed %} · Vertragsdaten SHA-256: {{ signed.contract_sha256 }}{% endif %}</p>
+  {% if signed %}
+    <a class="button signed-download" href="{{ url_for('mos_public.signed_contract_pdf',hold_id=h.id) }}">Unterschriebenen Mietvertrag als PDF herunterladen</a>
+  {% endif %}
+  <details class="checkout-details">
+    <summary>Vertragsdaten und Preis</summary>
+    <dl class="contract-lines">
+      <div><dt>{{ 'Vermieter und Vertragspartner' if signed else 'Vorgesehener Vermieter und Vertragspartner' }}</dt><dd>{{ contract.lessor_name }}, {{ contract.lessor_address }}. „Autovermietung MOS“ bezeichnet das Mietangebot und ist keine eigene Vertragspartei.</dd></div>
+      <div><dt>{{ 'Mieter' if signed else 'Anfragende Person' }}</dt><dd>{{ contract.customer_name }} · {{ contract.customer_email }}</dd></div>
+      <div><dt>Fahrzeug</dt><dd>{{ contract.vehicle_name }}</dd></div>
+      <div><dt>Kennzeichen / FIN</dt><dd>{{ contract.vehicle_plate or 'Wird vor Übergabe mitgeteilt' }}{% if contract.vehicle_vin %} · {{ contract.vehicle_vin }}{% endif %}</dd></div>
+      <div><dt>Abholung</dt><dd>{{ contract.start_slot|mos_slot }}</dd></div>
+      <div><dt>Rückgabe</dt><dd>{{ contract.end_slot|mos_slot }}</dd></div>
+      <div><dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} {{ 'Miettag' if contract.days == 1 else 'Miettage' }} × {{ contract_euro(contract.daily_cents) }}</dd></div>
+      <div><dt>Miete inkl. MwSt.</dt><dd>{{ contract_euro(contract.rental_cents) }}</dd></div>
+      {% if contract.deposit_authorized_cents|default(0) %}
+        <div><dt>Kaution als Kreditkartenreservierung</dt><dd>{{ contract_euro(contract.deposit_authorized_cents) }} · {% if contract.deposit_timing|default('') == 'before_pickup' %}separat online frühestens zwölf Stunden vor der Abholung selbst auf einer Kreditkarte zu reservieren, ohne Abbuchung. Der Mietpreis wird bei der Buchung bezahlt. Die tatsächliche Autorisierungsfrist muss länger als 24 Stunden nach der Rückgabe reichen. Ein Kautionsproblem hebt die bezahlte Buchung nicht auf. Ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich.{% else %}bei der Online-Reservierung zur Autorisierung vorgesehen, nicht zur Abbuchung. Die Autorisierung ist zeitlich begrenzt.{% endif %}</dd></div>
+        <div class="contract-total"><dt>{{ 'Bezahlter Mietpreis' if h.status == 'confirmed' else 'Vorgesehener Zahlbetrag (nur Miete)' }}</dt><dd>{{ contract_euro(contract.amount_cents) }}</dd></div>
+      {% else %}
+        <div><dt>Rückzahlbare Kaution</dt><dd>{{ contract_euro(contract.deposit_cents) }}{% if contract.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %} · zusammen mit der Miete bei Buchung {{ 'bezahlt' if h.status == 'confirmed' else 'zu bezahlen' }}. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe wird die Erstattung innerhalb von zwei Werktagen veranlasst. Die Gutschrift auf dem Kartenkonto kann später erfolgen.{% elif contract.deposit_charged_cents %} · im vorgesehenen Zahlbetrag enthalten{% endif %}</dd></div>
+        <div class="contract-total"><dt>{{ 'Gesamtzahlung' if h.status == 'confirmed' else 'Vorgesehener Zahlbetrag' }}</dt><dd>{{ contract_euro(contract.amount_cents) }}</dd></div>
+      {% endif %}
+      <div><dt>Vertragliche Selbstbeteiligung</dt><dd>{{ contract_euro(contract.deductible_cents) }} gemäß den Mietbedingungen</dd></div>
+      <div><dt>Kilometer</dt><dd>{{ contract.included_km }} km inklusive · {{ contract_euro(contract.extra_km_cents) }} je Mehrkilometer</dd></div>
+    </dl>
+  </details>
+  <details class="terms-disclosure checkout-details">
+    <summary>{{ 'Unterschriebene Mietbedingungen' if signed else 'Mietbedingungen des unterschriebenen Buchungsangebots' }}</summary>
+    <p class="small">Version {{ contract.terms_version }}. Dies ist die bei der Unterschrift angezeigte Fassung.</p>
+    <div class="terms">{{ contract.terms_text }}</div>
+  </details>
+  <details class="checkout-details">
+    <summary>Gespeicherte Unterschrift</summary>
+    <img class="signed-image" src="data:image/png;base64,{{ signed.signature_png_base64 if signed else presigned }}" alt="Gespeicherte digitale Unterschrift von {{ contract.customer_name }}">
+    <p class="small">{{ contract.customer_name }} · {{ signed_local }}{% if signed %}<br>Vertragsdaten SHA-256: {{ signed.contract_sha256 }}{% endif %}</p>
+  </details>
 </section>
 {% endif %}

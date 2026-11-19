@@ -1,14 +1,21 @@
 {% extends 'mos_public/base.html' %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
+{% endblock %}
 {% block content %}
-<h1>{{ 'Deine Buchung sicher öffnen' if management_access|default(false) else 'Deine Kaution online reservieren' }}</h1>
-<section class="card">
-  {% if management_access|default(false) %}<p>Öffne den geschützten Zugang zu deiner Buchung, um den Status und Vertrag anzusehen oder eine Stornierung nach den vereinbarten Bedingungen zu veranlassen.</p>{% else %}<p>Öffne deinen geschützten Buchungsstatus, um die Kaution vor Abholung auf deiner Kreditkarte zu reservieren.</p>{% endif %}
+<section class="card followup-panel">
+  <h1>{{ 'Deine Buchung sicher öffnen' if management_access|default(false) else 'Deine Kaution online reservieren' }}</h1>
+  {% if management_access|default(false) %}
+    <p>Im geschützten Buchungsstatus findest du deinen Vertrag und den aktuellen Stand deiner Buchung. Dort kannst du auch gemäß den vereinbarten Bedingungen stornieren.</p>
+  {% else %}
+    <p>Öffne deinen geschützten Buchungsstatus, um die Kaution vor der Abholung auf deiner Kreditkarte zu reservieren.</p>
+  {% endif %}
   <form method="post" id="booking-access">
     {{ csrf_field()|safe }}
     <input type="hidden" name="token" id="access-token" value="">
     <button id="access-button" disabled>Geschützten Buchungsstatus öffnen</button>
   </form>
-  <p id="access-message" class="small" role="status"></p>
+  <p id="access-message" class="followup-feedback" role="status" aria-live="polite"></p>
   <noscript><p>Bitte JavaScript aktivieren, um den geschützten Link zu öffnen, oder die Werkstatt kontaktieren.</p></noscript>
 </section>
 <script>

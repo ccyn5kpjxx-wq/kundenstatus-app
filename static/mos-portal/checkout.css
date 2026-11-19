@@ -1,0 +1,183 @@
+/* Price review and the signed contract as displayed in the booking status. */
+.checkout-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1.4rem;
+}
+.checkout-title h1 { margin: 0; }
+.checkout-title > a, .quote-download button {
+  flex: 0 0 auto;
+  font-size: .94rem;
+  font-weight: 700;
+}
+.quote-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 1rem;
+}
+.quote-trip.card, .quote-price, .quote-policies.card, .quote-sign.card {
+  margin: 0;
+  min-width: 0;
+}
+.quote-trip.card { padding: 0; overflow: hidden; }
+.quote-vehicle {
+  display: flex;
+  align-items: center;
+  gap: clamp(.9rem, 2vw, 1.7rem);
+  padding: 1.2rem clamp(1.25rem, 3vw, 2rem);
+  background: #eeefeb;
+}
+.quote-vehicle figure { flex: 0 1 11rem; min-width: 0; margin: 0; }
+.quote-vehicle img { display: block; width: 100%; height: auto; mix-blend-mode: multiply; }
+.quote-vehicle figcaption { color: #545850; font-size: .75rem; }
+.quote-vehicle h2 { margin: 0; font-size: clamp(1.25rem, 2.1vw, 1.75rem); }
+.quote-vehicle p { margin: .3rem 0 0; font-size: .94rem; }
+.trip-dates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.25rem clamp(1.25rem, 3vw, 2rem);
+}
+.trip-dates dt, .trip-address strong { display: block; color: #535851; font-size: .875rem; font-weight: 650; }
+.trip-dates dd { margin: .2rem 0 0; font-weight: 750; }
+.quote-trip.card .trip-address {
+  margin: 0 clamp(1.25rem, 3vw, 2rem);
+  padding: .8rem 0 1.35rem;
+  border-top: 1px solid var(--line, #daddd5);
+}
+.trip-address strong { display: inline; }
+.quote-price {
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border-radius: 15px;
+  background: #242825;
+  color: #fff;
+}
+.quote-price h2 { color: #ecefe8; font-size: 1rem; font-weight: 650; margin: 0 0 .5rem; }
+.quote-price .quoted-total {
+  font-size: clamp(2.4rem, 4.2vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -.045em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  color: #fff;
+  margin: 0 0 .55rem;
+}
+.quote-breakdown, .quote-mileage { margin: 0; font-size: .94rem; line-height: 1.5; color: #e1e6df; }
+.quote-price-lines { margin: 1.15rem 0 .7rem; border-top: 1px solid #4b514c; padding-top: .65rem; }
+.quote-price-lines > div { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.quote-price-lines dt { font-weight: 500; font-size: .94rem; }
+.quote-price-lines dd { margin: 0; white-space: nowrap; font-weight: 700; color: #fff; }
+.quote-policies.card, .quote-sign.card { margin-top: 1rem; }
+.quote-policies h2, .quote-sign h2, .signed-contract h2 { margin: 0 0 .85rem; }
+.quote-policies p, .quote-next p, .checkout-details p { max-width: 86ch; }
+.quote-cancellation {
+  margin: 1rem 0;
+  border-left: 3px solid var(--accent, #b84029);
+  background: #f6f5f1;
+  padding: .8rem 1.05rem;
+}
+.quote-cancellation h3 { margin: 0 0 .25rem; font-size: 1rem; }
+.quote-cancellation p { margin: .25rem 0; }
+.quote-cancellation p + p { font-size: .94rem; }
+details.checkout-details {
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line, #daddd5);
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+details.checkout-details:first-of-type { border-top: 1px solid var(--line, #daddd5); }
+details.checkout-details > summary {
+  display: list-item;
+  padding: .9rem .15rem;
+  color: var(--ink, #202221);
+  font-size: 1rem;
+  font-weight: 750;
+  cursor: pointer;
+  min-height: 44px;
+}
+details.checkout-details > summary::marker { color: var(--accent, #b84029); }
+details.checkout-details[open] > summary { border: 0; padding-bottom: .4rem; }
+.checkout-details > p { margin: .4rem 0 1rem; }
+.checkout-details .terms {
+  background: var(--paper, #f7f7f4);
+  padding: 1rem;
+  margin: 0 0 1rem;
+  max-width: 92ch;
+  font-size: 1rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.quote-download { margin: .7rem 0 1.3rem; text-align: right; }
+.quote-download button, .quote-signature button.secondary { margin: 0; width: auto; }
+.quote-customer { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.quote-customer input { width: 100%; }
+.quote-sign label.quote-consent {
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+  width: fit-content;
+  max-width: 84ch;
+  margin: 1.25rem 0;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.quote-consent input[type=checkbox] { flex: none; margin: .13rem 0 0; }
+.quote-signature {
+  padding: 1rem;
+  border: 1px solid var(--line, #daddd5);
+  border-radius: 10px;
+  max-width: 48rem;
+  background: #f6f7f3;
+}
+.quote-signature label { display: block; margin: 0 0 .45rem; }
+.quote-signature #signature-pad {
+  display: block;
+  width: 100%;
+  height: clamp(115px, 22vw, 180px);
+  touch-action: none;
+  background: #fff;
+  border: 1px solid #8b928a;
+  border-radius: 6px;
+}
+.quote-signature button.secondary { margin: .55rem 0 1rem; min-height: 42px; }
+.quote-signature #signature-file { background: #fff; max-width: 100%; }
+.quote-next { border-top: 1px solid var(--line, #daddd5); margin-top: 1.3rem; padding-top: .3rem; }
+.quote-next button, .signed-contract .signed-download { width: fit-content; max-width: 100%; }
+.quote-merchant, .signed-contract { overflow-wrap: anywhere; }
+.contract-lines { margin: 0 0 1rem; }
+.contract-lines > div {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) 3fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: .6rem 0;
+  border-top: 1px solid var(--line, #daddd5);
+}
+.contract-lines dt { font-size: .94rem; font-weight: 650; }
+.contract-lines dd { margin: 0; }
+.contract-lines .contract-total { font-weight: 750; }
+.signed-contract .signed-image { display: block; max-width: 100%; max-height: 150px; border-bottom: 1px solid #899087; }
+.signed-contract .signed-download { margin: .5rem 0 1.25rem; }
+@media (max-width: 760px) {
+  .quote-summary { grid-template-columns: 1fr; }
+  .quote-price { border-radius: 12px; }
+}
+@media (max-width: 540px) {
+  .checkout-title { flex-direction: column; align-items: flex-start; gap: .5rem; }
+  .quote-vehicle { padding: .85rem 1rem; }
+  .quote-vehicle figure { flex-basis: 8rem; }
+  .trip-dates { grid-template-columns: 1fr; gap: .5rem; margin: 1rem; }
+  .quote-trip.card .trip-address { margin: 0 1rem; padding-bottom: 1rem; }
+  .trip-dates > div { display: grid; grid-template-columns: 5rem 1fr; gap: .4rem; align-items: baseline; }
+  .trip-dates dd { margin: 0; }
+  .quote-customer { grid-template-columns: 1fr; gap: .35rem; }
+  .quote-next button, .quote-download button, .signed-contract .signed-download { width: 100%; }
+  .contract-lines > div { grid-template-columns: 1fr; gap: .12rem; }
+}
