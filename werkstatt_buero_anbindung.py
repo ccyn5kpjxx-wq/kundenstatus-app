@@ -242,6 +242,38 @@ class EvidencePortalInventory(PortalInventory):
         return super().create_review(*args,**kwargs)
 
 
+def read_official_lexware_file(portal, path, *, max_bytes, accept, budget=None, expected_type=None):
+    if budget:
+        budget.check()
+    if portal.LEXWARE_API_BASE_URL.rstrip("/") != "https://api.lexware.io" or not portal.LEXWARE_API_KEY:
+        raise InboxBlocked("Offizieller Lexware-Zugang erforderlich.")
+    http = portal.get_requests()
+    if http is None:
+        raise InboxBlocked("Vorhandener HTTP-Client fehlt.")
+    response = http.request("GET", "https://api.lexware.io" + path,
+                            headers={"Authorization": "Bearer " + portal.LEXWARE_API_KEY, "Accept": accept},
+                            stream=True, timeout=budget.timeout() if budget else 30, allow_redirects=False)
+    try:
+        if budget:
+            budget.check()
+        if response.status_code != 200:
+            raise InboxBlocked("Ein Lexware-Original konnte nicht begrenzt gelesen werden.")
+        if expected_type and response.headers.get("Content-Type", "").split(";")[0].strip().lower() != expected_type:
+            raise InboxBlocked("Das Lexware-Original hat ein anderes Dateiformat.")
+        length = response.headers.get("Content-Length")
+        if length and int(length) > max_bytes:
+            raise InboxBlocked("Lexware-Original überschreitet das Prüflimit.")
+        content = bytearray()
+        chunks = response.iter_content(65536)
+        for chunk in budget.iterate(chunks) if budget else chunks:
+            content.extend(chunk)
+            if len(content) > max_bytes:
+                raise InboxBlocked("Lexware-Original überschreitet das Prüflimit.")
+        return bytes(content)
+    finally:
+        response.close()
+
+
 class OfficeInboxBindings:
     def __init__(self,p,authorize=None,clock=time.monotonic):
         self.p=p
@@ -273,25 +305,7 @@ class OfficeInboxBindings:
                 "ready":not problems,"problems":problems}
 
     def _read_official(self,path,*,max_bytes,accept,budget=None):
-        if budget:budget.check()
-        if self.p.LEXWARE_API_BASE_URL.rstrip("/")!="https://api.lexware.io":raise InboxBlocked("Offizieller Lexware-Endpunkt erforderlich.")
-        http=self.p.get_requests()
-        if http is None:raise InboxBlocked("Vorhandener HTTP-Client fehlt.")
-        response=http.request("GET","https://api.lexware.io"+path,
-            headers={"Authorization":"Bearer "+self.p.LEXWARE_API_KEY,"Accept":accept},
-            stream=True,timeout=budget.timeout() if budget else 30,allow_redirects=False)
-        try:
-            if budget:budget.check()
-            if response.status_code!=200:raise InboxBlocked("Ein Lexware-Original konnte nicht begrenzt gelesen werden.")
-            length=response.headers.get("Content-Length")
-            if length and int(length)>max_bytes:raise InboxBlocked("Lexware-Original überschreitet das Prüflimit.")
-            content=bytearray()
-            chunks=response.iter_content(65536)
-            for chunk in budget.iterate(chunks) if budget else chunks:
-                content.extend(chunk)
-                if len(content)>max_bytes:raise InboxBlocked("Lexware-Original überschreitet das Prüflimit.")
-            return bytes(content)
-        finally:response.close()
+        return read_official_lexware_file(self.p, path, max_bytes=max_bytes, accept=accept, budget=budget)
 
     def _download(self,file_id,*,max_bytes,budget=None):
         key=str(UUID(str(file_id)))

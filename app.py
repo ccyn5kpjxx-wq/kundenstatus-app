@@ -20047,7 +20047,7 @@ def lexware_error_text(status_code, details):
     return f"Lexware API Fehler {status_code}: {details}"
 
 
-def lexware_request(method, path, payload=None, query=""):
+def lexware_request(method, path, payload=None, query="", *, single_attempt=False):
     if not LEXWARE_API_KEY:
         raise RuntimeError("LEXWARE_API_KEY fehlt. Bitte in .env.local eintragen.")
     requests_module = get_requests()
@@ -20055,7 +20055,7 @@ def lexware_request(method, path, payload=None, query=""):
         raise RuntimeError("Python-Paket requests ist nicht verfügbar.")
     url = f"{LEXWARE_API_BASE_URL}{path}{query}"
     response = None
-    for attempt in range(3):
+    for attempt in range(1 if single_attempt else 3):
         response = requests_module.request(
             method,
             url,
@@ -20066,8 +20066,11 @@ def lexware_request(method, path, payload=None, query=""):
             },
             json=payload,
             timeout=30,
+            **({"allow_redirects": False} if single_attempt else {}),
         )
-        if response.status_code != 429 or attempt == 2:
+        if single_attempt and 300 <= response.status_code < 400:
+            raise RuntimeError("Lexware hat die Anfrage umgeleitet.")
+        if response.status_code != 429 or attempt == 2 or single_attempt:
             break
         retry_after = response.headers.get("Retry-After")
         try:
