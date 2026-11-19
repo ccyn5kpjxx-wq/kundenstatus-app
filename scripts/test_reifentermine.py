@@ -1,5 +1,6 @@
 """Public tire request -> protected workshop views, using disposable test data."""
 from datetime import date, datetime, timedelta
+from contextlib import closing
 import json
 import re
 from pathlib import Path
@@ -312,6 +313,30 @@ class ReifentermineTest(unittest.TestCase):
         scheduled=updated.text.split('class="spalte s-eingeplant"',1)[1].split('class="fluss-pfeil"',1)[0]
         self.assertEqual(len(re.findall(r'<a class="karte"[^>]*data-auftrag="'+str(order_id)+'"',scheduled)),1)
         self.assertEqual(portal.get_auftrag(order_id)['leistungsart'],'reifenservice')
+
+    def test_tyre_label_uses_the_reserved_hour_and_individual_selected_services(self):
+        from reifen_auftragsetikett import reifenetikett
+        self.book()
+        number = portal.reifenauftrag_aus_buchung(self.latest()['id'])
+        result = reifenetikett(portal, number, nur_arbeitsdaten=True)
+        day = date.fromisoformat(self.day()).strftime('%d.%m.%Y')
+        self.assertEqual(result['start'], day + ' · 09:00')
+        self.assertEqual(result['end'], day + ' · 10:00')
+        self.assertEqual(result['end_label'], 'Planende (Zeitblock)')
+        self.assertEqual(result['service_items'], ['Radwechsel / Saisonwechsel', 'Reifeneinlagerung'])
+
+    def test_manual_tyre_label_uses_work_planning_even_with_an_earlier_dropoff(self):
+        from reifen_auftragsetikett import reifenetikett
+        number = portal.create_auftrag('admin', leistungsart='reifenservice', annahme_datum='05.11.2026')
+        self.assertEqual(reifenetikett(portal, number, nur_arbeitsdaten=True)['start'], 'Offen')
+        with closing(portal.get_db()) as db:
+            db.execute("""UPDATE auftraege SET start_datum='06.11.2026', start_uhrzeit='14:00',
+                fertig_datum='06.11.2026', fertig_uhrzeit='15:30' WHERE id=?""", (number,))
+            db.commit()
+        result = reifenetikett(portal, number, nur_arbeitsdaten=True)
+        self.assertEqual(result['start'], '06.11.2026 · 14:00')
+        self.assertEqual(result['end'], '06.11.2026 · 15:30')
+        self.assertEqual(result['service_items'], [])
 
     def test_customer_reschedule_is_reflected_without_duplicate_request(self):
         self.book()

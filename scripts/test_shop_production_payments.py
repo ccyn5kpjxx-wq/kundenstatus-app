@@ -117,17 +117,24 @@ class ProductionPaymentChecks(unittest.TestCase):
         with closing(self.storage.connect()) as db:
             return db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
 
-    def save_quote(self):
+    def save_quote(self, *, goods_only=False):
         value = quote(mode='live', context=CONTEXT)
+        if goods_only:
+            value['request'] = [item for item in value['request'] if item['id'] == OIL]
+            value['lines'] = [line for line in value['lines'] if line['id'] == OIL]
+            value['shipments'] = [group for group in value['shipments'] if group['destination'] == 'customer']
+            value['product_checks'] = {OIL: {'required_fees': ['packaging']}}
+            value['lines'][0]['services'] = [{'code': 'required:packaging', 'gross_cent': 120}]
+            value['total_gross_cent'] = value['known_subtotal_gross_cent'] = 4820
         value['created_at'] = (self.now - timedelta(minutes=1)).isoformat()
         value['expires_at'] = (self.now + timedelta(minutes=14)).isoformat()
         value = rehash(value)
         self.store.save_quote(value, expected_quote_hash=value['quote_hash'], customer_id='customer-a', mode='live', delivery_context=CONTEXT)
         return value
 
-    def bound_order(self, dependencies, reference):
+    def bound_order(self, dependencies, reference, *, goods_only=False):
         self.now = datetime.now(timezone.utc)
-        snapshot = self.save_quote()
+        snapshot = self.save_quote(goods_only=goods_only)
         consumer = dependencies['consumer_service']
         consumer.accept_quote(snapshot['quote_hash'], customer_id='customer-a', pack_hash=consumer.pack_hash,
                               terms_accepted=True, consumer=True)
@@ -192,6 +199,39 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.assertEqual(self.workshop_orders, {paid: 800})
         self.assertEqual(self.outbox.sent, [])
         self.assertEqual(self.count('shop_order_receipts_v2'), 0)
+
+    def test_goods_payment_and_confirmations_finish_without_any_workshop_access(self):
+        self.portal.shop_montageauftraege = Mock(side_effect=AssertionError('goods do not use the workshop'))
+        deps, _ = self.prepare()
+        identifier, record = self.bound_order(deps, 'goods', goods_only=True)
+        workflow = self.adapters['workflow']
+        record('authorized')
+        workflow.consider(identifier)
+
+        def capture(order_id, **kwargs):
+            record('paid')
+            return {'order_id': order_id, 'mode': 'live', 'state': 'captured',
+                    'payment_confirmed': True, 'authorization_released': False}
+
+        with patch.object(workflow.fulfillment, 'run', side_effect=capture) as fulfillment:
+            self.assertEqual(workflow.run_once()['state'], 'fulfilled')
+            workflow.consider_paid(identifier)
+            workflow._workshop_next_scan = None
+            workflow.run_once()
+            fulfillment.assert_called_once()
+
+        self.assertIsNone(deps['workshop_order_view'](identifier, customer_id='customer-a'))
+        self.assertNotIn('workshop_order', self.adapters['receipts'].customer_receipt(identifier, customer_id='customer-a'))
+        self.portal.erstelle_shop_montageauftrag.assert_not_called()
+        self.portal.shop_montageauftraege.assert_not_called()
+        with closing(self.storage.connect()) as db:
+            rows = db.execute("SELECT kind,body FROM shop_order_receipts_v2 WHERE order_id=?", (identifier,)).fetchall()
+        self.assertEqual({row['kind'] for row in rows}, {'order_received', 'order_confirmed'})
+        for row in rows:
+            self.assertIn(identifier, row['body'])
+            self.assertNotIn('Auftrag Nr.', row['body'])
+            self.assertNotIn('Montage-/Servicetermin', row['body'])
+        self.assertEqual(len(self.outbox.sent), 2)
 
     def test_unarmed_profiles_never_touch_adapters_or_construct_transports(self):
         for key in ('checkout_enabled', 'supplier_live_enabled', 'customer_mail_enabled', 'withdrawals_enabled',

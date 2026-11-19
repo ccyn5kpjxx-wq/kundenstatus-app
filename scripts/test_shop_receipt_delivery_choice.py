@@ -97,23 +97,24 @@ class ReceiptDeliveryChecks(unittest.TestCase):
                 f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_confirmed')
         self.assertFalse(f.outbox.sent)
 
-    def test_goods_order_has_order_number_and_only_its_purchased_goods(self):
+    def test_goods_order_keeps_shop_number_even_with_an_old_workshop_reference_and_wish(self):
         f = self.fixture()
         order, snapshot, context = f.receipts._load(f.order_id, 'customer-a')
-        order.update(mode='live', status='paid')
+        order.update(mode='live', status='paid', appointment_preference={'date': '2026-11-20', 'time': '10:00'})
         oil = next(i for i, row in enumerate(snapshot['lines']) if row['category'] == 'oil')
         snapshot.update(lines=[snapshot['lines'][oil]], request=[snapshot['request'][oil]])
         lookup = Mock(return_value={f.order_id: 583})
         with patch.object(f.receipts, 'mode', 'live'), patch.object(f.receipts, 'workshop_order_lookup', lookup), \
                 patch.object(f.receipts, '_load', return_value=(order, snapshot, context)):
             view = f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a')
-            self.assertFalse(view['mounting'])
-            self.assertEqual(len(view['items']), 1)
+            self.assertIsNone(view)
+            self.assertNotIn('workshop_order', f.receipts.customer_receipt(f.order_id, customer_id='customer-a'))
             message = f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_confirmed')
-            self.assertIn('Auftrag Nr. 583', message['body'])
-            self.assertNotIn('Montagetermin', message['body'])
+            self.assertIn(f.order_id, message['body'])
+            self.assertNotIn('Auftrag Nr.', message['body'])
+            self.assertNotIn('Wunschtermin', message['body'])
+            self.assertNotIn('Servicetermin', message['body'])
             order['status'] = 'authorized'
-            lookup.reset_mock()
             receipt = f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_received')
             self.assertNotIn('Auftrag Nr.', receipt['body'])
             self.assertIsNone(f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a'))

@@ -268,12 +268,17 @@
     }
 
     .karte.dragging { opacity: .45; }
-    .etikett-karte .karte { margin-bottom: 0; border-radius: 16px 16px 0 0; }
-    .etikett-druck {
-      display: block; padding: .5rem .65rem; margin-bottom: clamp(.35rem, .6vw, .55rem);
+    .auftragskarte .karte { margin-bottom: 0; border-radius: 16px 16px 0 0; }
+    .karten-druckaktionen {
+      display: flex; flex-wrap: wrap; gap: 1px; margin-bottom: clamp(.35rem, .6vw, .55rem);
       border: 1px solid var(--line); border-top: 0; border-radius: 0 0 16px 16px;
-      background: #fff; color: var(--accent); font-weight: 700; text-align: center;
+      overflow: hidden; background: var(--line);
     }
+    .karten-druckaktionen a {
+      flex: 1 1 9rem; display: grid; place-items: center; min-height: 44px; padding: .4rem;
+      color: var(--accent); background: #fff; text-align: center; font-weight: 700;
+    }
+    .karten-druckaktionen a:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
 
     .spalte.drop-ziel {
       border-color: var(--accent);
@@ -594,7 +599,7 @@
       </article>
       {% endfor %}
       {% for auftrag in spalte.auftraege %}
-      {% if auftrag.get('tafel_etikett') %}<div class="etikett-karte">{% endif %}
+      <div class="auftragskarte">
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}{% if auftrag['leistungsart'] == 'inspektion' %}#inspektionscheckliste{% endif %}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-nummernzeile">
@@ -701,10 +706,11 @@
         <button type="button" class="schnell-knopf zurueck" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">↩ Zurück in Arbeit</button>
         {% endif %}
       </a>
-      {% if auftrag.get('tafel_etikett') %}
-        <a class="etikett-druck" href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="A5-Etikett für Auftrag {{ auftrag.id }} drucken">A5-Etikett drucken</a>
+        <div class="karten-druckaktionen">
+          <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="Auftrag {{ auftrag.id }} ausdrucken">Auftrag ausdrucken</a>
+          {% if auftrag.get('tafel_etikett') %}<a href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="A5-Etikett für Auftrag {{ auftrag.id }} drucken">A5-Etikett drucken</a>{% endif %}
+        </div>
       </div>
-      {% endif %}
       {% else %}
       {% if not spalte.get('reifenbuchungen') %}<div class="leer-hinweis">Nichts in dieser Spalte.</div>{% endif %}
       {% endfor %}

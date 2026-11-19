@@ -1,5 +1,6 @@
 """Private workshop handling of financially accepted live shop orders."""
 from datetime import datetime, timezone
+import json
 import logging
 from zoneinfo import ZoneInfo
 
@@ -76,6 +77,31 @@ def appointment_handling_block(day, time, confirmed):
     return None
 
 
+def local_mounting_wishes(db, order_ids):
+    """Read preferences backed by a booked installation for local collection."""
+    from shop_order_store import requires_workshop_order, workshop_mounting_services
+
+    if not order_ids:
+        return
+    marks = ','.join('?' for _ in order_ids)
+    rows = db.execute(f'''SELECT a.order_id,a.requested_date,a.requested_time,
+                                strftime('%d.%m.%Y',a.requested_date) AS day,
+                                o.snapshot_json,o.delivery_context_json
+                         FROM shop_order_appointment_requests_v2 a JOIN shop_orders_v2 o ON o.id=a.order_id
+                         WHERE a.order_id IN ({marks})''', order_ids)
+    for row in rows:
+        try:
+            delivery = json.loads(row['delivery_context_json'])
+            if not isinstance(delivery, dict) or delivery.get('workshop_delivery', 'collection') != 'collection':
+                continue
+            snapshot = json.loads(row['snapshot_json'])
+            if not requires_workshop_order(snapshot) or not workshop_mounting_services(snapshot):
+                continue
+        except (TypeError, ValueError, KeyError, AttributeError, RecursionError):
+            continue
+        yield row
+
+
 def mark_handled(db, tables, order_id, confirmed_appointments):
     """Caller holds the shop write lock; calendar confirmations are separately durable."""
     row = db.execute(_queue_sql(tables) + ' AND o.id=?', (order_id,)).fetchone()
@@ -86,16 +112,15 @@ def mark_handled(db, tables, order_id, confirmed_appointments):
     if row['acknowledged']:
         return None
     if 'shop_order_appointment_requests_v2' in tables:
-        wish = db.execute('''SELECT requested_date, requested_time FROM shop_order_appointment_requests_v2
-                             WHERE order_id=?''', (order_id,)).fetchone()
-        if wish and appointment_handling_block(*wish, False):
+        wish = next(local_mounting_wishes(db, [order_id]), None)
+        if wish and appointment_handling_block(wish['requested_date'], wish['requested_time'], False):
             confirmed = None
             if callable(confirmed_appointments):
                 try:
                     confirmed = order_id in confirmed_appointments([order_id])
                 except Exception:
                     logging.getLogger(__name__).exception('Werkstattkalender für die Bearbeitungsfreigabe nicht erreichbar')
-            reason = appointment_handling_block(*wish, confirmed)
+            reason = appointment_handling_block(wish['requested_date'], wish['requested_time'], confirmed)
             if reason:
                 return reason
     if HANDLED_TABLE not in tables:

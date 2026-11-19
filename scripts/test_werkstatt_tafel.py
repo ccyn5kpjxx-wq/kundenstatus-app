@@ -332,6 +332,8 @@ def main():
         # Tafel zeigt Schnell-Knopf und Drop-Ziele
         response = client.get("/werkstatt/tafel")
         tafel_html = response.get_data(as_text=True)
+        druck_link = f'href="/werkstatt/auftrag/{auftrag_id}/ausdrucken"'
+        check("Hallenauftrag und Tafelkarte bieten den Werkstattdruck", druck_link in html and druck_link in tafel_html)
         check("Tafel hat Drop-Ziele", 'data-ziel-status="3"' in tafel_html)
         check("Tafel hat Schnell-Knoepfe", "data-status-knopf" in tafel_html)
 
@@ -455,6 +457,8 @@ def main():
         db.execute("UPDATE auftraege SET status=5 WHERE id=?", (auftrag_id,))
         db.commit()
         db.close()
+        check("Hallenauftrag blendet den Druck nach Rückgabe aus",
+              druck_link not in client.get(f"/werkstatt/auftrag/{auftrag_id}").get_data(as_text=True))
         response = client.post(
             f"/werkstatt/auftrag/{auftrag_id}/status/3",
             headers={"X-CSRF-Token": csrf, "X-Requested-With": "fetch"},
@@ -585,6 +589,10 @@ def main():
     check("Admin sieht Tafel ohne Extra-Login", response.status_code == 200)
     response = admin_client.get(f"/admin/auftrag/{werkstatt_neu_id}")
     admin_html = response.get_data(as_text=True)
+    admin_druck = f'href="/admin/auftrag/{werkstatt_neu_id}/ausdrucken"'
+    check("Auftrag ausdrucken im Cockpit und im Auftragskopf",
+          admin_druck in admin_client.get("/admin").get_data(as_text=True)
+          and admin_druck in admin_html.partition('<header class="order-focus-header')[2].partition("</header>")[0])
     check(
         "Büro sieht offenen Prüfstatus und Mitarbeiter-Preisvorschlag",
         response.status_code == 200

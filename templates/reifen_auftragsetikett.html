@@ -10,18 +10,33 @@
     body { margin:0 }
     nav, article { max-width:210mm; margin:16px auto }
     nav { display:flex; align-items:center; flex-wrap:wrap; gap:1rem; padding:0 16px }
-    button { font:inherit; font-weight:650; border:0; border-radius:.5rem; background:#193e30; color:white; padding:.75rem 1rem; cursor:pointer }
+    button, nav a { font:inherit; font-weight:650; border:1px solid #193e30; border-radius:.5rem; padding:.7rem 1rem; cursor:pointer }
+    button { background:#193e30; color:white }
+    nav a { color:#193e30; background:white; text-decoration:none }
     article { background:white; padding:8mm; overflow-wrap:anywhere; border:1px solid #d2d9d4 }
-    header { display:flex; justify-content:space-between; gap:1rem; border-bottom:2px solid; padding-bottom:2mm }
-    h1 { margin:3mm 0; font-size:32pt; line-height:1.1 }
-    h1 strong { font-variant-numeric:tabular-nums; font-size:1.3em }
+    header { border-bottom:2px solid; padding-bottom:1.5mm; margin-bottom:4mm }
+    header dl { grid-template-columns:1.3fr 1.05fr auto; gap:3mm }
+    header dt { font-size:9pt; font-weight:600; line-height:1.1 }
+    header dd { white-space:nowrap; font-variant-numeric:tabular-nums; line-height:1.1 }
+    .start { font-size:21pt }
+    .end { font-size:15pt }
+    .number { font-size:18pt; text-align:right }
+    .service { font-size:12pt; font-weight:700; margin:1mm 0 0; line-height:1.2 }
     dl { display:grid; grid-template-columns:1fr 1fr; gap:3mm 6mm; margin:0 }
     dt { margin-bottom:.2em; font-size:10pt }
     dd { font-size:16pt; font-weight:700; line-height:1.2; margin:0 }
     .product { grid-column:1/-1; border-top:1px solid; padding-top:2mm }
     .product dd { font-size:12pt }
-    @media screen and (max-width:550px) { article { padding:16px; margin:8px } h1 { font-size:24pt } dd { font-size:13pt } }
-    @page { size:A5 landscape; margin:7mm }
+    footer { font-size:9pt; margin-top:4mm }
+    @media screen and (max-width:620px) {
+      article { padding:16px; margin:8px }
+      header dl { grid-template-columns:1fr 1fr }
+      header dd { white-space:normal }
+      .start { font-size:16pt }
+      .end, dd { font-size:13pt }
+      .number { text-align:left; font-size:14pt }
+    }
+    @page { size:A5 landscape; margin:4mm 7mm 7mm }
     @media print {
       :root { background:white; color:black }
       nav { display:none }
@@ -31,21 +46,28 @@
   </style>
 </head>
 <body>
-  <nav aria-label="Druckoptionen"><button type="button" onclick="window.print()">Etikett drucken</button>
+  <nav aria-label="Druckoptionen"><button type="button" onclick="window.print()">A5-Etikett drucken</button>
+    <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck' if etikett.tafel else 'auftrag_ausdruck.auftragsdruck', auftrag_id=etikett.number) }}">A4-Auftrag mit Abrissstreifen</a>
     <span>DIN A5 · Querformat{% if etikett.positions|length > 1 %} · {{ etikett.positions|length }} Etiketten{% endif %}</span></nav>
   <main>
   {% for position in etikett.positions %}
     <article>
-      <header><strong>Gärtner Karosserie &amp; Lack</strong><span>{{ etikett.reference or 'Auftragsetikett' }}</span></header>
-      <h1>Auftrag <strong>{{ etikett.number }}</strong></h1>
+      <header>
+        <dl>
+          <div><dt>{{ etikett.start_label }}</dt><dd class="start">{{ etikett.start }}</dd></div>
+          <div><dt>{{ etikett.end_label }}</dt><dd class="end">{{ etikett.end }}</dd></div>
+          <div class="number"><dt>Auftrag</dt><dd><strong>{{ etikett.number }}</strong></dd></div>
+        </dl>
+        <p class="service">{{ etikett.service }}</p>
+      </header>
       <dl>
         <div><dt>Kunde</dt><dd>{{ etikett.customer }}</dd></div>
         <div><dt>Kennzeichen</dt><dd>{{ etikett.plate }}</dd></div>
-        <div><dt>{{ etikett.appointment_label }}</dt><dd>{{ etikett.appointment }}</dd></div>
         <div><dt>Voraussichtliche Lieferung</dt><dd>{{ position.delivery }}</dd></div>
         <div><dt>Reifengröße</dt><dd>{{ position.size }}</dd></div>
         {% if position.title %}<div class="product"><dt>Bestellte Position</dt><dd>{{ position.title }}</dd></div>{% endif %}
       </dl>
+      <footer>Gärtner Karosserie &amp; Lack{% if etikett.reference %} · {{ etikett.reference }}{% endif %}</footer>
     </article>
   {% endfor %}
   </main>

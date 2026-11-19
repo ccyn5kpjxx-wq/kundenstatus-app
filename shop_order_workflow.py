@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from uuid import uuid4
 from shop_order_review import requires_review
-from shop_order_store import _delivery_context, _validate_snapshot
+from shop_order_store import _delivery_context, _validate_snapshot, requires_workshop_order
 
 
 log = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ class WorkflowJournal:
         target = ' AND o.id=?' if order_id is not None else ''
         params = (after, order_id, limit) if order_id is not None else (after, limit)
         with self._db() as connection:
-            return [dict(row) for row in connection.execute('''SELECT o.id,o.customer_id
+            return [dict(row) for row in connection.execute('''SELECT o.id,o.customer_id,o.snapshot_json
                 FROM shop_orders_v2 o JOIN shop_payment_attempts_v2 a ON a.order_id=o.id
                 WHERE o.id>? AND o.mode='live' AND o.status='paid'
                 AND EXISTS (SELECT 1 FROM shop_payment_events_v2 e
@@ -242,8 +242,10 @@ class ShopOrderWorkflow:
         if order['status'] != 'paid':
             raise WorkflowError('workshop_payment_unconfirmed')
         snapshot = self.store.snapshot_for_order(order_id, **identity)
-        context = self.store.delivery_context_for_order(order_id, **identity)
         _validate_snapshot(snapshot, order['quote_hash'], customer_id, 'live')
+        if not requires_workshop_order(snapshot):
+            return None
+        context = self.store.delivery_context_for_order(order_id, **identity)
         _delivery_context(snapshot, context)
         number = self.workshop_order_create(order, snapshot, context)
         if type(number) is not int or number < 1:
@@ -268,9 +270,16 @@ class ShopOrderWorkflow:
             return
         try:
             rows = self.journal.paid_workshop_candidates(after=self._workshop_after, limit=limit)
-            if rows:
-                linked = self.workshop_order_lookup([row['id'] for row in rows])
-                for row in rows:
+            service_orders = []
+            for row in rows:
+                try:
+                    if requires_workshop_order(json.loads(row['snapshot_json'])):
+                        service_orders.append(row)
+                except (TypeError, ValueError):
+                    log.warning('Bestellpositionen für den Werkstattabgleich unlesbar: %s', row['id'])
+            if service_orders:
+                linked = self.workshop_order_lookup([row['id'] for row in service_orders])
+                for row in service_orders:
                     if row['id'] not in linked:
                         try:
                             self._ensure_workshop_order(row['id'], row['customer_id'])

@@ -49,9 +49,15 @@ class ShopAppointmentConfirmation(unittest.TestCase):
             day += timedelta(days=1)
         self.day = day.isoformat()
 
-    def order(self, customer, time, payment='paid', mode='live', tyre_size=None):
+    def order(self, customer, time, payment='paid', mode='live', tyre_size=None, goods_only=False):
         context = {'contact': {'name': 'Montage ' + customer, 'email': customer + '@example.invalid'}}
         value = quote(customer=customer, mode=mode, context=context)
+        if goods_only:
+            mounting = value['lines'][0]['services'].pop()
+            value['request'][0]['services'].clear()
+            value['known_subtotal_gross_cent'] -= mounting['gross_cent']
+            value['total_gross_cent'] -= mounting['gross_cent']
+            value = rehash(value)
         if tyre_size:
             value['lines'][0]['tyre_size'] = tyre_size
             value = rehash(value)
@@ -125,6 +131,20 @@ class ShopAppointmentConfirmation(unittest.TestCase):
             self.assertEqual(refresh.status_code, 200)
             self.assertEqual(refresh.json, {'count': count})
 
+    def test_goods_only_stays_in_shop_even_with_an_old_workshop_link(self):
+        path = self.order('warenverkauf', None, goods_only=True)
+        shop_id = path.rsplit('/', 1)[1]
+        with patch.object(portal.app.blueprints['shop_admin'], 'workshop_orders',
+                          return_value={shop_id: 522}) as lookup:
+            for url in (path, '/admin/shop'):
+                response = self.client.get(url, base_url=PORTAL)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(shop_id, response.text)
+                self.assertNotIn('/admin/auftrag/522', response.text)
+                self.assertNotIn('Werkstattauftrag Nr. 522', response.text)
+            lookup.assert_not_called()
+        self.assert_shop_count(1)
+
     def test_workshop_number_links_to_order_and_a5_label_before_and_after_confirmation(self):
         customer = 'etikettkunde'
         path = self.order(customer, '12:00', tyre_size='225/40 R18 92Y XL')
@@ -140,13 +160,17 @@ class ShopAppointmentConfirmation(unittest.TestCase):
         label = self.client.get(label_path, base_url=PORTAL)
         self.assertEqual(label.status_code, 200)
         self.assertIn('225/40 R18 92Y XL', label.text)
-        self.assertIn('Reifenservice · Wunschtermin', label.text)
+        self.assertEqual(label.text.count('<dt>Wunschtermin</dt>'), 2)
+        self.assertEqual(label.text.count('<p class="service">Reifenmontage</p>'), 2)
+        self.assertEqual(label.text.count('<dd class="end">Offen</dd>'), 2)
         self.assertNotIn('@example.invalid', label.text)
         self.assertEqual(label.text.count('<article>'), 2)
         action, fields = self.form(path)
         self.assertEqual(self.post(action, fields).status_code, 303)
         confirmed = self.client.get(label_path, base_url=PORTAL)
         self.assertIn('12:00', confirmed.text)
+        self.assertEqual(confirmed.text.count('<dt>Planende (Zeitblock)</dt>'), 2)
+        self.assertEqual(confirmed.text.count(' · 13:00'), 2)
         self.assertNotIn('Wunschtermin', confirmed.text)
         slots = [e for e in portal.gebuchte_reifen_kalendereintraege() if e['shop_order_id'] == shop_id]
         self.assertEqual([e['auftrag_id'] for e in slots], [number])

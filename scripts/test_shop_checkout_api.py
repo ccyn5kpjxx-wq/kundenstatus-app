@@ -140,6 +140,8 @@ class CheckoutApiChecks(unittest.TestCase):
         response = self.client.get(path, base_url=self.origin)
         self.assertEqual(response.get_json()['workshop_order']['number'], 582)
         self.workshop_view.assert_called_once_with(self.order_id, customer_id='customer-a')
+        self.workshop_view.side_effect = RuntimeError('unavailable')
+        self.assertNotIn('workshop_order', self.client.get(path, base_url=self.origin).get_json())
         self.workshop_view.reset_mock()
         self.orders.get_order.side_effect = OrderStoreError('order_not_found')
         response = self.client.get(path, base_url=self.origin)

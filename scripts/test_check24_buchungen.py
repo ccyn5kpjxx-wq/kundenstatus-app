@@ -798,13 +798,21 @@ class Check24IntegrationTest(unittest.TestCase):
         result = client.get(path)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.headers["Cache-Control"], "private, no-store")
-        for expected in (f"<strong>{order_id}</strong>", "29.10.2026", "30.10.2026 · 08:00–08:30",
+        for expected in (f"<strong>{order_id}</strong>", "29.10.2026", "30.10.2026 · 08:00", "30.10.2026 · 08:30",
                          "Erika Beispiel", "MOS-AB 123", "185/60 R15", "A5 landscape", "CHECK24 TEST9001"):
             self.assertIn(expected, result.text)
+        head = result.text.split('<header>', 1)[1].split('</header>', 1)[0]
+        for expected in ('Arbeitsbeginn', 'Gebuchtes Ende', 'Reifenmontage für 2 Reifen',
+                         '30.10.2026 · 08:00', '30.10.2026 · 08:30'):
+            self.assertIn(expected, head)
+        self.assertNotIn('29.10.2026', head)
+        self.assertIn(f'/admin/auftrag/{order_id}/ausdrucken', result.text)
         for private in ("07:00", "kundenalias@example.invalid", "45,00", "Provision"):
             self.assertNotIn(private, result.text)
         self.service.reschedule(event, "2026-10-30", "10:00", "10:30", "Abgeglichen")
-        self.assertIn("10:00–10:30", client.get(path).text)
+        changed = client.get(path).text.split('<header>', 1)[1].split('</header>', 1)[0]
+        self.assertIn("30.10.2026 · 10:00", changed)
+        self.assertIn("30.10.2026 · 10:30", changed)
 
     def test_reschedule_updates_order_and_slot_atomically_and_checks_conflicts(self):
         import json

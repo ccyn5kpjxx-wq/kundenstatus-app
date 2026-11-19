@@ -11040,6 +11040,7 @@ def init_db():
     ensure_column(db, "dateien", "versicherung_sichtbar", "INTEGER DEFAULT 0")
     ensure_column(db, "dateien", "sichtbarkeit_geprueft", "INTEGER DEFAULT 0")
     ensure_column(db, "dateien", "dokument_zweck", "TEXT DEFAULT 'pruefen'")
+    ensure_column(db, "dateien", "druck_auswahl", "INTEGER DEFAULT 0")
     ensure_upload_schema(db)
     ensure_column(db, "lead_dateien", "kunden_sichtbar", "INTEGER DEFAULT NULL")
     ensure_column(db, "benachrichtigungen", "kunden_sichtbar", "INTEGER DEFAULT 0")
@@ -46227,12 +46228,15 @@ def plane_shop_montageauftrag(db, auftrag_id, datum, uhrzeit):
 
 def erstelle_shop_montageauftrag(order, snapshot, context):
     """Prüft/erzeugt den Werkstattauftrag innerhalb einer Portal-Transaktion."""
-    from shop_order_store import workshop_mounting_services
+    from shop_order_store import workshop_mounting_services, workshop_service_codes
     from shop_order_receipts import LABELS
 
     order_id = order["id"]
     if order["mode"] != "live" or order["status"] != "paid" or not re.fullmatch(r"sho_[a-f0-9]{32}", order_id):
         raise ValueError("Ein Werkstattauftrag benötigt eine bezahlte Live-Shopbestellung.")
+    booked_services = workshop_service_codes(snapshot)
+    if not booked_services:
+        return None
     db = open_fresh_db()
     try:
         # Derselbe transaktionale Lock schützt auch die Terminbestätigung.
@@ -46243,14 +46247,29 @@ def erstelle_shop_montageauftrag(order, snapshot, context):
 
         mounting = workshop_mounting_services(snapshot)
         local_mounting = bool(mounting) and context.get("workshop_delivery", "collection") == "collection"
-        title = "Reifenmontage" if mounting else "Shopbestellung"
+        order_types = (
+            ("painting", "lackierung", "Lackierauftrag"), ("mounting", "reifenservice", "Reifenmontage"),
+            ("oil_service", "oelwechsel", "Ölservice"), ("installation", "mechanik", "Einbau"),
+            ("care", "fahrzeugpflege", "Fahrzeugaufbereitung"),
+        )
+        work = set.union(*booked_services.values())
+        _, leistungsart, title = next(kind for kind in order_types if kind[0] in work)
         vehicle = clean_text(context.get("vehicle_ref"))
         contact = context["contact"]
         description = ["Bestellte Artikel"]
         for index, line in enumerate(snapshot["lines"]):
             services = list(mounting.get(index, []))
-            services.extend(LABELS[s["code"]] for s in line["services"]
-                            if s["code"] in LABELS and (s["code"] != "mounting" or index not in mounting))
+            options = snapshot["request"][index]["services"]
+            for charge in line["services"]:
+                code = charge["code"]
+                if code not in booked_services.get(index, ()) or (code == "mounting" and index in mounting):
+                    continue
+                label = LABELS[code]
+                if code == "painting" and options.get("paint_color"):
+                    label += " · Farbton " + clean_text(options["paint_color"])
+                if code == "care":
+                    label += " " + {"inside": "innen", "outside": "außen", "complete": "innen und außen"}[options["care"]]
+                services.append(label)
             text = f"{line['quantity']} × {line['name']}"
             if services:
                 text += " · " + ", ".join(services)
@@ -46266,7 +46285,7 @@ def erstelle_shop_montageauftrag(order, snapshot, context):
             wish = order["appointment_preference"]
             intake["shop_montagewunsch"] = {"date": wish["date"], "time": wish["time"]}
         auftrag_id = create_auftrag(
-            quelle="shop", leistungsart="reifenservice" if mounting else "sonstiges",
+            quelle="shop", leistungsart=leistungsart,
             kunde_name=contact["name"], kunde_email=contact["email"], kontakt_telefon=contact.get("phone", ""),
             fahrzeug=vehicle or title, beschreibung="\n".join(description), schadenart=title,
             schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False), kundenkontakt_kanal="telefon", _db=db,
@@ -56873,6 +56892,7 @@ def werkstatt_auftrag(auftrag_id):
     return render_template(
         "werkstatt_auftrag.html",
         auftrag=auftrag,
+        tafel_auftragsdruck=not auftrag.get("angebotsphase") and werkstatt_tafel_auftrag_sichtbar(auftrag),
         tafel_etikett=tafel_etikett_sichtbar(sys.modules[__name__], auftrag),
         bilder=bilder,
         unterlagen=unterlagen,
@@ -60914,6 +60934,8 @@ from werkstatt_mailquellen import register_mail_sources
 assistant_mail_sources = register_mail_sources(sys.modules[__name__])
 from werkstatt_auftrag_ausdruck import register_auftrag_ausdruck
 register_auftrag_ausdruck(sys.modules[__name__])
+from werkstatt_druckquellen import register_druckquellen
+register_druckquellen(sys.modules[__name__])
 from werkstatt_fortschritt_api import register_progress_api, progress_csrf_exempt
 workshop_progress = register_progress_api(sys.modules[__name__])
 from werkstatt_fortschritt import init_schema as init_workshop_progress_schema

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from smoke_test import portal
 from test_shop_order_store import quote
+from shop_order_store import requires_workshop_order
 
 
 class ShopWerkstattauftragTest(TestCase):
@@ -76,12 +77,41 @@ class ShopWerkstattauftragTest(TestCase):
         self.order_id = self.order["id"] = "sho_" + uuid4().hex
         self.snapshot["lines"][0]["services"] = []
         self.snapshot["lines"][0]["destination"] = "customer"
-        job = portal.get_auftrag(self.ensure())
-        self.assertEqual(job["leistungsart"], "sonstiges")
-        self.assertEqual(job["annahme_datum"], "")
-        self.assertNotIn("shop_montagewunsch", job["schaden_aufnahme"])
-        self.assertNotIn("Reifenmontage", job["beschreibung"])
-        self.assertIn("Testreifen", job["beschreibung"])
+        self.assertIsNone(self.ensure())
+        self.assertEqual(portal.shop_montageauftraege([self.order_id]), {})
+
+    def test_only_selected_and_costed_work_creates_a_job(self):
+        line, request = self.snapshot["lines"][0], self.snapshot["request"][0]
+        for options, code, price in (
+                ({}, "required:rdks", 4200), ({"disposal": True}, "disposal", 200),
+                ({}, "painting", 7000), ({"painting": True}, "required:processing", 100),
+                ({"painting": True}, "painting", None)):
+            with self.subTest(options=options, code=code):
+                request["services"] = options
+                line["services"] = [{"code": code, "gross_cent": price}]
+                self.assertFalse(requires_workshop_order(self.snapshot))
+                with patch.object(portal, "open_fresh_db", side_effect=AssertionError("unexpected write")):
+                    self.assertIsNone(self.ensure())
+
+    def test_purchased_work_sets_type_and_describes_product_and_work(self):
+        line, request = self.snapshot["lines"][0], self.snapshot["request"][0]
+        for code, product, name, extra, kind, expected in (
+                ("painting", "body_part", "Kotflügel", {"paint_color": "LY7W"}, "lackierung", "Farbton LY7W"),
+                ("installation", "body_part", "Leuchte", {}, "mechanik", "Einbau"),
+                ("oil_service", "oil", "Motoröl", {}, "oelwechsel", "Ölservice"),
+                ("care", "care_product", "Autopflege", {}, "fahrzeugpflege", "Aufbereitung innen und außen")):
+            with self.subTest(code=code):
+                self.order["id"] = "sho_" + uuid4().hex
+                line["id"] = request["id"] = product + ":sample"
+                line["name"] = name
+                request["services"] = {code: "complete" if code == "care" else True, **extra}
+                line["services"] = [{"code": code, "gross_cent": 9000}]
+                self.assertTrue(requires_workshop_order(self.snapshot))
+                job = portal.get_auftrag(self.ensure())
+                self.assertEqual(job["leistungsart"], kind)
+                self.assertIn(name, job["beschreibung"])
+                self.assertIn(expected, job["beschreibung"])
+                self.assertNotIn("shop_montagewunsch", job["schaden_aufnahme"])
 
     def test_confirmed_before_backfill_uses_existing_time_and_replays_keep_state(self):
         portal.bestaetige_shop_reifentermin(self.order_id, self.day, "11:00", "Test Montage")
@@ -133,6 +163,8 @@ class ShopWerkstattauftragTest(TestCase):
             result = client.get(label)
             self.assertEqual(result.status_code, 200)
             self.assertIn("205/55 R16", result.get_data(as_text=True))
+            self.assertIn(f'/werkstatt/auftrag/{number}/ausdrucken', result.text)
+            self.assertNotIn(f'/admin/auftrag/{number}/ausdrucken', result.text)
             self.assertIn("no-store", result.headers["Cache-Control"])
             self.assertEqual(result.headers["Referrer-Policy"], "no-referrer")
             self.assertNotEqual(client.get(f"/admin/auftrag/{number}/reifenetikett").status_code, 200)

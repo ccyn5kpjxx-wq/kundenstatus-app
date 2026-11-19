@@ -20,7 +20,7 @@ from uuid import UUID, uuid5
 from uuid import uuid4
 
 from shop_buyer import validate_context
-from shop_order_store import _validate_snapshot, _delivery_context, workshop_mounting_services
+from shop_order_store import _validate_snapshot, _delivery_context, requires_workshop_order, workshop_mounting_services
 from werkstatt_mail_identity import FOOTER_TEXT
 
 NAMESPACE = UUID('9325b13f-f90f-45a1-a423-ddcf2086c4fc')
@@ -148,9 +148,14 @@ class ShopOrderReceipts:
             raise ReceiptError('receipt_not_found') from None
 
     def _workshop_order(self, order, snapshot):
-        if self.workshop_order_lookup is None or self.mode != 'live' or order['status'] != 'paid':
+        if (self.workshop_order_lookup is None or self.mode != 'live' or order['status'] != 'paid'
+                or not requires_workshop_order(snapshot)):
             return None
-        linked = self.workshop_order_lookup([order['id']])
+        try:
+            linked = self.workshop_order_lookup([order['id']])
+        except Exception:
+            # A qualifying service can be paid before its workshop number is available.
+            return {'pending': True}
         number = linked.get(order['id'])
         if type(number) is not int or number < 1:
             return {'pending': True}
@@ -242,14 +247,15 @@ class ShopOrderReceipts:
             if shipment['destination'] == 'workshop' and 'workshop_delivery' in context:
                 label += '; ' + WORKSHOP_DELIVERY_LABELS[context['workshop_delivery']]
             lines.append(label + ': ' + _money(shipment['gross_cent']))
-        appointment_note = 'Montage-/Servicetermin vereinbaren wir nach Wareneingang; hier ist kein Termin reserviert.'
-        preference = order.get('appointment_preference')
-        if preference and kind in {'order_received', 'order_confirmed'}:
-            day = datetime.fromisoformat(preference['date']).strftime('%d.%m.%Y')
-            appointment_note = (f"Ihr Wunschtermin für die Reifenmontage ist der {day} um {preference['time']} Uhr. "
-                                "Wir stimmen den Termin mit Ihnen ab, sobald die Reifenlieferung geklärt ist.")
         lines += ['', 'Gesamt inkl. 19 % MwSt.: ' + _money(order['amount_gross_cent'])]
-        if not workshop or (workshop['mounting'] and context.get('workshop_delivery') != 'customer_reshipment'):
+        if (kind in {'order_received', 'order_confirmed'} and requires_workshop_order(snapshot)
+                and context.get('workshop_delivery') != 'customer_reshipment'):
+            appointment_note = 'Montage-/Servicetermin vereinbaren wir nach Wareneingang; hier ist kein Termin reserviert.'
+            preference = order.get('appointment_preference')
+            if preference:
+                day = datetime.fromisoformat(preference['date']).strftime('%d.%m.%Y')
+                appointment_note = (f"Ihr Wunschtermin für die Reifenmontage ist der {day} um {preference['time']} Uhr. "
+                                    "Wir stimmen den Termin mit Ihnen ab, sobald die Reifenlieferung geklärt ist.")
             lines.extend(['', appointment_note])
         lines += ['', 'RECHNUNGSANSCHRIFT']
         for key in ('billing', 'delivery'):

@@ -88,11 +88,11 @@ async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='S
  vm.runInNewContext(source,{window:win,URL,URLSearchParams,Intl,Date,console,FormData});await flush();
  return{nodes,form,calls,stored,redirects,resolveQuote,request:()=>nodes['request-quote'].listeners.click(),submit:async()=>{await form.listeners.submit({preventDefault(){}});await flush();},change:()=>form.listeners.input()};
 }
-async function statusPage(status, technical, workshop){
+async function statusPage(status, technical, workshop, preference){
  const nodes=Object.fromEntries(['close-product','shop-announcement','order-status','order-summary'].map(key=>[key,new Node()]));
  const body=new Node('body'),id='sho_'+'1'.repeat(32);body.dataset={api:'/shop/api/v2',page:'order_status',orderId:id};const calls=[];
  const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:''}),querySelectorAll:()=>[]},localStorage:{getItem:()=>'[]',setItem(){}},location:{},setTimeout(){},setInterval(){},
- fetch:async(url,options)=>{calls.push({url,options});assert.equal(url,'/shop/api/v2/orders/'+id);return{ok:true,text:async()=>JSON.stringify({order:{id,status,amount_gross_cent:89000,mode:workshop?'live':'test'},technical_review:technical,workshop_order:workshop})};}};
+ fetch:async(url,options)=>{calls.push({url,options});assert.equal(url,'/shop/api/v2/orders/'+id);return{ok:true,text:async()=>JSON.stringify({order:{id,status,amount_gross_cent:89000,mode:'live',appointment_preference:preference},technical_review:technical,workshop_order:workshop})};}};
  vm.runInNewContext(source,{window:win,URL,URLSearchParams,Intl,Date,console});await flush();return{nodes,calls};
 }
 (async()=>{
@@ -161,9 +161,13 @@ async function statusPage(status, technical, workshop){
  const mounted=await statusPage('paid',undefined,{number:582,mounting:true,items:[{name:'Winterreifen',quantity:4,services:['Reifenmontage','Altreifenentsorgung']}]});
  assert.ok(walk(mounted.nodes['order-summary']).some(n=>n.textContent==='Montageauftrag Nr. 582'));
  assert.ok(walk(mounted.nodes['order-summary']).some(n=>n.textContent==='4 × Winterreifen (Reifenmontage, Altreifenentsorgung)'));
- const goods=await statusPage('paid',undefined,{number:583,mounting:false,items:[{name:'Felge',quantity:1,services:[]}]});
- assert.ok(walk(goods.nodes['order-summary']).some(n=>n.textContent==='Auftrag Nr. 583'));
- assert.ok(walk(goods.nodes['order-summary']).some(n=>n.textContent==='1 × Felge'));
+ const service=await statusPage('paid',undefined,{number:583,mounting:false,items:[{name:'Felge',quantity:1,services:['Lackierung']}]});
+ assert.ok(walk(service.nodes['order-summary']).some(n=>n.textContent==='Auftrag Nr. 583'));
+ assert.ok(walk(service.nodes['order-summary']).some(n=>n.textContent==='1 × Felge (Lackierung)'));
+ const goods=await statusPage('paid',undefined,undefined,{status:'requested',date:'2026-11-20',time:'10:00'});
+ const goodsSummary=walk(goods.nodes['order-summary']);
+ assert.ok(goodsSummary.some(n=>n.textContent.startsWith('Shop-Bestellnummer: sho_')));
+ assert.equal(goodsSummary.some(n=>/Auftrag|Montagetermin/.test(n.textContent)),false);
  const malformed=await statusPage('authorized',{required:'true',state:'approved'});assert.equal(walk(malformed.nodes['order-summary']).some(n=>n.className==='shop-review-note'),false);
  assert.equal([f,stale,pending,missing,blank,optional,legacy,badReview,badTerms].flatMap(x=>x.calls).some(c=>/\/orders|\/checkout|\/consumer\/acceptance/.test(c.url)),false);
  console.log('Complete-wheel authorization UI checks passed');

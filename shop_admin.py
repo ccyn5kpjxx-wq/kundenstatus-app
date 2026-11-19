@@ -22,12 +22,12 @@ from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, g, has_request_context, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import HTTPException
-from shop_order_store import OrderStore
+from shop_order_store import OrderStore, requires_workshop_order
 from shop_goods_margin import admin_goods_margins
 from shop_supplier_status import supplier_status_by_line
 from shop_supplier_delivery_dates import DATE_TABLE, delivery_dates
 from shop_storage import ShopStorage
-from shop_workshop_queue import HANDLED_TABLE, add_workshop_status, appointment_handling_block, mark_handled, pending_count
+from shop_workshop_queue import HANDLED_TABLE, add_workshop_status, appointment_handling_block, local_mounting_wishes, mark_handled, pending_count
 
 ORDER=re.compile(r'sho_[a-f0-9]{32}')
 WITHDRAWAL=re.compile(r'swd_[a-f0-9]{32}')
@@ -193,8 +193,7 @@ class ShopAdminReader:
                 result[row['order_id']][key]=row['state']
                 if key=='fulfillment':result[row['order_id']]['action']=row['action_state']
         if 'shop_order_appointment_requests_v2' in tables:
-            for row in db.execute('''SELECT order_id, requested_date, strftime('%d.%m.%Y', requested_date) AS day, requested_time
-                FROM shop_order_appointment_requests_v2 WHERE order_id IN ('''+placeholders+')',ids):
+            for row in local_mounting_wishes(db,ids):
                 result[row['order_id']]['appointment']=f"{row['day']}, {row['requested_time']} Uhr"
                 result[row['order_id']]['appointment_day']=row['requested_date']
                 result[row['order_id']]['appointment_time']=row['requested_time']
@@ -549,7 +548,22 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         if not live_orders or not callable(blueprint.workshop_orders):
             return
         try:
-            numbers = blueprint.workshop_orders([order['id'] for order in live_orders])
+            ids = [order['id'] for order in live_orders]
+            # Historic merchandise purchases can still have an archived workshop
+            # reference. Use the customer-approved cart to decide which links fit.
+            placeholders = ','.join('?' for _ in ids)
+            eligible = []
+            by_id = {order['id']: order for order in live_orders}
+            with reader().read() as (db, _):
+                snapshots = db.execute(
+                    f'SELECT id,snapshot_json FROM shop_orders_v2 WHERE id IN ({placeholders})', ids)
+                for row in snapshots:
+                    try:
+                        if requires_workshop_order(json.loads(row['snapshot_json'])):
+                            eligible.append(row['id'])
+                    except (ValueError, TypeError, KeyError):
+                        by_id[row['id']]['workshop_lookup_unavailable'] = True
+            numbers = blueprint.workshop_orders(eligible) if eligible else {}
         except Exception:
             current_app.logger.exception('Werkstattaufträge der Shopbestellungen konnten nicht gelesen werden')
             for order in live_orders:

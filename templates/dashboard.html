@@ -319,7 +319,10 @@
             {% endif %}
           </td>
           <td class="auftrag-action-cell">
-            <a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a>
+            <div class="d-flex flex-wrap gap-1">
+              <a href="{{ url_for('auftrag_detail', auftrag_id=a.id) }}" class="btn btn-soft btn-sm">Öffnen</a>
+              <a href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=a.id) }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener" aria-label="Auftrag {{ a.id }} ausdrucken">Auftrag ausdrucken</a>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -458,7 +461,12 @@
               {% if a['abholtermin'] %}<span class="schedule-pill">{{ a['abholung_label'] }} {{ a['abholtermin'] }}</span>{% endif %}
             </div>
           </td>
-          <td class="auftrag-action-cell"><a href="{{ url_for('auftrag_detail', auftrag_id=a['id']) }}" class="btn btn-soft btn-sm">Öffnen</a></td>
+          <td class="auftrag-action-cell">
+            <div class="d-flex flex-wrap gap-1">
+              <a href="{{ url_for('auftrag_detail', auftrag_id=a.id) }}" class="btn btn-soft btn-sm">Öffnen</a>
+              {% if not a.angebotsphase %}<a href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=a.id) }}" class="btn btn-soft btn-sm" target="_blank" rel="noopener" aria-label="Auftrag {{ a.id }} ausdrucken">Auftrag ausdrucken</a>{% endif %}
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>

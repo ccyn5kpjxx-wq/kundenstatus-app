@@ -96,6 +96,51 @@ def available_appointment_times(day, calendar):
         raise OrderStoreError('appointment_service_unavailable') from None
 
 
+def _priced_workshop_services(line):
+    return {service['code'] for service in line.get('services', [])
+            if isinstance(service, Mapping) and isinstance(service.get('code'), str)
+            and _amount(service.get('gross_cent'), zero=True)}
+
+
+def workshop_service_codes(snapshot):
+    """Return only work selected by the customer and costed on the same quote."""
+    if not isinstance(snapshot, Mapping):
+        return {}
+    lines, requests = snapshot.get('lines'), snapshot.get('request')
+    if not isinstance(lines, list) or not isinstance(requests, list) or len(lines) != len(requests):
+        return {}
+    rows = list(zip(lines, requests))
+    for line, item in rows:
+        if (not isinstance(line, Mapping) or not isinstance(item, Mapping)
+                or not isinstance(line.get('id'), str) or line['id'] != item.get('id')
+                or not isinstance(line.get('services'), list) or not isinstance(item.get('services'), Mapping)
+                or not isinstance(item.get('assembly_group', ''), str)):
+            return {}
+
+    # For complete wheels either component can carry the one installation charge.
+    selected_groups = {item['assembly_group'] for line, item in rows
+                       if item.get('assembly_group') and line.get('destination') == 'workshop'
+                       and item['services'].get('mounting') is True}
+    result = {}
+    for index, (line, item) in enumerate(rows):
+        if line.get('destination') != 'workshop':
+            continue
+        options = item['services']
+        selected = {key for key in ('painting', 'installation', 'oil_service', 'mounting') if options.get(key) is True}
+        if options.get('care') in ('inside', 'outside', 'complete'):
+            selected.add('care')
+        if item.get('assembly_group') in selected_groups:
+            selected.add('mounting')
+        booked = selected & _priced_workshop_services(line)
+        if booked:
+            result[index] = booked
+    return result
+
+
+def requires_workshop_order(snapshot):
+    return bool(workshop_service_codes(snapshot))
+
+
 def workshop_mounting_services(snapshot):
     """Map purchased tyre installation lines to their options by snapshot index."""
     rows = list(zip(snapshot['lines'], snapshot['request']))
@@ -104,14 +149,12 @@ def workshop_mounting_services(snapshot):
         if item['assembly_group']:
             groups.setdefault(item['assembly_group'], []).append((line, item))
 
-    def has_mounting_charge(line):
-        return any(service['code'] == 'mounting' for service in line['services'])
-
     mounted_groups = {
         group for group, members in groups.items()
         if all(line['destination'] == 'workshop' for line, _ in members)
         and any(line['id'].startswith('tyre:') for line, _ in members)
-        and any(has_mounting_charge(line) for line, _ in members)
+        and any(item['services'].get('mounting') is True for _, item in members)
+        and any('mounting' in _priced_workshop_services(line) for line, _ in members)
     }
     result = {}
     for index, (line, item) in enumerate(rows):
@@ -121,7 +164,7 @@ def workshop_mounting_services(snapshot):
             services = ['Komplettradmontage'] if tyre else []
             options = [member['services'] for _, member in groups[group]]
         elif (not group and tyre and line['destination'] == 'workshop'
-                and item['services'].get('mounting') and has_mounting_charge(line)):
+                and item['services'].get('mounting') is True and 'mounting' in _priced_workshop_services(line)):
             services = ['Reifenmontage']
             options = [item['services']]
         else:

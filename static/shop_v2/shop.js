@@ -1809,11 +1809,12 @@
           }
           summary.append(items);
         } else if (workshop?.pending) {
-          summary.append(el('p', 'Ihre Auftragsnummer wird bereitgestellt.'));
+          summary.append(el('p', 'Ihre Werkstatt-Auftragsnummer wird bereitgestellt.'));
         }
         summary.append(el('p', 'Shop-Bestellnummer: ' + id), el('p', money(order.amount_gross_cent), 'shop-summary-total'));
         const preferred = order.appointment_preference;
-        if (preferred?.status === 'requested' && typeof preferred.date === 'string' && typeof preferred.time === 'string') {
+        if ((order.mode !== 'live' || order.status !== 'paid' || workshop) && preferred?.status === 'requested'
+            && typeof preferred.date === 'string' && typeof preferred.time === 'string') {
           const ended = ['cancelled', 'payment_failed'].includes(order.status);
           const ending = ended ? '. Aus diesem Zahlungsvorgang ergibt sich kein bestätigter Montagetermin.' : '. Die Terminbestätigung erfolgt separat durch die Werkstatt.';
           summary.append(el('p', 'Montagetermin angefragt: ' + root.ShopAppointmentPreference.label(preferred) + ending, 'shop-review-note'));

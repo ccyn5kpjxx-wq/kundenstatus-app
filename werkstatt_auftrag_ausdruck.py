@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, make_response, render_template
+from flask import Blueprint, abort, make_response, render_template, send_file
 
 
 _FIELDS = (
@@ -74,9 +74,10 @@ def workshop_sheet(portal, order_id):
         row = db.execute("SELECT " + ", ".join(_FIELDS) + " FROM auftraege WHERE id=?", (order_id,)).fetchone()
     finally:
         db.close()
-    if row is None:
-        return None
-    order = dict(row)
+    return _sheet_data(portal, dict(row)) if row is not None else None
+
+
+def _sheet_data(portal, order):
     try:
         status_id = int(order.get("status") or 0)
     except (TypeError, ValueError):
@@ -120,6 +121,30 @@ def register_auftrag_ausdruck(portal):
     if "auftrag_ausdruck" in portal.app.blueprints:
         return portal.app.blueprints["auftrag_ausdruck"]
     blueprint = Blueprint("auftrag_ausdruck", __name__)
+
+    def auftragsdruck_antwort(auftrag_id, *, tafel=False):
+        from werkstatt_druckpaket import druckpaket
+        pdf = druckpaket(portal, auftrag_id, tafel=tafel)
+        if pdf is None:
+            abort(404)
+        response = send_file(pdf, mimetype="application/pdf", as_attachment=False,
+                             download_name=f"Auftrag-{auftrag_id}.pdf", conditional=False)
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @blueprint.get("/admin/auftrag/<int:auftrag_id>/ausdrucken")
+    @portal.admin_required
+    def auftragsdruck(auftrag_id):
+        return auftragsdruck_antwort(auftrag_id)
+
+    @blueprint.get("/werkstatt/auftrag/<int:auftrag_id>/ausdrucken")
+    def tafel_auftragsdruck(auftrag_id):
+        guard = portal.werkstatt_tafel_guard()
+        if guard:
+            return guard
+        return auftragsdruck_antwort(auftrag_id, tafel=True)
 
     def etikett_antwort(auftrag_id, *, tafel=False):
         from reifen_auftragsetikett import reifenetikett as lade_etikett

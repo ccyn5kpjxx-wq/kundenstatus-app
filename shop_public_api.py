@@ -400,7 +400,6 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
                         result['workshop_order'] = workshop
                 except Exception:
                     current_app.logger.warning('Kundenansicht: Werkstattauftrag momentan nicht abrufbar.')
-                    result['workshop_order'] = {'pending': True}
             if getattr(checkout_service, 'mode', None) == mode and callable(getattr(checkout_service, 'status', None)):
                 retained = checkout_service.status(order_id, customer_id=principal)
                 technical = retained.get('technical_review') if isinstance(retained, dict) else None

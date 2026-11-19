@@ -275,8 +275,6 @@
 
 {% block content %}
 {% set shop_wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch') %}
-<div class="mb-3"><a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag['id']) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag['id'] }}</a>
-{% if auftrag.ist_reifenauftrag or auftrag.quelle == 'shop' %}<a class="btn btn-brand" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>{% endif %}</div>
 <header class="order-focus-header page-card p-4 mb-3">
   {% if auftrag.get('shop_order_id') %}
     <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
@@ -292,6 +290,10 @@
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
     <div><span class="badge mb-2" style="background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</span><div class="small text-muted mb-1">Auftrag {{ auftrag['id'] }} · {{ auftrag['autohaus_name'] or 'Direktkunde' }}</div><h1 class="h2 mb-1">{{ auftrag['fahrzeug'] }}</h1><div>{{ auftrag['kunde_name'] or 'Kunde noch ergänzen' }} <span class="ms-2 order-plate">{{ auftrag['kennzeichen'] or 'Kennzeichen offen' }}</span></div></div>
     <div><span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} p-2">{{ auftrag['status_meta']['label'] }}</span><div class="mt-2 text-end"><a href="{{ detail_back_url }}" class="small">Zur Auftragsliste</a></div></div>
+  </div>
+  <div class="d-flex flex-wrap gap-2 mt-3">
+    {% if not auftrag.angebotsphase %}<a class="btn btn-brand" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>{% endif %}
+    {% if auftrag.ist_reifenauftrag or auftrag.quelle == 'shop' %}<a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>{% endif %}
   </div>
   <div class="order-keyfacts mt-4">
     <div><span>Anlieferung</span><strong>{{ auftrag['annahme_datum'] or 'Noch offen' }}{% if auftrag['annahme_uhrzeit'] %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</strong></div>
@@ -776,6 +778,7 @@
 
 <details class="page-card p-4 mb-4" id="dateifreigaben">
   <summary class="h4 mb-0">Dateien und Sichtbarkeit · {{ alle_dateien|length }} Unterlagen</summary>
+  <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag.id }}</a>
   <p class="text-muted mt-3">Für jede Datei gilt die unten bestätigte Sichtbarkeit. Nicht freigegebene Dateien bleiben intern; eigene Uploads bleiben zunächst für ihren Absender sichtbar.</p>
   {% for d in alle_dateien %}
   <form method="POST" action="{{ url_for('admin_datei_freigaben', datei_id=d['id']) }}" class="border-top py-3">
@@ -1182,7 +1185,7 @@
     </div>
 
     <div class="page-card p-4 mb-4">
-      <h4 class="mb-3">Unterlagen</h4>
+      <h4 class="mb-3" id="auftragsunterlagen">Unterlagen</h4>
       {% if dateien %}
         <div class="d-grid gap-2">
           {% for datei in dateien %}
@@ -1218,6 +1221,17 @@
                 <button type="submit" class="btn btn-outline-danger btn-sm">Löschen</button>
               </form>
             </div>
+            {% set druckstatus = druckquelle_status(datei) if session.get('admin') else '' %}
+            {% if druckstatus %}
+            <form method="post" action="{{ url_for('druckquellen.auswahl', auftrag_id=auftrag.id, datei_id=datei.id) }}" class="mt-2">
+              {{ csrf_field()|safe }}
+              {% if druckstatus in ('automatisch', 'gewaehlt') %}
+              <span class="small me-2">Auftragsoriginal im Ausdruck</span><button type="submit" class="btn btn-soft btn-sm" name="auswahl" value="weglassen">Aus Ausdruck nehmen</button>
+              {% else %}
+              <button type="submit" class="btn btn-soft btn-sm" name="auswahl" value="beilegen">Als Auftragsoriginal beilegen</button>
+              {% endif %}
+            </form>
+            {% endif %}
             {% if datei['notiz'] %}
               <div class="mt-3">
                 <div class="small text-muted">Hinweis {{ 'Versicherung' if datei['quelle'] == 'versicherung' else ('Autohaus' if datei['quelle'] == 'autohaus' else 'Werkstatt') }}</div>
