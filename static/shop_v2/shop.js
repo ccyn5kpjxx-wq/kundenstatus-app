@@ -461,6 +461,45 @@
   const readCart = () => normaliseCart(JSON.parse(root.localStorage.getItem(CART_KEY) || '[]'));
   const partialToken = body.dataset.page === 'warenkorb' ? new URLSearchParams(root.location.search || '').get('auswahl') : null;
   const partial = partialToken !== null;
+  const cartSteps = byId('cart-steps');
+  let cartStep = 1, editingAddress = false, confirmedAddressText = '';
+  function updateStepControls() {
+    if (!cartSteps) return;
+    const busy = checkoutInProgress || addressSaving || quoteBusy;
+    for (const control of cartSteps.querySelectorAll('[data-cart-go]')) {
+      const target = Number(control.dataset.cartGo);
+      control.disabled = busy || target >= cartStep || (target === 2 && !byId('buyer-address'));
+      if (target === cartStep) control.setAttribute('aria-current', 'step');
+      else control.removeAttribute('aria-current');
+    }
+    document.querySelectorAll('[data-cart-back]').forEach(control => { control.disabled = busy; });
+    const saved = byId('saved-address-choice'), form = byId('buyer-address');
+    if (form) {
+      const reuse = addressReady && !editingAddress && body.dataset.quoteEnabled === 'true';
+      form.hidden = cartFlow !== 'checkout' || reuse;
+      saved.hidden = cartFlow !== 'checkout' || !reuse;
+      if (reuse && confirmedAddressText) saved.querySelector('p').textContent = confirmedAddressText;
+      byId('use-saved-address').hidden = !reuse;
+      byId('use-saved-address').disabled = busy || !sourceReady;
+    }
+    const retry = byId('retry-quote');
+    retry.hidden = cartStep !== 3 || Boolean(quote) || quoteBusy || !addressReady || !sourceReady;
+    retry.disabled = busy;
+  }
+  function showCartStep(step, focus = true) {
+    if (!cartSteps) return;
+    cartStep = step;
+    document.querySelectorAll('[data-cart-panel]').forEach(panel => {
+      panel.hidden = Number(panel.dataset.cartPanel) !== step;
+    });
+    const heading = byId('cart-step-title');
+    heading.textContent = ['Ihre Auswahl', 'Rechnung und Lieferung', 'Prüfen und bezahlen'][step - 1];
+    updateStepControls();
+    if (focus) {
+      heading.focus({preventScroll: true});
+      cartSteps.scrollIntoView({block: 'start'});
+    }
+  }
   const mountingEntry = byId('catalog-mounting');
   const appointmentPanel = byId('cart-appointment');
   const appointment = appointmentPanel && root.ShopAppointmentPreference?.create(appointmentPanel, {
@@ -1318,8 +1357,8 @@
         if (mounting.checked) target.services.mounting = true; else delete target.services.mounting;
         saveCart(); await renderCart();
       }
-      if (mounting.checked && appointment && paymentCheckout && !inquiryOnly(product)) {
-        dialog.close(); appointment.focus();
+      if (mounting.checked && appointment && paymentCheckout && cartFlow === 'checkout' && !inquiryOnly(product)) {
+        dialog.close(); showCartStep(2); appointment.focus();
       } else status.textContent = mounting.checked ? 'Montage ausgewählt. Den Termin stimmen wir nach Lieferklärung ab.' : 'Ohne Montage. Die Auswahl löst keine Buchung aus.';
     });
     dialog.setAttribute('aria-label', 'Montage auswählen');
@@ -1417,17 +1456,25 @@
     updateMainlandRequirement(form);
     updateVehicleRequirement(form);
     const deliverySalutation = form?.elements.namedItem('delivery_salutation');
-    if (deliverySalutation) deliverySalutation.required = paymentCheckout && cartNeedsCustomerDelivery(cart);
-    if (form) form.hidden = cartFlow !== 'checkout';
+    if (deliverySalutation) deliverySalutation.required = paymentCheckout && cartNeedsCustomerDelivery(cart, form.elements.namedItem('workshop_delivery')?.value);
+    const workshopDeliveryOptions = byId('workshop-delivery-options');
+    if (workshopDeliveryOptions) workshopDeliveryOptions.hidden = !cart.some(row => !cartNeedsCustomerDelivery([row]));
+    if (form && !cartSteps) form.hidden = cartFlow !== 'checkout';
+    if (cartSteps && cartStep !== 1 && (!cart.length || (allLoaded && cartFlow !== 'checkout'))) showCartStep(1);
     if (cartFlow !== 'checkout') {
       byId('checkout-button').hidden = true; byId('checkout-button').disabled = true;
       if (cartFlow === 'inquiry') byId('checkout-note').textContent = 'Gesamtangebot wird vor Bezahlung bestätigt. Noch keine Bestellung oder Zahlung.';
     }
     if (note) note.textContent = cartFlow === 'inquiry' ? 'Sie können Ihre gesamte Auswahl auch als Angebot anfragen.' : cartFlow === 'checkout' ? 'Nach Ihrer Anschrift sehen Sie den Gesamtpreis mit Versand und gewählten Leistungen.' : cart.length ? 'Die vollständigen Artikelinformationen werden geprüft.' : '';
-    const enterAddress = paymentCheckout && form && !addressReady && buyerSessionReady;
+    const enterAddress = form && (cartSteps || paymentCheckout) && !addressReady && buyerSessionReady;
     primary.textContent = cartFlow === 'inquiry' ? 'Gesamtangebot anfragen' : quoteBlocked ? 'Erneut prüfen' : enterAddress ? (cart.length > 1 ? 'Gemeinsam zur Kasse' : 'Zur Kasse') : 'Gesamtpreis prüfen';
     primary.disabled = checkoutInProgress || addressSaving || quoteBusy || cartFlow === 'unavailable' ||
       (cartFlow === 'inquiry' ? !offerReady || body.dataset.cartRequestUrl !== '/anfrage?anliegen=allgemein&shop_anfrage=1' : body.dataset.quoteEnabled !== 'true' || (!addressReady && !enterAddress) || !sourceReady);
+    if (cartSteps && cartFlow === 'checkout' && form) {
+      primary.textContent = 'Weiter zu Rechnung und Lieferung';
+      primary.disabled = checkoutInProgress || addressSaving || quoteBusy || !sourceReady || (paymentCheckout && !buyerSessionReady);
+    }
+    updateStepControls();
     if (!quote && !quoteBlocked && !quoteBusy) {
       byId('quote-status').textContent = cartFlow === 'inquiry' ? 'Noch keine Bestellung oder Zahlung. Wir bestätigen das vollständige Angebot persönlich.' :
         cartFlow === 'unavailable' ? (cart.length ? 'Bitte die Artikelinformationen laden lassen oder nicht zuordenbare Artikel entfernen.' : '') :
@@ -1674,7 +1721,9 @@
     if (!terms || !/^[a-f0-9]{64}$/.test(terms.pack_hash) || typeof terms.version !== 'string' || !terms.version || terms.version.length > 100 || terms.consumer_only !== true || !terms.texts || Object.keys(documents).some(key => typeof terms.texts[key] !== 'string' || !terms.texts[key] || terms.texts[key].length > 65536)) throw new Error('legal_terms_unavailable');
     const section = el('section', null, 'shop-consumer-review'); section.append(el('h3', 'Vor dem Abschluss'), el('p', 'Vertragsunterlagen · Version ' + terms.version, 'shop-muted'));
     if (typeof terms.before_order_notice === 'string' && terms.before_order_notice.length > 0 && terms.before_order_notice.length <= 4000) section.append(el('p', terms.before_order_notice, 'shop-review-note'));
-    for (const [key, title] of Object.entries(documents)) { const details = el('details'), summary = el('summary', title), text = el('div', terms.texts[key], 'shop-legal-text'); details.append(summary, text); section.append(details); }
+    const documentsList = el('div', null, 'shop-contract-documents');
+    for (const [key, title] of Object.entries(documents)) { const details = el('details'), summary = el('summary', title), text = el('div', terms.texts[key], 'shop-legal-text'); details.append(summary, text); documentsList.append(details); }
+    section.append(documentsList);
     const warranty = el('section', null, 'shop-warranty-notice'), warrantyLink = el('a'), warrantyImage = el('img');
     warrantyLink.href = '/static/recht/reifen-gewaehrleistung-de.jpg'; warrantyLink.target = '_blank'; warrantyLink.rel = 'noopener';
     warrantyLink.setAttribute('aria-label', 'EU-Hinweis zur gesetzlichen Gewährleistung in voller Größe öffnen');
@@ -1686,7 +1735,15 @@
     acceptLabel.append(accept, el('span', 'Ich akzeptiere die AGB und habe Widerrufsbelehrung sowie Liefer- und Leistungshinweise gelesen.'));
     consumerState = {quoteHash: frozenQuote.quote_hash, packHash: terms.pack_hash, consumer, accept};
     const changed = () => { if (consumerState && consumerState.quoteHash === frozenQuote.quote_hash && quote === frozenQuote && !checkoutInProgress) checkout.disabled = !(consumer.checked && accept.checked); };
-    consumer.addEventListener('change', changed); accept.addEventListener('change', changed); section.append(consumerLabel, acceptLabel); byId('quote-review').append(section);
+    consumer.addEventListener('change', changed); accept.addEventListener('change', changed); section.append(consumerLabel, acceptLabel);
+    if (cartSteps) {
+      const jump = button('Zu den Bestätigungen ↓', () => {
+        consumerLabel.scrollIntoView({block: 'center'});
+        consumer.focus({preventScroll: true});
+      }, 'shop-detail-link cart-step-jump');
+      byId('quote-review').append(jump);
+    }
+    byId('quote-review').append(section);
     checkout.hidden = !(body.dataset.orderEnabled === 'true' && body.dataset.checkoutEnabled === 'true'); changed();
     checkout.textContent = frozenQuote.version === 2 ? 'Gesamtbetrag online reservieren' : 'Gesamtpreis bezahlen';
   }
@@ -1738,9 +1795,25 @@
       byId('checkout-note').textContent = 'Es wurde keine Bestellung angelegt. Sie können die Auswahl als Gesamtangebot anfragen oder die Prüfung erneut starten.';
     }
     updateCartAction();
-    review.scrollIntoView?.({block:'start',behavior:'smooth'});
+    if (!cartSteps) review.scrollIntoView?.({block:'start',behavior:'smooth'});
   }
   if (byId('cart-items')) {
+    if (cartSteps) {
+      for (const button of cartSteps.querySelectorAll('[data-cart-go]')) {
+        button.addEventListener('click', () => { if (!button.disabled) showCartStep(Number(button.dataset.cartGo)); });
+      }
+      document.querySelectorAll('[data-cart-back]').forEach(button => {
+        button.addEventListener('click', () => showCartStep(cartStep === 3 && byId('buyer-address') ? 2 : 1));
+      });
+      byId('edit-saved-address')?.addEventListener('click', () => {
+        editingAddress = true;
+        updateStepControls();
+        byId('buyer-address').elements.namedItem('name')?.focus();
+      });
+      byId('use-saved-address')?.addEventListener('click', requestCartQuote);
+      byId('retry-quote').addEventListener('click', requestCartQuote);
+      showCartStep(1, false);
+    }
     function syncStoredCart() {
       if (partial) { currentSeparateCart(); return; }
       try {
@@ -1748,12 +1821,16 @@
         if (JSON.stringify(cart) === JSON.stringify(latest)) return;
         cart = latest; revision++; quoteRequestRun++; quoteBusy = false;
         invalidateQuote(); updateBasketCount(cart); renderCart();
+        if (cartStep !== 1) showCartStep(1);
       } catch (_) { /* Keep the in-memory cart when storage is unavailable. */ }
     }
     root.addEventListener?.('storage', event => { if (event.key === CART_KEY || event.key === null) syncStoredCart(); });
     root.addEventListener?.('pageshow', event => { if (event.persisted) syncStoredCart(); });
     renderCart();
-    if (body.dataset.buyerEnabled === 'true') buyerSession().then(() => renderCart()).catch(error => { byId('address-status').textContent = errorText(error); });
+    if (body.dataset.buyerEnabled === 'true') buyerSession().then(() => renderCart()).catch(error => {
+      byId('address-status').textContent = errorText(error);
+      if (cartSteps) byId('cart-status').textContent = 'Die Bestellsitzung konnte nicht geladen werden. Bitte laden Sie den Warenkorb erneut.';
+    });
     if (byId('buyer-address')) {
       const form = byId('buyer-address');
       let previousDelivery = currentDeliverySignature(form);
@@ -1778,21 +1855,39 @@
         invalidateQuote(); addressReady = false; updateCartAction(); byId('address-status').textContent = 'Anschrift wird geprüft …';
         const submittedRevision = revision;
         try {
-          const result = await requestJSON('/buyer/address', {method: 'PUT', body: JSON.stringify(addressPayload(form))});
+          const payload = addressPayload(form);
+          const result = await requestJSON('/buyer/address', {method: 'PUT', body: JSON.stringify(payload)});
           if (result.address_ready !== true || typeof result.csrf_token !== 'string') throw new Error('invalid_session');
           if (submittedRevision !== revision) { byId('address-status').textContent = 'Die Anschrift wurde während der Prüfung geändert. Bitte erneut bestätigen.'; return; }
           csrf = result.csrf_token; restoreWorkshopDelivery(result); buyerSessionReady = true; addressReady = true; updateVehicleRequirement(form);
+          if (addressReady && cartSteps) {
+            const addressLine = value => [value.recipient, value.street, value.postcode + ' ' + value.city].join(', ');
+            confirmedAddressText = 'Rechnung: ' + addressLine(payload.billing);
+            if (form.elements.namedItem('different_delivery').checked && payload.delivery) confirmedAddressText += '\nLieferung: ' + addressLine(payload.delivery);
+          }
           byId('address-status').textContent = addressReady ? 'Anschrift für diese Bestellung gespeichert.' : 'Bitte das genaue Fahrzeug auswählen und die Anschrift erneut bestätigen.';
           await renderCart();
         } catch (error) { byId('address-status').textContent = errorText(error); return; }
         finally { addressSaving = false; updateCartAction(); }
-        if (paymentCheckout && submittedRevision === revision) await requestCartQuote();
+        if ((paymentCheckout || cartSteps) && submittedRevision === revision) await requestCartQuote();
       });
     }
     async function requestCartQuote() {
       if (!currentSeparateCart()) return;
       if (cartFlow !== 'checkout' || body.dataset.quoteEnabled !== 'true' || !addressReady || !cart.length || !sourceReady || !offerReady || quoteBusy || checkoutInProgress) return;
+      if (cartSteps && appointment) {
+        try { appointment.selected(); }
+        catch (error) {
+          showCartStep(2); appointment.focus(); byId('address-status').textContent = errorText(error); return;
+        }
+      }
       invalidateQuote(); quoteBusy = true; const quoteRun = ++quoteRequestRun;
+      if (cartSteps) {
+        const address = byId('cart-review-address');
+        address.textContent = confirmedAddressText || 'Die in Ihrer Bestellsitzung gespeicherte Anschrift wird verwendet.';
+        address.hidden = false;
+        showCartStep(3);
+      }
       updateCartAction(); byId('quote-status').textContent = 'Gesamtpreis und Lieferwege werden geprüft …';
       const submittedRevision = revision;
       try {
@@ -1810,6 +1905,7 @@
     byId('request-quote').addEventListener('click', () => {
       if (!currentSeparateCart() || byId('request-quote').disabled) return;
       if (cartFlow === 'inquiry') { openOfferRequest(); return; }
+      if (cartSteps && byId('buyer-address')) { showCartStep(2); return; }
       if (!addressReady) {
         const form = byId('buyer-address');
         form.scrollIntoView?.({block: 'start', behavior: 'smooth'});
@@ -1821,12 +1917,13 @@
     byId('checkout-button').addEventListener('click', async () => {
       if (!currentSeparateCart()) return;
       if (cartFlow !== 'checkout' || body.dataset.orderEnabled !== 'true' || body.dataset.checkoutEnabled !== 'true' || body.dataset.consumerEnabled !== 'true' || !quote || !retained || !addressReady || !sourceReady || !offerReady || checkoutInProgress || !consumerState || consumerState.quoteHash !== quote.quote_hash || !consumerState.consumer.checked || !consumerState.accept.checked) return;
-      if (Date.parse(quote.expires_at) <= Date.now() || quote.version === 2 && !reviewQuoteReady(quote, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) { invalidateQuote(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen oder wurde geändert. Bitte den Gesamtpreis erneut prüfen.'; return; }
+      if (Date.parse(quote.expires_at) <= Date.now() || quote.version === 2 && !reviewQuoteReady(quote, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) { invalidateQuote(); updateStepControls(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen oder wurde geändert. Bitte den Gesamtpreis erneut prüfen.'; return; }
       let preference;
       try { preference = appointment?.selected(); }
-      catch (error) { byId('quote-status').textContent = errorText(error); return; }
+      catch (error) { if (cartSteps) { showCartStep(2); appointment?.focus(); } byId('quote-status').textContent = errorText(error); return; }
       appointment?.lock(true);
       const frozenQuote = quote, hash = frozenQuote.quote_hash, submittedRevision = revision, pack = consumerState.packHash; checkoutInProgress = true; byId('checkout-button').disabled = true; byId('quote-status').textContent = 'Ihre geprüfte Auswahl wird übernommen …';
+      updateStepControls();
       let orderId = null;
       try {
         const acceptance = await requestJSON('/consumer/acceptance', {method: 'POST', body: JSON.stringify({quote_hash: hash, pack_hash: pack, terms_accepted: true, consumer: true})});
@@ -1858,6 +1955,7 @@
         if (!orderId && ['invalid_appointment_preference', 'appointment_slot_unavailable', 'appointment_service_unavailable', 'appointment_not_eligible'].includes(error.message)) {
           checkoutInProgress = false; appointment?.lock(false); byId('checkout-button').disabled = false;
           byId('quote-status').textContent = errorText(error);
+          if (cartSteps) { showCartStep(2); byId('address-status').textContent = errorText(error); }
           appointment?.focus(); appointment?.refresh(); return;
         }
         if (!orderId && error.message === 'appointment_preference_conflict') {
@@ -1866,7 +1964,7 @@
           if (typeof priorId === 'string' && /^sho_[a-f0-9]{32}$/.test(priorId)) orderId = priorId;
           else { byId('quote-status').textContent = errorText(error); return; }
         }
-        if (!orderId && ['terms_acceptance_required', 'terms_changed_new_quote_required', 'legal_terms_unavailable', 'consumer_unavailable'].includes(error && error.message)) { invalidateQuote(); checkoutInProgress = false; appointment?.lock(false); byId('quote-status').textContent = errorText(error); return; }
+        if (!orderId && ['terms_acceptance_required', 'terms_changed_new_quote_required', 'legal_terms_unavailable', 'consumer_unavailable'].includes(error && error.message)) { invalidateQuote(); checkoutInProgress = false; appointment?.lock(false); updateStepControls(); byId('quote-status').textContent = errorText(error); return; }
         byId('quote-status').textContent = orderId ? 'Der Zahlungsstatus muss sicher geprüft werden. Bitte keine neue Bestellung starten.' : 'Der Abschluss konnte nicht sicher bestätigt werden. Bitte prüfen Sie den Status vor einem neuen Versuch.';
         if (orderId) { const link = el('a', 'Bestellstatus prüfen'); link.href = root.location.pathname.replace(/\/warenkorb\/?$/, '') + '/orders/' + orderId + '/success'; byId('quote-review').append(link); }
       }
@@ -1958,7 +2056,7 @@
   }
   root.setInterval(() => {
     for (const [node, item] of priceNodes) { if (!node.isConnected) priceNodes.delete(node); else priceChanged(node, item); }
-    if (quote && Date.parse(quote.expires_at) <= Date.now()) { invalidateQuote(); if (byId('quote-status')) byId('quote-status').textContent = 'Das Angebot ist abgelaufen. Bitte den Gesamtpreis erneut prüfen.'; }
+    if (quote && Date.parse(quote.expires_at) <= Date.now()) { invalidateQuote(); updateStepControls(); if (byId('quote-status')) byId('quote-status').textContent = 'Das Angebot ist abgelaufen. Bitte den Gesamtpreis erneut prüfen.'; }
     document.querySelectorAll('[data-subtotal-expires]').forEach(node => { if (Number(node.dataset.subtotalExpires) <= Date.now()) { node.textContent = 'Preise werden aktualisiert'; delete node.dataset.subtotalExpires; } });
   }, 15000);
 })(typeof window !== 'undefined' ? window : globalThis);

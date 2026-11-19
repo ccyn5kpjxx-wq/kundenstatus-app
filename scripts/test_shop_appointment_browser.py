@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from flask import Flask
 
 try:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import expect, sync_playwright
 except ImportError:
     sync_playwright = None
 
@@ -59,7 +59,8 @@ class AppointmentBrowser(unittest.TestCase):
                 "observed_at": now.isoformat(), "expires_at": expiry, "stock_reported": 8,
                 "prices_by_quantity": {str(i): {"quantity": i, "items_gross_cent": 5000*i, "unit_gross_cent": 5000}
                                       for i in range(1, 5)}}}
-        orders, unexpected = [], []
+        orders, unexpected, addresses, quotes = [], [], [], []
+        saved_address = width == 320
         pref = {"date": day, "time": "11:00"}
         times = ["09:00", "11:00"]
         api = "/shop/api/v2"
@@ -84,12 +85,19 @@ class AppointmentBrowser(unittest.TestCase):
             elif path == "/appointment-slots":
                 self.assertIn("datum=" + day, url.query)
                 data = {"zeiten": times}
-            elif path == "/buyer/session":
-                data = {"address_ready": True, "csrf_token": "Test_CSRF_1234567890abcdefgh", "guest": True, "expires_at": expiry}
+            elif path in ("/buyer/session", "/buyer/address"):
+                if path == "/buyer/address":
+                    self.assertEqual(request.method, "PUT")
+                    addresses.append(request.post_data_json)
+                data = {"address_ready": saved_address or bool(addresses), "csrf_token": "Test_CSRF_1234567890abcdefgh",
+                        "guest": True, "expires_at": expiry,
+                        "workshop_delivery": addresses[-1]["workshop_delivery"] if addresses else "collection"}
             elif path == "/cart/quote":
+                quotes.append(request.post_data_json)
                 data = {"quote_retained": True, "quote": {"ready": True, "currency": "eur", "expires_at": expiry,
                     "quote_hash": quote_hash, "total_gross_cent": 7250,
-                    "lines": [{"id": product_id, "name": "Testreifen", "quantity": 1, "items_gross_cent": 5000, "services": []}],
+                    "lines": [{"id": product_id, "name": "Testreifen", "quantity": 1, "items_gross_cent": 5000,
+                               "services": [{"code": "mounting", "gross_cent": 2250}]}],
                     "shipments": [{"destination": "workshop", "gross_cent": 0}]}}
             elif path == "/consumer/terms":
                 data = {"pack_hash": pack, "consumer_only": True, "version": "Test",
@@ -119,6 +127,7 @@ class AppointmentBrowser(unittest.TestCase):
         context.route("**/*", route_request)
         try:
             page.goto("http://localhost/shop/reifen/?montage=1")
+            page.get_by_role("button", name="Nein danke").click()
             self.assertTrue(page.locator("#catalog-mounting").is_checked())
             page.get_by_role("button", name="Artikel ansehen").first.click()
             self.assertTrue(page.locator("#product-dialog [name=mounting]").is_checked())
@@ -126,6 +135,18 @@ class AppointmentBrowser(unittest.TestCase):
             page.get_by_role("button", name="In den Warenkorb").first.click()
             self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('gaertner-shop-v2-selection'))[0].services"), {"mounting": True})
             page.goto("http://localhost/shop/warenkorb/")
+            def assert_step(number):
+                for other in (1, 2, 3):
+                    panel = page.locator(f'[data-cart-panel="{other}"]')
+                    if other == number:
+                        expect(panel).to_be_visible()
+                    else:
+                        expect(panel).to_be_hidden()
+                self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
+
+            assert_step(1)
+            page.locator("#request-quote").click()
+            assert_step(2)
             panel = page.locator("#cart-appointment")
             req = panel.locator("[name=appointment_requested]")
             req.check()
@@ -135,15 +156,61 @@ class AppointmentBrowser(unittest.TestCase):
             self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
             page.reload()
             page.wait_for_function("document.querySelector('[name=appointment_time]').value === '09:00'")
-            self.assertIn("09:00 Uhr", page.locator("#checkout-appointment-note").inner_text())
+            assert_step(1)
             page.locator("#request-quote").click()
+            assert_step(2)
+            self.assertEqual((addresses, quotes, orders), ([], [], []))
+            address = page.locator("#buyer-address")
+            if saved_address:
+                page.locator("#use-saved-address").click()
+            else:
+                submit = address.locator('button[type=submit]')
+                submit.click()
+                assert_step(2)
+                self.assertEqual((addresses, quotes), ([], []))
+                fields = {"name": "Alex Muster", "email": "alex@example.test", "recipient": "Alex Muster",
+                          "street": "Testgasse 1", "postcode": "74821", "city": "Mosbach"}
+                for name, value in fields.items():
+                    address.locator(f'[name="{name}"]').fill(value)
+                address.locator('[name=different_delivery]').check()
+                for name, value in {"delivery_recipient": "Testbetrieb", "delivery_street": "Beispielweg 2",
+                                    "delivery_postcode": "74821", "delivery_city": "Mosbach"}.items():
+                    address.locator(f'[name="{name}"]').fill(value)
+                address.locator('[name=delivery_salutation]').select_option("Firma")
+                page.locator('[data-cart-panel="2"] [data-cart-back]').click()
+                assert_step(1)
+                expect(time_field).to_have_value("09:00")
+                page.locator("#request-quote").click()
+                assert_step(2)
+                expect(address.locator("[name=email]")).to_have_value("alex@example.test")
+                expect(address.locator("[name=delivery_street]")).to_have_value("Beispielweg 2")
+                expect(address.locator("[name=different_delivery]")).to_be_checked()
+                submit.click()
+            assert_step(3)
+            self.assertEqual(len(quotes), 1)
+            if not saved_address:
+                self.assertEqual(addresses[-1]["delivery"]["street"], "Beispielweg 2")
+            self.assertIn("09:00 Uhr", page.locator("#checkout-appointment-note").inner_text())
+            self.assertEqual(orders, [])
             page.locator("#quote-review input[name=accept],#quote-review input[name=consumer]").first.wait_for()
+            page.get_by_role("button", name="Zu den Bestätigungen", exact=False).click()
+            customer_consent = page.locator('#quote-review [name="consumer"]')
+            expect(customer_consent).to_be_focused()
+            expect(customer_consent).not_to_be_checked()
+            expect(page.locator("#checkout-button")).to_be_in_viewport()
             for checkbox in page.locator("#quote-review input[type=checkbox]").all():
                 checkbox.check()
             page.locator("#checkout-button").click()
             page.wait_for_function("document.querySelector('[name=appointment_time]').value === '' && !document.querySelector('[name=appointment_time]').disabled")
+            assert_step(2)
             self.assertEqual(orders[0]["appointment_preference"], {"date": day, "time": "09:00"})
             time_field.select_option("11:00")
+            page.locator("#use-saved-address").click()
+            assert_step(3)
+            page.locator("#quote-review input[type=checkbox]").first.wait_for()
+            for checkbox in page.locator("#quote-review input[type=checkbox]").all():
+                checkbox.check()
+            expect(page.locator("#checkout-button")).to_be_enabled()
             page.locator("#checkout-button").click()
             page.wait_for_url("https://checkout.stripe.com/**")
             self.assertEqual(orders[1]["appointment_preference"], pref)
@@ -151,6 +218,10 @@ class AppointmentBrowser(unittest.TestCase):
             page.goto("http://localhost/shop/orders/" + order_id + "/success")
             page.get_by_text("Montagetermin angefragt", exact=False).wait_for()
             self.assertIn("11:00 Uhr", page.locator("#order-summary").inner_text())
+            page.get_by_role("link", name="Zur Auswahl", exact=True).click()
+            assert_step(1)
+            expect(page.locator("#request-quote")).to_be_disabled()
+            expect(page.locator('[data-cart-go="2"]')).to_be_disabled()
             self.assertEqual(unexpected, [])
         finally:
             context.close()

@@ -142,6 +142,78 @@
 .shop-storefront .shop-service h3 { color: var(--ink); }
 .shop-storefront .shop-service p { color: var(--muted); font-size: 14px; }
 .shop-storefront [hidden] { display: none !important; }
+
+.shop-cart-page #cart-steps { max-width: 740px; scroll-margin-top: 12px; }
+#cart-steps ol {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  list-style: none; margin: 0; padding: 0;
+}
+#cart-steps button {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 46px;
+  background: transparent; border: 0; border-bottom: 2px solid var(--line);
+  padding: 4px 0 8px; color: var(--ink); text-align: left; font: 600 14px/1.2 Arial, sans-serif;
+}
+#cart-steps button:disabled { color: var(--muted); opacity: 1; cursor: default; }
+#cart-steps .cart-step-number {
+  display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px;
+  border: 1px solid currentColor; border-radius: 50%; font-variant-numeric: tabular-nums;
+}
+#cart-steps button[aria-current="step"] { color: var(--accent); border-bottom-color: var(--accent); }
+#cart-steps [aria-current="step"] .cart-step-number { background: var(--accent); color: white; border-color: var(--accent); }
+#cart-steps button:enabled:hover { border-bottom-color: currentColor; }
+.shop-cart-page #cart-step-title { margin: 24px 0 20px; line-height: 1.08; }
+.shop-cart-page .shop-cart-layout { margin: 0; grid-template-areas: "selection summary"; align-items: start; }
+.shop-cart-page .shop-cart-selection { grid-area: selection; min-width: 0; }
+.shop-cart-page .shop-cart-item:first-child { margin-top: 0; }
+.shop-cart-page .shop-summary { grid-area: summary; }
+.shop-cart-page .shop-summary p { margin: 6px 0; }
+.shop-cart-page .shop-cart-details, .shop-cart-page .shop-order-review { max-width: 740px; margin: 0; }
+.shop-cart-page .shop-cart-appointment { margin-top: 0; }
+.shop-cart-page .shop-address, .shop-cart-page .shop-order-review, .shop-cart-page .shop-saved-address {
+  background: white; color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+  margin-top: 0; padding: clamp(14px, 3vw, 26px);
+}
+.shop-cart-page .shop-saved-address p { margin: 0 0 14px; }
+.shop-cart-page .shop-saved-address .shop-detail-link { min-height: 44px; padding-inline: 12px; }
+.shop-cart-page .shop-cart-address-group { margin: 0 0 20px; border: 0; padding: 0; min-inline-size: 0; }
+.shop-cart-page .shop-address legend { font-size: 17px; font-weight: 700; padding: 0; }
+.shop-cart-page .shop-address .shop-filters { margin: 10px 0; }
+.shop-cart-page .shop-cart-address-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.shop-cart-page .cart-field-wide { grid-column: 1 / -1; }
+.shop-cart-page #delivery-fields { padding: 14px; }
+.shop-cart-page #cart-review-address { white-space: pre-line; }
+.shop-cart-page #quote-review .shop-summary-total { margin: 2px 0 8px; }
+.shop-cart-page .cart-step-jump { min-height: 44px; }
+.shop-cart-page .shop-contract-documents { display: grid; gap: 6px; }
+.shop-cart-page .shop-contract-documents details { margin: 0; }
+.shop-cart-page .shop-warranty-notice { margin: 18px 0; padding: 12px; }
+@media (min-width: 760px) {
+  .shop-cart-page .shop-order-review { max-width: 920px; }
+  .shop-cart-page .shop-consumer-review {
+    display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    align-items: start; gap: 10px 24px;
+  }
+  .shop-cart-page .shop-consumer-review > * { grid-column: 1; }
+  .shop-cart-page .shop-consumer-review .shop-warranty-notice {
+    grid-column: 2; grid-row: 1 / span 7; margin: 0;
+  }
+}
+.shop-cart-page .cart-step-back { min-height: 44px; margin-top: 8px; }
+.shop-cart-page p:empty { display: none; }
+@media (max-width: 900px) {
+  .shop-cart-page .shop-cart-layout { grid-template-areas: "summary" "selection"; gap: 16px; }
+}
+@media (max-width: 520px) {
+  .shop-cart-page #cart-step-title { margin: 18px 0 14px; font-size: 34px; }
+  #cart-steps button { font-size: 13px; gap: 5px; }
+  #cart-steps .cart-step-number { width: 20px; height: 20px; }
+  .shop-cart-page .shop-cart-address-grid { grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); }
+  .shop-cart-address-grid label { grid-column: 1 / -1; }
+  .shop-cart-address-grid label:has(input[autocomplete$="postal-code"]),
+  .shop-cart-address-grid label:has(input[autocomplete$="address-level2"]) { grid-column: auto; }
+  .shop-cart-page .shop-address .shop-filters { gap: 9px; }
+  .shop-cart-page .shop-address .shop-filters label { gap: 4px; }
+}
 @media(max-width:1000px) {
   .shop-storefront .tire-search-results { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .shop-storefront .modern-wrap { width: calc(100% - 48px); }

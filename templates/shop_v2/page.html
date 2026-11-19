@@ -139,22 +139,136 @@
   <nav class="shop-pagination" aria-label="Katalogseiten"><button id="previous-page" class="shop-button shop-button-light" type="button" disabled>← Zurück</button><span id="page-label">Seite 1</span><button id="next-page" class="shop-button shop-button-light" type="button" disabled>Weiter →</button></nav>
 </section>
 {% elif page_key == 'warenkorb' %}
-<section class="modern-wrap shop-section"><p class="shop-eyebrow">Ihr Warenkorb</p><h1>{{ title }}</h1><p>{{ description }}</p><div class="shop-cart-layout"><div><div id="cart-items"></div><p id="cart-status" role="status" aria-live="polite"></p>
-{% if buyer_enabled and quote_enabled and order_enabled and checkout_enabled and consumer_enabled %}
-<fieldset id="cart-appointment" class="shop-cart-appointment" hidden>
-  <legend>Montagetermin in Mosbach</legend>
-  <label class="shop-checkbox"><input name="appointment_requested" type="checkbox"> Terminwunsch mit der Bestellung übermitteln</label>
-  <p class="shop-muted">Wir bestätigen den Termin, sobald die Reifenlieferung geklärt ist. Sie können die Montage auch ohne Terminwunsch bestellen.</p>
-  <div class="shop-appointment-fields" data-appointment-fields hidden>
-    <label>Wunschdatum<input type="date" name="appointment_date"></label>
-    <label>Freie Uhrzeit<select name="appointment_time" disabled><option value="">Uhrzeit wählen</option></select></label>
-    <button type="button" class="shop-detail-link" data-appointment-retry hidden>Freie Zeiten erneut prüfen</button>
+<section class="modern-wrap shop-section shop-cart-page" aria-labelledby="cart-step-title">
+  <nav id="cart-steps" aria-label="Bestellschritte">
+    <ol>
+      {% for label in ['Auswahl', 'Lieferdaten', 'Abschluss'] %}
+      <li>
+        <button type="button" data-cart-go="{{ loop.index }}" {% if loop.first %}aria-current="step"{% else %}disabled{% endif %}>
+          <span class="cart-step-number">{{ loop.index }}</span><span>{{ label }}</span>
+        </button>
+      </li>
+      {% endfor %}
+    </ol>
+  </nav>
+  <h1 id="cart-step-title" tabindex="-1">Ihre Auswahl</h1>
+
+  <div data-cart-panel="1" class="shop-cart-layout">
+    <aside class="shop-summary" aria-label="Preisübersicht">
+      <div id="cart-summary"></div>
+      <p id="cart-workflow-note" class="shop-muted" role="status"></p>
+      <section id="cart-separate" aria-label="Bestellbare Artikel" hidden></section>
+      <button id="request-quote" class="shop-button" type="button" disabled>Weiter zu Rechnung und Lieferung</button>
+    </aside>
+    <div class="shop-cart-selection">
+      <div id="cart-items"></div>
+      <p id="cart-status" role="status"></p>
+    </div>
   </div>
-  <p role="status" aria-live="polite" class="shop-muted"></p>
-</fieldset>
-{% endif %}
-{% if buyer_enabled %}<form id="buyer-address" class="shop-address" hidden><h2>Rechnung und Lieferung</h2><p>Die Daten werden für diese Bestellung geschützt in Ihrer Sitzung gespeichert.</p><div class="shop-filters"><label>Name<input name="name" autocomplete="name" required maxlength="100"></label><label>E-Mail<input name="email" type="email" autocomplete="email" required maxlength="200"></label><label>Telefon (optional)<input name="phone" autocomplete="tel" maxlength="40"></label><label>Empfänger / Firma<input name="recipient" autocomplete="organization" required maxlength="100"></label><label>Straße und Hausnummer<input name="street" autocomplete="street-address" required maxlength="150"></label><label>Postleitzahl<input name="postcode" autocomplete="postal-code" pattern="[0-9]{5}" maxlength="5" required></label><label>Ort<input name="city" autocomplete="address-level2" required maxlength="100"></label></div><p>Lieferland: Deutschland. Keine Packstation oder Postfach.</p><div class="shop-filters"><label>Anrede für die Lieferung<select name="delivery_salutation" autocomplete="off"><option value="">Bitte auswählen</option><option value="Herr">Herr</option><option value="Frau">Frau</option><option value="Firma">Firma</option><option value="personal_offer">Ohne Anrede – persönliches Versandangebot</option></select><small class="shop-muted">Für die Onlinezahlung mit Direktversand wählen Sie bitte Herr, Frau oder Firma.</small></label></div><label class="shop-checkbox"><input type="checkbox" name="different_delivery"> Abweichende Lieferanschrift</label><fieldset id="delivery-fields" hidden disabled><legend>Lieferanschrift</legend><div class="shop-filters"><label>Empfänger<input name="delivery_recipient" maxlength="100" required></label><label>Straße und Hausnummer<input name="delivery_street" maxlength="150" required></label><label>Postleitzahl<input name="delivery_postcode" pattern="[0-9]{5}" maxlength="5" required></label><label>Ort<input name="delivery_city" maxlength="100" required></label></div></fieldset><div class="shop-filters"><label>Ware nach Werkstattleistung<select name="workshop_delivery"><option value="collection" selected>Abholen</option><option value="customer_reshipment">An Lieferadresse weitersenden (2 Versandwege)</option></select><small class="shop-muted">Gilt für Artikel, die für Montage oder Lackierung zur Werkstatt geliefert werden.</small></label></div>{% if mainland_delivery_enabled %}<div id="mainland-delivery-confirmation" hidden><label class="shop-checkbox"><input type="checkbox" name="delivery_mainland" disabled> Meine Lieferadresse liegt auf dem deutschen Festland (keine Inselzustellung).</label><p class="shop-muted">Für Inselzustellung bestätigen wir Versandkosten und Lieferbarkeit in einem persönlichen Angebot.</p></div>{% endif %}{% if deferred_complete_wheels_enabled %}<div id="complete-wheel-vehicle" hidden><div class="shop-filters"><label>Fahrzeug für die technische Prüfung<input name="vehicle_ref" type="text" minlength="3" maxlength="200" autocomplete="off"></label></div><p class="shop-muted">Bitte Marke, Modell und Baujahr oder HSN/TSN angeben. Fahrzeugpassung und Gutachten prüfen wir vor der Abbuchung.</p></div>{% endif %}{% if parts_direct_enabled %}<div id="parts-vehicle-choice" hidden><div class="shop-filters"><label>Genaues Fahrzeug für Ihre Ersatzteile<select name="parts_vehicle_ref" disabled><option value="">Fahrzeug und Motorisierung auswählen</option>{% for vehicle in parts_vehicle_options %}<option value="{{ vehicle.vehicle_ref }}">{{ vehicle.label }}</option>{% endfor %}</select></label></div><p class="shop-muted">Motorisierung, Bauzeit und HSN/TSN vergleichen. Die genaue Zuordnung prüfen wir für jeden gewählten Artikel.</p>{% if not parts_vehicle_options %}<p class="shop-muted">Aktuell ist keine bestätigte Fahrzeugauswahl verfügbar. Bitte ein persönliches Angebot anfragen.</p>{% endif %}</div>{% endif %}<button type="submit" class="shop-button">{% if order_enabled and checkout_enabled and consumer_enabled and quote_enabled %}Anschrift bestätigen und Gesamtpreis sehen{% else %}Anschrift übernehmen{% endif %}</button><p id="address-status" role="status"></p></form>{% endif %}
-</div><aside class="shop-summary"><p class="shop-eyebrow">Alles im Blick</p><h2>Ihre Zusammenstellung.</h2><div id="cart-summary"></div><p class="shop-muted">Artikel mit Montage oder Lackierung gehen zunächst an unsere Werkstatt. Bei Abholung in Mosbach können Sie einen Montagetermin anfragen. Versandmöglichkeiten prüfen wir je Artikel.</p><p id="cart-workflow-note" class="shop-muted" role="status" aria-live="polite"></p><section id="cart-separate" aria-label="Bestellbare Artikel" hidden></section><button id="request-quote" class="shop-button" type="button" disabled>Gesamtpreis prüfen</button><p id="quote-status" role="status"></p></aside></div><section class="shop-order-review" aria-label="Gesamtangebot und Vertragsunterlagen"><div id="quote-review"></div><p id="checkout-appointment-note" class="shop-muted" hidden></p><button id="checkout-button" class="shop-button" type="button" hidden>Weiter zur sicheren Zahlung</button><p class="shop-muted" id="checkout-note">Ein Gesamtpreis entsteht erst mit bestätigten Service- und Versandkosten. Ihre Auswahl allein löst keine Bestellung aus.</p></section></section>
+
+  <div data-cart-panel="2" class="shop-cart-details" hidden>
+    {% if buyer_enabled and quote_enabled and order_enabled and checkout_enabled and consumer_enabled %}
+    <fieldset id="cart-appointment" class="shop-cart-appointment" hidden>
+      <legend>Montagetermin in Mosbach</legend>
+      <label class="shop-checkbox"><input name="appointment_requested" type="checkbox"> Terminwunsch mit der Bestellung übermitteln</label>
+      <p class="shop-muted">Wir bestätigen Ihren Wunschtermin, sobald die Reifenlieferung geklärt ist.</p>
+      <div class="shop-appointment-fields" data-appointment-fields hidden>
+        <label>Wunschdatum<input type="date" name="appointment_date"></label>
+        <label>Freie Uhrzeit<select name="appointment_time" disabled><option value="">Uhrzeit wählen</option></select></label>
+        <button type="button" class="shop-detail-link" data-appointment-retry hidden>Freie Zeiten erneut prüfen</button>
+      </div>
+      <p role="status" class="shop-muted"></p>
+    </fieldset>
+    {% endif %}
+    {% if buyer_enabled %}
+    <div id="saved-address-choice" class="shop-saved-address" hidden>
+      <p>In Ihrer Sitzung ist bereits eine bestätigte Anschrift hinterlegt.</p>
+      <button id="use-saved-address" class="shop-button" type="button">Mit gespeicherter Anschrift weiter</button>
+      <button id="edit-saved-address" class="shop-detail-link" type="button">Andere Anschrift verwenden</button>
+    </div>
+    <form id="buyer-address" class="shop-address" hidden>
+      <fieldset class="shop-cart-address-group">
+        <legend>Rechnungsanschrift</legend>
+        <div class="shop-filters shop-cart-address-grid">
+          <label>Name<input name="name" autocomplete="name" required maxlength="100"></label>
+          <label>E-Mail<input name="email" type="email" autocomplete="email" required maxlength="200"></label>
+          <label>Telefon (optional)<input name="phone" type="tel" autocomplete="tel" maxlength="40"></label>
+          <label>Empfänger / Firma<input name="recipient" autocomplete="organization" required maxlength="100"></label>
+          <label class="cart-field-wide">Straße und Hausnummer<input name="street" autocomplete="street-address" required maxlength="150"></label>
+          <label>Postleitzahl<input name="postcode" autocomplete="postal-code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required></label>
+          <label>Ort<input name="city" autocomplete="address-level2" required maxlength="100"></label>
+        </div>
+      </fieldset>
+      <fieldset class="shop-cart-address-group">
+        <legend>Lieferung</legend>
+        <p class="shop-muted">Wir liefern innerhalb Deutschlands an Straßenadressen.</p>
+        <div class="shop-filters">
+          <label>Anrede für die Lieferung
+            <select name="delivery_salutation" autocomplete="off">
+              <option value="">Bitte auswählen</option><option value="Herr">Herr</option><option value="Frau">Frau</option>
+              <option value="Firma">Firma</option><option value="personal_offer">Ohne Anrede – persönliches Versandangebot</option>
+            </select>
+          </label>
+        </div>
+        <label class="shop-checkbox"><input type="checkbox" name="different_delivery"> Abweichende Lieferanschrift</label>
+        <fieldset id="delivery-fields" hidden disabled>
+          <legend>Lieferanschrift</legend>
+          <div class="shop-filters shop-cart-address-grid">
+            <label>Empfänger<input name="delivery_recipient" autocomplete="shipping name" maxlength="100" required></label>
+            <label>Straße und Hausnummer<input name="delivery_street" autocomplete="shipping street-address" maxlength="150" required></label>
+            <label>Postleitzahl<input name="delivery_postcode" autocomplete="shipping postal-code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" required></label>
+            <label>Ort<input name="delivery_city" autocomplete="shipping address-level2" maxlength="100" required></label>
+          </div>
+        </fieldset>
+        <div class="shop-filters" id="workshop-delivery-options">
+          <label>Ware nach Werkstattleistung
+            <select name="workshop_delivery"><option value="collection" selected>Abholen</option><option value="customer_reshipment">An Lieferadresse weitersenden (2 Versandwege)</option></select>
+            <small class="shop-muted">Für Artikel, die zur Montage oder Lackierung an unsere Werkstatt gehen.</small>
+          </label>
+        </div>
+        {% if mainland_delivery_enabled %}
+        <div id="mainland-delivery-confirmation" hidden>
+          <label class="shop-checkbox"><input type="checkbox" name="delivery_mainland" disabled> Meine Lieferadresse liegt auf dem deutschen Festland (keine Inselzustellung).</label>
+          <p class="shop-muted">Für Inselzustellung bestätigen wir Versandkosten und Lieferbarkeit in einem persönlichen Angebot.</p>
+        </div>
+        {% endif %}
+      </fieldset>
+      {% if deferred_complete_wheels_enabled %}
+      <div id="complete-wheel-vehicle" hidden>
+        <div class="shop-filters"><label>Fahrzeug für die technische Prüfung<input name="vehicle_ref" type="text" minlength="3" maxlength="200" autocomplete="off"></label></div>
+        <p class="shop-muted">Bitte Marke, Modell und Baujahr oder HSN/TSN angeben. Fahrzeugpassung und Gutachten prüfen wir vor der Abbuchung.</p>
+      </div>
+      {% endif %}
+      {% if parts_direct_enabled %}
+      <div id="parts-vehicle-choice" hidden>
+        <div class="shop-filters"><label>Genaues Fahrzeug für Ihre Ersatzteile
+          <select name="parts_vehicle_ref" disabled>
+            <option value="">Fahrzeug und Motorisierung auswählen</option>
+            {% for vehicle in parts_vehicle_options %}<option value="{{ vehicle.vehicle_ref }}">{{ vehicle.label }}</option>{% endfor %}
+          </select>
+        </label></div>
+        <p class="shop-muted">Motorisierung, Bauzeit und HSN/TSN vergleichen. Die genaue Zuordnung prüfen wir für jeden gewählten Artikel.</p>
+        {% if not parts_vehicle_options %}<p class="shop-muted">Aktuell ist keine bestätigte Fahrzeugauswahl verfügbar. Bitte ein persönliches Angebot anfragen.</p>{% endif %}
+      </div>
+      {% endif %}
+      <button type="submit" class="shop-button">{% if quote_enabled %}Weiter zur Prüfung{% else %}Anschrift übernehmen{% endif %}</button>
+    </form>
+    <p id="address-status" role="status"></p>
+    {% endif %}
+    <button type="button" class="shop-detail-link cart-step-back" data-cart-back>← Zurück zur Auswahl</button>
+  </div>
+
+  <section data-cart-panel="3" class="shop-order-review" aria-label="Bestellübersicht" hidden>
+    <p id="quote-status" role="status"></p>
+    <p id="cart-review-address" class="shop-muted" hidden></p>
+    <div id="quote-review"></div>
+    <p id="checkout-appointment-note" class="shop-muted" hidden></p>
+    <p id="checkout-note" class="shop-muted">Ihr Gesamtpreis enthält die bestätigten Service- und Versandkosten.</p>
+    <button id="retry-quote" class="shop-button shop-button-light" type="button" hidden>Gesamtpreis erneut prüfen</button>
+    <button id="checkout-button" class="shop-button" type="button" hidden>Weiter zur sicheren Zahlung</button>
+    <div><button type="button" class="shop-detail-link cart-step-back" data-cart-back>← Zurück</button></div>
+  </section>
+</section>
 {% elif page_key == 'service' %}
 <section id="services" class="modern-wrap shop-section">
   <p class="shop-eyebrow">Vor Ort in Mosbach</p><h2>Welche Leistung wünschen Sie?</h2>
