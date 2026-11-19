@@ -49,6 +49,24 @@ def _card_authorization_quote(quote):
     return quote.get('deposit_method') == 'card_authorization_at_booking'
 
 
+def is_onsite_quote(quote):
+    return quote.get('payment_method') == 'onsite' and quote.get('deposit_method') == 'pay_at_pickup'
+
+
+def validate_onsite_quote(quote):
+    """Verify the amounts which must be collected at handover, never by Stripe."""
+    cents = ('amount_cents', 'rental_cents', 'daily_cents', 'deposit_cents',
+             'deposit_authorized_cents', 'deposit_charged_cents')
+    if (not is_onsite_quote(quote) or any(type(quote.get(key)) is not int for key in cents)
+            or type(quote.get('days')) is not int or not 1 <= quote['days'] <= 30
+            or quote['daily_cents'] <= 0 or quote['rental_cents'] != quote['daily_cents'] * quote['days']
+            or quote['deposit_cents'] != 50000 or quote['amount_cents'] != 0
+            or quote['deposit_authorized_cents'] != 0 or quote['deposit_charged_cents'] != 0
+            or quote.get('checkout_deposit') is not False
+            or any(key in quote for key in ('deposit_timing', 'deposit_authorization_mode', 'long_rental_deposit_policy'))):
+        raise ValueError('Bei Vor-Ort-Zahlung sind Mietpreis und 500 EUR Kaution bei Abholung fällig.')
+
+
 def is_long_rental_paid_deposit(quote):
     return (quote.get('long_rental_deposit_policy') == LONG_RENTAL_DEPOSIT_POLICY
             and quote.get('deposit_method') == LONG_RENTAL_DEPOSIT_METHOD)
@@ -237,7 +255,12 @@ class SharedCheckout:
         name = self.p.clean_text(customer.get('name'))
         if not name or not isinstance(request_key, str) or not 16 <= len(request_key) <= 200:
             raise ValueError('Kunde oder Idempotenzreferenz fehlt.')
-        if (type(quote.get('amount_cents')) is not int or quote['amount_cents'] <= 0
+        onsite = quote.get('payment_method') == 'onsite' or quote.get('deposit_method') == 'pay_at_pickup'
+        if onsite:
+            validate_onsite_quote(quote)
+            if quote.get('slot_policy') != 'db_open_slots_v1':
+                raise ValueError('Vor-Ort-Buchungen benötigen freigegebene Abhol- und Rückgabetermine.')
+        if (type(quote.get('amount_cents')) is not int or (not onsite and quote['amount_cents'] <= 0)
                 or quote.get('currency') != 'eur' or not quote.get('rules_version')):
             raise ValueError('Verbindlicher serverseitiger Preis und Regelversion erforderlich.')
         if 'deposit_timing' in quote and not deferred_deposit_quote(quote):
@@ -254,7 +277,7 @@ class SharedCheckout:
             raise ValueError('Mieten über fünf Tage benötigen eine bestätigte verlängerte Kreditkartenautorisierung; höchstens 28 Miettage.')
         payload = json.dumps({'customer': {'name': name, 'telefon': customer.get('telefon', ''),
                             'email': customer.get('email', '')}, 'quote': quote}, sort_keys=True)
-        if _card_authorization_quote(quote) or is_long_rental_paid_deposit(quote):
+        if onsite or _card_authorization_quote(quote) or is_long_rental_paid_deposit(quote):
             if (type(quote.get('rental_cents')) is not int or quote['rental_cents'] <= 0
                     or (_card_authorization_quote(quote) and (
                         quote['amount_cents'] != quote['rental_cents']
@@ -283,7 +306,23 @@ class SharedCheckout:
                 (id,request_key,mietfahrzeug_id,start_datum,end_datum,payload,fingerprint,status,expires_at)
                 VALUES (?,?,?,?,?,?,?,'pending',?)''',
                 (hold_id,request_key,int(vehicle_id),start.isoformat(),end.isoformat(),payload,fingerprint,int(time.time())+2100))
+            if onsite:
+                # Commit both the confirmed booking and its inventory allocation together.
+                # The transient pending state cannot be observed by another transaction.
+                rental_id = self._insert_rental(db, vehicle_id, start, end, name, customer,
+                                               'MOS Vor-Ort-Zahlung ' + hold_id)
+                db.execute("""UPDATE miet_checkout_holds SET status='confirmed',mietvorgang_id=?,
+                              expires_at=0 WHERE id=?""", (rental_id, hold_id))
             return dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
+
+    def _insert_rental(self, db, vehicle_id, start, end, name, customer, note):
+        now = self.p.now_str()
+        return db.execute('''INSERT INTO mietvorgaenge
+            (mietfahrzeug_id,auftrag_id,kunde_name,kunde_telefon,kunde_email,whatsapp_erlaubt,
+             start_datum,end_datum,rueckgabe_datum,status,notiz,erstellt_am,geaendert_am)
+            VALUES (?,0,?,?,?,0,?,?,'','aktiv',?,?,?)''',
+            (vehicle_id, name, customer.get('telefon', ''), customer.get('email', ''),
+             start.strftime(self.p.DATE_FMT), end.strftime(self.p.DATE_FMT), note, now, now)).lastrowid
 
     def _deposit_record(self, hold_id):
         db = self.p.get_db()
@@ -940,6 +979,8 @@ class SharedCheckout:
 
     def validate(self, h, session):
         q = json.loads(h['payload'])['quote']
+        if is_onsite_quote(q):
+            raise ValueError('Für diese Vor-Ort-Buchung gibt es keine Onlinezahlung.')
         expected_live = self.gateway.livemode
         if (session.get('livemode') is not expected_live or session.get('mode') != 'payment'
             or not str(session.get('id','')).startswith('cs_live_' if expected_live else 'cs_test_')
@@ -1032,15 +1073,8 @@ class SharedCheckout:
                     db.execute("UPDATE miet_checkout_holds SET status='review',grund=? WHERE id=?",(reason,h['id']))
                     return None
                 c = json.loads(h['payload'])['customer']
-                now = self.p.now_str()
-                cur = db.execute('''INSERT INTO mietvorgaenge
-                    (mietfahrzeug_id,auftrag_id,kunde_name,kunde_telefon,kunde_email,whatsapp_erlaubt,
-                     start_datum,end_datum,rueckgabe_datum,status,notiz,erstellt_am,geaendert_am)
-                    VALUES (?,0,?,?,?,0,?,?,'','aktiv',?,?,?)''',
-                    (h['mietfahrzeug_id'],c['name'],c['telefon'],c['email'],start.strftime(self.p.DATE_FMT),
-                     end.strftime(self.p.DATE_FMT),
-                     ('Stripe TEST Checkout ' if q.get('test_only') else 'Stripe Checkout ')+h['id'],now,now))
-                rental_id = cur.lastrowid
+                note = ('Stripe TEST Checkout ' if q.get('test_only') else 'Stripe Checkout ') + h['id']
+                rental_id = self._insert_rental(db, h['mietfahrzeug_id'], start, end, c['name'], c, note)
                 db.execute("UPDATE miet_checkout_holds SET status='confirmed',payment_intent=?,mietvorgang_id=? WHERE id=?",(pi,rental_id,h['id']))
                 return rental_id
             if session.get('status') == 'expired' and session.get('payment_status') == 'unpaid' and h['status'] != 'review':

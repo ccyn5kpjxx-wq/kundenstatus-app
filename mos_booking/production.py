@@ -190,6 +190,9 @@ class StripeLiveGateway(StripeTestGateway):
 
 
 def init_refund_schema(db):
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_onsite_fee_adjustments (
+        id TEXT PRIMARY KEY, hold_id TEXT NOT NULL, amount_cents BIGINT NOT NULL,
+        recorded_at TEXT NOT NULL, reason TEXT NOT NULL)''')
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_cancellations (
         id TEXT PRIMARY KEY, requested_at TEXT NOT NULL, fee_cents BIGINT NOT NULL,
         credit_cents BIGINT NOT NULL DEFAULT 0, reason TEXT NOT NULL)''')
@@ -351,13 +354,22 @@ class RefundLedger:
                operator_name='',review_note=''):
         now=requested_at or datetime.now(timezone.utc)
         h=self.s.read(hold_id);q=json.loads(h['payload'])['quote']
-        if not h['mietvorgang_id'] or not h['payment_intent']:raise ValueError('Keine bestätigte bezahlte Buchung.')
+        from mietwagen_checkout import is_onsite_quote, validate_onsite_quote
+        onsite=is_onsite_quote(q)
+        if onsite:
+            validate_onsite_quote(q)
+        if not h['mietvorgang_id'] or (not onsite and not h['payment_intent']):raise ValueError('Keine bestätigte Buchung.')
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
             if db.execute('SELECT hold_id FROM miet_checkout_handovers WHERE hold_id=?',
                           (hold_id,)).fetchone():
                 raise ValueError('Schlüsselübergabe ist dokumentiert; Storno nur nach manueller Abrechnung.')
             old=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
-            if old:return 'cancel-'+hold_id
+            if old:return None if onsite else 'cancel-'+hold_id
+            if onsite:
+                current=db.execute('SELECT status,session_id,payment_intent FROM miet_checkout_holds WHERE id=?',(hold_id,)).fetchone()
+                collected=db.execute('SELECT hold_id FROM miet_checkout_onsite_payments WHERE hold_id=?',(hold_id,)).fetchone()
+                if current['status']!='confirmed' or current['session_id'] or current['payment_intent'] or collected:
+                    raise ValueError('Zahlung oder Buchungsstatus erfordert eine manuelle Prüfung.')
             start=datetime.fromisoformat(q['start_slot'])
             if no_show:
                 if not admin or now.tzinfo is None or start.tzinfo is None:
@@ -388,18 +400,35 @@ class RefundLedger:
                     if no_show else 'Stornierung')
             db.execute('INSERT INTO miet_checkout_cancellations (id,requested_at,fee_cents,reason) VALUES (?,?,?,?)',(hold_id,now.isoformat(),fee,reason))
             db.execute("UPDATE mietvorgaenge SET status='storniert',geaendert_am=? WHERE id=?",(self.s.p.now_str(),h['mietvorgang_id']))
+            if onsite:
+                db.execute("UPDATE miet_checkout_holds SET status='released',grund='onsite_cancelled' WHERE id=?",(hold_id,))
+                return None  # No money was collected; any fee is settled separately.
             return self._enqueue(db,h,q['amount_cents']-fee,'cancellation',reason,'cancel-'+hold_id)
 
     def credit(self,hold_id,credit_cents,reason,request_id):
         if not reason.strip():raise ValueError('Begründung für Minderung fehlt.')
         h=self.s.read(hold_id)
         with self.s.locked(h['mietfahrzeug_id']) as (db,_):
+            from mietwagen_checkout import is_onsite_quote
+            onsite=is_onsite_quote(json.loads(h['payload'])['quote'])
+            if onsite:
+                adjustment=db.execute('SELECT * FROM miet_checkout_onsite_fee_adjustments WHERE id=?',(request_id,)).fetchone()
+                if adjustment:
+                    if adjustment['hold_id']!=hold_id or adjustment['amount_cents']!=credit_cents:
+                        raise ValueError('Minderungsreferenz mit abweichendem Inhalt.')
+                    return None
             old=db.execute('SELECT id FROM miet_checkout_refunds WHERE id=?',(request_id,)).fetchone()
             if old:return self._enqueue(db,h,credit_cents,'cancellation_credit',reason,request_id)
             c=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
             if not c or type(credit_cents) is not int or credit_cents<=0 or c['credit_cents']+credit_cents>c['fee_cents']:
                 raise ValueError('Minderung übersteigt die verbleibende Stornogebühr.')
-            rid=self._enqueue(db,h,credit_cents,'cancellation_credit',reason,request_id)
+            if onsite:
+                db.execute('''INSERT INTO miet_checkout_onsite_fee_adjustments
+                    (id,hold_id,amount_cents,recorded_at,reason) VALUES (?,?,?,?,?)''',
+                    (request_id,hold_id,credit_cents,datetime.now(timezone.utc).isoformat(),reason))
+                rid=None
+            else:
+                rid=self._enqueue(db,h,credit_cents,'cancellation_credit',reason,request_id)
             db.execute('UPDATE miet_checkout_cancellations SET credit_cents=credit_cents+? WHERE id=?',(credit_cents,hold_id))
             return rid
 

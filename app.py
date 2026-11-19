@@ -8413,6 +8413,7 @@ BACKUP_TABLES = (
     "leads",
     "reifen_termin_slots",
     "shop_reifen_termin_slots",
+    "shop_montageauftraege",
     "lead_dateien",
     "lead_mail_log",
     "lead_portal_log",
@@ -8557,6 +8558,7 @@ BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEA
 BACKUP_SCHEMA_FEATURES += (servicezugang.SCHEMA_FEATURE, serviceprozess.SCHEMA_FEATURE, serviceerinnerungen.SCHEMA_FEATURE)
 BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
 BACKUP_SCHEMA_FEATURES += ("shop_reifentermine_v1",)
+BACKUP_SCHEMA_FEATURES += ("shop_montageauftraege_v1",)
 BACKUP_SCHEMA_FEATURES += ("reifen_angebote_v1",)
 BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
@@ -9837,6 +9839,12 @@ def init_db():
             datum TEXT NOT NULL, uhrzeit TEXT NOT NULL,
             kunde_name TEXT NOT NULL, bestaetigt_am TEXT NOT NULL,
             UNIQUE (datum, uhrzeit)
+        );
+
+        CREATE TABLE IF NOT EXISTS shop_montageauftraege (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shop_order_id TEXT NOT NULL UNIQUE,
+            auftrag_id INTEGER NOT NULL UNIQUE
         );
 
         CREATE TABLE IF NOT EXISTS lead_dateien (
@@ -17613,10 +17621,11 @@ def get_auftrag(auftrag_id):
     row = db.execute(
         """
         SELECT a.*, h.name AS autohaus_name, h.slug AS autohaus_slug,
-               v.name AS versicherung_name, v.slug AS versicherung_slug
+               v.name AS versicherung_name, v.slug AS versicherung_slug, m.shop_order_id
         FROM auftraege a
         LEFT JOIN autohaeuser h ON h.id = a.autohaus_id
         LEFT JOIN versicherungen v ON v.id = a.versicherung_id
+        LEFT JOIN shop_montageauftraege m ON m.auftrag_id = a.id
         WHERE a.id=?
         """,
         (auftrag_id,),
@@ -38793,7 +38802,11 @@ def gebuchte_reifen_kalendereintraege(von=None, bis=None):
              LEFT JOIN auftraege a ON a.id=l.auftrag_id
              WHERE l.status!='verloren'
              UNION ALL
-             SELECT datum,uhrzeit,NULL,NULL,shop_order_id,NULL,kunde_name,'','' FROM shop_reifen_termin_slots
+             SELECT s.datum, s.uhrzeit, NULL, a.id, s.shop_order_id, NULL,
+                    COALESCE(NULLIF(a.kunde_name, ''), s.kunde_name), a.fahrzeug, a.kennzeichen
+             FROM shop_reifen_termin_slots s
+             LEFT JOIN shop_montageauftraege m ON m.shop_order_id=s.shop_order_id
+             LEFT JOIN auftraege a ON a.id=m.auftrag_id
              ) SELECT * FROM termine"""
     params = ()
     if von is not None and bis is not None:
@@ -38819,10 +38832,10 @@ def gebuchte_reifen_kalendereintraege(von=None, bis=None):
         kunde = clean_text(row["kunde_name"]) or "Reifenservice"
         url = ""
         if has_request_context():
-            if row["shop_order_id"]:
-                url = url_for("shop_admin.order_detail", order_id=row["shop_order_id"])
-            elif row["auftrag_id"]:
+            if row["auftrag_id"]:
                 url = url_for("auftrag_detail", auftrag_id=row["auftrag_id"], back="kalender")
+            elif row["shop_order_id"]:
+                url = url_for("shop_admin.order_detail", order_id=row["shop_order_id"])
             else:
                 url = url_for("admin_lead_detail", lead_id=row["lead_id"])
         termine.append({
@@ -39600,6 +39613,9 @@ def autohaus_dashboard_daten(auftraege):
         ],
         "zurueckgegeben": [a for a in auftraege if a["status"] == 5],
     }
+
+
+app.add_template_filter(format_date, "werkstatt_datum")
 
 
 @app.template_filter("iso_date")
@@ -46176,6 +46192,104 @@ def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
         raise ReifenSlotBelegt("Diese Uhrzeit wurde gerade gebucht. Bitte wählen Sie einen anderen freien Termin.")
 
 
+def shop_montageauftraege(order_ids):
+    """Kanonische Werkstattnummer je verbindlicher Shopbestellung."""
+    ids = tuple(dict.fromkeys(order_ids))
+    if not ids:
+        return {}
+    db = get_db()
+    try:
+        result = {}
+        for start in range(0, len(ids), 500):
+            batch = ids[start:start + 500]
+            placeholders = ",".join("?" for _ in batch)
+            rows = db.execute(f"""SELECT shop_order_id,auftrag_id FROM shop_montageauftraege
+                                  WHERE shop_order_id IN ({placeholders})""", batch).fetchall()
+            result.update((row["shop_order_id"], row["auftrag_id"]) for row in rows)
+        return result
+    finally:
+        db.close()
+
+
+def plane_shop_montageauftrag(db, auftrag_id, datum, uhrzeit):
+    # Auch ein paralleler regulärer Statuswechsel muss seine Reihenfolge zum
+    # Bestätigen behalten. Die Auftragszeile bleibt bis zum Commit gesperrt.
+    db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+    auftrag = db.execute("SELECT status, archiviert FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+    if not auftrag or auftrag["archiviert"] or auftrag["status"] not in (1, 2):
+        return
+    jetzt = now_str()
+    db.execute("""UPDATE auftraege SET status=2, annahme_datum=?, annahme_uhrzeit=?, geaendert_am=?
+                  WHERE id=?""", (format_date(datum), uhrzeit, jetzt, auftrag_id))
+    if auftrag["status"] == 1:
+        db.execute("INSERT INTO status_log (auftrag_id,status,zeitstempel) VALUES (?,2,?)", (auftrag_id, jetzt))
+
+
+def erstelle_shop_montageauftrag(order, snapshot, context):
+    """Prüft/erzeugt den Werkstattauftrag innerhalb einer Portal-Transaktion."""
+    from shop_order_store import workshop_mounting_services
+    from shop_order_receipts import LABELS
+
+    order_id = order["id"]
+    if order["mode"] != "live" or order["status"] != "paid" or not re.fullmatch(r"sho_[a-f0-9]{32}", order_id):
+        raise ValueError("Ein Werkstattauftrag benötigt eine bezahlte Live-Shopbestellung.")
+    db = open_fresh_db()
+    try:
+        # Derselbe transaktionale Lock schützt auch die Terminbestätigung.
+        check24_bookings.lock(db)
+        existing = db.execute("SELECT auftrag_id FROM shop_montageauftraege WHERE shop_order_id=?", (order_id,)).fetchone()
+        if existing:
+            return existing["auftrag_id"]
+
+        mounting = workshop_mounting_services(snapshot)
+        local_mounting = bool(mounting) and context.get("workshop_delivery", "collection") == "collection"
+        title = "Reifenmontage" if mounting else "Shopbestellung"
+        vehicle = clean_text(context.get("vehicle_ref"))
+        contact = context["contact"]
+        description = ["Bestellte Artikel"]
+        for index, line in enumerate(snapshot["lines"]):
+            services = list(mounting.get(index, []))
+            services.extend(LABELS[s["code"]] for s in line["services"]
+                            if s["code"] in LABELS and (s["code"] != "mounting" or index not in mounting))
+            text = f"{line['quantity']} × {line['name']}"
+            if services:
+                text += " · " + ", ".join(services)
+            description.append(text)
+        intake = {"shop_order_id": order_id}
+        billing = context.get("billing") or {}
+        if billing:
+            intake.update(kunde_strasse=billing["street"], kunde_plz=billing["postcode"], kunde_ort=billing["city"])
+        if vehicle.startswith("alzura-vehicle:"):
+            intake["shop_fahrzeugreferenz"] = vehicle
+            vehicle = ""
+        if local_mounting and order.get("appointment_preference"):
+            wish = order["appointment_preference"]
+            intake["shop_montagewunsch"] = {"date": wish["date"], "time": wish["time"]}
+        auftrag_id = create_auftrag(
+            quelle="shop", leistungsart="reifenservice" if mounting else "sonstiges",
+            kunde_name=contact["name"], kunde_email=contact["email"], kontakt_telefon=contact.get("phone", ""),
+            fahrzeug=vehicle or title, beschreibung="\n".join(description), schadenart=title,
+            schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False), kundenkontakt_kanal="telefon", _db=db,
+        )
+        db.execute("""UPDATE auftraege SET auftragsnummer=?, werkstatt_neu=1, kunden_status_aktiv=0
+                      WHERE id=?""", (str(auftrag_id), auftrag_id))
+        # Die einmal vergebene Auftragsnummer bleibt auch nach einer manuellen
+        # Löschung belegt. Ein Rücklauf darf keinen Ersatzauftrag auslösen.
+        db.execute("INSERT INTO shop_montageauftraege (shop_order_id,auftrag_id) VALUES (?,?)", (order_id, auftrag_id))
+        if local_mounting:
+            slot = db.execute("SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?", (order_id,)).fetchone()
+            if slot:
+                plane_shop_montageauftrag(db, auftrag_id, slot["datum"], slot["uhrzeit"])
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    schedule_change_backup("shop-werkstattauftrag")
+    return auftrag_id
+
+
 def bestaetige_shop_reifentermin(order_id, datum, uhrzeit, kundenname):
     if not isinstance(order_id, str) or not re.fullmatch(r"sho_[a-f0-9]{32}", order_id):
         raise ValueError("Ungültige Shopbestellung.")
@@ -46192,6 +46306,9 @@ def bestaetige_shop_reifentermin(order_id, datum, uhrzeit, kundenname):
         pruefe_freie_reifenstunde(db, datum, uhrzeit)
         db.execute("""INSERT INTO shop_reifen_termin_slots (shop_order_id,datum,uhrzeit,kunde_name,bestaetigt_am)
                       VALUES (?,?,?,?,?)""", (order_id, datum, uhrzeit, clean_text(kundenname)[:254], now_str()))
+        job = db.execute("SELECT auftrag_id FROM shop_montageauftraege WHERE shop_order_id=?", (order_id,)).fetchone()
+        if job:
+            plane_shop_montageauftrag(db, job["auftrag_id"], datum, uhrzeit)
         db.commit()
     except Exception:
         db.rollback()
@@ -50161,6 +50278,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "inspektions_checkpunkte",
         "reifen_termin_slots",  # Historical backups predate online tire bookings.
         "shop_reifen_termin_slots",
+        "shop_montageauftraege",
         "fahrzeugeinkauf_scan_treffer",
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
         # vorhandenen Sicherungen noch nicht. Alte Pakete bleiben importierbar.
@@ -50227,6 +50345,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         required_tables.add("reifen_termin_slots")
     if "shop_reifentermine_v1" in schema_features:
         required_tables.add("shop_reifen_termin_slots")
+    if "shop_montageauftraege_v1" in schema_features:
+        required_tables.add("shop_montageauftraege")
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
     if "werkstatt_assistent_v2" in schema_features:
@@ -51570,10 +51690,15 @@ def auftrag_detail(auftrag_id):
         neue_art = leistungsart_formular(form, fallback="") if "leistungsart" in form else None
         aktion = form.get("aktion", "speichern")
         analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
-        if (hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24') and (
+        shop_wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch')
+        gebuchter_termin = hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24' or shop_wunsch
+        if gebuchter_termin and (
             format_date(form.get("annahme_datum")) != format_date(auftrag.get("annahme_datum"))
             or format_time_value(form.get("annahme_uhrzeit")) != format_time_value(auftrag.get("annahme_uhrzeit"))
         ):
+            if shop_wunsch:
+                flash('Den Montagetermin bitte in der Shopbestellung bestätigen.', 'warning')
+                return redirect(detail_self_url)
             if auftrag.get('quelle') == 'check24':
                 flash('CHECK24-Termine bitte im CHECK24-Bereich ändern. Dort wird das gesamte Zeitintervall geprüft.', 'warning')
                 return redirect(url_for('check24.index'))
@@ -51594,19 +51719,19 @@ def auftrag_detail(auftrag_id):
                 abort(404)
             frisch = dict(zeile)
             hat_reifenrechnung = clean_text(frisch.get("reifen_rechnung_json")) not in ("", "{}")
-            if (hat_reifenbuchung(frisch) or frisch.get('quelle') == 'check24' or hat_reifenrechnung) and neue_art != "reifenservice":
+            if (gebuchter_termin or hat_reifenbuchung(frisch) or hat_reifenrechnung) and neue_art != "reifenservice":
                 db.rollback()
                 db.close()
                 abort(400, description="Die Auftragsart einer Reifenbuchung oder gespeicherten Reifenabrechnung bleibt Reifenservice.")
             db.execute("UPDATE auftraege SET leistungsart=? WHERE id=?", (neue_art, auftrag_id))
-        if hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24':
+        if gebuchter_termin:
             db.execute("UPDATE auftraege SET status=status WHERE id=?",(auftrag_id,))
             termin = db.execute("SELECT annahme_datum,annahme_uhrzeit FROM auftraege WHERE id=?",(auftrag_id,)).fetchone()
             if not termin or termin["annahme_datum"] != auftrag.get("annahme_datum") or termin["annahme_uhrzeit"] != auftrag.get("annahme_uhrzeit"):
                 db.rollback()
                 db.close()
                 flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.","warning")
-                return redirect(url_for("admin_reifentermine"))
+                return redirect(detail_self_url if shop_wunsch else url_for("admin_reifentermine"))
         db.execute(
             """
             UPDATE auftraege
@@ -54086,6 +54211,9 @@ def admin_auslese_uebernehmen(auftrag_id):
     if not order:
         abort(404)
     key = request.form.get('feld')
+    if (order.get('schaden_aufnahme') or {}).get('shop_montagewunsch') and key == 'annahme_datum':
+        flash('Den Montagetermin bitte in der Shopbestellung bestätigen.', 'warning')
+        return redirect(url_for('auftrag_detail', auftrag_id=auftrag_id))
     if order.get('quelle') == 'check24' and key == 'annahme_datum':
         flash('CHECK24-Termine bitte im CHECK24-Bereich ändern.', 'warning')
         return redirect(url_for('check24.index'))
@@ -56549,7 +56677,9 @@ def werkstatt_tafel():
         for auftrag in list_auftraege()
         if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
+    from reifen_auftragsetikett import tafel_etikett_sichtbar
     for auftrag in auftraege:
+        auftrag["tafel_etikett"] = tafel_etikett_sichtbar(sys.modules[__name__], auftrag)
         if auftrag.get('quelle') == 'check24':
             intake = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
             start, end = intake.get('check24_start', ''), intake.get('check24_ende', '')
@@ -56739,9 +56869,11 @@ def werkstatt_auftrag(auftrag_id):
     dateien = [datei for datei in list_dateien(auftrag_id) if werkstatt_datei_sichtbar(datei)]
     bilder = [datei for datei in dateien if datei.get("is_browser_image")]
     unterlagen = [datei for datei in dateien if not datei.get("is_browser_image")]
+    from reifen_auftragsetikett import tafel_etikett_sichtbar
     return render_template(
         "werkstatt_auftrag.html",
         auftrag=auftrag,
+        tafel_etikett=tafel_etikett_sichtbar(sys.modules[__name__], auftrag),
         bilder=bilder,
         unterlagen=unterlagen,
         statusliste=STATUSLISTE,
@@ -60910,7 +61042,8 @@ shop_runtime = register_shop_runtime(sys.modules[__name__],
 from shop_admin import register_shop_admin
 register_shop_admin(app, private_data_dir=SHOP_PRIVATE_DATA_DIR,
                     confirm_appointment=bestaetige_shop_reifentermin,
-                    confirmed_appointments=bestaetigte_shop_reifentermine)
+                    confirmed_appointments=bestaetigte_shop_reifentermine,
+                    workshop_orders=shop_montageauftraege)
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)

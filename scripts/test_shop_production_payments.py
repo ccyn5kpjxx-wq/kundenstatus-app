@@ -90,6 +90,11 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.portal = SimpleNamespace(app=Flask('synthetic-payment-wiring', root_path=str(ROOT)),
             get_werkstatt_smtp_config=Mock(return_value={'smtp_configured': True, 'from_address': 'info@auto-lackierzentrum.de'}),
             get_werkstatt_imap_config=Mock(side_effect=AssertionError('No IMAP')))
+        self.workshop_orders = {}
+        self.portal.erstelle_shop_montageauftrag = Mock(side_effect=lambda order, snapshot, context:
+            self.workshop_orders.setdefault(order['id'], 800 + len(self.workshop_orders)))
+        self.portal.shop_montageauftraege = lambda ids: {key: self.workshop_orders[key]
+                                                        for key in ids if key in self.workshop_orders}
         self.stripe_config = {'SHOP_STRIPE_MODE': 'live', 'SHOP_STRIPE_SECRET_KEY': 'sk_live_SYNTHETIC_ONLY',
             'SHOP_STRIPE_WEBHOOK_SECRET': 'whsec_SYNTHETIC_ONLY', 'SHOP_STRIPE_PUBLIC_ORIGIN': ORIGIN}
         self.supplier_config = {'TYRESYSTEM_API_MODE': 'live', 'TYRESYSTEM_API_USERNAME': 'SYNTHETIC', 'TYRESYSTEM_API_PASSWORD': 'SYNTHETIC'}
@@ -119,6 +124,74 @@ class ProductionPaymentChecks(unittest.TestCase):
         value = rehash(value)
         self.store.save_quote(value, expected_quote_hash=value['quote_hash'], customer_id='customer-a', mode='live', delivery_context=CONTEXT)
         return value
+
+    def bound_order(self, dependencies, reference):
+        self.now = datetime.now(timezone.utc)
+        snapshot = self.save_quote()
+        consumer = dependencies['consumer_service']
+        consumer.accept_quote(snapshot['quote_hash'], customer_id='customer-a', pack_hash=consumer.pack_hash,
+                              terms_accepted=True, consumer=True)
+        order = dependencies['order_store'].create_order(snapshot['quote_hash'], customer_id='customer-a',
+            mode='live', idempotency_key='SYNTHETIC-' + reference)
+        attempt = self.store.claim_payment(order['id'], customer_id='customer-a', mode='live')
+        session, intent = 'cs_live_' + reference, 'pi_' + reference
+        self.store.bind_payment(order['id'], attempt['id'], customer_id='customer-a', mode='live',
+                                session_id=session, intent_id=intent, currency='eur',
+                                amount_gross_cent=order['amount_gross_cent'])
+        def record(kind):
+            return self.store.apply_verified_event({'event_id': 'evt_' + reference + '_' + kind,
+                'order_id': order['id'], 'attempt_id': attempt['id'], 'mode': 'live', 'currency': 'eur',
+                'amount_gross_cent': order['amount_gross_cent'], 'session_id': session, 'intent_id': intent,
+                'kind': kind, 'occurred_at': self.now.isoformat()}, verified=True)
+        return order['id'], record
+
+    def test_workshop_order_precedes_confirmation_and_survives_duplicate_paid_events(self):
+        deps, _ = self.prepare()
+        identifier, record = self.bound_order(deps, 'checkout')
+        workflow = self.adapters['workflow']
+        record('authorized')
+        workflow.consider_paid(identifier)
+        self.assertEqual(self.workshop_orders, {})
+        workflow.consider(identifier)
+        def capture(order_id, **kwargs):
+            record('paid')
+            return {'order_id': order_id, 'mode': 'live', 'state': 'captured',
+                    'payment_confirmed': True, 'authorization_released': False}
+        with patch.object(workflow.fulfillment, 'run', side_effect=capture) as run:
+            self.assertEqual(workflow.run_once()['state'], 'fulfilled')
+            workflow.consider_paid(identifier)
+            workflow.run_once()
+            run.assert_called_once()
+        self.assertEqual(self.workshop_orders, {identifier: 800})
+        self.assertEqual(deps['workshop_order_view'](identifier, customer_id='customer-a')['number'], 800)
+        with closing(self.storage.connect()) as db:
+            messages = db.execute("SELECT body FROM shop_order_receipts_v2 WHERE kind='order_confirmed'").fetchall()
+        self.assertEqual(len(messages), 1)
+        self.assertIn('800', messages[0][0])
+        self.assertEqual(len(self.outbox.sent), 2)
+
+    def test_paid_repair_restores_missed_projection_without_sending_old_receipts_or_reordering(self):
+        deps, _ = self.prepare()
+        workflow = self.adapters['workflow']
+        paid, capture = self.bound_order(deps, 'paid')
+        handled, historical_capture = self.bound_order(deps, 'handled')
+        _, reject = self.bound_order(deps, 'cancelled')
+        capture('paid')
+        historical_capture('paid')
+        reject('cancelled')
+        with closing(self.storage.connect()) as db:
+            db.execute('INSERT INTO shop_workshop_handled_v1 VALUES (?,?)', (handled, self.now.isoformat()))
+            db.commit()
+        with patch.object(workflow, 'workshop_order_create', side_effect=RuntimeError('temporary portal failure')):
+            workflow.consider_paid(paid)
+        self.assertEqual(self.workshop_orders, {})
+        with patch.object(workflow.fulfillment, 'run') as supplier:
+            for _ in range(2):
+                self.assertEqual(workflow.run_once()['state'], 'idle')
+            supplier.assert_not_called()
+        self.assertEqual(self.workshop_orders, {paid: 800})
+        self.assertEqual(self.outbox.sent, [])
+        self.assertEqual(self.count('shop_order_receipts_v2'), 0)
 
     def test_unarmed_profiles_never_touch_adapters_or_construct_transports(self):
         for key in ('checkout_enabled', 'supplier_live_enabled', 'customer_mail_enabled', 'withdrawals_enabled',

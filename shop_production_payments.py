@@ -183,11 +183,16 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         review_service=review, revalidate_remaining=partial(requote_remaining_goods, quotes,
                                                             legacy_retail_quote=legacy_retail_quote))
     holder['saga'] = saga
+    workshop_order_create = getattr(portal, 'erstelle_shop_montageauftrag', None)
+    workshop_order_lookup = getattr(portal, 'shop_montageauftraege', None)
+    if not callable(workshop_order_create) or not callable(workshop_order_lookup):
+        raise PaymentProfileError('workshop_order_integration_unavailable')
     receipts = ShopOrderReceipts(store, storage.connect, mode='live', enabled=True, delivery_enabled=True,
         sender_address='info@auto-lackierzentrum.de', outbox=outbox, smtp_config=smtp_config,
-        legal_snapshot=consumer.contract_pack, require_legal=True)
+        legal_snapshot=consumer.contract_pack, require_legal=True, workshop_order_lookup=workshop_order_lookup)
     workflow = ShopOrderWorkflow(store, WorkflowJournal(storage.connect), saga, payment,
-        mode='live', enabled=True, receipt_service=_ReceiptDelivery(receipts, consumer), review_service=review)
+        mode='live', enabled=True, receipt_service=_ReceiptDelivery(receipts, consumer), review_service=review,
+        workshop_order_create=workshop_order_create, workshop_order_lookup=workshop_order_lookup)
     wrapped = WorkflowCheckout(checkout, workflow)
     if (not wrapped.readiness()['ready'] or not receipts.readiness()['delivery_ready']
             or not payment.readiness()['ready']):
@@ -201,4 +206,5 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         portal.app.config['SHOP_REVIEW_ADMIN_ORIGIN'] = _origin(profile.get('review_admin_origin', buyer.public_origin))
     # The ordinary runtime owns registration; callers must not start this
     # worker if any later blueprint/readiness setup fails.
-    return {'order_store': store, 'checkout_service': wrapped, 'consumer_service': consumer}, workflow.start
+    return {'order_store': store, 'checkout_service': wrapped, 'consumer_service': consumer,
+            'workshop_order_view': receipts.customer_workshop_order}, workflow.start

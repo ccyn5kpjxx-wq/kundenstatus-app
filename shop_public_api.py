@@ -19,7 +19,7 @@ MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
 
 
-def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None, catalogue_warmup=None, appointment_calendar=None):
+def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None, catalogue_warmup=None, appointment_calendar=None, workshop_order_view=None):
     """Return an unregistered blueprint; all features default off.
 
     ``authorize_quote(request)`` must verify the host session and CSRF token and
@@ -393,6 +393,14 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         try:
             result = {'order': public_order(order_store.get_order(order_id, customer_id=principal, mode=mode)),
                       'payment_enabled': payment_available()}
+            if mode == 'live' and result['order']['status'] == 'paid' and workshop_order_view is not None:
+                try:
+                    workshop = workshop_order_view(order_id, customer_id=principal)
+                    if workshop:
+                        result['workshop_order'] = workshop
+                except Exception:
+                    current_app.logger.warning('Kundenansicht: Werkstattauftrag momentan nicht abrufbar.')
+                    result['workshop_order'] = {'pending': True}
             if getattr(checkout_service, 'mode', None) == mode and callable(getattr(checkout_service, 'status', None)):
                 retained = checkout_service.status(order_id, customer_id=principal)
                 technical = retained.get('technical_review') if isinstance(retained, dict) else None

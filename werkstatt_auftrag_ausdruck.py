@@ -121,6 +121,29 @@ def register_auftrag_ausdruck(portal):
         return portal.app.blueprints["auftrag_ausdruck"]
     blueprint = Blueprint("auftrag_ausdruck", __name__)
 
+    def etikett_antwort(auftrag_id, *, tafel=False):
+        from reifen_auftragsetikett import reifenetikett as lade_etikett
+        etikett = lade_etikett(portal, auftrag_id, tafel=tafel)
+        if etikett is None:
+            abort(404)
+        response = make_response(render_template("reifen_auftragsetikett.html", etikett=etikett))
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @blueprint.get("/admin/auftrag/<int:auftrag_id>/reifenetikett")
+    @portal.admin_required
+    def reifenetikett(auftrag_id):
+        return etikett_antwort(auftrag_id)
+
+    @blueprint.get("/werkstatt/auftrag/<int:auftrag_id>/reifenetikett")
+    def tafel_reifenetikett(auftrag_id):
+        guard = portal.werkstatt_tafel_guard()
+        if guard:
+            return guard
+        return etikett_antwort(auftrag_id, tafel=True)
+
     @blueprint.get("/admin/auftrag/<int:auftrag_id>/werkstattzettel")
     @portal.admin_required
     def werkstattzettel(auftrag_id):

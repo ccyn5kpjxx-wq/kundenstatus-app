@@ -274,8 +274,20 @@
 {% endblock %}
 
 {% block content %}
-<div class="mb-3"><a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag['id']) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag['id'] }}</a></div>
+{% set shop_wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch') %}
+<div class="mb-3"><a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag['id']) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag['id'] }}</a>
+{% if auftrag.ist_reifenauftrag or auftrag.quelle == 'shop' %}<a class="btn btn-brand" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>{% endif %}</div>
 <header class="order-focus-header page-card p-4 mb-3">
+  {% if auftrag.get('shop_order_id') %}
+    <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+      {% if session.get('admin') is sameas true %}
+        <a class="btn btn-soft btn-sm" href="{{ url_for('shop_admin.order_detail', order_id=auftrag.shop_order_id) }}">Shopbestellung öffnen</a>
+      {% endif %}
+      {% if shop_wunsch %}
+        <span>Montagewunsch · {{ shop_wunsch.date|werkstatt_datum }} · {{ shop_wunsch.time }} Uhr</span>
+      {% endif %}
+    </div>
+  {% endif %}
   {% if cockpit_demo %}<div class="alert alert-info py-2">Lokale Vorschau · Beispieldaten · keine Nachrichten oder Rechnungen werden versendet</div>{% endif %}
   <div class="d-flex justify-content-between gap-3 flex-wrap align-items-start">
     <div><span class="badge mb-2" style="background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</span><div class="small text-muted mb-1">Auftrag {{ auftrag['id'] }} · {{ auftrag['autohaus_name'] or 'Direktkunde' }}</div><h1 class="h2 mb-1">{{ auftrag['fahrzeug'] }}</h1><div>{{ auftrag['kunde_name'] or 'Kunde noch ergänzen' }} <span class="ms-2 order-plate">{{ auftrag['kennzeichen'] or 'Kennzeichen offen' }}</span></div></div>
@@ -1014,8 +1026,8 @@
         </div>
         <div class="col-md-2">
           <label class="form-label">{{ auftrag['annahme_label'] }}</label>
-          <input type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ auftrag['annahme_datum']|iso_date }}">
-          <input type="time" name="annahme_uhrzeit" class="form-control mt-1" value="{{ auftrag['annahme_uhrzeit'] }}" aria-label="Uhrzeit Anlieferung">
+          <input type="date" name="annahme_datum" class="form-control form-control-lg" value="{{ auftrag['annahme_datum']|iso_date }}" {% if shop_wunsch %}readonly{% endif %}>
+          <input type="time" name="annahme_uhrzeit" class="form-control mt-1" value="{{ auftrag['annahme_uhrzeit'] }}" aria-label="Uhrzeit Anlieferung" {% if shop_wunsch %}readonly{% endif %}>
         </div>
         <div class="col-md-2">
           <label class="form-label">Start</label>

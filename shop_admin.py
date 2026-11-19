@@ -274,6 +274,7 @@ class ShopAdminReader:
                     services=line.get('services',[])
                     if not isinstance(services,list) or len(services)>20:raise ValueError()
                     lines.append({'id':_text(line.get('id'),64),'name':_text(line.get('name')),'quantity':line['quantity'],
+                        'category':_text(line.get('category'),40),'tyre_size':_text(line.get('tyre_size'),100),
                         'unit_price':_money(line.get('unit_gross_cent')),'items_price':_money(line.get('items_gross_cent')),
                         'destination':DESTINATION.get(line.get('destination'),'Versandziel ungeklärt'),
                         'services':[{'name':SERVICE.get(service.get('code'),'Erforderliches Zubehör'),
@@ -460,11 +461,26 @@ def _review_projection(value,detail):
     return result
 
 
-def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None):
+def shop_admin_reader():
+    adapters = current_app.extensions.get('shop_production')
+    storage = adapters.get('storage') if isinstance(adapters, Mapping) else None
+    store = adapters.get('store') if isinstance(adapters, Mapping) else None
+    if isinstance(storage, ShopStorage) and isinstance(store, OrderStore) and storage.ready is True:
+        return ShopAdminReader(storage, store)
+    root = current_app.blueprints['shop_admin'].shop_admin_private_data_dir
+    if root is None:
+        abort(404)
+    existing = ShopStorage(root)
+    return ShopAdminReader(existing, existing.order_store(), existing_only=True)
+
+
+def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None,
+                                workshop_orders=None):
     blueprint=Blueprint('shop_admin',__name__,template_folder='templates')
     blueprint.shop_admin_private_data_dir=_private_root(private_data_dir)
     blueprint.confirm_appointment=confirm_appointment
     blueprint.confirmed_appointments=confirmed_appointments
+    blueprint.workshop_orders=workshop_orders
 
     @blueprint.before_request
     def administrator_only():
@@ -477,19 +493,7 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         response.headers['X-Content-Type-Options']='nosniff'
         return response
 
-    def reader():
-        adapters=current_app.extensions.get('shop_production')
-        storage=adapters.get('storage') if isinstance(adapters,Mapping) else None
-        store=adapters.get('store') if isinstance(adapters,Mapping) else None
-        if isinstance(storage,ShopStorage) and isinstance(store,OrderStore) and storage.ready is True:
-            return ShopAdminReader(storage,store)
-        root=blueprint.shop_admin_private_data_dir
-        if root is None:abort(404)
-        # An explicitly supplied persistent root may still have historical
-        # orders when the selling release is disabled or its bootstrap failed.
-        # Construction is inert: marker/schema checks happen in the RO reader.
-        existing=ShopStorage(root)
-        return ShopAdminReader(existing,existing.order_store(),existing_only=True)
+    reader = shop_admin_reader
 
     def review_dependencies():
         if current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is not True:abort(404)
@@ -539,6 +543,20 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
                 or request.headers.get('Sec-Fetch-Site') not in (None,'same-origin')):abort(403)
         fields=checked_form_fields()
         return fields,'portal-admin-session:'+sha256(fields['csrf_token'].encode('ascii')).hexdigest()[:32]
+
+    def attach_workshop_orders(orders):
+        live_orders = [order for order in orders if order['mode'] == 'Live']
+        if not live_orders or not callable(blueprint.workshop_orders):
+            return
+        try:
+            numbers = blueprint.workshop_orders([order['id'] for order in live_orders])
+        except Exception:
+            current_app.logger.exception('Werkstattaufträge der Shopbestellungen konnten nicht gelesen werden')
+            for order in live_orders:
+                order['workshop_lookup_unavailable'] = True
+            return
+        for order in live_orders:
+            order['workshop_order_number'] = numbers.get(order['id'])
 
     def attach_appointment_status(orders):
         wishes=[row for row in orders if row['appointment']]
@@ -631,6 +649,7 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         page,per_page=int(page),int(per_page)
         if per_page>100:abort(400)
         rows,has_next=reader().orders(page=page,per_page=per_page,show_margin=session.get('admin') is True)
+        attach_workshop_orders(rows)
         attach_appointment_status(rows)
         attach_invoice_status(rows)
         return render_template('shop_v2/admin_orders.html',orders=rows,detail=None,page=page,per_page=per_page,has_next=has_next)
@@ -644,6 +663,7 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
 
     def show_order_detail(detail,appointment_error=None,delivery_error=None,processing_error=None,invoice_error=None):
         order_id=detail['id']
+        attach_workshop_orders([detail])
         attach_appointment_status([detail])
         attach_invoice_status([detail])
         if detail['workshop_pending'] and not detail.get('processing_blocked_reason'):
@@ -837,7 +857,8 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
     return blueprint
 
 
-def register_shop_admin(app_or_portal,*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None):
+def register_shop_admin(app_or_portal,*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None,
+                        workshop_orders=None):
     app=getattr(app_or_portal,'app',app_or_portal)
     root=_private_root(private_data_dir)
     if 'shop_admin' in app.blueprints:
@@ -845,8 +866,9 @@ def register_shop_admin(app_or_portal,*,private_data_dir=None,confirm_appointmen
         if root is not None:blueprint.shop_admin_private_data_dir=root
         if confirm_appointment is not None:blueprint.confirm_appointment=confirm_appointment
         if confirmed_appointments is not None:blueprint.confirmed_appointments=confirmed_appointments
+        if workshop_orders is not None:blueprint.workshop_orders=workshop_orders
         return blueprint
     blueprint=create_shop_admin_blueprint(private_data_dir=root,confirm_appointment=confirm_appointment,
-                                           confirmed_appointments=confirmed_appointments)
+                                           confirmed_appointments=confirmed_appointments,workshop_orders=workshop_orders)
     app.register_blueprint(blueprint)
     return blueprint

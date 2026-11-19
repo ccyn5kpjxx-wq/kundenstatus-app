@@ -1797,11 +1797,25 @@
       try {
         const result = await requestJSON('/orders/' + id), order = result.order;
         if (!order || order.id !== id || !Object.hasOwn(labels, order.status)) throw new Error('order_unavailable');
-        status.textContent = labels[order.status]; summary.replaceChildren(el('p', 'Bestellung ' + id), el('p', money(order.amount_gross_cent), 'shop-summary-total'));
+        status.textContent = labels[order.status];
+        summary.replaceChildren();
+        const workshop = order.mode === 'live' && order.status === 'paid' ? result.workshop_order : null;
+        if (Number.isSafeInteger(workshop?.number) && workshop.number > 0) {
+          summary.append(el('h2', (workshop.mounting ? 'Montageauftrag Nr. ' : 'Auftrag Nr. ') + workshop.number));
+          const items = el('ul');
+          for (const item of workshop.items) {
+            const services = item.services.length ? ' (' + item.services.join(', ') + ')' : '';
+            items.append(el('li', item.quantity + ' × ' + item.name + services));
+          }
+          summary.append(items);
+        } else if (workshop?.pending) {
+          summary.append(el('p', 'Ihre Auftragsnummer wird bereitgestellt.'));
+        }
+        summary.append(el('p', 'Shop-Bestellnummer: ' + id), el('p', money(order.amount_gross_cent), 'shop-summary-total'));
         const preferred = order.appointment_preference;
         if (preferred?.status === 'requested' && typeof preferred.date === 'string' && typeof preferred.time === 'string') {
           const ended = ['cancelled', 'payment_failed'].includes(order.status);
-          const ending = ended ? '. Aus diesem Zahlungsvorgang ergibt sich kein bestätigter Montagetermin.' : '. Die Werkstatt bestätigt den Termin nach Klärung der Reifenlieferung.';
+          const ending = ended ? '. Aus diesem Zahlungsvorgang ergibt sich kein bestätigter Montagetermin.' : '. Die Terminbestätigung erfolgt separat durch die Werkstatt.';
           summary.append(el('p', 'Montagetermin angefragt: ' + root.ShopAppointmentPreference.label(preferred) + ending, 'shop-review-note'));
         }
         if (order.status === 'paid' || order.status === 'authorized') {
@@ -1827,7 +1841,7 @@
           summary.append(el('p', technical.state === 'approved' && order.status === 'paid' ? 'Technische Prüfung abgeschlossen.' : reviewStates[technical.state], 'shop-review-note'));
         }
         if (order.mode === 'test') summary.append(el('p', 'Testvorgang · keine echte Zahlung', 'shop-notice'));
-        if (order.status === 'payment_pending' && ++checks < 12) root.setTimeout(poll, 5000);
+        if ((['payment_pending', 'authorized'].includes(order.status) || workshop?.pending) && ++checks < 12) root.setTimeout(poll, 5000);
       } catch (error) { status.textContent = errorText(error); }
     }
     poll();

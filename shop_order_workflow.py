@@ -9,11 +9,16 @@ capture POST itself. All adapters/storage/start/activation are explicitly inject
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import re
 import sqlite3
 import threading
 from uuid import uuid4
 from shop_order_review import requires_review
+from shop_order_store import _delivery_context, _validate_snapshot
+
+
+log = logging.getLogger(__name__)
 
 
 class WorkflowError(ValueError):
@@ -105,6 +110,19 @@ class WorkflowJournal:
                 AND (j.order_id IS NULL OR j.state='awaiting_review')
               ORDER BY COALESCE(j.updated_at,o.created_at),o.id LIMIT ?''', (mode, limit))]
 
+    def paid_workshop_candidates(self, *, after='', order_id=None, limit=20):
+        """Only financially verified live purchases still open for workshop processing."""
+        target = ' AND o.id=?' if order_id is not None else ''
+        params = (after, order_id, limit) if order_id is not None else (after, limit)
+        with self._db() as connection:
+            return [dict(row) for row in connection.execute('''SELECT o.id,o.customer_id
+                FROM shop_orders_v2 o JOIN shop_payment_attempts_v2 a ON a.order_id=o.id
+                WHERE o.id>? AND o.mode='live' AND o.status='paid'
+                AND EXISTS (SELECT 1 FROM shop_payment_events_v2 e
+                    WHERE e.order_id=o.id AND e.attempt_id=a.id AND e.kind='paid')
+                AND NOT EXISTS (SELECT 1 FROM shop_workshop_handled_v1 h WHERE h.order_id=o.id)
+                ''' + target + ' ORDER BY o.id LIMIT ?', params)]
+
     def reconciliation_candidates(self, *, mode, limit=20):
         with self._db() as connection:
             return [r[0] for r in connection.execute('SELECT j.order_id ' + self._PAYMENT_RECOVERY
@@ -184,13 +202,19 @@ class WorkflowJournal:
 
 class ShopOrderWorkflow:
     def __init__(self, store, journal, fulfillment, payment_actions=None, *, mode, enabled=False,
-                 receipt_service=None, clock=None, poll_seconds=2, review_service=None):
+                 receipt_service=None, clock=None, poll_seconds=2, review_service=None,
+                 workshop_order_create=None, workshop_order_lookup=None):
         if (not isinstance(mode, str) or mode not in {'test', 'live'} or type(enabled) is not bool
                 or type(poll_seconds) not in (int, float) or not 0.5 <= poll_seconds <= 60):
             raise WorkflowError('invalid_workflow_configuration')
+        if ((workshop_order_create is None) != (workshop_order_lookup is None)
+                or workshop_order_create is not None and not all(map(callable, (workshop_order_create, workshop_order_lookup)))):
+            raise WorkflowError('invalid_workshop_order_configuration')
         self.store, self.journal, self.fulfillment, self.payment = store, journal, fulfillment, payment_actions
         self.mode, self.enabled, self.receipts = mode, enabled, receipt_service
         self.review_service = review_service
+        self.workshop_order_create, self.workshop_order_lookup = workshop_order_create, workshop_order_lookup
+        self._workshop_after, self._workshop_next_scan = '', None
         self.clock, self.poll_seconds = clock or (lambda: datetime.now(timezone.utc)), poll_seconds
         self._stop, self._thread, self._run_lock, self._start_lock = threading.Event(), None, threading.Lock(), threading.Lock()
 
@@ -211,6 +235,52 @@ class ShopOrderWorkflow:
     def _active(self):
         if not self.readiness()['ready']:
             raise WorkflowError('workflow_disabled')
+
+    def _ensure_workshop_order(self, order_id, customer_id):
+        identity = {'customer_id': customer_id, 'mode': 'live'}
+        order = self.store.get_order(order_id, **identity)
+        if order['status'] != 'paid':
+            raise WorkflowError('workshop_payment_unconfirmed')
+        snapshot = self.store.snapshot_for_order(order_id, **identity)
+        context = self.store.delivery_context_for_order(order_id, **identity)
+        _validate_snapshot(snapshot, order['quote_hash'], customer_id, 'live')
+        _delivery_context(snapshot, context)
+        number = self.workshop_order_create(order, snapshot, context)
+        if type(number) is not int or number < 1:
+            raise WorkflowError('workshop_order_unavailable')
+        return number
+
+    def consider_paid(self, order_id):
+        """A verified payment may arrive before the fulfillment worker finishes."""
+        if self.mode == 'live' and self.enabled and self.workshop_order_create is not None:
+            try:
+                for row in self.journal.paid_workshop_candidates(order_id=order_id, limit=1):
+                    self._ensure_workshop_order(row['id'], row['customer_id'])
+            except Exception:
+                # Payment has already been persisted. The worker recovers the portal write.
+                log.warning('Shopauftrag wird nach bestätigter Zahlung erneut abgeglichen: %s', order_id)
+
+    def _repair_workshop_orders(self, limit=20):
+        if self.mode != 'live' or self.workshop_order_create is None:
+            return
+        now = _stamp(self.clock())
+        if self._workshop_next_scan is not None and now < self._workshop_next_scan:
+            return
+        try:
+            rows = self.journal.paid_workshop_candidates(after=self._workshop_after, limit=limit)
+            if rows:
+                linked = self.workshop_order_lookup([row['id'] for row in rows])
+                for row in rows:
+                    if row['id'] not in linked:
+                        try:
+                            self._ensure_workshop_order(row['id'], row['customer_id'])
+                        except Exception:
+                            log.warning('Bezahlter Shopauftrag konnte nicht übernommen werden: %s', row['id'])
+            self._workshop_after = rows[-1]['id'] if len(rows) == limit else ''
+            self._workshop_next_scan = None if self._workshop_after else now + timedelta(minutes=1)
+        except Exception:
+            self._workshop_next_scan = now + timedelta(minutes=1)
+            log.warning('Abgleich der bezahlten Shopaufträge wird wiederholt.')
 
     def consider(self, order_id):
         self._active()
@@ -271,6 +341,7 @@ class ShopOrderWorkflow:
             return {'processed': False, 'state': 'busy'}
         try:
             self.repair()
+            self._repair_workshop_orders()
             job = self.journal.claim(mode=self.mode)
             if job is None:
                 self.receipts.deliver_once()
@@ -291,6 +362,8 @@ class ShopOrderWorkflow:
                 state, prepared = 'manual_review', None
                 if result.get('state') == 'captured' and result.get('payment_confirmed') is True and result.get('authorization_released') is False:
                     state = 'fulfilled'
+                    if self.mode == 'live' and self.workshop_order_create is not None:
+                        self._ensure_workshop_order(job['order_id'], job['customer_id'])
                     prepared = self.receipts.prepare(job['order_id'], customer_id=job['customer_id'], kind='order_confirmed')
                 elif result.get('state') == 'cancelled' and result.get('authorization_released') is True and result.get('payment_confirmed') is False:
                     state = 'cancelled'
@@ -360,10 +433,14 @@ class WorkflowCheckout:
         result = self.checkout.reconcile(order_id, customer_id=customer_id)
         if result.get('status') == 'authorized':
             self.workflow.consider(order_id)
+        elif result.get('status') == 'paid':
+            self.workflow.consider_paid(order_id)
         return result
 
     def handle_webhook(self, raw_body, signature):
         result = self.checkout.handle_webhook(raw_body, signature)
         if result.get('ignored') is False and result.get('status') == 'authorized':
             self.workflow.consider(result['order_id'])
+        elif result.get('ignored') is False and result.get('status') == 'paid':
+            self.workflow.consider_paid(result['order_id'])
         return result

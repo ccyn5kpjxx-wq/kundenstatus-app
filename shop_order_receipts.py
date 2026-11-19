@@ -20,7 +20,7 @@ from uuid import UUID, uuid5
 from uuid import uuid4
 
 from shop_buyer import validate_context
-from shop_order_store import _validate_snapshot, _delivery_context
+from shop_order_store import _validate_snapshot, _delivery_context, workshop_mounting_services
 from werkstatt_mail_identity import FOOTER_TEXT
 
 NAMESPACE = UUID('9325b13f-f90f-45a1-a423-ddcf2086c4fc')
@@ -97,14 +97,16 @@ def init_order_receipt_schema(connection):
 class ShopOrderReceipts:
     def __init__(self, store, connection_factory, *, mode, sender_address, enabled=False,
                  delivery_enabled=False, outbox=None, smtp_config=None, legal_snapshot=None,
-                 require_legal=True, clock=None):
+                 require_legal=True, clock=None, workshop_order_lookup=None):
         if (not isinstance(mode, str) or mode not in {'test', 'live'} or not _email(sender_address)
                 or any(type(v) is not bool for v in (enabled, delivery_enabled, require_legal))
-                or not callable(connection_factory) or legal_snapshot is not None and not callable(legal_snapshot)):
+                or not callable(connection_factory) or legal_snapshot is not None and not callable(legal_snapshot)
+                or workshop_order_lookup is not None and not callable(workshop_order_lookup)):
             raise ReceiptError('invalid_receipt_configuration')
         self.store, self.factory, self.mode, self.sender = store, connection_factory, mode, sender_address
         self.enabled, self.delivery_enabled, self.outbox, self.smtp_config = enabled, delivery_enabled, outbox, smtp_config
         self.legal_snapshot, self.require_legal = legal_snapshot, require_legal
+        self.workshop_order_lookup = workshop_order_lookup
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def readiness(self):
@@ -144,6 +146,28 @@ class ShopOrderReceipts:
             return order, snapshot, context
         except Exception:
             raise ReceiptError('receipt_not_found') from None
+
+    def _workshop_order(self, order, snapshot):
+        if self.workshop_order_lookup is None or self.mode != 'live' or order['status'] != 'paid':
+            return None
+        linked = self.workshop_order_lookup([order['id']])
+        number = linked.get(order['id'])
+        if type(number) is not int or number < 1:
+            return {'pending': True}
+        mounting = workshop_mounting_services(snapshot)
+        items = []
+        for index, line in enumerate(snapshot['lines']):
+            services = list(mounting.get(index, []))
+            for service in line['services']:
+                code = service['code']
+                if code != 'mounting' or index not in mounting:
+                    services.append(LABELS.get(code, 'Erforderliches Zubehör'))
+            items.append({'name': line['name'], 'quantity': line['quantity'], 'services': services})
+        return {'number': number, 'mounting': bool(mounting), 'items': items}
+
+    def customer_workshop_order(self, order_id, *, customer_id):
+        order, snapshot, _ = self._load(order_id, customer_id)
+        return self._workshop_order(order, snapshot)
 
     def _legal(self, order_id, customer_id):
         value = self.legal_snapshot(order_id, customer_id=customer_id, mode=self.mode) if self.legal_snapshot else None
@@ -192,15 +216,27 @@ class ShopOrderReceipts:
                   'order_confirmed': ('Bestätigung Ihrer Bestellung', 'Alle Bestellpositionen wurden vom Lieferanten angenommen. Die Zahlung wurde eingezogen. Dies ist noch keine Versand- oder Zustellbestätigung.'),
                   'order_cancelled': ('Status Ihrer Bestellung', 'Die Kartenreservierung wurde beendet. Es wurde kein Kartenbetrag eingezogen.')}
         subject, intro = labels[kind]
+        workshop = self._workshop_order(order, snapshot) if kind == 'order_confirmed' else None
+        if workshop and workshop.get('pending'):
+            raise ReceiptError('workshop_order_pending')
         lines = [('TESTVORGANG · keine echte Bestellung oder Zahlung\n' if self.mode == 'test' else '') + intro,
                  '', 'Bestellung: ' + order_id, 'Bestelleingang: ' + order['created_at'], '']
+        if workshop:
+            title = 'Montageauftrag' if workshop['mounting'] else 'Auftrag'
+            subject = f"{title} Nr. {workshop['number']} · Ihre Bestellbestätigung"
+            lines = [f"Ihr {title} Nr. {workshop['number']}", '', intro, '', 'Shop-Bestellnummer: ' + order_id,
+                     'Bestelleingang: ' + order['created_at'], '', 'Auftragspositionen']
         if snapshot.get('version') == 2 and kind == 'order_received':
             from shop_complete_wheels import NOTICE
             lines.extend([NOTICE, 'Fahrzeugangabe: ' + snapshot['vehicle_ref'], ''])
-        for line in snapshot['lines']:
+        mounting_services = workshop_mounting_services(snapshot) if workshop and workshop['mounting'] else {}
+        for index, line in enumerate(snapshot['lines']):
             lines.append(f"{line['quantity']} × {line['name']}: {_money(line['items_gross_cent'])}")
             for service in line['services']:
-                lines.append('  ' + LABELS.get(service['code'], 'Erforderliches Zubehör') + ': ' + _money(service['gross_cent']))
+                label = LABELS.get(service['code'], 'Erforderliches Zubehör')
+                if service['code'] == 'mounting' and mounting_services.get(index):
+                    label = ', '.join(mounting_services[index])
+                lines.append('  ' + label + ': ' + _money(service['gross_cent']))
         for shipment in snapshot['shipments']:
             label = 'Versand zur Werkstatt' if shipment['destination'] == 'workshop' else 'Direktversand zum Kunden'
             if shipment['destination'] == 'workshop' and 'workshop_delivery' in context:
@@ -212,9 +248,10 @@ class ShopOrderReceipts:
             day = datetime.fromisoformat(preference['date']).strftime('%d.%m.%Y')
             appointment_note = (f"Ihr Wunschtermin für die Reifenmontage ist der {day} um {preference['time']} Uhr. "
                                 "Wir stimmen den Termin mit Ihnen ab, sobald die Reifenlieferung geklärt ist.")
-        lines += ['', 'Gesamt inkl. 19 % MwSt.: ' + _money(order['amount_gross_cent']),
-                  '', appointment_note,
-                  '', 'RECHNUNGSANSCHRIFT']
+        lines += ['', 'Gesamt inkl. 19 % MwSt.: ' + _money(order['amount_gross_cent'])]
+        if not workshop or (workshop['mounting'] and context.get('workshop_delivery') != 'customer_reshipment'):
+            lines.extend(['', appointment_note])
+        lines += ['', 'RECHNUNGSANSCHRIFT']
         for key in ('billing', 'delivery'):
             if key == 'delivery':
                 title = ('LIEFERANSCHRIFT FÜR DIREKTVERSAND UND WEITERVERSAND NACH WERKSTATTLEISTUNG'
@@ -227,7 +264,7 @@ class ShopOrderReceipts:
         lines += ['', 'Dies ist eine Bestell-/Statusbestätigung, keine Rechnung.', '', FOOTER_TEXT]
         record = {'order_id': order_id, 'kind': kind, 'customer_id': customer_id, 'mode': self.mode,
             'binding': binding, 'recipient': context['contact']['email'], 'sender': self.sender,
-            'subject': ('TEST · ' if self.mode == 'test' else '') + subject + ' ' + order_id,
+            'subject': subject if workshop else ('TEST · ' if self.mode == 'test' else '') + subject + ' ' + order_id,
             'body': '\n'.join(lines), 'legal_hash': sha256(legal_json.encode()).hexdigest(), 'legal_json': legal_json}
         record['token'] = str(uuid5(NAMESPACE, self.mode + ':' + order_id + ':' + kind))
         record['fingerprint'] = sha256(_json(record).encode()).hexdigest()
@@ -332,6 +369,9 @@ class ShopOrderReceipts:
             'shipments': [{key: group[key] for key in ('destination', 'gross_cent')} for group in snapshot['shipments']],
             'email_state': {row['kind']: row['state'] for row in rows}, 'invoice_status': 'issued' if invoice else 'not_issued',
             'invoice': {'number': invoice['voucher_number']} if invoice else None, 'returns_enabled': False}
+        workshop = self._workshop_order(order, snapshot)
+        if workshop:
+            result['workshop_order'] = workshop
         if (parsed_context is not None and 'workshop_delivery' in parsed_context
                 and any(group['destination'] == 'workshop' for group in snapshot['shipments'])):
             choice = parsed_context['workshop_delivery']

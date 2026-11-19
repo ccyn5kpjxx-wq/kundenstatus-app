@@ -37,6 +37,9 @@ def vehicle_blocked(db, vehicle_id):
 
 def init_schema(db):
     init_vehicle_schema(db)
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_onsite_repayments (
+        hold_id TEXT PRIMARY KEY, mietvorgang_id INTEGER NOT NULL UNIQUE, amount_cents BIGINT NOT NULL,
+        repaid_at TEXT NOT NULL, operator_name TEXT NOT NULL, receipt_ref TEXT NOT NULL)''')
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_returns (
         hold_id TEXT PRIMARY KEY, mietvorgang_id INTEGER NOT NULL UNIQUE,
         returned_at TEXT NOT NULL, recorded_at TEXT NOT NULL,
@@ -108,6 +111,33 @@ def deposit_release_eligible(db, hold_id, rental_id):
                 and 2 <= len(clearance['operator_name'].strip()) <= 100
                 and 3 <= len(clearance['evidence_ref'].strip()) <= 100
                 and 5 <= len(clearance['note'].strip()) <= 1000)
+
+
+def record_onsite_repayment(db, hold_id, *, confirmed, operator_name, receipt_ref, now=None):
+    """Record a completed local payout under the existing per-vehicle lock."""
+    prior = db.execute('SELECT * FROM miet_checkout_onsite_repayments WHERE hold_id=?', (hold_id,)).fetchone()
+    if prior:
+        return dict(prior)
+    if (confirmed is not True or not isinstance(operator_name, str) or not 2 <= len(operator_name.strip()) <= 100
+            or not isinstance(receipt_ref, str) or not 3 <= len(receipt_ref.strip()) <= 100):
+        raise ValueError('Vollständige Auszahlung der Kaution mit verantwortlicher Person und Beleg bestätigen.')
+    hold = db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone()
+    if not hold or hold['status'] != 'confirmed' or hold['payment_intent'] or hold['session_id']:
+        raise ValueError('Keine bestätigte Vor-Ort-Buchung.')
+    from mietwagen_checkout import validate_onsite_quote
+    q = json.loads(hold['payload'])['quote']
+    validate_onsite_quote(q)
+    payment = db.execute('SELECT * FROM miet_checkout_onsite_payments WHERE hold_id=?', (hold_id,)).fetchone()
+    if (q.get('test_only') is not False or not payment or payment['mietvorgang_id'] != hold['mietvorgang_id']
+            or payment['deposit_cents'] != q['deposit_cents']
+            or not deposit_release_eligible(db, hold_id, hold['mietvorgang_id'])):
+        raise ValueError('Auszahlung erst nach belegtem Kautionseingang und unbeanstandeter oder geklärter Rückgabe bestätigen.')
+    row = db.execute('''INSERT INTO miet_checkout_onsite_repayments
+        (hold_id,mietvorgang_id,amount_cents,repaid_at,operator_name,receipt_ref)
+        VALUES (?,?,?,?,?,?) RETURNING *''',
+        (hold_id, hold['mietvorgang_id'], payment['deposit_cents'], (now or datetime.now(timezone.utc)).isoformat(),
+         operator_name.strip(), receipt_ref.strip())).fetchone()
+    return dict(row)
 
 
 def queue_qualified_charged_deposit_refunds(portal, ledger, *, limit=100):

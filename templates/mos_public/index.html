@@ -101,9 +101,15 @@
           <p id="rental-duration-help">Ein Miettag entspricht 24 Stunden. Auch angefangene Miettage zählen voll. Bei Zeitumstellungen zählen die tatsächlich verstrichenen Stunden. Online sind höchstens {{ max_days }} Miettage möglich.</p>
           {% if weekly_schedule %}<p>Termine kannst du bis zu zwölf Monate im Voraus wählen.</p>{% endif %}
         </details>
+        <label for="payment-method">Wie möchtest du bezahlen?</label>
+        <select id="payment-method" name="payment_method" required>
+          <option value="online"{% if chosen.get('payment_method', 'online') == 'online' %} selected{% endif %}>Online bezahlen</option>
+          <option value="onsite"{% if chosen.get('payment_method') == 'onsite' %} selected{% endif %}>Vor Ort bezahlen (Barzahlung möglich)</option>
+        </select>
+        <p>Bei Zahlung vor Ort buchst du verbindlich ohne Onlinezahlung. Den Mietpreis und die 500 € rückzahlbare Kaution kannst du bei der Abholung bar bezahlen.</p>
         {% if live %}
           <details class="entry-detail" id="duration-deposit-help">
-            <summary>So funktioniert die Kaution</summary>
+            <summary>So funktioniert die Kaution bei Onlinezahlung</summary>
             {% if mixed_deposit %}
               <p><strong>Bis fünf berechnete Miettage:</strong> 500 € auf einer Kreditkarte reservieren, ohne Abbuchung. Das bestätigst du selbst online, frühestens zwölf Stunden vor der Abholung. Die Reservierung muss länger als 24 Stunden nach der Rückgabe gültig bleiben. Debit- und Prepaidkarten eignen sich dafür nicht.</p>
               <p><strong>Sechs bis {{ max_days }} berechnete Miettage:</strong> 500 € Kaution bei der Buchung zusammen mit der Miete bezahlen. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe veranlassen wir die Erstattung innerhalb von zwei Werktagen. Die Gutschrift kann später erfolgen. Zusätzliche Forderungen prüfen wir getrennt. Es erfolgt keine automatische weitere Kartenbelastung.</p>
@@ -130,7 +136,7 @@
     <script src="{{ url_for('static', filename='mos_booking_calendar.js') }}" defer></script>
     <script src="{{ url_for('static', filename='mos-portal/entry.js') }}" defer></script>
   {% else %}
-    <section class="entry-panel entry-empty"><h2>Aktuell sind keine Termine frei</h2><p>Für eine persönliche Übergabe ist derzeit kein Termin geöffnet. Bitte prüfe später erneut oder rufe uns an.</p><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a></section>
+    <section class="entry-panel entry-empty"><h2>Aktuell sind keine Termine frei</h2><p>Derzeit sind keine persönlichen Übergabetermine buchbar. Bitte prüfe später erneut oder rufe uns an.</p><a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a></section>
   {% endif %}
 
   <aside class="entry-aside" aria-label="Mietstation und Buchungshinweise">
@@ -146,9 +152,9 @@
       <h2>Gut zu wissen</h2>
       <dl>
         {% if live %}
-          <dt>Zahlung</dt><dd>Den Mietpreis bezahlst du bei der Buchung online. Vor Ort ist keine Zahlung vorgesehen.</dd>
+          <dt>Zahlung</dt><dd>Du wählst zwischen Onlinezahlung und Zahlung bei Abholung. Bei Vor-Ort-Zahlung brauchst du online keine Karte anzugeben.</dd>
           <dt>Kaution</dt>
-          <dd>{% if mixed_deposit %}Bis 5 Miettage werden 500 € kurz vor Abholung auf der Kreditkarte reserviert. Ab 6 Miettagen zahlst du die rückzahlbare Kaution mit der Miete.{% else %}500 € per Kreditkartenreservierung. Die Bedingungen siehst du bei der Auswahl und in der Preisübersicht.{% endif %}</dd>
+          <dd>Bei Vor-Ort-Zahlung hinterlegst du die 500 € bei der Abholung. Bei Onlinezahlung gelten die Bedingungen im Abschnitt zur Kaution.</dd>
         {% else %}
           <dt>Testbuchung</dt><dd>Die angezeigten Termine sind Testtermine. Kartenreservierung und Mietzahlung werden simuliert.</dd>
         {% endif %}
