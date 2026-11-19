@@ -154,14 +154,19 @@ class LexwareShopInvoices:
         return _uuid(created.get('id'))
 
     @staticmethod
-    def _verify(raw, remote_id, payload):
+    def _verify(raw, remote_id, payload, *, voucher_number=None):
         try:
             invoice_day = _day(datetime.fromisoformat(raw['voucherDate'].replace('Z', '+00:00')))
+            terms = raw['paymentConditions']
+            expected_terms = payload['paymentConditions']
             if (_uuid(raw['id']) != remote_id or _printed_text(raw['introduction']) != payload['introduction']
                     or invoice_day.isoformat() != payload['voucherDate'][:10]
+                    or _printed_text(raw['title']) != payload['title']
                     or any(raw['address'].get(k) != v for k, v in payload['address'].items())
                     or _printed_text(raw['remark']) != payload['remark']
-                    or _printed_text(raw['paymentConditions']['paymentTermLabel']) != payload['paymentConditions']['paymentTermLabel']
+                    or _printed_text(terms['paymentTermLabel']) != expected_terms['paymentTermLabel']
+                    or type(terms.get('paymentTermDuration')) is not int
+                    or terms['paymentTermDuration'] != expected_terms['paymentTermDuration']
                     or raw['shippingConditions']['shippingType'] != payload['shippingConditions']['shippingType']
                     or raw['taxConditions']['taxType'] != 'gross' or raw['totalPrice']['currency'] != 'EUR'
                     or _amount(raw['totalPrice']['totalGrossAmount']) != _gross(payload)
@@ -174,6 +179,7 @@ class LexwareShopInvoices:
                 raise ValueError()
             number = raw.get('voucherNumber') or ''
             if ((status != 'draft' and not number) or not isinstance(number, str) or len(number) > 80
+                    or voucher_number is not None and number != voucher_number
                     or any(ord(c) < 32 for c in number)):
                 raise ValueError()
             return {'state': 'draft' if status == 'draft' else 'final', 'voucher_number': number,
@@ -181,10 +187,10 @@ class LexwareShopInvoices:
         except (ValueError, KeyError, TypeError, AttributeError):
             raise ShopLexwareError('lexware_invoice_binding_mismatch') from None
 
-    def inspect(self, remote_id, payload):
+    def inspect(self, remote_id, payload, *, voucher_number=None):
         remote_id = _uuid(remote_id)
         raw = self._request('GET', '/v1/invoices/' + remote_id)
-        return self._verify(raw, remote_id, payload)
+        return self._verify(raw, remote_id, payload, voucher_number=voucher_number)
 
     def recover(self, payload):
         """Search the frozen voucher day, including drafts. Never choose among competing references."""
@@ -218,9 +224,9 @@ class LexwareShopInvoices:
                 return matches[0] if matches else None
         raise ShopLexwareError('lexware_invoice_search_incomplete')
 
-    def pdf(self, remote_id, payload):
+    def pdf(self, remote_id, payload, *, voucher_number=None):
         remote_id = _uuid(remote_id)
-        if self.inspect(remote_id, payload)['state'] != 'final':
+        if self.inspect(remote_id, payload, voucher_number=voucher_number)['state'] != 'final':
             raise ShopLexwareError('lexware_invoice_pdf_not_ready')
         # Request the original representation. A visual PDF preview of an XML
         # XRechnung must never be delivered as the accounting original.

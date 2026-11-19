@@ -139,7 +139,7 @@ class LexwareShopInvoiceTests(unittest.TestCase):
         response = self.portal.get_requests.return_value.request.return_value
         response.status_code, response.headers = 200, {'Content-Type':'application/pdf'}
         response.iter_content.return_value = [pdf]
-        self.assertEqual(self.service.pdf(RID, self.payload), pdf)
+        self.assertEqual(self.service.pdf(RID, self.payload, voucher_number='RE-45'), pdf)
         req = self.portal.get_requests.return_value.request.call_args
         self.assertEqual(req.args, ('GET', 'https://api.lexware.io/v1/invoices/' + RID + '/file'))
         self.assertEqual(req.kwargs['headers']['Accept'], '*/*')
@@ -157,6 +157,15 @@ class LexwareShopInvoiceTests(unittest.TestCase):
             self.transport.return_value = {**self.remote, **change}
             with self.assertRaises(ShopLexwareError):
                 self.service.pdf(RID, self.payload)
+        self.portal.get_requests.assert_not_called()
+
+    def test_number_title_and_terms_must_match_before_downloading_any_bytes(self):
+        for change in [{'voucherNumber':'RE-99'}, {'voucherNumber':'RE-45 '}, {'title':'Mahnung'},
+                       {'paymentConditions':{**self.remote['paymentConditions'], 'paymentTermDuration':14}},
+                       {'paymentConditions':{**self.remote['paymentConditions'], 'paymentTermDuration':False}}]:
+            with self.subTest(change=change), self.assertRaisesRegex(ShopLexwareError, 'binding_mismatch'):
+                self.transport.return_value = {**self.remote, **change}
+                self.service.pdf(RID, self.payload, voucher_number='RE-45')
         self.portal.get_requests.assert_not_called()
 
     def test_invalid_host_never_receives_an_account_request(self):
