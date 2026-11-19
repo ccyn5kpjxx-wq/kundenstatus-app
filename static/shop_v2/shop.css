@@ -13,6 +13,8 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
 .shop-price .shop-tyre-label img{width:90px;height:auto;max-height:132px;filter:none;mix-blend-mode:normal}.shop-order-review dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;font-size:14px;line-height:1.6}.shop-order-review dd{margin:0;text-align:right;font-weight:700}.shop-order-review>.shop-button{margin-top:20px}
 .shop-cart-feedback:not(:empty){display:grid;gap:9px;margin-top:14px;padding:17px;border:1px solid #b9d9c8;border-radius:7px;background:#eff8f2;color:#254f3b;overflow-wrap:anywhere}.shop-cart-feedback>strong{font-size:18px;line-height:1.3}.shop-cart-feedback>p{margin:0;font-size:13px;line-height:1.5}.shop-cart-feedback>.shop-button{justify-self:start;max-width:100%}.shop-cart-feedback[data-kind=error]{border-color:#e3b8b5;background:#fff3f2;color:#8b302b}.shop-cart-feedback[data-kind=warning]{border-color:#dbc99e;background:#fff8e8;color:#705621}
 .shop-rim-details {grid-column: 1 / -1; border-top: 1px solid #dce5ec; padding-block: 12px;}
+.shop-tyre-documents { flex-wrap: wrap; }
+.shop-tyre-documents > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .shop-rim-details summary {cursor: pointer; padding-block: 8px; font-weight: 700;}
 .shop-cost-lines {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 6px 16px; margin-block: 12px; font-size: 14px;}
 .shop-cost-lines dd {margin: 0; text-align: right;}

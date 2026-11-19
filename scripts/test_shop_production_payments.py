@@ -51,8 +51,9 @@ def reviewed_complete_pack():
 
 
 def reviewed_complete_profile(value):
+    # Keep this independent of NOTICE: the deployed payment profile pins the reviewed wording.
     return {**profile(), 'complete_wheel_review_approved': True,
-        'complete_wheel_notice_sha256': sha256(NOTICE.encode('utf-8')).hexdigest(),
+        'complete_wheel_notice_sha256': '07371bb8c23d41f8d71ca719e80ed326d5c9b44afb9d6e31de1324a7b4efb024',
         'complete_wheel_frozen_pack_hash': sha256(_freeze_pack(value).encode('utf-8')).hexdigest()}
 
 
@@ -296,6 +297,43 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.assertEqual(set(frozen['texts']), set(DOCS))
         self.assertEqual(frozen['attachments'][0]['content'], b'SYNTHETIC annex')
         self.assertEqual(self.client.mock_calls, [])
+
+    def test_real_checkout_route_preserves_accepted_montage_request_across_retry(self):
+        dependencies, _ = self.prepare()
+        snapshot = self.save_quote()
+        calendar = Mock(return_value=['10:00'])
+        self.portal.freie_reifen_slots = calendar
+        app = self.portal.app
+        app.config.update({flag: True for flag in FLAGS}, SHOP_PUBLIC_ORIGIN=ORIGIN,
+                          SHOP_ORDER_MODE='live', SHOP_CONSUMER_ENABLED=True)
+        register_shop_runtime(self.portal, catalogue=object(), quote_service=self.quotes,
+            authorize_quote=lambda req: 'customer-a', quote_context=lambda req, owner: {},
+            quote_sink=lambda *args, **kwargs: None, **dependencies)
+        client = app.test_client()
+        wish = {'date': '2026-11-24', 'time': '10:00'}
+        body = {'quote_hash': snapshot['quote_hash'], 'idempotency_key': 'SYNTHETIC-montage-order',
+                'appointment_preference': wish}
+        def submit():
+            return client.post('/shop/api/v2/orders', base_url=ORIGIN, headers={'Origin': ORIGIN}, json=body)
+        self.assertNotEqual(submit().status_code, 200)
+        calendar.assert_not_called()
+        self.assertEqual(self.count('shop_orders_v2'), 0)
+        consumer = dependencies['consumer_service']
+        consumer.accept_quote(snapshot['quote_hash'], customer_id='customer-a', pack_hash=consumer.pack_hash,
+                              terms_accepted=True, consumer=True)
+        first = submit()
+        self.assertEqual(first.status_code, 200, first.json)
+        order = first.json['order']
+        self.assertEqual(order['appointment_preference'], {**wish, 'status': 'requested'})
+        self.assertEqual(order['amount_gross_cent'], snapshot['total_gross_cent'])
+        calendar.return_value = []
+        self.assertEqual(submit().json['order'], order)
+        calendar.assert_called_once_with(wish['date'])
+        self.assertEqual(self.count('shop_orders_v2'), 1)
+        self.assertEqual(self.count('shop_order_appointment_requests_v2'), 1)
+        self.assertEqual(self.count('shop_payment_attempts_v2'), 0)
+        self.assertEqual(self.client.mock_calls, [])
+        self.assertEqual(self.outbox.sent, [])
 
     def test_actual_revalidation_address_and_authorization_callback_signatures(self):
         self.prepare()

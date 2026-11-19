@@ -53,9 +53,11 @@ class ConsumerOrderStore:
     def __getattr__(self, name):
         return getattr(self.store, name)
 
-    def create_order(self, quote_hash, *, customer_id, mode, idempotency_key):
+    def create_order(self, quote_hash, *, customer_id, mode, idempotency_key,
+                     appointment_preference=None, appointment_calendar=None):
         self.consumer.require_acceptance(quote_hash, customer_id=customer_id)
-        return self.store.create_order(quote_hash, customer_id=customer_id, mode=mode, idempotency_key=idempotency_key)
+        return self.store.create_order(quote_hash, customer_id=customer_id, mode=mode, idempotency_key=idempotency_key,
+            appointment_preference=appointment_preference, appointment_calendar=appointment_calendar)
 
 
 class _ReceiptDelivery:
