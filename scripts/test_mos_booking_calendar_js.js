@@ -45,7 +45,7 @@ function regularSlots(first, last) {
   return slots;
 }
 
-function calendar(slots, values, maxDays = 5) {
+function calendar(slots, values, maxDays = 5, fetchInventory) {
   const controls = {};
   const ids = {'vehicle': 'vehicle', 'start_date': 'start-date', 'start_time': 'start-time', 'end_date': 'end-date', 'end_time': 'end-time'};
   for (const [key, id] of Object.entries(ids)) {
@@ -61,13 +61,15 @@ function calendar(slots, values, maxDays = 5) {
   controls['booking-slots'] = {textContent: JSON.stringify(slots)};
   controls['date-message'] = new Control('message');
   controls['date-message'].required = false;
+  if (fetchInventory) controls['inventory-message'] = new Control('message');
   const form = controls['booking-dates'] = new Control('form');
-  form.required = false; form.dataset = {maxDays: String(maxDays)}; form.reports = 0;
+  form.required = false; form.dataset = {maxDays: String(maxDays), availability:'/mieten/availability'}; form.reports = 0;
   form.checkValidity = () => Object.values(ids).every(id => controls[id].checkValidity());
   form.reportValidity = () => { form.reports += 1; return form.checkValidity(); };
   const windowListeners = {};
   const document = {getElementById: id => controls[id], createElement: () => ({value: '', textContent: ''})};
-  vm.runInNewContext(source, {document, window: {addEventListener: (type, listener) => { windowListeners[type] = listener; }}, Date, JSON, Map});
+  vm.runInNewContext(source, {document, window: {addEventListener: (type, listener) => { windowListeners[type] = listener; }},
+    Date, JSON, Map, URLSearchParams, AbortController, fetch: fetchInventory});
   return {
     controls, form,
     change(key, value) { const control = controls[ids[key]]; control.value = value; control.listeners.change(); },
@@ -220,10 +222,35 @@ test('submit revalidates current fields rather than keeping a stale custom error
   assert.equal(page.submit().prevented, false);
 });
 
-let failures = 0;
-for (const [name, callback] of tests) {
-  try { callback(); console.log('PASS ' + name); }
-  catch (error) { failures += 1; console.error('FAIL ' + name); console.error(error.stack); }
-}
-console.log(`${tests.length - failures}/${tests.length} calendar tests passed`);
-process.exitCode = failures ? 1 : 0;
+test('a stale vehicle lookup never overwrites the active calendar result', async () => {
+  const checks = [];
+  const fetchInventory = (url, options) => new Promise(resolve => {
+    checks.push({url, signal:options.signal, answer:body => resolve({ok:true, json:async () => body})});
+  });
+  const page = calendar(regularSlots('2026-11-23', '2026-12-01'),
+    selection('2026-11-23', '14:00', '2026-11-25', '14:00'), 5, fetchInventory);
+  page.change('vehicle', 'kona');
+  assert.equal(checks.length, 2);
+  assert.equal(checks[0].signal.aborted, true);
+  assert.match(checks[1].url, /vehicle=kona/);
+  checks[1].answer({available:false, reason:'occupied', message:'Dieser Zeitraum ist belegt.'});
+  checks[0].answer({available:true});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.controls['inventory-message'].textContent, 'Dieser Zeitraum ist belegt.');
+  assert.equal(page.submit().prevented, true);
+  page.change('end_date', '2026-11-24');
+  checks[2].answer({available:true});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.submit().prevented, false);
+  assert.match(page.controls['inventory-message'].textContent, /verfügbar/);
+});
+
+(async () => {
+  let failures = 0;
+  for (const [name, callback] of tests) {
+    try { await callback(); console.log('PASS ' + name); }
+    catch (error) { failures += 1; console.error('FAIL ' + name); console.error(error.stack); }
+  }
+  console.log(`${tests.length - failures}/${tests.length} calendar tests passed`);
+  process.exitCode = failures ? 1 : 0;
+})();

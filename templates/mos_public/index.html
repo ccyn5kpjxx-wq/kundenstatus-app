@@ -22,7 +22,7 @@
 {% set mixed_deposit = booking_config.long_rental_deposit_method|default('') == 'charge_with_rent_refund_after_return' and max_days|default(5) > 5 %}
 <div class="entry-intro">
   <h1>Mietwagen buchen<span>.</span></h1>
-  <p>Wähle dein Fahrzeug und deinen Mietzeitraum. Anschließend siehst du den Preis und die Verfügbarkeit.</p>
+  <p>Wähle dein Fahrzeug, deinen Mietzeitraum und wie du bezahlen möchtest.</p>
 </div>
 
 <div class="entry-layout">
@@ -33,7 +33,7 @@
     {% set return_day = chosen.get('end_date', (default_end or slots[0])[:10]) %}
     {% set return_time = chosen.get('end_time', default_end[11:16] if default_end else '') %}
     {% set fleet_rates = booking_config.fleet|default({}) %}
-    <form class="entry-form" method="post" action="{{ url_for('mos_public.preview') }}" id="booking-dates" data-max-days="{{ max_days }}">
+    <form class="entry-form" method="post" action="{{ url_for('mos_public.preview') }}" id="booking-dates" data-max-days="{{ max_days }}" data-availability="{{ url_for('mos_public.availability') }}">
       {{ csrf_field()|safe }}
       {% if error %}<p class="error" id="booking-error" role="alert">{{ error }}</p>{% endif %}
 
@@ -96,6 +96,7 @@
           </fieldset>
         </div>
         <p id="date-message" class="small muted" role="status" aria-live="polite"></p>
+        <p id="inventory-message" class="small" role="status" aria-live="polite" hidden></p>
         <details class="entry-detail">
           <summary>Wie wird die Mietdauer berechnet?</summary>
           <p id="rental-duration-help">Ein Miettag entspricht 24 Stunden. Auch angefangene Miettage zählen voll. Bei Zeitumstellungen zählen die tatsächlich verstrichenen Stunden. Online sind höchstens {{ max_days }} Miettage möglich.</p>
@@ -129,7 +130,7 @@
           </details>
         {% endif %}
         <noscript><p>Für die vollständige Auswahl aller angebotenen Uhrzeiten bitte JavaScript aktivieren. Die eingetragenen Termine werden bei der Preisprüfung geprüft.</p></noscript>
-        <div class="entry-submit"><button>{{ 'Verfügbarkeit und Preis prüfen' if live else 'Verfügbarkeit und Testpreis prüfen' }}</button></div>
+        <div class="entry-submit"><button>{{ 'Jetzt buchen' if live else 'Zur Testbuchung' }}</button></div>
       </section>
     </form>
     <script id="booking-slots" type="application/json">{{ slots|tojson }}</script>

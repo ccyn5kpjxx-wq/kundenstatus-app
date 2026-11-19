@@ -47,6 +47,33 @@ class OnsiteCheckoutTests(unittest.TestCase):
         signer = URLSafeTimedSerializer(public.portal.app.secret_key, salt='mos-public-quote-v1')
         return signer.loads(token)['quote']
 
+    def test_direct_booking_creates_an_onsite_reservation_and_updates_public_availability(self):
+        fields = {'vehicle':'kona', 'start':self.slots[0], 'end':self.slots[3], 'payment_method':'onsite'}
+        page = self.public.client.get('/mietwagen-test/buchen', query_string=fields)
+        self.assertEqual(page.status_code, 200)
+        token = unescape(re.search(r'name="quote_token" value="([^"]+)"', page.get_data(as_text=True))[1])
+        self.assertEqual(self.public.client.get('/mietwagen-test/availability', query_string=fields).json, {'available':True})
+        reservation = self.public.checkout(token)
+        self.assertEqual(reservation.status_code, 303)
+        self.assertEqual(self.service.read(reservation.location.rsplit('/', 1)[1])['status'], 'confirmed')
+        fields['payment_method'] = 'online'
+        availability = self.public.client.get('/mietwagen-test/availability', query_string=fields)
+        self.assertEqual(availability.json['reason'], 'occupied')
+        self.assertEqual(self.public.client.get('/mietwagen-test/buchen', query_string=fields).status_code, 409)
+
+    def test_online_checkout_hold_blocks_then_creates_calendar_reservation(self):
+        fields = {'vehicle':'kona', 'start':self.slots[0], 'end':self.slots[3], 'payment_method':'online'}
+        page = self.public.client.get('/mietwagen-test/buchen', query_string=fields)
+        token = unescape(re.search(r'name="quote_token" value="([^"]+)"', page.get_data(as_text=True))[1])
+        checkout = self.public.checkout(token)
+        self.assertEqual(checkout.status_code, 303)
+        check_url = '/mietwagen-test/availability'
+        self.assertEqual(self.public.client.get(check_url, query_string=fields).json['reason'], 'occupied')
+        confirmed = self.public.post(checkout.location)
+        self.assertEqual(confirmed.status_code, 303)
+        self.assertEqual(len(self.public.rows()), 1)
+        self.assertEqual(self.public.client.get(check_url, query_string=fields).json['reason'], 'occupied')
+
     def test_confirms_once_without_stripe_and_blocks_both_payment_paths(self):
         token = self.token()
         q = self.quote(token)

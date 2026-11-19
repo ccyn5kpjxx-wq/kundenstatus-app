@@ -11,6 +11,11 @@
   const endDate = document.getElementById('end-date');
   const endTime = document.getElementById('end-time');
   const message = document.getElementById('date-message');
+  const inventory = document.getElementById('inventory-message');
+  const vehicle = document.getElementById('vehicle');
+  let activeSelection = '';
+  let occupied = false;
+  let inventoryRequest;
   const fields = [startDate, startTime, endDate, endTime];
   let adjustment = '';
   if (!Number.isInteger(maxDays) || maxDays < 1) {
@@ -56,6 +61,39 @@
     return slots.filter(slot => slot.stamp > start.stamp && slot.stamp <= deadline);
   }
 
+  function refreshInventory(valid) {
+    if (!inventory) return;
+    const selection = valid ? new URLSearchParams({
+      vehicle: vehicle.value, start_date: startDate.value, start_time: startTime.value,
+      end_date: endDate.value, end_time: endTime.value
+    }).toString() : '';
+    if (selection === activeSelection) return;
+    activeSelection = selection;
+    occupied = false;
+    if (inventoryRequest) inventoryRequest.abort();
+    inventory.hidden = !selection;
+    inventory.className = 'small';
+    inventory.textContent = '';
+    if (!selection) return;
+    const controller = new AbortController();
+    inventoryRequest = controller;
+    inventory.textContent = 'Kalender wird geladen …';
+    fetch(form.dataset.availability + '?' + selection, { signal: controller.signal, cache: 'no-store' })
+      .then(async response => {
+        if (!response.ok) throw new Error();
+        const result = await response.json();
+        if (controller.signal.aborted) return;
+        if (typeof result.available !== 'boolean') throw new Error();
+        occupied = !result.available;
+        inventory.className = occupied ? 'small error' : 'small';
+        inventory.textContent = occupied ? result.message : 'Fahrzeug im gewählten Zeitraum verfügbar.';
+      })
+      .catch(error => {
+        if (error.name !== 'AbortError' && !controller.signal.aborted)
+          inventory.textContent = 'Der Kalender ist gerade nicht erreichbar. Beim Weitergehen wird der Zeitraum erneut geprüft.';
+      });
+  }
+
   function validate() {
     for (const field of fields) field.setCustomValidity('');
     const start = selectedSlot(startDate, startTime);
@@ -96,7 +134,9 @@
     if (field) field.setCustomValidity(error);
     message.className = error ? 'small error' : 'small';
     message.textContent = error || [adjustment, days ? `Gewählte Mietdauer: ${days} Miettag${days === 1 ? '' : 'e'}; maximal ${maxDays} online möglich.` : ''].filter(Boolean).join(' ');
-    return {valid: !error, start, end, returns, days};
+    refreshInventory(!error);
+    if (occupied) endDate.setCustomValidity(inventory.textContent);
+    return {valid: !error && !occupied, start, end, returns, days};
   }
 
   function pickupChanged() {
@@ -123,6 +163,8 @@
 
   function restore() {
     // Initial rendering, server errors and Back navigation preserve all values.
+    activeSelection = null;
+    occupied = false;
     fillTimes(startDate, startTime);
     fillTimes(endDate, endTime);
     adjustment = '';
@@ -133,6 +175,7 @@
   startTime.addEventListener('change', pickupChanged);
   endDate.addEventListener('change', returnChanged);
   endTime.addEventListener('change', returnChanged);
+  vehicle.addEventListener('change', validate);
   // Handle validation ourselves so an earlier custom error cannot swallow the
   // submit event before the current values have been checked again.
   form.noValidate = true;

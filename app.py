@@ -3382,7 +3382,7 @@ def add_security_headers(response):
         )
     form_action = "form-action 'self'"
     if request.endpoint in {
-        'mos_public.preview', 'mos_public.checkout',
+        'mos_public.preview', 'mos_public.direct_booking', 'mos_public.checkout',
         'mos_public.status', 'mos_public.retry',
     }:
         form_action += " https://checkout.stripe.com"

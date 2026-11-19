@@ -39,6 +39,12 @@ WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
 WEEKLY_SLOT_HORIZON_MONTHS = 12
 
 
+class RentalSelectionError(ValueError):
+    def __init__(self, reason, message):
+        super().__init__(message)
+        self.reason = reason
+
+
 def weekly_handover_enabled(cfg):
     schedule=cfg.get('weekly_handover')
     if schedule is None:return False
@@ -164,6 +170,13 @@ def booking_selection(values):
     return selected
 
 
+def booking_slot(fields, name):
+    if name + '_date' in fields or name + '_time' in fields:
+        return local_slot_to_iso(fields.get(name + '_date', '') + 'T' + fields.get(name + '_time', ''),
+                                 require_future=False)
+    return fields.get(name)
+
+
 def checked_rental_window(start,end,max_days,now):
     """Explain invalid elapsed-time windows before checking opened slots."""
     try:
@@ -210,8 +223,16 @@ def selected_slots_open(db,start,end,weekly=False,now=None):
     except (TypeError,ValueError):return False
     overrides={row['slot']:bool(row['active']) for row in db.execute(
         'SELECT slot,active FROM miet_checkout_slots WHERE slot IN (?,?)',(start,end)).fetchall()}
-    recurring=set(weekly_handover_slots(now)) if weekly else set()
-    return all(overrides.get(slot,slot in recurring) for slot in (start,end))
+    for text, slot in ((start, a), (end, b)):
+        if text in overrides:
+            if not overrides[text]:
+                return False
+            continue
+        local = slot.astimezone(BERLIN)
+        if (not weekly or text != local.isoformat() or local.date() > weekly_handover_end_date(now)
+                or local.weekday() == 6 or not 8 <= local.hour <= 20 or local.minute or local.second or local.microsecond):
+            return False
+    return True
 
 
 def materialize_selected_weekly_slots(db,start,end,now):
@@ -377,7 +398,7 @@ def register(portal):
         state=setup()
         if request.host != urlsplit(state['cfg']['origin']).netloc:abort(403)
         if request.content_length and request.content_length>65536:abort(413)
-        if request.endpoint!='mos_public.webhook':
+        if request.endpoint not in {'mos_public.webhook', 'mos_public.availability'}:
             session.setdefault('mos_public_owner',secrets.token_urlsafe(32))
         if state['cfg']['mode']=='live' and request.method=='POST' and request.endpoint in {'mos_public.preview','mos_public.checkout'}:
             # Persisted across workers; never trust an unconfigured X-Forwarded-For header.
@@ -404,6 +425,10 @@ def register(portal):
         response.headers.update({'Cache-Control':'no-store','X-Robots-Tag':'noindex, nofollow',
                                  'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff',
                                  'X-Frame-Options':'DENY'})
+        if request.endpoint == 'mos_public.availability':
+            response.vary.add('Origin')
+            if request.headers.get('Origin') in mos_site_handoff.SITE_ORIGINS:
+                response.headers['Access-Control-Allow-Origin'] = request.headers['Origin']
         if request.endpoint=='mos_public.deposit_page':
             response.headers['Content-Security-Policy']=(
                 "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
@@ -438,32 +463,50 @@ def register(portal):
             app.logger.exception('MOS Kartenreservierung/Checkout nach Terminschließung muss geprüft werden')
         return render_status(hold_id,'Der Übergabetermin ist nicht mehr geöffnet. Bitte neu buchen.'),409
 
-    def quote(slug,start,end,payment_method='online'):
+    def rental_inventory(db, cfg, slug, start, end, now):
+        if slug not in cfg['fleet']:
+            raise RentalSelectionError('unavailable', 'Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
+        a, b, days = checked_rental_window(start, end, cfg['max_days'], now)
+        if not selected_slots_open(db, start, end, weekly_handover_enabled(cfg), now):
+            raise RentalSelectionError('closed', 'Für einen der gewählten Übergabetermine ist keine Abholung oder Rückgabe geöffnet. '
+                                       'Bitte die angebotenen Tage und Uhrzeiten wählen.')
+        fleet_entry = cfg['fleet'][slug]
+        vehicle = db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',
+                             (fleet_entry['id'],)).fetchone()
+        if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
+            raise RentalSelectionError('unavailable', 'Das zugeordnete Fahrzeug ist nicht verfügbar.')
+        if ((slug == 'doblo-xl' and not is_doblo_xl(vehicle['bezeichnung']))
+                or (cfg['mode'] == 'live' and vehicle['bezeichnung'] != fleet_entry['expected_name'])):
+            raise RentalSelectionError('unavailable', 'Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
+        if not portal.mietfahrzeug_zeitraum_frei_db(db, vehicle['id'], a.date(), b.date()):
+            raise RentalSelectionError('occupied', 'Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
+        return vehicle, days
+
+    @bp.get('/availability')
+    def availability():
+        cfg = setup()['cfg']
+        db = portal.get_db()
+        try:
+            start, end = (booking_slot(request.args, name) for name in ('start', 'end'))
+            rental_inventory(db, cfg, request.args.get('vehicle'), start, end, datetime.now(timezone.utc))
+        except ValueError as error:
+            return {'available': False, 'reason': getattr(error, 'reason', 'invalid'), 'message': str(error)}
+        finally:
+            db.close()
+        return {'available': True}
+
+    def quote(slug,start,end,payment_method='online', *, materialize=True):
         state=setup();cfg=state['cfg']
         if payment_method not in ('online','onsite'):
             raise ValueError('Bitte Onlinezahlung oder Zahlung vor Ort wählen.')
-        if slug not in cfg['fleet']:
-            raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
         db=portal.get_db()
         try:
-            if not portal.USE_POSTGRES:db.execute('BEGIN IMMEDIATE')
+            if materialize and not portal.USE_POSTGRES:db.execute('BEGIN IMMEDIATE')
             now=datetime.now(timezone.utc)
-            weekly=weekly_handover_enabled(cfg)
-            a,b,days=checked_rental_window(start,end,cfg['max_days'],now)
-            if not selected_slots_open(db,start,end,weekly,now):
-                raise ValueError('Für einen der gewählten Übergabetermine ist keine Abholung oder Rückgabe geöffnet. '
-                                 'Bitte die angebotenen Tage und Uhrzeiten wählen.')
+            vehicle, days = rental_inventory(db, cfg, slug, start, end, now)
             f=cfg['fleet'][slug];rate=f['daily_cents']
             if days>=f.get('discount_after_days',cfg['max_days']+1):rate=f['discount_cents']
-            vehicle=db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
-            if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
-                raise ValueError('Das zugeordnete Fahrzeug ist nicht verfügbar.')
-            if ((slug == 'doblo-xl' and not is_doblo_xl(vehicle['bezeichnung']))
-                    or (cfg['mode']=='live' and vehicle['bezeichnung']!=f['expected_name'])):
-                raise ValueError('Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
-            if not portal.mietfahrzeug_zeitraum_frei_db(db,f['id'],a.date(),b.date()):
-                raise ValueError('Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
-            if weekly:
+            if materialize and weekly_handover_enabled(cfg):
                 materialize_selected_weekly_slots(db,start,end,now)
                 if not selected_slots_open(db,start,end):
                     raise ValueError('Ein Übergabetermin ist nicht mehr freigegeben. Bitte neu buchen.')
@@ -1263,23 +1306,26 @@ def register(portal):
                 or charged_refunds['failed'] or charged_refunds['overdue'] or charged_refunds['errors']):
             raise click.ClickException('Offene Zahlungs- oder Prüffälle; Admin-Prüfung erforderlich.')
 
+    @bp.get('/buchen')
+    def direct_booking():
+        return preview()
+
     @bp.post('/quote')
     def preview():
         prefill={}
-        payment_method=request.form.get('payment_method','online')
+        direct=request.method in ('GET','HEAD')
+        fields=request.args if direct else request.form
+        payment_method=fields.get('payment_method','online')
         try:
-            if 'handoff_nonce' in request.form:
+            if not direct and 'handoff_nonce' in request.form:
                 mos_site_handoff.consume_nonce(session,request.form.get('handoff_nonce'))
                 prefill=mos_site_handoff.validated_prefill(request.form,setup()['cfg'])
                 q=quote(prefill['vehicle'],prefill['start'],prefill['end'],payment_method)
             else:
-                def form_slot(name):
-                    if name+'_date' in request.form or name+'_time' in request.form:
-                        return local_slot_to_iso(request.form.get(name+'_date','')+'T'+request.form.get(name+'_time',''),require_future=False)
-                    return request.form.get(name)
-                q=quote(request.form.get('vehicle'),form_slot('start'),form_slot('end'),payment_method)
+                q=quote(fields.get('vehicle'),booking_slot(fields,'start'),booking_slot(fields,'end'),
+                        payment_method,materialize=not direct)
         except ValueError as error:
-            return render_index(booking_selection(request.form),error=str(error),
+            return render_index(booking_selection(fields),error=str(error),
                                 status=400 if 'handoff_nonce' in request.form else 409)
         token=serializer().dumps({'quote':q,'nonce':secrets.token_urlsafe(20)})
         selection=booking_selection({'vehicle':q['slug'],'start':q['start_slot'],'end':q['end_slot']})

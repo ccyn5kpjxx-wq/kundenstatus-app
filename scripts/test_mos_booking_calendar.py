@@ -83,6 +83,65 @@ class BookingCalendarTests(unittest.TestCase):
         available=json.loads(re.search(r'<script id="booking-slots" type="application/json">(.*?)</script>',page,re.S)[1])
         self.assertNotIn(slot,available)
 
+    def test_public_availability_and_direct_booking_share_the_calendar(self):
+        fields = {'vehicle': 'i10', 'start_date': self.day.isoformat(), 'start_time': '10:00',
+                  'end_date': (self.day + timedelta(days=1)).isoformat(), 'end_time': '10:00'}
+        path = '/mietwagen-test/availability'
+        origin = 'https://autovermietung-mos.de'
+        response = self.portal.app.test_client().get(path, query_string=fields, headers={'Origin': origin})
+        self.assertEqual(response.json, {'available': True})
+        self.assertEqual(response.headers['Access-Control-Allow-Origin'], origin)
+        self.assertNotIn('Access-Control-Allow-Credentials', response.headers)
+        self.assertNotIn('Access-Control-Allow-Origin', self.client.get(
+            path, query_string=fields, headers={'Origin': 'https://unrelated.example'}).headers)
+        for method in ('online', 'onsite'):
+            page = self.client.get('/mietwagen-test/buchen', query_string={**fields, 'payment_method': method})
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('name="quote_token"', page.get_data(as_text=True))
+            self.assertIn('Auswahl ändern', page.get_data(as_text=True))
+        db = self.portal.get_db()
+        try:
+            # Even a full booking preview creates no slots, holds or reservations on GET.
+            for table in ('miet_checkout_slots', 'miet_checkout_holds', 'mietvorgaenge'):
+                self.assertEqual(db.execute('SELECT count(*) AS n FROM ' + table).fetchone()['n'], 0)
+            slot = local_slot_to_iso(fields['end_date'] + 'T' + fields['end_time'])
+            db.execute('INSERT INTO miet_checkout_slots (slot,active,created_at,updated_at) VALUES (?,0,?,?)',
+                       (slot, slot, slot))
+            db.commit()
+        finally:
+            db.close()
+        self.assertEqual(self.client.get(path, query_string=fields).json['reason'], 'closed')
+        self.assertEqual(self.client.get(path, query_string={**fields, 'start_date':'bad'}).json['reason'], 'invalid')
+        self.assertEqual(self.client.get(path, query_string={**fields, 'vehicle':'unknown'}).json['reason'], 'unavailable')
+        sunday = self.day + timedelta(days=6-self.day.weekday())
+        self.assertEqual(self.client.get(path, query_string={
+            **fields, 'start_date': sunday.isoformat(), 'end_date': (sunday+timedelta(days=1)).isoformat()
+        }).json['reason'], 'closed')
+
+    def test_manual_calendar_booking_blocks_each_touched_day_and_only_one_vehicle(self):
+        fields = {'vehicle':'i10', 'start_date':self.day.isoformat(), 'start_time':'10:00',
+                  'end_date':(self.day+timedelta(days=1)).isoformat(), 'end_time':'10:00'}
+        vehicle_id = self.base_config['fleet']['i10']['id']
+        identifier = self.portal.create_mietvorgang(vehicle_id, kunde_name='Kalendertest',
+                                                     start_datum=fields['end_date'], end_datum=fields['end_date'])
+        try:
+            for start, end in ((self.day, self.day+timedelta(days=1)),
+                               (self.day+timedelta(days=1), self.day+timedelta(days=2))):
+                fields.update(start_date=start.isoformat(), end_date=end.isoformat())
+                answer = self.client.get('/mietwagen-test/availability', query_string=fields)
+                self.assertEqual((answer.json['available'], answer.json['reason']), (False, 'occupied'))
+                self.assertNotIn('Kalendertest', answer.get_data(as_text=True))
+                self.assertEqual(self.client.get('/mietwagen-test/buchen', query_string=fields).status_code, 409)
+                self.assertEqual(self.client.get('/mietwagen-test/availability',
+                                 query_string={**fields, 'vehicle':'kona'}).json, {'available': True})
+        finally:
+            db = self.portal.get_db()
+            try:
+                db.execute('DELETE FROM mietvorgaenge WHERE id=?', (identifier,))
+                db.commit()
+            finally:
+                db.close()
+
     def test_invalid_calendar_fields_and_reverse_or_equal_return_are_rejected(self):
         for changes in ({'start_date':'2027-02-30'}, {'start_date':'not-a-date'},
                         {'start_time':'25:00'}, {'start_time':'10:30'},
