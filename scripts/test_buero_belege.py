@@ -21,6 +21,7 @@ from jinja2 import ChoiceLoader, DictLoader
 from PIL import Image
 from pypdf import PdfWriter
 from werkzeug.datastructures import FileStorage, MultiDict
+from werkzeug.exceptions import ServiceUnavailable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -64,6 +65,7 @@ class Portal:
         self.app.config.update(TESTING=True, SECRET_KEY="isolated-office-documents-test")
         self.app.jinja_loader = ChoiceLoader([DictLoader({"buero_nav.html": "<nav>Synthetic office navigation</nav>"}), self.app.jinja_loader])
         self.lock = threading.RLock()
+        self.receipts_lock = threading.RLock()
         self.backups = []
         with closing(self.get_db()) as db:
             db.executescript("CREATE TABLE synthetic_office(id INTEGER PRIMARY KEY,active INTEGER); INSERT INTO synthetic_office VALUES(1,1),(2,1);")
@@ -79,6 +81,11 @@ class Portal:
     @contextmanager
     def portal_originals_operation_lock(self):
         with self.lock:
+            yield
+
+    @contextmanager
+    def portal_office_receipts_lock(self):
+        with self.receipts_lock:
             yield
 
     def schedule_change_backup(self, reason):
@@ -626,6 +633,47 @@ class OfficeDocumentTests(unittest.TestCase):
             self.assertEqual(self.office.get(path).status_code, 403)
         self.assertEqual(self.row(key)["status"], "eingereicht")
         self.assertEqual(self.admin.get("/admin/buero/belege/" + key).status_code, 200)
+
+    def test_detail_and_download_remain_available_while_originals_are_busy(self):
+        raw = pdf_bytes("office-read-during-file-work")
+        key = self.create(raw=raw)
+        self.submit(key)
+        record, audit = self.row(key), self.rows(TABLES[1])
+        other = self.p.app.test_client()
+        self.login(other, mid=2)
+        office_url = "/werkstatt/buero/belege/" + key
+        with patch.object(self.p, "portal_originals_operation_lock", side_effect=ServiceUnavailable(retry_after=2)):
+            for client, url in ((self.admin, "/admin/buero/belege/" + key), (self.office, office_url)):
+                with self.subTest(url=url):
+                    detail = client.get(url + "?kategorie=alle&bereich=offen")
+                    self.assertEqual(detail.status_code, 200)
+                    self.assertIn(record["belegnummer"], detail.get_data(as_text=True))
+                    download = client.get(url + "/original")
+                    self.assertEqual(download.status_code, 200)
+                    self.assertEqual(download.data, raw)
+            for suffix in ("", "/original"):
+                self.assertEqual(other.get(office_url + suffix).status_code, 404)
+        self.assertEqual(self.row(key), record)
+        self.assertEqual(self.rows(TABLES[1]), audit)
+        seen = {row["actor"]: row["seen_revision"] for row in self.rows(TABLES[2]) if row["beleg_id"] == key}
+        self.assertEqual(seen, {"admin": record["revision"], "mitarbeiter:1": record["revision"]})
+
+    def test_approval_can_run_during_unrelated_file_work_but_waits_for_a_restore(self):
+        key = self.create()
+        self.submit(key)
+        record, audit = self.row(key), self.rows(TABLES[1])
+        with patch.object(self.p, "portal_office_receipts_lock", side_effect=ServiceUnavailable(retry_after=2)):
+            self.assertEqual(self.action(key, "freigeben", admin=True).status_code, 503)
+        self.assertEqual(self.row(key), record)
+        self.assertEqual(self.rows(TABLES[1]), audit)
+        with patch.object(self.p, "portal_originals_operation_lock", side_effect=ServiceUnavailable(retry_after=2)):
+            self.assertEqual(self.action(key, "freigeben", admin=True, version=record["revision"]).status_code, 303)
+            self.assertEqual(self.action(key, "freigeben", admin=True, version=record["revision"]).status_code, 409)
+        approved = self.row(key)
+        self.assertEqual((approved["status"], approved["revision"], approved["sha256"]),
+                         ("freigegeben", record["revision"] + 1, record["sha256"]))
+        self.assertEqual(len(self.rows(TABLES[1])), len(audit) + 1)
+        self.assertEqual([row["aktion"] for row in self.rows(TABLES[1])].count("freigegeben"), 1)
 
     def test_unauthorized_and_revoked_identity_cannot_read_or_write_original(self):
         key = self.create()

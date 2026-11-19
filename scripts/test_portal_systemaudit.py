@@ -197,6 +197,29 @@ class SystemAuditTests(unittest.TestCase):
                 self.assertEqual(p._portal_originals_lock_state.depth, 2)
         self.assertEqual(p._portal_originals_lock_state.depth, 0)
 
+    def test_office_receipts_can_proceed_during_file_work_and_wait_during_restore(self):
+        for operation, blocked in ((p.portal_originals_operation_lock, False), (p.portal_restore_operation_lock, True)):
+            with self.subTest(blocked=blocked):
+                entered, release = threading.Event(), threading.Event()
+                def hold():
+                    with operation():
+                        entered.set()
+                        release.wait(5)
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    held = pool.submit(hold)
+                    try:
+                        self.assertTrue(entered.wait(2))
+                        with p.app.test_request_context('/admin/buero/belege'), patch.object(p, 'PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS', .05):
+                            if blocked:
+                                with self.assertRaises(p.ServiceUnavailable), p.portal_office_receipts_lock():
+                                    self.fail('Office operation ran during a restore')
+                            else:
+                                with p.portal_office_receipts_lock(), p.portal_office_receipts_lock():
+                                    self.assertEqual(p._portal_office_receipts_lock_state.depth, 2)
+                    finally:
+                        release.set()
+                    held.result(timeout=2)
+
     def test_pg_lock_contention_is_bounded_and_connection_released(self):
         connection = Mock()
         connection.execute.return_value.fetchone.return_value = (False,)
@@ -211,6 +234,18 @@ class SystemAuditTests(unittest.TestCase):
         with p.app.test_request_context('/'):
             with p.portal_originals_operation_lock():
                 self.assertEqual(p._portal_originals_lock_state.depth, 1)
+
+    def test_pg_restore_takes_distinct_keys_and_reuses_the_receipts_lock(self):
+        connections = [Mock(), Mock()]
+        with patch.object(p, 'USE_POSTGRES', True), patch.object(p, 'open_fresh_db', side_effect=connections):
+            with p.portal_restore_operation_lock(), p.portal_office_receipts_lock():
+                self.assertEqual(p._portal_office_receipts_lock_state.depth, 2)
+        keys = [p.PORTAL_ORIGINALS_ADVISORY_LOCK_KEY, p.PORTAL_OFFICE_RECEIPTS_ADVISORY_LOCK_KEY]
+        self.assertNotEqual(*keys)
+        for conn, key in zip(connections, keys):
+            self.assertEqual([call.args for call in conn.execute.call_args_list], [
+                ('SELECT pg_advisory_lock(?)', (key,)), ('SELECT pg_advisory_unlock(?)', (key,))])
+            conn.close.assert_called_once()
 
     def test_pg_connection_deadline_and_request_reuse(self):
         connector = Mock()

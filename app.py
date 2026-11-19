@@ -8606,11 +8606,15 @@ _change_backup_running = False
 _portal_file_export_lock = threading.Lock()
 _portal_originals_thread_lock = threading.RLock()
 _portal_originals_lock_state = threading.local()
+_portal_office_receipts_thread_lock = threading.RLock()
+_portal_office_receipts_lock_state = threading.local()
 PORTAL_ORIGINALS_ADVISORY_LOCK_KEY = 6572746_20261003
+PORTAL_OFFICE_RECEIPTS_ADVISORY_LOCK_KEY = 6572746_20261119
 PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS = 2.0
 PORTAL_ORIGINALS_FILE_LOCK = (
     pathlib.Path(tempfile.gettempdir()) / "gaertner-portal-originals-v1.lock"
 )
+PORTAL_OFFICE_RECEIPTS_FILE_LOCK = PORTAL_ORIGINALS_FILE_LOCK.with_name("gaertner-portal-office-receipts-v1.lock")
 
 
 def list_table_rows_for_backup(db, table_name, exclude_columns=()):
@@ -8822,40 +8826,40 @@ def _originals_busy():
 
 
 @contextmanager
-def _portal_originals_thread_guard():
+def _portal_operation_thread_guard(thread_lock):
     # Background imports may finish normally; HTTP threads must remain usable
     # while an import, analysis or mail delivery owns the shared originals lock.
     if has_request_context():
-        acquired = _portal_originals_thread_lock.acquire(
+        acquired = thread_lock.acquire(
             timeout=PORTAL_ORIGINALS_REQUEST_WAIT_SECONDS
         )
         if not acquired:
             raise _originals_busy()
     else:
-        _portal_originals_thread_lock.acquire()
+        thread_lock.acquire()
     try:
         yield
     finally:
-        _portal_originals_thread_lock.release()
+        thread_lock.release()
 
 
 @contextmanager
-def portal_originals_operation_lock():
-    """Serialize destructive imports with the verified Render cleanup.
+def _portal_operation_lock(thread_lock, state, advisory_key, lock_file):
+    """Hold one operation's cross-process lock with bounded waits for web requests.
 
     PostgreSQL's session advisory lock works across workers and Render
     instances. SQLite/local runtimes use an OS file lock. The thread-local
     depth makes the lock safely re-entrant when a guarded route calls a guarded
     importer in the same request.
     """
-    with _portal_originals_thread_guard():
-        depth = int(getattr(_portal_originals_lock_state, "depth", 0) or 0)
+    with _portal_operation_thread_guard(thread_lock):
+        depth = int(getattr(state, "depth", 0) or 0)
         if depth:
-            _portal_originals_lock_state.depth = depth + 1
+            state.depth = depth + 1
             try:
                 yield
             finally:
-                _portal_originals_lock_state.depth = depth
+                state.depth = depth
             return
 
         lock_connection = None
@@ -8869,7 +8873,7 @@ def portal_originals_operation_lock():
                     while True:
                         row = lock_connection.execute(
                             "SELECT pg_try_advisory_lock(?)",
-                            (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                            (advisory_key,),
                         ).fetchone()
                         if row[0]:
                             break
@@ -8879,7 +8883,7 @@ def portal_originals_operation_lock():
                 else:
                     lock_connection.execute(
                         "SELECT pg_advisory_lock(?)",
-                        (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                        (advisory_key,),
                     ).fetchone()
                 acquired = True
             else:
@@ -8888,7 +8892,7 @@ def portal_originals_operation_lock():
                     flags |= os.O_BINARY
                 if hasattr(os, "O_NOFOLLOW"):
                     flags |= os.O_NOFOLLOW
-                fd = os.open(str(PORTAL_ORIGINALS_FILE_LOCK), flags, 0o600)
+                fd = os.open(str(lock_file), flags, 0o600)
                 lock_handle = os.fdopen(fd, "r+b", buffering=0)
                 while True:
                     try:
@@ -8911,16 +8915,16 @@ def portal_originals_operation_lock():
                         if time.monotonic() >= deadline:
                             raise _originals_busy() from None
                         time.sleep(0.05)
-            _portal_originals_lock_state.depth = 1
+            state.depth = 1
             yield
         finally:
-            _portal_originals_lock_state.depth = 0
+            state.depth = 0
             if lock_connection is not None:
                 try:
                     if acquired:
                         lock_connection.execute(
                             "SELECT pg_advisory_unlock(?)",
-                            (PORTAL_ORIGINALS_ADVISORY_LOCK_KEY,),
+                            (advisory_key,),
                         ).fetchone()
                 finally:
                     lock_connection.close()
@@ -8936,6 +8940,23 @@ def portal_originals_operation_lock():
                             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
                 finally:
                     lock_handle.close()
+
+
+def portal_originals_operation_lock():
+    return _portal_operation_lock(_portal_originals_thread_lock, _portal_originals_lock_state,
+                                  PORTAL_ORIGINALS_ADVISORY_LOCK_KEY, PORTAL_ORIGINALS_FILE_LOCK)
+
+
+def portal_office_receipts_lock():
+    return _portal_operation_lock(_portal_office_receipts_thread_lock, _portal_office_receipts_lock_state,
+                                  PORTAL_OFFICE_RECEIPTS_ADVISORY_LOCK_KEY, PORTAL_OFFICE_RECEIPTS_FILE_LOCK)
+
+
+@contextmanager
+def portal_restore_operation_lock():
+    """Hold both locks from the preflight comparison through the last restore write."""
+    with portal_originals_operation_lock(), portal_office_receipts_lock():
+        yield
 
 
 def portal_originals_locked(function):
@@ -50748,7 +50769,7 @@ def normalize_import_value(value, column_type):
     return value
 
 
-@portal_originals_locked
+@portal_restore_operation_lock()
 def import_backup_json_rows_into_current_database(export, archive, names):
     from shop_storage import reject_portal_only_restore
     reject_portal_only_restore(export=export, names=names)
@@ -50837,7 +50858,7 @@ def import_backup_json_rows_into_current_database(export, archive, names):
         target.close()
 
 
-@portal_originals_locked
+@portal_restore_operation_lock()
 def import_sqlite_rows_into_current_database(imported_db):
     from shop_storage import reject_portal_only_restore
     reject_portal_only_restore(imported_db=imported_db)
@@ -51137,7 +51158,7 @@ def admin_daten_import():
                     tmp_path,
                 )
 
-                with portal_originals_operation_lock():
+                with portal_restore_operation_lock():
                     ensure_no_unrestorable_mos_data_for_import()
                     ensure_no_database_only_originals_for_import()
                     ensure_office_state_for_import(sys.modules[__name__], export=backup_export, imported_db=imported_db)

@@ -23,6 +23,8 @@ from uuid import UUID
 
 from flask import Blueprint, abort, flash, redirect, request, session
 
+from werkstatt_buero_belege import office_receipts_lock
+
 
 TABLES = ('buero_lexware_transfers',)
 MAX_UPLOAD_BYTES = 5_000_000
@@ -264,7 +266,7 @@ class OfficeLexware:
 
     def _claim(self, key, detail, fingerprint, *, manual=False, upload=None):
         lease, now = secrets.token_hex(16), int(time.time())
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self._identity(db, lock=True)
             current = db.execute('SELECT revision,status,typ,payable,business_confirmed,decided_by,sha256,created_by,bereich '
                                  'FROM buero_belege WHERE id=?', (_key(key),)).fetchone()
@@ -297,7 +299,7 @@ class OfficeLexware:
         return lease, None
 
     def _mark_attempt(self, key, lease, state, *, file_id='', voucher_id='', error=''):
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             changed = db.execute('''UPDATE buero_lexware_transfers SET state=?,file_id=?,voucher_id=?,
                 last_error=?,lease_until=0,updated_at=? WHERE beleg_id=? AND lease_id=? RETURNING beleg_id''',
                 (state, file_id, voucher_id, error, self.p.now_str(), key, lease)).fetchone()

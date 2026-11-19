@@ -1,5 +1,5 @@
 """Offline reconciliation tests: no network, credentials, company booking or payment."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime
 from email.message import EmailMessage
 import hashlib
@@ -152,6 +152,28 @@ class OfficeInboxTests(TestCase):
         self.lexware.records=[dict(self.meta,id="one"),dict(self.meta,id="two")]
         self.assertEqual(self.run_mail()["results"][0]["status"],"MEHRDEUTIGER_LEXWARETREFFER")
         self.assertFalse(self.portal.creates)
+    def test_existing_private_receipt_is_rechecked_after_external_lookup(self):
+        held = []
+        @contextmanager
+        def guard(name):
+            held.append(name)
+            try:
+                yield
+            finally:
+                held.pop()
+        self.p.portal_originals_operation_lock = lambda: guard("files")
+        self.p.portal_office_receipts_lock = lambda: guard("receipts")
+        def lookup(digest, meta):
+            self.assertEqual(held, [])
+            self.portal.records.append(dict(meta, id="local", sha256=digest, bereich="privat"))
+            return {"complete": True, "matches": [{"id": "remote"}]}
+        self.lexware.find_matches = lookup
+        result = self.run_mail()["results"][0]
+        self.assertEqual(result["status"], "PRIVAT_BEREITS_IM_PORTAL")
+        self.assertEqual(result["portal_key"], "local")
+        self.assertNotIn("lexware_id", result)
+        self.assertFalse(self.portal.creates)
+
     def test_private_is_not_sent_to_company_lexware_and_does_not_become_payable(self):
         self.meta.update(bereich="privat",bereich_verified=True)
         self.lexware.find_matches=Mock(side_effect=AssertionError("No private company lookup"))

@@ -22,6 +22,8 @@ from zoneinfo import ZoneInfo
 from flask import has_request_context, session
 from werkzeug.datastructures import FileStorage
 
+from werkstatt_buero_belege import office_receipts_lock
+
 BACKUP_TABLES = ("buero_posteingang_receipts", "buero_posteingang_audit")
 SCHEMA_FEATURE = "office_inbox_reconciliation_v1"
 MAX_ATTACHMENT = 10 * 1024 * 1024
@@ -355,6 +357,18 @@ class OfficeInbox:
                 with self.p.portal_originals_operation_lock():
                     if not self.authorize():
                         raise PermissionError("Chefauftrag wurde entzogen.")
+                    initial = portal.find_matches(digest, meta).get("matches", [])
+                # Only read the supplier inventory here. No document is sent;
+                # slow external paging must not reserve the portal or a receipt.
+                lcheck = {"matches": [], "complete": False}
+                if (not private and not private_review_only and len(initial) <= 1
+                        and not any(row.get("bereich") == "privat" for row in initial)):
+                    lcheck = lexware.find_matches(digest, meta)
+                # Another process can classify or import the same receipt
+                # during the remote lookup. Decide against the current state.
+                with self.p.portal_originals_operation_lock(), office_receipts_lock(self.p):
+                    if not self.authorize():
+                        raise PermissionError("Chefauftrag wurde entzogen.")
                     pcheck = portal.find_matches(digest, meta)
                     pmatches = pcheck.get("matches", [])
                     result = {"status": "ZU_PRUEFEN", "sha256": digest, "filename": filename}
@@ -367,7 +381,8 @@ class OfficeInbox:
                         private = private or bool(existing and existing.get("bereich") == "privat")
                         # A local private hint blocks company lookup without
                         # claiming a verified private classification.
-                        lcheck = {"matches": [], "complete": True} if private or private_review_only else lexware.find_matches(digest, meta)
+                        if private or private_review_only:
+                            lcheck = {"matches": [], "complete": True}
                         lmatches = lcheck.get("matches", [])
                         if len(lmatches) == 1:
                             result["lexware_id"] = str(lmatches[0]["id"])

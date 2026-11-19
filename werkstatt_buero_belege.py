@@ -370,6 +370,12 @@ def _lexware_url(value):
         return ""
 
 
+def office_receipts_lock(portal):
+    # Older embedded portals expose a single gate for both files and receipts.
+    lock = getattr(portal, "portal_office_receipts_lock", portal.portal_originals_operation_lock)
+    return lock()
+
+
 class OfficeDocuments:
     def __init__(self, portal):
         self.p = portal
@@ -476,6 +482,7 @@ class OfficeDocuments:
         db.execute("INSERT INTO buero_belege_audit(id,beleg_id,actor,aktion,details_json,created_at) VALUES(?,?,?,?,?,?)",
                    (secrets.token_hex(16), key, who["actor"], action, json.dumps(details, sort_keys=True, ensure_ascii=False), _now()))
         OfficeDocuments._seen(db, who, key, row["revision"])
+        return row
 
     def _backup(self):
         hook = getattr(self.p, "schedule_change_backup", None)
@@ -516,7 +523,7 @@ class OfficeDocuments:
         return {"rows": [self._view(row, admin=admin) for row in rows[:200]], "limited": len(rows) > 200}
 
     def detail(self, key, *, admin=False):
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._row(db, key)
             self._visibility(row, who, admin=admin)
@@ -559,7 +566,7 @@ class OfficeDocuments:
         if category not in CATEGORIES or suggested_kind and suggested_kind not in KINDS:
             raise ValueError("Gültigen Klassifizierungsvorschlag angeben.")
         hint = _text(hint, 1000, "Klassifizierungshinweis", multiline=True)
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = {"actor": "system:chef-posteingang"} if intake else self.identity(admin=bool(session.get("admin")), db=db, lock=True)
             row = self._current(db, key, revision, {"entwurf", "zurueckgewiesen", "eingereicht"})
             if row["klassifizierung_hinweis"].startswith(_BANK_CONFLICT_HINT) and not hint.startswith(_BANK_CONFLICT_HINT):
@@ -614,7 +621,7 @@ class OfficeDocuments:
                 skipped.append(name)
         if skipped:
             hint = (hint + "\nNicht eindeutig übernommen: " + ", ".join(labels[name] for name in skipped) + ". Bitte am Original prüfen.").strip()[:1000]
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             admin = not intake and bool(session.get("admin"))
             who = {"actor": "system:chef-posteingang"} if intake else self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, revision, {"entwurf", "zurueckgewiesen", "eingereicht"})
@@ -670,7 +677,7 @@ class OfficeDocuments:
             raise ValueError("Geprüfte Lexware-Belegreferenz mit offizieller HTTPS-Adresse angeben.")
         if status not in ("bereit", "uebertragen"):
             raise ValueError("Gültigen Lexware-Belegstatus angeben.")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=bool(session.get("admin")), db=db, lock=True)
             row = self._current(db, key, revision, {"freigegeben", "zahlung_in_bearbeitung", "bezahlt"})
             if not row["payable"] or not row["business_confirmed"] or row["typ"] not in ("rechnung", "bescheid"):
@@ -696,7 +703,7 @@ class OfficeDocuments:
         expected_url = "https://app.lexware.de/permalink/vouchers/edit/" + canonical_id
         if document_id.lower() != canonical_id or url != expected_url or status not in ("bereit", "uebertragen"):
             raise ValueError("Geprüfte Lexware-Belegreferenz mit passendem offiziellen Link angeben.")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             admin = bool(session.get("admin"))
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, revision, set(STATES))
@@ -717,7 +724,7 @@ class OfficeDocuments:
 
     def record_processing_notice(self, key, message):
         message = _text(message, 500, "Verarbeitungshinweis")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             admin = bool(session.get("admin"))
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._row(db, key)
@@ -792,7 +799,8 @@ class OfficeDocuments:
             raise ValueError("Beleg darf höchstens 10 MB groß sein.")
         digest = hashlib.sha256(raw).hexdigest()
         dedup_key = _dedup_key(digest, fields)
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        # Inbox deduplication also covers originals in the legacy file inventory.
+        with self.p.portal_originals_operation_lock(), office_receipts_lock(self.p), self.db() as db:
             who = {"actor": "system:chef-posteingang"} if intake else self.identity(admin=admin, db=db, lock=True)
             existing = db.execute("SELECT id FROM buero_belege WHERE dedup_key=?", (dedup_key,)).fetchone()
             if existing:
@@ -823,7 +831,7 @@ class OfficeDocuments:
     def update(self, key, version, payload, *, admin=False):
         if not isinstance(payload, dict) or set(payload) - FIELDS:
             raise ValueError("Nur die vorgesehenen Belegangaben bearbeiten.")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"entwurf", "zurueckgewiesen", "eingereicht"} if admin else {"entwurf", "zurueckgewiesen"})
             self._visibility(row, who, admin=admin)
@@ -845,7 +853,7 @@ class OfficeDocuments:
         self._backup()
 
     def submit(self, key, version, *, admin=False, kind=None, category=None):
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"entwurf", "zurueckgewiesen"})
             self._visibility(row, who, admin=admin)
@@ -874,7 +882,7 @@ class OfficeDocuments:
         note = _text(note, 1000, "Chefnotiz", multiline=True)
         if not approve and not note:
             raise ValueError("Für die Rückgabe bitte den Korrekturgrund angeben.")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=True, db=db, lock=True)
             row = self._current(db, key, version, {"eingereicht", "entwurf", "zurueckgewiesen", "freigegeben"} if approve else {"eingereicht"})
             # A reviewed private letter may subsequently become a source-backed
@@ -952,11 +960,12 @@ class OfficeDocuments:
                  int(payable and row["typ"] == "zahlungsauftrag" and source_confirmed), chosen_area, now, who["actor"], note, now, key, row["revision"], row["status"]))
             if changed.rowcount != 1:
                 raise RevisionConflict("Beleg wurde gleichzeitig entschieden. Bitte neu laden.")
-            self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"],
-                        extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed,
-                               "private_post_zahlungsfreigabe": private_post_payment,
-                               "transferdaten_geaendert": transfer_changed})
+            decided = self._audit(db, who, key, "freigegeben" if approve else "zurueckgewiesen", row["status"],
+                                  extra={"direkte_chefpruefung": direct, "klassifizierung_geaendert": classification_changed,
+                                         "private_post_zahlungsfreigabe": private_post_payment,
+                                         "transferdaten_geaendert": transfer_changed})
         self._backup()
+        return decided
 
     def payment(self, key, version, *, paid=False, paid_date="", reference="", admin=False):
         if paid:
@@ -966,7 +975,7 @@ class OfficeDocuments:
             reference = _text(reference, 200, "Zahlungsreferenz")
             if not reference:
                 raise ValueError("Referenz der außerhalb des Portals ausgeführten Zahlung angeben.")
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = self._current(db, key, version, {"freigegeben", "zahlung_in_bearbeitung"} if paid else {"freigegeben"})
             self._visibility(row, who, admin=admin)
@@ -986,7 +995,7 @@ class OfficeDocuments:
         self._backup()
 
     def original(self, key, *, admin=False):
-        with self.p.portal_originals_operation_lock(), self.db() as db:
+        with office_receipts_lock(self.p), self.db() as db:
             who = self.identity(admin=admin, db=db, lock=True)
             row = db.execute("SELECT filename,mime,size_bytes,sha256,original_base64,revision,created_by,bereich,status,decided_by FROM buero_belege WHERE id=?", (_key(key),)).fetchone()
             if not row:
@@ -1214,13 +1223,13 @@ def register_office_documents(p):
         if request.form.get("confirmed") != "ja" or request.form.get("zahlungspflichtig", "") not in ("", "ja"):
             abort(400)
         def approve_and_transfer():
-            service.decide(key, request.form.get("revision"), approve=True,
-                           note=request.form.get("chef_notiz", ""), payment_release=request.form.get("zahlungspflichtig") == "ja",
-                           business_confirmed=request.form.get("confirmed") == "ja", bereich=request.form.get("bereich", "unklar"),
-                           source_confirmed=request.form.get("zahlungspflichtig") == "ja" and request.form.get("confirmed") == "ja",
-                           kind=request.form.get("typ"), category=request.form.get("kategorie"),
-                           transfer_fields={name: request.form[name] for name in TRANSFER_FIELDS if name in request.form})
-            approved = service.detail(key, admin=True)
+            approved = service.decide(
+                key, request.form.get("revision"), approve=True,
+                note=request.form.get("chef_notiz", ""), payment_release=request.form.get("zahlungspflichtig") == "ja",
+                business_confirmed=request.form.get("confirmed") == "ja", bereich=request.form.get("bereich", "unklar"),
+                source_confirmed=request.form.get("zahlungspflichtig") == "ja" and request.form.get("confirmed") == "ja",
+                kind=request.form.get("typ"), category=request.form.get("kategorie"),
+                transfer_fields={name: request.form[name] for name in TRANSFER_FIELDS if name in request.form})
             if (approved["bereich"] == "geschaeftlich" and approved["business_confirmed"] and approved["payable"]
                     and approved["typ"] in ("rechnung", "bescheid")):
                 run_hook("office_document_approved", key)

@@ -51,7 +51,8 @@ class ComparisonBackupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tree = ast.parse(ROOT.joinpath('app.py').read_text(encoding='utf-8'))
-        names = {'_originals_busy', '_portal_originals_thread_guard',
+        names = {'_originals_busy', '_portal_operation_thread_guard', '_portal_operation_lock',
+                 'portal_office_receipts_lock', 'portal_restore_operation_lock',
                  'portal_originals_operation_lock', 'portal_originals_locked',
                  'ensure_material_external_claims_for_import', 'ensure_kundenflotten_state_for_import', 'admin_daten_import',
                  'import_backup_json_rows_into_current_database', 'import_sqlite_rows_into_current_database'}
@@ -85,6 +86,9 @@ class ComparisonBackupTests(unittest.TestCase):
             'USE_POSTGRES': False, 'DATA_DIR': self.root, 'DB': self.db_path,
             'PORTAL_ORIGINALS_FILE_LOCK': self.root / 'restore.lock',
             '_portal_originals_thread_lock': threading.RLock(), '_portal_originals_lock_state': threading.local(),
+            '_portal_office_receipts_thread_lock': threading.RLock(), '_portal_office_receipts_lock_state': threading.local(),
+            'PORTAL_ORIGINALS_ADVISORY_LOCK_KEY': 1, 'PORTAL_OFFICE_RECEIPTS_ADVISORY_LOCK_KEY': 2,
+            'PORTAL_OFFICE_RECEIPTS_FILE_LOCK': self.root / 'office-receipts.lock',
             'get_db': self.portal.get_db,
             'get_table_columns': lambda db, table: {row['name'] for row in db.execute(f'PRAGMA table_info({table})')},
             'get_table_column_types': lambda db, table: {}, 'normalize_import_value': lambda value, _type: value,
@@ -208,6 +212,27 @@ class ComparisonBackupTests(unittest.TestCase):
             archive.writestr('placeholder', 'synthetic')
         payload.seek(0)
         return self.client.post('/admin/daten-import', data={'datenpaket': (payload, 'backup.zip')})
+
+    def test_restore_preflight_holds_both_locks_for_json_sqlite_rows_and_file_replacement(self):
+        current = self.export()
+        source = self.sqlite_source(current)
+        checks = []
+        def check(*args):
+            checks.append((self.ns['_portal_originals_lock_state'].depth,
+                           self.ns['_portal_office_receipts_lock_state'].depth))
+            raise ValueError('Synthetic preflight stop')
+        self.ns['ensure_no_database_only_originals_for_import'] = check
+        self.ns['extract_import_package_files'] = lambda *args: (source, self.root / 'uploads', current)
+        for restore in (lambda: self.ns['import_backup_json_rows_into_current_database'](current, None, []),
+                        lambda: self.ns['import_sqlite_rows_into_current_database'](source)):
+            checks.clear()
+            with self.assertRaisesRegex(ValueError, 'Synthetic preflight stop'):
+                restore()
+            self.assertEqual(checks, [(1, 1)])
+        checks.clear()
+        self.post_backup()
+        self.assertEqual(checks, [(1, 1)])
+        self.ns['copy_sqlite_database_snapshot'].assert_not_called()
 
     def test_sqlite_file_wins_over_newer_json_before_any_mutation(self):
         path = self.sqlite_source(self.export(), omit_prices=True)

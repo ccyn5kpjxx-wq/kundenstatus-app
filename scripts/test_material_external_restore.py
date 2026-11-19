@@ -62,7 +62,8 @@ def connection(path):
 class ExternalRestoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        names = {'_originals_busy', '_portal_originals_thread_guard',
+        names = {'_originals_busy', '_portal_operation_thread_guard', '_portal_operation_lock',
+                 'portal_office_receipts_lock', 'portal_restore_operation_lock',
                  'portal_originals_operation_lock', 'portal_originals_locked',
                  'ensure_material_external_claims_for_import',
                  'ensure_kundenflotten_state_for_import',
@@ -94,6 +95,9 @@ class ExternalRestoreTests(unittest.TestCase):
             'datetime': datetime, 'USE_POSTGRES': False, 'DATA_DIR': self.root, 'DB': self.db_path,
             'PORTAL_ORIGINALS_FILE_LOCK': self.root / 'restore.lock',
             '_portal_originals_thread_lock': threading.RLock(), '_portal_originals_lock_state': threading.local(),
+            '_portal_office_receipts_thread_lock': threading.RLock(), '_portal_office_receipts_lock_state': threading.local(),
+            'PORTAL_ORIGINALS_ADVISORY_LOCK_KEY': 1, 'PORTAL_OFFICE_RECEIPTS_ADVISORY_LOCK_KEY': 2,
+            'PORTAL_OFFICE_RECEIPTS_FILE_LOCK': self.root / 'office-receipts.lock',
             'get_db': lambda: connection(self.db_path),
             'get_table_columns': lambda db, table: {row['name'] for row in db.execute(f'PRAGMA table_info({table})')},
             'get_table_column_types': lambda db, table: {},

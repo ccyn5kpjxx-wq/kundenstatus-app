@@ -28,6 +28,7 @@ document.querySelectorAll('.bb-chef-review').forEach((form) => {
   const confirmation = form.querySelector('[data-review-confirm]');
   const button = form.querySelector('[data-review-button]');
   const transfer = form.querySelector('[data-transfer-fields]');
+  let submitting = false;
   kind.required = true;
   category.required = true;
 
@@ -54,9 +55,26 @@ document.querySelectorAll('.bb-chef-review').forEach((form) => {
     confirmation.textContent = paying
       ? 'Original, Betrag und Zuordnung geprüft. Das Büro darf die Überweisung ausführen.'
       : 'Original, Angaben und Zuordnung geprüft. Diesen Beleg als geprüft kennzeichnen.';
-    button.textContent = paying ? 'Zahlung freigeben' : 'Prüfung bestätigen';
+    if (!submitting) button.textContent = paying ? 'Zahlung freigeben' : 'Prüfung bestätigen';
   };
 
+  form.addEventListener('submit', (event) => {
+    if (submitting) {
+      event.preventDefault();
+      return;
+    }
+    if (event.defaultPrevented) return;
+    submitting = true;
+    button.setAttribute('aria-disabled', 'true');
+    button.textContent = 'Freigabe wird gespeichert …';
+  });
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) {
+      submitting = false;
+      button.removeAttribute('aria-disabled');
+      update();
+    }
+  });
   kind.addEventListener('change', () => {
     payment.checked = false;
     form.querySelector('[name="confirmed"]').checked = false;
