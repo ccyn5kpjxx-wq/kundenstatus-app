@@ -11,7 +11,8 @@ from reportlab.graphics.shapes import Drawing, Rect
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
+from reportlab.pdfbase.pdfmetrics import getAscentDescent
+from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Table, TableStyle
 
 from auftragsarten import AUFTRAGSARTEN, auftrag_leistungsart
 from reifen_auftragsetikett import reifenetikett
@@ -80,9 +81,10 @@ def _boxes(rows, width, style):
 def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     stream = BytesIO()
     size = A4
-    doc = SimpleDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
-                            author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
-                            bottomMargin=32*mm, allowSplitting=True)
+    doc = BaseDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
+                          author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
+                          allowSplitting=True)
+    cut = size[1] / 4  # PDF coordinates start at the bottom of the portrait page.
     ink, green = HexColor("#172f25"), HexColor("#37654f")
     heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=25, leading=42, textColor=ink)
     label = ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=green,
@@ -182,9 +184,9 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
         canvas.setStrokeColor(green)
         canvas.line(doc.leftMargin + 6, y, width-doc.rightMargin - 6, y)
         canvas.setFont("Helvetica", 8)
-        canvas.drawRightString(width-14*mm, 30*mm, f"Gärtner Karosserie & Lack   ·   Auftrag {sheet['nummer']}   ·   Blatt {document.page}")
+        footer_y = cut + 4*mm if document.page == 1 else 9*mm
+        canvas.drawRightString(width-14*mm, footer_y, f"Gärtner Karosserie & Lack   ·   Auftrag {sheet['nummer']}   ·   Blatt {document.page}")
         if document.page == 1:
-            cut = 26*mm
             canvas.setLineWidth(0.8)
             canvas.setDash(4, 3)
             canvas.line(14*mm, cut, width-7*mm, cut)
@@ -192,10 +194,18 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
             for dy in (-3, 3):
                 canvas.circle(8*mm, cut+dy, 2.2)
                 canvas.line(8*mm+2, cut+dy, 13*mm, cut-dy)
-            canvas.setFont("Helvetica-Bold", 29)
-            canvas.drawString(14*mm, 8*mm, f"Auftrag {sheet['nummer']}")
+            tag = f"Auftrag {sheet['nummer']}"
+            font = "Helvetica-Bold"
+            pts = min(54, (width - 28*mm) / canvas.stringWidth(tag, font, 1))
+            asc, desc = getAscentDescent(font, pts)
+            canvas.setFont(font, pts)
+            canvas.drawCentredString(width / 2, (cut - asc - desc) / 2, tag)
 
-    doc.build(story, onFirstPage=chrome, onLaterPages=chrome)
+    for name, bottom in (("Auftragsblatt", cut + 9*mm), ("Fortsetzung", 17*mm)):
+        frame = Frame(doc.leftMargin, bottom, doc.width, size[1] - doc.topMargin - bottom, id=name)
+        doc.addPageTemplates(PageTemplate(id=name, frames=[frame], onPage=chrome,
+                                          autoNextPageTemplate="Fortsetzung"))
+    doc.build(story)
     return stream.getvalue()
 
 

@@ -15,6 +15,20 @@ import smoke_test
 portal = smoke_test.portal
 
 
+def quarter_cut_lines(page):
+    cut_y = page.rect.height * .75
+    lines = []
+    for drawing in page.get_drawings():
+        for item in drawing["items"]:
+            if item[0] != "l":
+                continue
+            start, end = item[1:3]
+            if (abs(start.y - cut_y) <= .75 and abs(end.y - cut_y) <= .75
+                    and abs(end.x - start.x) > page.rect.width * .75):
+                lines.append((start, end))
+    return lines
+
+
 def original_pdf(*pages):
     with fitz.open() as doc:
         for text in pages:
@@ -37,6 +51,19 @@ class OrderPrintTest(unittest.TestCase):
         saved, _ = portal.save_uploads(order or self.oid, [FileStorage(stream=BytesIO(raw), filename=name)],
                                        "autohaus", kategorie=kategorie, analyze=False)
         self.assertEqual(saved, 1)
+
+    def assert_first_page_tearoff(self, page, number):
+        self.assertEqual(len(quarter_cut_lines(page)), 1, "Schnittlinie bei 75 % der A4-Höhe erwartet")
+        cut_y = page.rect.height * .75
+        lower = [s for block in page.get_text("dict")["blocks"] for line in block.get("lines", [])
+                 for s in line["spans"] if s["text"].strip() and s["bbox"][3] > cut_y]
+        self.assertEqual(" ".join(s["text"].strip() for s in lower), f"Auftrag {number}")
+        self.assertGreaterEqual(min(s["size"] for s in lower), 29)
+        bounds = fitz.Rect(lower[0]["bbox"])
+        for span in lower[1:]:
+            bounds.include_rect(span["bbox"])
+        self.assertAlmostEqual((bounds.x0 + bounds.x1) / 2, page.rect.width / 2, delta=2)
+        self.assertAlmostEqual((bounds.y0 + bounds.y1) / 2, (cut_y + page.rect.height) / 2, delta=10)
 
     def assert_print_hierarchy(self, page, title, number, service, start, end, identification):
         spans = [s for block in page.get_text("dict")["blocks"] for line in block.get("lines", [])
@@ -69,7 +96,8 @@ class OrderPrintTest(unittest.TestCase):
         self.assertGreaterEqual(work["bbox"][1] - max(previous), 9, "Vor der Checkliste fehlt eine freie Textzeile")
 
     def test_a4_cover_and_all_order_pages_exclude_other_jobs_and_invoices(self):
-        self.upload("Lackauftrag9617.pdf", original_pdf("TUER HINTEN RECHTS", "LACKIERFREIGABE"))
+        original = original_pdf("TUER HINTEN RECHTS", "LACKIERFREIGABE")
+        self.upload("Lackauftrag9617.pdf", original)
         self.upload("Rechnung_Auftrag_9617.pdf", original_pdf("PRIVATE INVOICE"), kategorie="rechnung")
         other = portal.create_auftrag("intern", fahrzeug="Testwagen")
         self.upload("Lackauftrag7777.pdf", original_pdf("OTHER ORDER"), order=other)
@@ -88,6 +116,9 @@ class OrderPrintTest(unittest.TestCase):
             self.assertAlmostEqual(pdf[0].rect.height, 841.89, places=1)
             self.assertIn("TUER HINTEN RECHTS", pages[1])
             self.assertIn("LACKIERFREIGABE", pages[2])
+            with fitz.open(stream=original) as source:
+                for index, source_page in enumerate(source):
+                    self.assertEqual(source_page.get_pixmap().digest, pdf[index + 1].get_pixmap().digest)
             self.assertNotIn("PRIVATE INVOICE", "".join(pages))
             self.assertNotIn("OTHER ORDER", "".join(pages))
 
@@ -104,8 +135,7 @@ class OrderPrintTest(unittest.TestCase):
             self.assert_print_hierarchy(page, "Lackierauftrag", self.oid, "Lackier",
                 ("15.11.2026", "08:00"), ("17.11.2026", "16:30"),
                 (portal.get_autohaus_by_slug("kaesmann")["name"], "Audi A6", "TEST AB 123"))
-            strip = fitz.Rect(0, page.rect.height - 70, page.rect.width, page.rect.height)
-            self.assertEqual(page.get_text(clip=strip).strip(), f"Auftrag {self.oid}")
+            self.assert_first_page_tearoff(page, self.oid)
             text = page.get_text()
             self.assertIn("Auftrag erledigt", text)
             self.assertIn("Rückgabe ans Büro", text)
@@ -130,8 +160,7 @@ class OrderPrintTest(unittest.TestCase):
             self.assert_print_hierarchy(page, "Werkstattauftrag", order_id, "Radwechsel",
                                         ("20.11.2026", "10:15"), ("20.11.2026", "11:00"),
                                         ("Tina Beispiel", "Opel Corsa", "TEST EF 456"))
-            strip = fitz.Rect(0, page.rect.height - 70, page.rect.width, page.rect.height)
-            self.assertEqual(page.get_text(clip=strip).strip(), f"Auftrag {order_id}")
+            self.assert_first_page_tearoff(page, order_id)
 
     def test_image_and_unreadable_original_show_what_will_print(self):
         photo = BytesIO()
@@ -190,9 +219,17 @@ class OrderPrintTest(unittest.TestCase):
             db.commit()
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertGreater(len(pdf), 1)
+            self.assert_first_page_tearoff(pdf[0], self.oid)
+            continuation = [pdf[index] for index in range(1, len(pdf))]
+            for page in continuation:
+                self.assertFalse(quarter_cut_lines(page), "Es gibt nur auf Blatt 1 einen Abrissstreifen")
+            self.assertTrue(any("Position " in page.get_text(clip=fitz.Rect(0, page.rect.height * .75,
+                                page.rect.width, page.rect.height)) for page in continuation),
+                            "Folgeseiten müssen das untere Viertel für Arbeitspositionen nutzen")
             whole = "".join(page.get_text() for page in pdf)
             self.assertIn("Werkstattauftrag", whole)
-            self.assertIn("Position 139 bearbeiten.", whole)
+            for index in range(140):
+                self.assertEqual(whole.count(f"Position {index} bearbeiten."), 1)
 
 
 if __name__ == "__main__":
