@@ -187,6 +187,26 @@ def zeitraum_frei(db, vehicle_id, start, end, exclude_hold_id=None):
                    and date.fromisoformat(r['start_datum']) <= (end or date.max) for r in rows)
 
 
+@contextmanager
+def locked_vehicle(portal, vehicle_id):
+    """Serialize inventory changes for this vehicle in both checkout and the admin calendar."""
+    db = portal.get_db()
+    try:
+        if not portal.USE_POSTGRES:
+            db.execute('BEGIN IMMEDIATE')
+        suffix = ' FOR UPDATE' if portal.USE_POSTGRES else ''
+        vehicle = db.execute('SELECT * FROM mietfahrzeuge WHERE id=?' + suffix, (int(vehicle_id),)).fetchone()
+        if vehicle is None:
+            raise ValueError('Mietfahrzeug nicht gefunden.')
+        yield db, vehicle
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 class SharedCheckout:
     def __init__(self, portal, gateway, return_url_base=None):
         from mos_booking.gateway import StripeTestGateway, OfflineGateway
@@ -219,23 +239,8 @@ class SharedCheckout:
             ('paid_bookings_disabled_review' if valid_pi else 'paid_bookings_disabled_payment_unclear_review',
              pi if valid_pi else h['payment_intent'], h['id']))
 
-    @contextmanager
     def locked(self, vehicle_id):
-        db = self.p.get_db()
-        try:
-            if not self.p.USE_POSTGRES:
-                db.execute('BEGIN IMMEDIATE')
-            suffix = ' FOR UPDATE' if self.p.USE_POSTGRES else ''
-            vehicle = db.execute('SELECT * FROM mietfahrzeuge WHERE id=?' + suffix, (int(vehicle_id),)).fetchone()
-            if vehicle is None:
-                raise ValueError('Mietfahrzeug nicht gefunden.')
-            yield db, vehicle
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
+        return locked_vehicle(self.p, vehicle_id)
 
     def read(self, hold_id):
         db = self.p.get_db()

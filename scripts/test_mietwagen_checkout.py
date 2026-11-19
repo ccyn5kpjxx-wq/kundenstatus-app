@@ -102,6 +102,50 @@ class InventoryTests(unittest.TestCase):
         with c.session_transaction() as s:s['admin']=True;s['csrf_token']='test-csrf'
         return c
 
+    def test_manual_block_rejects_conflicts_and_release_is_audited_once(self):
+        blocks = portal.mietkalender_sperren
+        block = blocks.create(portal, self.vid, '2030-01-10', '2030-01-12', 'telefon', 'intern', 'Dispo')
+        with self.assertRaises(ValueError):
+            blocks.create(portal, self.vid, '2030-01-12', '2030-01-13', 'vor_ort')
+        with self.assertRaises(ValueError):
+            self.admin('2030-01-09', '2030-01-10')
+        with self.assertRaises(ValueError):
+            self.hold(start='2030-01-12', end='2030-01-16')
+        self.assertEqual(self.count(), 0)
+        self.assertIn(block, [r['id'] for r in blocks.list_active(portal, '2030-01-12', '2030-01-13')])
+        self.assertNotIn(block, [r['id'] for r in blocks.list_active(portal, '2030-01-13')])
+        self.assertTrue(blocks.release(portal, block, 'Empfang'))
+        self.assertFalse(blocks.release(portal, block, 'Zweiter Versuch'))
+        self.assertNotIn(block, [r['id'] for r in blocks.list_active(portal)])
+        db = portal.get_db()
+        try:
+            row = db.execute('SELECT * FROM mietkalender_sperren WHERE id=?', (block,)).fetchone()
+            self.assertEqual((row['created_by'], row['released_by'], row['note']), ('Dispo', 'Empfang', 'intern'))
+            self.assertIsNotNone(row['released_at'])
+        finally:
+            db.close()
+        self.admin()
+        with self.assertRaises(ValueError):
+            blocks.create(portal, self.vid, '2030-01-11', '2030-01-11', 'vor_ort')
+
+    def test_manual_block_and_online_booking_share_one_vehicle_lock(self):
+        barrier = threading.Barrier(2)
+
+        def attempt(callback):
+            barrier.wait(timeout=10)
+            try:
+                callback()
+                return True
+            except ValueError:
+                return False
+
+        def block():
+            return portal.mietkalender_sperren.create(portal, self.vid, '2030-01-11', '2030-01-11', 'vor_ort')
+
+        with ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(attempt, (self.hold, block)))
+        self.assertCountEqual(results, (False, True))
+
     def test_disabled_creation_but_existing_holds_still_block_admin(self):
         self.hold()
         portal.app.config['MOS_SHARED_CHECKOUT_ENABLED']=False

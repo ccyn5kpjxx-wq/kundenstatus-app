@@ -83,6 +83,25 @@ class BookingCalendarTests(unittest.TestCase):
         available=json.loads(re.search(r'<script id="booking-slots" type="application/json">(.*?)</script>',page,re.S)[1])
         self.assertNotIn(slot,available)
 
+    def test_telephone_block_changes_public_availability_and_checkout_immediately(self):
+        blocks = self.portal.mietkalender_sperren
+        cfg = self.portal.app.config['MOS_PUBLIC_BOOKING']
+        fields = {'vehicle': 'i10', 'start_date': self.day.isoformat(), 'start_time': '10:00',
+                  'end_date': (self.day+timedelta(days=1)).isoformat(), 'end_time': '10:00'}
+        path = '/mietwagen-test/availability'
+        block = blocks.create(self.portal, cfg['fleet']['i10']['id'], fields['end_date'], fields['end_date'],
+                              'telefon', 'Interne Telefonnotiz')
+        self.addCleanup(blocks.release, self.portal, block)
+        result = self.client.get(path, query_string=fields)
+        self.assertEqual(result.json['reason'], 'occupied')
+        self.assertNotIn('Interne Telefonnotiz', result.get_data(as_text=True))
+        self.assertEqual(self.client.get(path, query_string={**fields, 'vehicle': 'kona'}).json, {'available': True})
+        for payment in ('onsite', 'online'):
+            self.assertEqual(self.client.get('/mietwagen-test/buchen', query_string={
+                **fields, 'payment_method': payment}).status_code, 409)
+        self.assertTrue(blocks.release(self.portal, block))
+        self.assertEqual(self.client.get(path, query_string=fields).json, {'available': True})
+
     def test_public_availability_and_direct_booking_share_the_calendar(self):
         fields = {'vehicle': 'i10', 'start_date': self.day.isoformat(), 'start_time': '10:00',
                   'end_date': (self.day + timedelta(days=1)).isoformat(), 'end_time': '10:00'}

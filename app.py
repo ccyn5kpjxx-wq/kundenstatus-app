@@ -68,6 +68,7 @@ from lexware_zahlungsuebersicht import (
 )
 from mos_company_identity import LEGAL_NAME as WORKSHOP_LEGAL_NAME
 import mietwagen_checkout
+import mietkalender_sperren
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
     reifenangebot_summary, reifenangebot_deadline, reifenangebot_frist, reifenangebot_mail, reifenangebot_preis)
@@ -8430,6 +8431,7 @@ BACKUP_TABLES = (
     "kunden_termin_mail_versand",
     "mietfahrzeuge",
     "mietvorgaenge",
+    "mietkalender_sperren",
     "mietvertrag_versionen",
     "mietfahrzeug_bilder",
     "mietbild_backups",
@@ -8561,6 +8563,7 @@ BACKUP_SCHEMA_FEATURES += ("shop_reifentermine_v1",)
 BACKUP_SCHEMA_FEATURES += ("shop_montageauftraege_v1",)
 BACKUP_SCHEMA_FEATURES += ("reifen_angebote_v1",)
 BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
+BACKUP_SCHEMA_FEATURES += (mietkalender_sperren.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
     "kundenflotten_belege": {
         "original_base64": {"suffix": ".bin", "max_bytes": 8 * 1024 * 1024},
@@ -11382,6 +11385,7 @@ def init_db():
     )
     from mos_return import init_vehicle_schema
     init_vehicle_schema(db)
+    mietkalender_sperren.init_schema(db)
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mietvertrag_versionen (
@@ -41944,7 +41948,7 @@ def validiere_mietkontakt(telefon="", email=""):
 
 def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None, exclude_hold_id=None):
     from mos_return import vehicle_blocked
-    if vehicle_blocked(db, fahrzeug_id):
+    if vehicle_blocked(db, fahrzeug_id) or mietkalender_sperren.overlaps(db, fahrzeug_id, start_obj, end_obj):
         return False
     rows = db.execute(
         """
@@ -50424,6 +50428,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
                                 "assistent_mailquellen_dateien"})
     if inspektionscheckliste.SCHEMA_FEATURE in schema_features:
         required_tables.update(inspektionscheckliste.BACKUP_TABLES)
+    if mietkalender_sperren.SCHEMA_FEATURE not in schema_features:
+        required_tables.discard("mietkalender_sperren")
     if format_version >= 3:
         required_tables.add("fahrzeugeinkauf_scan_treffer")
     if format_version >= 4:
