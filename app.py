@@ -39291,7 +39291,27 @@ def build_mini_monatskalender(
     # Kundennamen gehören nicht ins Partner-Dashboard.
     miete_dates = defaultdict(list)
     miete_day_items = defaultdict(list)
+    fahrzeugsperren = []
     if include_internal_notes:
+        fahrzeugsperren = mietkalender_sperren.list_active(sys.modules[__name__], month_start, month_end)
+        for sperre in fahrzeugsperren:
+            start = date.fromisoformat(sperre["start_date"])
+            ende = date.fromisoformat(sperre["end_date"])
+            sperre["zeitraum"] = f"{start.strftime(DATE_FMT)} – {ende.strftime(DATE_FMT)}"
+            sperre["anlass"] = mietkalender_sperren.SOURCES[sperre["source"]]
+            titel = f"{sperre['vehicle_name'] or sperre['kennzeichen']} gesperrt"
+            eintrag = {
+                "label": "Fahrzeugsperre", "farbe": "warning", "title": titel,
+                "subtitle": f"{sperre['anlass']} · {sperre['zeitraum']}",
+                "url": (url_for("betriebs_cockpit", monat=month_start.strftime("%Y-%m"),
+                                _anchor=f"fahrzeugsperre-{sperre['id']}")
+                        if endpoint == "betriebs_cockpit" and has_request_context() and session.get("admin") else ""),
+            }
+            tag = max(start, month_start)
+            while tag <= min(ende, month_end):
+                miete_dates[tag].append(titel)
+                miete_day_items[tag].append(eintrag)
+                tag += timedelta(days=1)
         if miet_fahrzeuge is None:
             try:
                 miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
@@ -39487,6 +39507,7 @@ def build_mini_monatskalender(
         "abwesenheiten": abwesenheiten,
         "show_notes": include_internal_notes,
         "show_miete": include_internal_notes,
+        "fahrzeugsperren": fahrzeugsperren,
         "miete_count": len(miete_dates),
         "event_label": "Anlieferung" if only_arrival_events else "Fahrzeugtermin",
     }
@@ -40360,7 +40381,7 @@ def cockpit_aktionsuebersicht(auftraege):
 @app.route("/admin/start")
 @app.route("/admin/cockpit")
 @admin_required
-def betriebs_cockpit():
+def betriebs_cockpit(sperrformular=None, sperrfehler=None):
     # Preserve legacy unset archive flags while filtering before expensive hydration.
     auftraege = list_auftraege(include_unset_archived=True)
     cockpit_data = dashboard_daten(auftraege)
@@ -40369,15 +40390,23 @@ def betriebs_cockpit():
         miet_fahrzeuge = list_mietfahrzeuge(include_inactive=True)
     except Exception:
         miet_fahrzeuge = []
+    kalender_tag = request.args.get("tag")
+    if sperrformular:
+        gewaehlter_start = parse_date(sperrformular.get("start_date"))
+        if gewaehlter_start and 1 < gewaehlter_start.year < 9999:
+            kalender_tag = gewaehlter_start.isoformat()
     mini_calendar = build_mini_monatskalender(
         auftraege,
         request.args.get("monat"),
-        request.args.get("tag"),
+        kalender_tag,
         endpoint="betriebs_cockpit",
         include_internal_notes=True,
         miet_fahrzeuge=miet_fahrzeuge,
     )
     mini_calendar["full_url"] = url_for("kalender")
+    heutiger_tag = datetime.now(ZoneInfo("Europe/Berlin")).date()
+    erster_tag = parse_mini_calendar_month(mini_calendar["month_param"])
+    starttag = parse_date(kalender_tag) or max(erster_tag, heutiger_tag)
     neue_emails = list_werkstatt_emails(status="neu", limit=5)
     if current_datetime.hour < 11:
         tages_gruss = "Guten Morgen"
@@ -40395,6 +40424,10 @@ def betriebs_cockpit():
             neue_emails,
         ),
         mietwagen_heute=mietwagen_heute_uebersicht(miet_fahrzeuge),
+        sperrfahrzeuge=[f for f in miet_fahrzeuge if f["aktiv"] and f["basis_status"] not in {"inaktiv", "wartung", "bald"}],
+        sperranlaesse=mietkalender_sperren.SOURCES,
+        sperrformular=sperrformular or {"start_date": starttag.isoformat(), "end_date": starttag.isoformat(), "source": "telefon"},
+        sperrfehler=sperrfehler,
         tages_gruss=tages_gruss,
         erinnerungen=list_erinnerungen(limit=8),
         ki_status=get_ai_status(),
@@ -40411,6 +40444,33 @@ def betriebs_cockpit():
         lohnfreigabe_count=office_payroll.pending_review_count(),
         urlaubfreigabe_count=office_vacation_pending_count(),
     )
+
+
+@app.post("/admin/kalender/fahrzeugsperren")
+@admin_required
+def kalender_fahrzeug_blockieren():
+    form = request.form
+    try:
+        sperre_id = mietkalender_sperren.create(
+            sys.modules[__name__], form.get("vehicle_id"), form.get("start_date"), form.get("end_date"),
+            form.get("source"), note=form.get("note", ""), actor="Werkstatt-Admin",
+        )
+    except ValueError as exc:
+        return betriebs_cockpit(sperrformular=form, sperrfehler=str(exc)), 409
+    flash("Fahrzeugsperre gespeichert. Der Zeitraum ist auf der Homepage belegt.", "success")
+    return redirect(url_for("betriebs_cockpit", monat=form["start_date"][:7],
+                            _anchor=f"fahrzeugsperre-{sperre_id}"), code=303)
+
+
+@app.post("/admin/kalender/fahrzeugsperren/<int:sperre_id>/freigeben")
+@admin_required
+def kalender_fahrzeug_freigeben(sperre_id):
+    if mietkalender_sperren.release(sys.modules[__name__], sperre_id, actor="Werkstatt-Admin"):
+        flash("Fahrzeugsperre aufgehoben.", "success")
+    else:
+        flash("Diese Sperre ist bereits aufgehoben.", "info")
+    monat = parse_mini_calendar_month(request.form.get("monat")).strftime("%Y-%m")
+    return redirect(url_for("betriebs_cockpit", monat=monat, _anchor="fahrzeug-sperren"), code=303)
 
 
 @app.route("/admin/cockpit/auftraege-suche")

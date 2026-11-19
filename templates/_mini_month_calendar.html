@@ -233,8 +233,9 @@
       <h4 class="mb-1">Monatsblick {{ mini_calendar['title'] }}</h4>
       <div class="text-muted small">Heute: {{ mini_calendar['today_text'] }}</div>
     </div>
-    <div class="d-flex gap-2">
-      {% if mini_calendar.get('full_url') %}<a class="btn btn-brand btn-sm" href="{{ mini_calendar['full_url'] }}">Kalender öffnen</a>{% endif %}
+    <div class="d-flex gap-2 flex-wrap">
+      {% if request.endpoint in ('betriebs_cockpit', 'kalender_fahrzeug_blockieren') and session.get('admin') %}<a class="btn btn-brand btn-sm" href="#fahrzeug-sperren">Fahrzeug blockieren</a>{% endif %}
+      {% if mini_calendar.get('full_url') %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['full_url'] }}">Kalender öffnen</a>{% endif %}
       {% if mini_calendar['prev_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['prev_url'] }}">Zurück</a>{% endif %}
       {% if mini_calendar['next_url'] %}<a class="btn btn-soft btn-sm" href="{{ mini_calendar['next_url'] }}">Weiter</a>{% endif %}
     </div>
@@ -291,6 +292,9 @@
             </div>
             {% else %}
             <div class="mini-selected-empty mt-3">Keine Einträge.</div>
+            {% endif %}
+            {% if mini_calendar.get('show_miete') and session.get('admin') and day['url'] %}
+            <a href="{{ day['url'] }}#fahrzeug-sperren" class="btn btn-soft btn-sm mt-2">Ab diesem Tag blockieren</a>
             {% endif %}
           </div>
         </div>

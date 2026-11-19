@@ -23,6 +23,7 @@
     {% if config.MOS_TERMINATION_ENABLED %}<a class="btn btn-soft" href="{{ url_for('mos_termination.admin_declarations') }}">MOS-Kündigungen prüfen</a>{% endif %}
     <a class="btn btn-soft" href="#flotte">Flotte</a>
     <a class="btn btn-soft" href="#belegung">Belegung</a>
+    {% if session.get('admin') %}<a class="btn btn-soft" href="{{ url_for('betriebs_cockpit', mietsperre=1, _anchor='fahrzeug-sperren') }}">Fahrzeug im Kalender blockieren</a>{% endif %}
     <a class="btn btn-soft" href="#neu">+ Fahrzeug</a>
   </div>
 </div>

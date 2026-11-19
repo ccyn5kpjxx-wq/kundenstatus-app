@@ -116,6 +116,7 @@
         <a href="{{ url_for('kalender', ansicht='vergangenheit') }}" class="btn btn-soft">Vergangenheit ansehen</a>
       {% endif %}
       <a href="{{ url_for('admin_mitarbeiter') }}" class="btn btn-soft">Mitarbeiter</a>
+      {% if session.get('admin') %}<a href="{{ url_for('betriebs_cockpit', mietsperre=1, _anchor='fahrzeug-sperren') }}" class="btn btn-brand">Fahrzeug blockieren</a>{% endif %}
     </div>
   </div>
   <div class="week-overview mt-4">

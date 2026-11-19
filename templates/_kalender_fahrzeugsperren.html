@@ -1,0 +1,71 @@
+<section id="fahrzeug-sperren" class="page-card p-3 p-lg-4 mb-3" aria-labelledby="fahrzeug-sperren-titel">
+  <h3 id="fahrzeug-sperren-titel" class="h5">Fahrzeug blockieren</h3>
+  <p class="text-muted">Für Telefon- und Vor-Ort-Buchungen. Die Homepage sperrt das Fahrzeug sofort für den gesamten Zeitraum, einschließlich des letzten Tages.</p>
+  {% if sperrfehler %}<p class="alert alert-warning" role="alert">{{ sperrfehler }}</p>{% endif %}
+  {% if sperrfahrzeuge %}
+  <form id="fahrzeug-sperren-formular" method="post" action="{{ url_for('kalender_fahrzeug_blockieren', _anchor='fahrzeug-sperren') }}" class="row g-3">
+    {{ csrf_field()|safe }}
+    <div class="col-12 col-lg-5">
+      <label class="form-label" for="sperre-fahrzeug">Fahrzeug</label>
+      <select id="sperre-fahrzeug" name="vehicle_id" class="form-select" required>
+        <option value="">Fahrzeug wählen</option>
+        {% for f in sperrfahrzeuge %}<option value="{{ f.id }}"{% if sperrformular.get('vehicle_id') == f.id|string %} selected{% endif %}>{{ f.bezeichnung or 'Mietfahrzeug' }} · {{ f.kennzeichen }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-sm-6 col-lg">
+      <label class="form-label" for="sperre-von">Von</label>
+      <input type="date" id="sperre-von" name="start_date" class="form-control" value="{{ sperrformular.get('start_date', '') }}" required>
+    </div>
+    <div class="col-12 col-sm-6 col-lg">
+      <label class="form-label" for="sperre-bis">Bis einschließlich</label>
+      <input type="date" id="sperre-bis" name="end_date" class="form-control" value="{{ sperrformular.get('end_date', '') }}" required>
+    </div>
+    <div class="col-12 col-lg-5">
+      <label class="form-label" for="sperre-anlass">Anlass</label>
+      <select id="sperre-anlass" name="source" class="form-select" required>
+        {% for key, label in sperranlaesse.items() %}<option value="{{ key }}"{% if sperrformular.get('source') == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="col-12 col-lg">
+      <label class="form-label" for="sperre-notiz">Interne Notiz <span class="text-muted">(optional)</span></label>
+      <input id="sperre-notiz" type="text" name="note" maxlength="500" class="form-control" value="{{ sperrformular.get('note', '') }}">
+    </div>
+    <div class="col-12">
+      <button type="submit" class="btn btn-brand">Fahrzeug blockieren</button>
+    </div>
+  </form>
+  <script>
+    (() => {
+      const start = document.getElementById('sperre-von');
+      const end = document.getElementById('sperre-bis');
+      end.min = start.value;
+      start.addEventListener('change', () => {
+        end.min = start.value;
+        if (start.value && (!end.value || end.value < start.value)) end.value = start.value;
+      });
+    })();
+  </script>
+  {% else %}<p>Aktuell stehen keine aktiven Mietfahrzeuge zur Auswahl.</p>{% endif %}
+  <div class="border-top mt-4 pt-3">
+    <h4 class="h6">Manuelle Sperren im {{ mini_calendar.title }}</h4>
+    {% for b in mini_calendar.fahrzeugsperren %}
+    <article id="fahrzeugsperre-{{ b.id }}" class="border rounded p-3 mb-2">
+      <div class="d-flex justify-content-between gap-2 flex-wrap align-items-start">
+        <div>
+          <strong>{{ b.vehicle_name or 'Mietfahrzeug' }} · {{ b.kennzeichen }}</strong>
+          <div>{{ b.zeitraum }} · {{ b.anlass }}</div>
+          {% if b.note %}<div class="small text-muted mt-1">{{ b.note }}</div>{% endif %}
+        </div>
+        <details>
+          <summary class="btn btn-soft btn-sm">Sperre aufheben</summary>
+          <form method="post" action="{{ url_for('kalender_fahrzeug_freigeben', sperre_id=b.id) }}" class="mt-2">
+            {{ csrf_field()|safe }}
+            <input type="hidden" name="monat" value="{{ mini_calendar.month_param }}">
+            <button class="btn btn-outline-danger btn-sm" type="submit">Freigabe bestätigen</button>
+          </form>
+        </details>
+      </div>
+    </article>
+    {% else %}<p class="text-muted mb-0">Für diesen Monat sind keine manuellen Sperren eingetragen.</p>{% endfor %}
+  </div>
+</section>
