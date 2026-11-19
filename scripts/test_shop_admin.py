@@ -438,7 +438,10 @@ class ShopAdminTests(unittest.TestCase):
         self.assertEqual(self.client.get(pdf).status_code, 403)
         self.login()
         self.assertIn('Bereit zur Rechnungserstellung', self.client.get('/admin/shop').get_data(as_text=True))
-        self.assertIn('Rechnung vorbereiten', self.client.get(path).get_data(as_text=True))
+        before = self.client.get(path).get_data(as_text=True)
+        self.assertIn('Endgültige Rechnung erstellen', before)
+        self.assertIn('Lexware vergibt eine Rechnungsnummer.', before)
+        self.assertNotIn('Online bezahlt.', before)
         with self.client.session_transaction() as saved:
             csrf = {'csrf_token': saved['csrf_token']}
         self.assertEqual(self.client.get(prepare).status_code, 405)
@@ -454,6 +457,12 @@ class ShopAdminTests(unittest.TestCase):
         view = self.client.get(path).get_data(as_text=True)
         self.assertIn('TEST-101', view)
         self.assertIn('PDF öffnen und drucken', view)
+        self.assertNotIn('Online bezahlt.', view)
+        summary = ShopAdminReader(self.storage, self.store).detail(identifier)
+        summary.update(mode='Live', status='Zahlung eingezogen', payment='Zahlung eingezogen')
+        with patch.object(ShopAdminReader, 'detail', return_value=summary):
+            self.assertIn('Online bezahlt. Die Zahlung lässt sich in Lexware der Rechnung zuordnen.',
+                          self.client.get(path).get_data(as_text=True))
         for query, disposition in (('', 'inline'), ('?download=1', 'attachment')):
             response = self.client.get(pdf + query)
             self.assertEqual(response.status_code, 200)

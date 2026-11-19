@@ -80,6 +80,8 @@
     <div class="invoice-heading"><h2 id="rechnung-titel">Rechnung</h2><span class="status">{{ detail.invoice.label }}</span></div>
     {% if invoice_error %}<p class="note warning" role="alert">{{ invoice_error }}</p>{% endif %}
     {% if detail.invoice.number %}<p>Rechnungsnummer <strong>{{ detail.invoice.number }}</strong></p>{% endif %}
+    {% if detail.invoice.state == 'available' %}<p>Lexware vergibt eine Rechnungsnummer.</p>{% endif %}
+    {% if detail.invoice.paid_online %}<p>Online bezahlt. Die Zahlung lässt sich in Lexware der Rechnung zuordnen.</p>{% endif %}
     {% if detail.invoice.state == 'unknown' %}<p>Die Rückmeldung von Lexware ist unklar. Über „Belegstatus prüfen“ suchen Sie nach einem Beleg zu dieser Bestellung.</p>{% endif %}
     {% if detail.invoice.state == 'draft' %}<p>Prüfen Sie den Entwurf in Lexware. Nach der Fertigstellung können Sie hier den Belegstatus aktualisieren und das PDF öffnen.</p>{% endif %}
     {% if detail.invoice.state in ('available', 'draft', 'unknown', 'ready') %}
@@ -91,7 +93,7 @@
       {% if detail.invoice.edit_url %}<a class="primary" href="{{ detail.invoice.edit_url }}" target="_blank" rel="noopener noreferrer">Entwurf in Lexware öffnen ↗</a>{% endif %}
       <form method="post" action="{{ url_for('shop_admin.invoice_action', order_id=detail.id, action='vorbereiten' if detail.invoice.state == 'available' else 'abgleichen') }}">
         {% if csrf_field is not defined %}<input type="hidden" name="csrf_token" value="{{ review_csrf }}">{% endif %}
-        <button type="submit"{% if detail.invoice.state == 'available' %} class="primary"{% endif %}>{{ 'Rechnung vorbereiten' if detail.invoice.state == 'available' else 'Belegstatus prüfen' }}</button>
+        <button type="submit"{% if detail.invoice.state == 'available' %} class="primary"{% endif %}>{{ 'Endgültige Rechnung erstellen' if detail.invoice.state == 'available' else 'Belegstatus prüfen' }}</button>
       </form>
       {% endif %}
     </div>

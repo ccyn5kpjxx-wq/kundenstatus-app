@@ -56,7 +56,7 @@ SERVICE={'mounting':'Montage','painting':'Lackierung','installation':'Einbau','o
 INVOICE_LABELS = {
     'ineligible': 'Keine Rechnung erforderlich',
     'available': 'Bereit zur Rechnungserstellung',
-    'preparing': 'Rechnung wird vorbereitet',
+    'preparing': 'Rechnung wird erstellt',
     'unknown': 'Belegabgleich erforderlich',
     'unavailable': 'Rechnungsstatus derzeit nicht verfügbar',
     'draft': 'Entwurf in Lexware',
@@ -84,6 +84,8 @@ def _invoice_projection(record, order):
     edit_url = record.get('edit_url')
     number = record.get('voucher_number')
     return {'state': state, 'label': label,
+            'paid_online': state == 'ready' and order['mode'] == 'Live' and order['status'] == STATUS['paid']
+                           and order['payment'] == PAYMENT['paid'],
             'number': number if isinstance(number, str) and 0 < len(number) <= 80 else '',
             'edit_url': edit_url if state == 'draft' and isinstance(edit_url, str)
                          and LEXWARE_INVOICE_URL.fullmatch(edit_url) else ''}
