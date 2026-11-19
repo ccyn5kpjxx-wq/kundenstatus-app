@@ -1,9 +1,16 @@
-{% extends 'mos_public/base.html' %}{% block content %}
-<h1>Deine Auswahl wird übernommen</h1>
-<p id="handoff-status" role="status" aria-live="polite">Wir übernehmen Fahrzeug, Termine und Kontaktdaten. Anschließend prüfen wir den verfügbaren Mietpreis.</p>
-<p>Du prüfst die Buchungsübersicht und unterschreibst erst im nächsten Schritt. Es wird hier weder eine Kaution reserviert noch eine Zahlung ausgelöst.</p>
-<a class="button" href="{{ url_for('mos_public.index') }}">Fahrzeug und Termine selbst auswählen</a>
-<noscript><p>Für die Datenübernahme ist JavaScript erforderlich. Du kannst Fahrzeug und Termine über den Link selbst auswählen.</p></noscript>
+{% extends 'mos_public/base.html' %}
+{% set booking_stage = 1 %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
+{% endblock %}
+{% block content %}
+<section class="card followup-panel">
+  <h1>Deine Auswahl wird übernommen</h1>
+  <p id="handoff-status" role="status" aria-live="polite">Wir übernehmen Fahrzeug, Termine und Kontaktdaten. Anschließend prüfen wir den verfügbaren Mietpreis.</p>
+  <p>Im nächsten Schritt siehst du die Buchungsübersicht und entscheidest über deine Unterschrift. Die Übergabe der Daten löst weder eine Kartenreservierung noch eine Zahlung aus.</p>
+  <a class="button secondary" href="{{ url_for('mos_public.index') }}">Fahrzeug und Termine selbst auswählen</a>
+  <noscript><p>Für die Datenübernahme ist JavaScript erforderlich. Du kannst Fahrzeug und Termine über den Link selbst auswählen.</p></noscript>
+</section>
 <script>
 (() => {
   const origins = {{ site_origins|tojson }};

@@ -1,91 +1,279 @@
-{% extends 'mos_public/base.html' %}{% block content %}{% set paid_long = q.long_rental_deposit_policy|default('')=='paid_at_booking_v1' %}<h1>Deine Buchungsübersicht</h1><section class="card" id="booking-overview"><h2>{{ q.vehicle_name }}</h2>{% if not live %}<p class="small muted">Zugeordneter Portal-Testdatensatz: {{ q.portal_vehicle_name }}</p>{% endif %}<dl><dt>Abholung / Rückgabe</dt><dd>{{ q.start_slot|mos_slot }}<br>{{ q.end_slot|mos_slot }}</dd><dt>Aktuelle Abholadresse für die Schlüsselübergabe</dt><dd>Gärtner · {{ werkstatt_oeffentlich.adresse }}</dd><dt>Mietdauer</dt><dd>{{ q.days }} Miettag(e) à {{ '%.2f'|format(q.daily_cents/100)|replace('.', ',') }} €</dd></dl>
-<div class="price">{{ '%.2f'|format(q.amount_cents/100)|replace('.', ',') }} €</div><p>{% if q.deposit_authorized_cents|default(0) %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}Zahlbetrag: nur die Miete inkl. MwSt.; die Kaution wird nicht abgebucht.{% elif q.deposit_charged_cents|default(0) %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}Gesamtzahlung: {{ "%.2f"|format(q.rental_cents/100)|replace(".", ",") }} € Miete inkl. MwSt. + {{ "%.2f"|format(q.deposit_charged_cents/100)|replace(".", ",") }} € rückzahlbare Kaution.{% else %}Mietpreis inkl. MwSt. · im Checkout ausschließlich als Testbetrag.{% endif %}</p><p>{{ q.included_km }} km inklusive. Tatsächliche Mehrkilometer: {{ '%.2f'|format(q.extra_km_cents/100)|replace('.', ',') }} €/km, getrennt bei Rückgabe abzurechnen.</p>
-{% if q.cancellation_policy|default('') == 'free_48h_then_10pct_rent' %}<p class="notice"><strong>Stornierung vor der Unterschrift prüfen:</strong> Bis einschließlich 48 Stunden vor Abholung kostenlos; danach beträgt der pauschalierte Ausfallersatz 10 % des Mietpreises, bei dieser Buchung höchstens {{ '%.2f'|format(((q.rental_cents + 5) // 10) / 100)|replace('.', ',') }} €. Die Kaution gehört nicht zur Berechnung. Ersparte Aufwendungen und eine Wiedervermietung werden angerechnet; du kannst nachweisen, dass kein oder ein wesentlich geringerer Schaden entstanden ist. Liegt die Abholung schon innerhalb von 48 Stunden, gibt es ab Buchung keine kostenlose Stornofrist mehr.</p>{% endif %}
-{% if q.deposit_authorized_cents|default(0) %}<p><strong>{{ '%.2f'|format(q.deposit_authorized_cents/100)|replace('.', ',') }} € Kaution als Kreditkartenreservierung.</strong> {% if not live %}Im Testmodus wird dies ohne echte Geldbewegung simuliert. {% endif %}{% if q.deposit_timing|default('')=='before_pickup' %}Du bezahlst den Mietpreis bei der Buchung. Die Kaution reservierst du separat online, frühestens zwölf Stunden vor der Abholung, selbst auf einer Kreditkarte. Dazu erhältst du eine Erinnerung mit persönlichem Zugangslink; du kannst auch deinen Buchungsstatus öffnen. Es erfolgt keine automatische spätere Kartenbelastung. Die Kaution wird nicht abgebucht. Die tatsächliche Autorisierungsfrist muss länger als 24 Stunden nach der vereinbarten Rückgabe reichen. Ist die Frist zu kurz, wird die ungenutzte Kartenreservierung nach geklärtem Anbieterstatus freigegeben. Deine bereits bezahlte Buchung bleibt bestehen; bitte kläre die Kaution mit der Werkstatt. Ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich. Eine noch bestehende Reservierung wird nach ordnungsgemäßer Rückgabe freigegeben.{% else %}Die Kaution wird schon bei der Online-Reservierung auf der Kreditkarte autorisiert und nicht abgebucht. Vor Ort ist dafür keine Zahlung oder weitere Kartenbestätigung vorgesehen. Die tatsächliche Gültigkeitsfrist wird erst nach der Kartenbestätigung geprüft: Sie muss länger als 24 Stunden nach der vereinbarten Rückgabe reichen. Ist sie zu kurz, wird keine Mietzahlung gestartet und keine Buchung bestätigt; die ungenutzte Kartenreservierung wird nach geklärtem Anbieterstatus freigegeben. Eine noch bestehende Reservierung wird nach ordnungsgemäßer Rückgabe freigegeben.{% endif %}</p>{% elif q.deposit_charged_cents|default(0) %}<p><strong>{{ '%.2f'|format(q.deposit_charged_cents/100)|replace('.', ',') }} € rückzahlbare Kaution zusätzlich zur Miete.</strong> {% if not live %}Nur im Stripe-Testmodus, ohne echte Geldbewegung: {% endif %}{% if paid_long %}Bei dieser längeren Miete bezahlst du die Kaution bei der Buchung zusammen mit dem Mietpreis. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe veranlassen wir die Erstattung der Kaution innerhalb von zwei Werktagen. Die Gutschrift auf deinem Kartenkonto kann später erfolgen. Zusätzliche Forderungen werden getrennt geprüft; es erfolgt keine automatische weitere Kartenbelastung.{% else %}Die Kaution wird zusammen mit der Miete als gesonderter Posten bezahlt und nach Rückgabe entsprechend den vereinbarten Bedingungen zurückerstattet.{% endif %}</p>{% else %}<p><strong>500 € Kaution zusätzlich zur Miete.</strong> Wird in diesem Offline-Test weder belastet noch reserviert.</p>{% endif %}<p><strong>1.000 € vertragliche Selbstbeteiligung.</strong> {% if live %}Anwendungsfälle und Ausnahmen ergeben sich aus den nachfolgenden Mietbedingungen.{% else %}Versicherungsschutz und Anwendungsfälle sind nicht bestätigt. Keine Deckungszusage.{% endif %}</p>
-<p><strong>Konkretes Fahrzeug:</strong> {{ q.portal_vehicle_name }} · Kennzeichen: {{ q.vehicle_plate or 'wird vor Übergabe mitgeteilt' }}{% if q.vehicle_vin %} · FIN: {{ q.vehicle_vin }}{% endif %}.</p>
-<p><strong>Vermieter und Vertragspartner:</strong> {{ q.lessor_name }}, {{ q.lessor_address }}. „Autovermietung MOS“ bezeichnet nur das Angebot und ist keine eigene Vertragspartei.</p>
-{% if q.lessor_email and q.lessor_phone %}<p><strong>Kontakt des Vermieters:</strong> {{ q.lessor_email }} · Telefon {{ q.lessor_phone }}.</p>{% endif %}
-<details class="terms-disclosure" id="booking-terms"><summary>{{ "Mietbedingungen und Haftungsblatt" if live else "Entwurf der Mietbedingungen und des Haftungsblatts" }}</summary><div class="terms">{{ q.terms_text }}</div></details><p class="small">Version: {{ q.rules_version }}. Diese Übersicht ist 15 Minuten gültig.</p></section>
-<button type="button" class="secondary" id="download-overview">Diese Buchungsübersicht und Mietbedingungen speichern</button>
-<p class="small">Bitte prüfe Fahrzeug, Termine, Preis und Bedingungen. Mit „Auswahl ändern“ unten kannst du Eingabefehler vor der Unterschrift korrigieren. Name und E-Mail kannst du direkt im Formular berichtigen; eine gezeichnete Unterschrift mit „Unterschrift löschen“. Wenn du nach der Unterschrift und vor der Mietzahlung etwas ändern möchtest, beende den offenen Checkout im Buchungsstatus und beginne erneut. Falls die Zahlung schon läuft, prüfe zuerst den Buchungsstatus. {% if live %}Der Vertragsschluss erfolgt in deutscher Sprache.{% else %}Die Testoberfläche ist auf Deutsch.{% endif %} Die unterschriebene Fassung wird gespeichert und nach bestätigter Buchung als PDF im Buchungsstatus bereitgestellt.</p>
-<form class="card" method="post" action="{{ url_for('mos_public.checkout') }}" id="contract-sign-form">{{ csrf_field()|safe }}<input type="hidden" name="quote_token" value="{{ token }}"><input type="hidden" name="signature_data" id="signature-data">
-<h2>{{ 'Buchungsdaten und Unterschrift vorbereiten' if live else 'Test-Buchungsangebot vor der Testzahlung unterschreiben' }}</h2>
-<label for="name">{{ "Name" if live else "Testname" }}</label><input id="name" name="name" maxlength="150" required autocomplete="off"{% if prefill %} value="{{ prefill.name }}"{% endif %}><label for="email">{{ "E-Mail" if live else "Test-E-Mail (kein Versand)" }}</label><input id="email" name="email" type="email" maxlength="254" required autocomplete="off"{% if prefill %} value="{{ prefill.email }}"{% endif %}>
-{% if prefill and prefill.planned_km is not none %}<p class="small">Deine geplante Fahrstrecke: {{ prefill.planned_km }} km. Sie ändert den oben ausgewiesenen Mietpreis nicht. Tatsächliche Mehrkilometer werden bei Rückgabe gesondert abgerechnet.</p>{% endif %}
-<label><input type="checkbox" name="accept" value="yes" required> {% if live %}Ich habe die Preisübersicht gelesen und stimme den Mietbedingungen dieser Version zu.{% else %}Ich habe Preisübersicht und gekennzeichnete Entwurfsbedingungen für diesen Test gelesen.{% endif %}</label>
-<label for="signature-pad">Unterschrift mit Finger oder Maus zeichnen</label>
-<canvas id="signature-pad" width="700" height="180" style="width:100%;height:180px;touch-action:none;background:#fff;border:1px solid #888;border-radius:8px" aria-label="Unterschriftsfeld"></canvas>
-<label for="signature-file">Alternativ eine bereits gezeichnete Unterschrift als PNG-Datei auswählen</label><input id="signature-file" type="file" accept="image/png">
-<button type="button" class="secondary" id="clear-signature">Unterschrift löschen</button>
-<label><input type="checkbox" name="sign_confirm" value="yes" required> {% if live %}Ich habe die angezeigten Buchungsdaten geprüft und erfasse meine Unterschrift für die Buchungsunterlagen.{% else %}Ich habe das angezeigte Buchungsangebot geprüft und unterschreibe es vor der Zahlung.{% endif %}</label>
-<p class="small">{% if live %}Die Unterschrift wird zur Vorbereitung der Buchungsunterlagen mit den angezeigten Buchungsdaten und dem Zeitpunkt gespeichert.{% else %}Die gezeichnete Unterschrift wird mit der angezeigten Angebotsfassung und dem Zeitpunkt gespeichert.{% endif %} Sie ist keine qualifizierte elektronische Signatur. Gärtner nimmt eine Buchung erst nach bestätigter Zahlung und Verfügbarkeitsprüfung an.</p>
-{% if live %}<p>{% if paid_long %}Nach der Vorbereitung deiner Buchungsunterlagen öffnet sich Stripe zur gemeinsamen Zahlung von Mietpreis und 500 € rückzahlbarer Kaution. Die beiden Beträge und der Gesamtbetrag werden getrennt ausgewiesen.{% elif q.deposit_timing|default('')=='before_pickup' %}Nach der Vorbereitung deiner Buchungsunterlagen öffnet sich Stripe zur Zahlung des Mietpreises. Die Kaution reservierst du anschließend separat online, frühestens zwölf Stunden vor der Abholung. Eine gültige Kreditkartenreservierung ist Voraussetzung für die Schlüsselübergabe.{% elif q.deposit_authorized_cents|default(0) %}Nach der Vorbereitung deiner Buchungsunterlagen führt dich der Online-Ablauf zuerst zur Kreditkartenreservierung für die Kaution ohne Abbuchung und danach zur Zahlung des Mietpreises. Vor Ort ist kein Zahlungsschritt vorgesehen.{% else %}Nach der Vorbereitung deiner Buchungsunterlagen öffnet sich Stripe zur Zahlung des angezeigten Betrags.{% endif %} Deine verbindliche, zahlungspflichtige Bestellung gibst du erst mit dem letzten Bezahlbutton bei Stripe ab. Nach bestätigter und angenommener Buchung erhältst du die unterschriebene Vertragsfassung separat als PDF im Buchungsstatus. <a href="{{ booking_config.privacy_url }}">Datenschutzhinweise einschließlich Stripe</a></p><p>{{ q.lessor_name }} · {{ q.lessor_address }} · {{ q.lessor_email }} · {{ q.lessor_phone }}</p><button>{{ 'Weiter zur Zahlung von Miete und Kaution' if paid_long else 'Weiter zur Mietpreiszahlung' if q.deposit_timing|default('')=='before_pickup' else 'Weiter zur Kautionsreservierung und Onlinezahlung' }}</button>{% else %}<p>Nach der Unterschrift folgt die simulierte Zahlung oder Stripe im Testmodus. Es entsteht kein echter Mietvertrag.</p><button>Test-Buchungsangebot unterschreiben und zur Testzahlung</button>{% endif %}</form>
+{% extends 'mos_public/base.html' %}
+{% set booking_stage = 2 %}
+{% block page_styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/checkout.css') }}">
+{% endblock %}
+{% block content %}
+{% set paid_long = q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
+{% set deferred = q.deposit_timing|default('') == 'before_pickup' %}
+{% set reserved_deposit = q.deposit_authorized_cents|default(0) %}
+{% set paid_deposit = q.deposit_charged_cents|default(0) %}
+{% macro euro(cents) %}{{ '%.2f'|format(cents/100)|replace('.', ',') }} €{% endmacro %}
+
+<div class="checkout-title">
+  <h1>Deine Buchungsübersicht</h1>
+  <a href="{{ change_url|default(url_for('mos_public.index')) }}">Auswahl ändern</a>
+</div>
+<div id="booking-overview">
+  <div class="quote-summary">
+    <div class="card quote-trip">
+      <div class="quote-vehicle">
+        {% if q.slug in ('i10', 'kona') %}
+          <figure>
+            <img src="{{ url_for('static', filename='mos-portal/' ~ q.slug ~ '.webp') }}" alt="" width="230" height="128">
+            <figcaption>Herstellerabbildung</figcaption>
+          </figure>
+        {% endif %}
+        <div>
+          <h2>{{ q.vehicle_name }}</h2>
+          <p>{{ q.days }} {{ 'Miettag' if q.days == 1 else 'Miettage' }} · {{ q.included_km }} km inklusive</p>
+        </div>
+      </div>
+      <dl class="trip-dates">
+        <div><dt>Abholung</dt><dd>{{ q.start_slot|mos_slot }}</dd></div>
+        <div><dt>Rückgabe</dt><dd>{{ q.end_slot|mos_slot }}</dd></div>
+      </dl>
+      <p class="trip-address"><strong>Aktuelle Abholadresse</strong><br>Gärtner · {{ werkstatt_oeffentlich.adresse }}</p>
+    </div>
+
+    <div class="quote-price">
+      <h2>{{ 'Bei der Buchung zu zahlen' if live else 'Testbetrag bei der Buchung' }}</h2>
+      <p class="quoted-total">{{ euro(q.amount_cents) }}</p>
+      <p class="quote-breakdown">
+        {% if reserved_deposit %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}Zahlbetrag: nur die Miete inkl. MwSt.; die Kaution wird nicht abgebucht.
+        {% elif paid_deposit %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}Gesamtzahlung: {{ euro(q.rental_cents) }} Miete inkl. MwSt. + {{ euro(paid_deposit) }} rückzahlbare Kaution.
+        {% else %}Mietpreis inkl. MwSt. · im Checkout ausschließlich als Testbetrag.{% endif %}
+      </p>
+      <dl class="quote-price-lines">
+        <div><dt>{{ q.days }} {{ 'Miettag' if q.days == 1 else 'Miettage' }} × {{ euro(q.daily_cents) }}</dt><dd>{{ euro(q.rental_cents) }}</dd></div>
+        {% if reserved_deposit %}
+          <div><dt>Kartenreservierung{% if deferred %} vor Abholung{% else %} bei Buchung{% endif %}</dt><dd>{{ euro(reserved_deposit) }}</dd></div>
+        {% elif paid_deposit %}
+          <div><dt>Enthaltene Kaution</dt><dd>{{ euro(paid_deposit) }}</dd></div>
+        {% endif %}
+      </dl>
+      <p class="quote-mileage">Tatsächliche Mehrkilometer werden bei Rückgabe mit {{ euro(q.extra_km_cents) }}/km abgerechnet.</p>
+    </div>
+  </div>
+
+  <div class="card quote-policies">
+    <h2>Kaution und Mietbedingungen</h2>
+    {% if reserved_deposit %}
+      <p><strong>{{ euro(reserved_deposit) }} Kaution als Kreditkartenreservierung.</strong> {% if not live %}Im Testmodus wird dies ohne echte Geldbewegung simuliert. {% endif %}
+        {% if deferred %}Du bezahlst den Mietpreis bei der Buchung. Die Kaution reservierst du separat online, frühestens zwölf Stunden vor der Abholung, selbst auf einer Kreditkarte. Ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich.
+        {% else %}Die Kaution wird bei der Online-Reservierung auf der Kreditkarte autorisiert und nicht abgebucht. Vor Ort ist dafür keine Zahlung oder weitere Kartenbestätigung vorgesehen.{% endif %}
+      </p>
+      <details class="checkout-details">
+        <summary>Gültigkeit und Freigabe der Kartenreservierung</summary>
+        {% if deferred %}
+          <p>Du erhältst eine Erinnerung mit persönlichem Zugangslink und kannst auch deinen Buchungsstatus öffnen. Es erfolgt keine automatische spätere Kartenbelastung. Die tatsächliche Autorisierungsfrist muss länger als 24 Stunden nach der vereinbarten Rückgabe reichen.</p>
+          <p>Ist die Frist zu kurz, wird die ungenutzte Kartenreservierung nach geklärtem Anbieterstatus freigegeben. Deine bereits bezahlte Buchung bleibt bestehen. Bitte kläre die Kaution mit der Werkstatt.</p>
+        {% else %}
+          <p>Die tatsächliche Gültigkeitsfrist wird erst nach der Kartenbestätigung geprüft. Sie muss länger als 24 Stunden nach der vereinbarten Rückgabe reichen. Ist sie zu kurz, wird keine Mietzahlung gestartet und keine Buchung bestätigt. Die ungenutzte Kartenreservierung wird nach geklärtem Anbieterstatus freigegeben.</p>
+        {% endif %}
+        <p>Eine noch bestehende Reservierung wird nach ordnungsgemäßer Rückgabe freigegeben.</p>
+      </details>
+    {% elif paid_deposit %}
+      <p><strong>{{ euro(paid_deposit) }} rückzahlbare Kaution zusätzlich zur Miete.</strong> {% if not live %}Nur im Stripe-Testmodus, ohne echte Geldbewegung. {% endif %}
+        {% if paid_long %}Bei dieser längeren Miete bezahlst du die Kaution bei der Buchung zusammen mit dem Mietpreis. Nach dokumentierter ordnungsgemäßer oder vollständig geklärter Rückgabe veranlassen wir die Erstattung der Kaution innerhalb von zwei Werktagen. Die Gutschrift auf deinem Kartenkonto kann später erfolgen. Zusätzliche Forderungen werden getrennt geprüft. Es erfolgt keine automatische weitere Kartenbelastung.
+        {% else %}Die Kaution wird zusammen mit der Miete als gesonderter Posten bezahlt und nach Rückgabe entsprechend den vereinbarten Bedingungen zurückerstattet.{% endif %}
+      </p>
+    {% else %}
+      <p><strong>500 € Kaution zusätzlich zur Miete.</strong> Wird in diesem Offline-Test weder belastet noch reserviert.</p>
+    {% endif %}
+    {% if q.cancellation_policy|default('') == 'free_48h_then_10pct_rent' %}
+      <div class="quote-cancellation">
+        <h3>Stornierung</h3>
+        <p>Bis einschließlich 48 Stunden vor Abholung kostenlos. Danach beträgt der pauschalierte Ausfallersatz 10 % des Mietpreises, bei dieser Buchung höchstens <strong>{{ euro((q.rental_cents + 5) // 10) }}</strong>. Liegt die Abholung schon innerhalb von 48 Stunden, gibt es ab Buchung keine kostenlose Stornofrist mehr.</p>
+        <p>Die Kaution gehört nicht zur Berechnung. Ersparte Aufwendungen und eine Wiedervermietung werden angerechnet. Du kannst nachweisen, dass kein oder ein wesentlich geringerer Schaden entstanden ist.</p>
+      </div>
+    {% endif %}
+    <p><strong>1.000 € vertragliche Selbstbeteiligung.</strong> {% if live %}Anwendungsfälle und Ausnahmen ergeben sich aus den nachfolgenden Mietbedingungen.{% else %}Versicherungsschutz und Anwendungsfälle sind nicht bestätigt. Keine Deckungszusage.{% endif %}</p>
+
+    <details class="checkout-details" id="booking-partner">
+      <summary>Konkretes Fahrzeug und Vertragspartner</summary>
+      {% if not live %}<p class="small muted">Zugeordneter Portal-Testdatensatz: {{ q.portal_vehicle_name }}</p>{% endif %}
+      <p><strong>Fahrzeug</strong><br>{{ q.portal_vehicle_name }} · Kennzeichen: {{ q.vehicle_plate or 'wird vor Übergabe mitgeteilt' }}{% if q.vehicle_vin %} · FIN: {{ q.vehicle_vin }}{% endif %}.</p>
+      <p><strong>Vermieter und Vertragspartner</strong><br>{{ q.lessor_name }}, {{ q.lessor_address }}. „Autovermietung MOS“ bezeichnet das Mietangebot und ist keine eigene Vertragspartei.</p>
+      {% if q.lessor_email and q.lessor_phone %}<p><strong>Kontakt des Vermieters</strong><br>{{ q.lessor_email }} · {{ q.lessor_phone }}</p>{% endif %}
+    </details>
+    <details class="terms-disclosure checkout-details" id="booking-terms">
+      <summary>{{ 'Mietbedingungen und Haftungsblatt' if live else 'Entwurf der Mietbedingungen und des Haftungsblatts' }}</summary>
+      <div class="terms">{{ q.terms_text }}</div>
+    </details>
+    <p class="small muted">Version {{ q.rules_version }}. Diese Übersicht ist 15 Minuten gültig.</p>
+  </div>
+</div>
+<div class="quote-download">
+  <button type="button" class="secondary" id="download-overview">Buchungsübersicht und Mietbedingungen speichern</button>
+</div>
+
+<form class="card quote-sign" method="post" action="{{ url_for('mos_public.checkout') }}" id="contract-sign-form">
+  {{ csrf_field()|safe }}
+  <input type="hidden" name="quote_token" value="{{ token }}">
+  <input type="hidden" name="signature_data" id="signature-data">
+  <h2>{{ 'Buchungsdaten und Unterschrift' if live else 'Test-Buchungsangebot vor der Testzahlung unterschreiben' }}</h2>
+  <div class="quote-customer">
+    <div><label for="name">{{ 'Vor- und Nachname' if live else 'Testname' }}</label>
+      <input id="name" name="name" maxlength="150" required autocomplete="{{ 'name' if live else 'off' }}"{% if prefill %} value="{{ prefill.name }}"{% endif %}>
+    </div>
+    <div><label for="email">{{ 'E-Mail-Adresse' if live else 'Test-E-Mail (kein Versand)' }}</label>
+      <input id="email" name="email" type="email" maxlength="254" required autocomplete="{{ 'email' if live else 'off' }}"{% if prefill %} value="{{ prefill.email }}"{% endif %}>
+    </div>
+  </div>
+  {% if prefill and prefill.planned_km is not none %}<p class="small">Deine geplante Fahrstrecke: {{ prefill.planned_km }} km. Sie ändert den oben ausgewiesenen Mietpreis nicht. Tatsächliche Mehrkilometer werden bei Rückgabe gesondert abgerechnet.</p>{% endif %}
+  <label class="quote-consent"><input type="checkbox" name="accept" value="yes" required><span>{% if live %}Ich habe die Preisübersicht gelesen und stimme den Mietbedingungen dieser Version zu.{% else %}Ich habe Preisübersicht und gekennzeichnete Entwurfsbedingungen für diesen Test gelesen.{% endif %}</span></label>
+
+  <div class="quote-signature">
+    <label for="signature-pad">Unterschrift mit Finger oder Maus zeichnen</label>
+    <canvas id="signature-pad" width="700" height="180" aria-label="Unterschriftsfeld" aria-describedby="signature-alternative">Über das Dateifeld kannst du eine PNG-Unterschrift hochladen.</canvas>
+    <button type="button" class="secondary" id="clear-signature">Unterschrift löschen</button>
+    <label for="signature-file" id="signature-alternative">Alternativ eine gezeichnete Unterschrift als PNG-Datei auswählen</label>
+    <input id="signature-file" type="file" accept="image/png">
+    <p id="signature-error" class="error" role="alert" tabindex="-1" hidden></p>
+  </div>
+  <label class="quote-consent"><input type="checkbox" name="sign_confirm" value="yes" required><span>{% if live %}Ich habe die angezeigten Buchungsdaten geprüft und erfasse meine Unterschrift für die Buchungsunterlagen.{% else %}Ich habe das angezeigte Buchungsangebot geprüft und unterschreibe es vor der Zahlung.{% endif %}</span></label>
+  <details class="checkout-details">
+    <summary>Angaben korrigieren und Unterschrift speichern</summary>
+    <p>Mit „Auswahl ändern“ kannst du Eingabefehler vor der Unterschrift korrigieren. Name und E-Mail lassen sich direkt im Formular berichtigen. Eine gezeichnete Unterschrift kannst du mit „Unterschrift löschen“ zurücksetzen.</p>
+    <p>Wenn du nach der Unterschrift und vor der Mietzahlung etwas ändern möchtest, beende den offenen Checkout im Buchungsstatus und beginne erneut. Falls die Zahlung schon läuft, prüfe zuerst den Buchungsstatus.</p>
+    <p>{% if live %}Der Vertragsschluss erfolgt in deutscher Sprache. Deine Unterschrift wird mit den angezeigten Buchungsdaten und dem Zeitpunkt zur Vorbereitung der Buchungsunterlagen gespeichert.{% else %}Die Testoberfläche ist auf Deutsch. Die gezeichnete Unterschrift wird mit der angezeigten Angebotsfassung und dem Zeitpunkt gespeichert.{% endif %} Sie ist keine qualifizierte elektronische Signatur. Gärtner nimmt eine Buchung erst nach bestätigter Zahlung und Verfügbarkeitsprüfung an. Die unterschriebene Fassung steht nach bestätigter Buchung als PDF im Buchungsstatus bereit.</p>
+  </details>
+  <div class="quote-next">
+    {% if live %}
+      <p>{% if paid_long %}Anschließend bezahlst du bei Stripe den Mietpreis und 500 € rückzahlbare Kaution zusammen. Die beiden Beträge und der Gesamtbetrag werden getrennt ausgewiesen.{% elif deferred %}Anschließend bezahlst du bei Stripe den Mietpreis. Die Kaution reservierst du separat online, frühestens zwölf Stunden vor der Abholung. Eine gültige Kreditkartenreservierung ist Voraussetzung für die Schlüsselübergabe.{% elif reserved_deposit %}Anschließend reservierst du die Kaution auf einer Kreditkarte ohne Abbuchung. Danach bezahlst du den Mietpreis online. Vor Ort ist kein Zahlungsschritt vorgesehen.{% else %}Anschließend öffnet sich Stripe zur Zahlung des angezeigten Betrags.{% endif %}</p>
+      <p><strong>Deine verbindliche, zahlungspflichtige Bestellung gibst du erst mit dem letzten Bezahlbutton bei Stripe ab.</strong></p>
+      <p class="small"><a href="{{ booking_config.privacy_url }}">Datenschutzhinweise einschließlich Stripe</a></p>
+      <p class="small quote-merchant">{{ q.lessor_name }} · {{ q.lessor_address }}{% if q.lessor_email %} · {{ q.lessor_email }}{% endif %}{% if q.lessor_phone %} · {{ q.lessor_phone }}{% endif %}</p>
+      <button>{{ 'Weiter zur Zahlung von Miete und Kaution' if paid_long else 'Weiter zur Mietpreiszahlung' if deferred or not reserved_deposit else 'Weiter zur Kautionsreservierung und Onlinezahlung' }}</button>
+    {% else %}
+      <p>Nach der Unterschrift folgt die simulierte Zahlung oder Stripe im Testmodus. Es entsteht kein echter Mietvertrag.</p>
+      <button>Test-Buchungsangebot unterschreiben und zur Testzahlung</button>
+    {% endif %}
+  </div>
+</form>
 <script>
 (() => {
+  const overview = document.getElementById('booking-overview');
   document.getElementById('download-overview').addEventListener('click', () => {
-    const details = document.getElementById('booking-terms');
-    const wasOpen = details.open;
-    let overview;
+    const previouslyClosed = [...overview.querySelectorAll('details:not([open])')];
+    let text;
     try {
-      details.open = true;
-      overview = document.getElementById('booking-overview').innerText;
+      for (const item of previouslyClosed) item.open = true;
+      text = overview.innerText;
     } finally {
-      details.open = wasOpen;
+      for (const item of previouslyClosed) item.open = false;
     }
-    const body = 'Buchungsübersicht und Mietbedingungen\n\n' + overview;
-    const url = URL.createObjectURL(new Blob([body], {type: 'text/plain;charset=utf-8'}));
+    const url = URL.createObjectURL(new Blob(['Buchungsübersicht und Mietbedingungen\n\n' + text], {type: 'text/plain;charset=utf-8'}));
     const link = document.createElement('a');
-    link.href = url; link.download = 'MOS-Buchungsuebersicht-und-Mietbedingungen.txt';
+    link.href = url;
+    link.download = 'MOS-Buchungsuebersicht-und-Mietbedingungen.txt';
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
+
   const pad = document.getElementById('signature-pad');
   const form = document.getElementById('contract-sign-form');
+  const signatureFile = document.getElementById('signature-file');
+  const signatureData = document.getElementById('signature-data');
+  const error = document.getElementById('signature-error');
   const ctx = pad.getContext('2d');
-  let drawing = false, hasInk = false;
-  ctx.strokeStyle = '#17202a'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  let drawing = false;
+  let hasInk = false;
+  let pendingUpload = false;
+  let imageGeneration = 0;
+  ctx.strokeStyle = '#17202a';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  function showError(message) {
+    error.textContent = message;
+    error.hidden = false;
+    error.focus();
+  }
   function point(event) {
     const box = pad.getBoundingClientRect();
     return {x: (event.clientX - box.left) * pad.width / box.width,
             y: (event.clientY - box.top) * pad.height / box.height};
   }
   pad.addEventListener('pointerdown', event => {
-    drawing = true; pad.setPointerCapture(event.pointerId);
-    const p = point(event); ctx.beginPath(); ctx.moveTo(p.x, p.y);
+    imageGeneration++;
+    pendingUpload = false;
+    error.hidden = true;
+    drawing = true;
+    pad.setPointerCapture(event.pointerId);
+    const p = point(event);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
   });
   pad.addEventListener('pointermove', event => {
     if (!drawing) return;
-    const p = point(event); ctx.lineTo(p.x, p.y); ctx.stroke(); hasInk = true;
+    const p = point(event);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    hasInk = true;
   });
-  for (const name of ['pointerup', 'pointercancel']) pad.addEventListener(name, () => { drawing = false; });
-  document.getElementById('signature-file').addEventListener('change', event => {
-    const file = event.target.files[0];
+  for (const name of ['pointerup', 'pointercancel']) {
+    pad.addEventListener(name, () => { drawing = false; });
+  }
+  signatureFile.addEventListener('change', () => {
+    const file = signatureFile.files[0];
     if (!file) return;
-    if (file.type !== 'image/png') { alert('Bitte eine PNG-Datei auswählen.'); return; }
+    const generation = ++imageGeneration;
+    pendingUpload = false;
+    if (file.type !== 'image/png') {
+      signatureFile.value = '';
+      showError('Bitte eine PNG-Datei auswählen.');
+      return;
+    }
+    pendingUpload = true;
     const reader = new FileReader();
+    const img = new Image();
+    img.onload = () => {
+      if (generation !== imageGeneration) return;
+      pendingUpload = false;
+      ctx.clearRect(0, 0, pad.width, pad.height);
+      const scale = Math.min(pad.width / img.width, pad.height / img.height);
+      ctx.drawImage(img, (pad.width - img.width * scale) / 2,
+        (pad.height - img.height * scale) / 2, img.width * scale, img.height * scale);
+      hasInk = true;
+      error.hidden = true;
+    };
+    img.onerror = reader.onerror = () => {
+      if (generation !== imageGeneration) return;
+      pendingUpload = false;
+      signatureFile.value = '';
+      showError('Die PNG-Datei konnte nicht gelesen werden.');
+    };
     reader.onload = () => {
-      const img = new window.Image();
-      img.onload = () => {
-        ctx.clearRect(0, 0, pad.width, pad.height);
-        const scale = Math.min(pad.width / img.width, pad.height / img.height);
-        ctx.drawImage(img, (pad.width - img.width * scale) / 2,
-          (pad.height - img.height * scale) / 2, img.width * scale, img.height * scale);
-        hasInk = true;
-      };
-      img.onerror = () => alert('Die PNG-Datei konnte nicht gelesen werden.');
-      img.src = reader.result;
+      if (generation === imageGeneration) img.src = reader.result;
     };
     reader.readAsDataURL(file);
   });
   document.getElementById('clear-signature').addEventListener('click', () => {
-    ctx.clearRect(0, 0, pad.width, pad.height); hasInk = false;
-    document.getElementById('signature-data').value = '';
-    document.getElementById('signature-file').value = '';
+    imageGeneration++;
+    pendingUpload = false;
+    ctx.clearRect(0, 0, pad.width, pad.height);
+    hasInk = false;
+    signatureData.value = '';
+    signatureFile.value = '';
+    error.hidden = true;
   });
   form.addEventListener('submit', event => {
-    if (!hasInk) { event.preventDefault(); alert('Bitte zeichne zuerst deine Unterschrift.'); return; }
-    document.getElementById('signature-data').value = pad.toDataURL('image/png');
+    if (pendingUpload) {
+      event.preventDefault();
+      showError('Die Unterschrift wird geladen. Bitte versuche es gleich noch einmal.');
+      return;
+    }
+    if (!hasInk) {
+      event.preventDefault();
+      showError('Bitte zeichne deine Unterschrift oder wähle eine PNG-Datei aus.');
+      return;
+    }
+    signatureData.value = pad.toDataURL('image/png');
   });
 })();
 </script>
-<a href="{{ change_url|default(url_for('mos_public.index')) }}">Auswahl ändern</a>{% endblock %}
+{% endblock %}

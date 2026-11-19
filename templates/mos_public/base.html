@@ -1,9 +1,63 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>MOS · {{ "Mietwagen buchen" if live else "Buchungstest" }}</title>
-<style>.terms-disclosure{margin:20px 0;border:1px solid #c8c8c8;border-radius:10px;background:#f8f6f0;overflow:hidden}.terms-disclosure summary{min-height:44px;box-sizing:border-box;padding:12px 16px;font-weight:700;cursor:pointer}.terms-disclosure summary:focus-visible{outline:3px solid #8b3500;outline-offset:-4px}.terms-disclosure[open] summary{border-bottom:1px solid #c8c8c8}.terms-disclosure .terms{margin:0;border-radius:0;overflow-wrap:anywhere}</style>
-<style>body{margin:0;background:#f5f3ee;color:#24272a;font:16px/1.6 system-ui,sans-serif}header{background:#1e2023;color:white;padding:18px}header a{color:white}main{max-width:800px;margin:auto;padding:24px 18px}.notice{background:#ffe4b2;padding:12px;text-align:center}.card{background:white;border:1px solid #dedbd5;border-radius:18px;padding:24px;margin:20px 0}h1{font-size:clamp(26px,5vw,42px);line-height:1.15}h2{font-size:22px}label{display:block;margin:15px 0 5px}input,select,button,.button{font:inherit;box-sizing:border-box;width:100%;padding:13px;border:1px solid #c8c8c8;border-radius:9px}input[type=checkbox]{width:auto}button,.button{background:#fb741d;color:#181818;font-weight:700;cursor:pointer;margin:12px 0;text-align:center;display:block;text-decoration:none}button.secondary{background:#eee}.price{font-size:34px;font-weight:800}.muted{color:#596168}.terms{white-space:pre-wrap;background:#f8f6f0;padding:16px;border-radius:10px}dt{font-weight:600}dd{margin:0 0 10px}a{color:#8b3500}.error{border-left:4px solid #d45417;padding:15px;background:#fff0e5}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}footer{max-width:800px;margin:20px auto;padding:18px;border-top:1px solid #dedbd5;color:#596168;font-size:14px}footer a{margin-left:12px}@media(max-width:560px){.grid{grid-template-columns:1fr}.card{padding:18px}}.small{font-size:14px}</style></head><body>
-{% if not live %}<div class="notice"><strong>TEST · Keine echte Anmietung oder Geldbewegung.</strong><br>Nur Beispieldaten verwenden. Preise und Bedingungen sind ein Testentwurf.</div>{% endif %}
-{% set header_deposit_timing = q.deposit_timing|default('') if q is defined else booking_config.deposit_timing|default('') %}
-<header><a href="{{ url_for('mos_public.index') }}">AUTOVERMIETUNG MOS</a> · Fahrzeug → Preis → Vertrag &amp; Unterschrift → {% if q is defined and q.long_rental_deposit_policy|default('')=='paid_at_booking_v1' %}Miete und Kaution bezahlen → Bestätigung{% elif q is not defined and booking_config.long_rental_deposit_method|default('')=='charge_with_rent_refund_after_return' %}Onlinezahlung → Bestätigung · Kaution je nach Mietdauer{% elif header_deposit_timing=='before_pickup' %}Miete bezahlen → Bestätigung → Kaution vor Abholung online reservieren{% else %}{% if booking_config.deposit_method|default('')=='card_authorization_at_booking' %}Kaution auf Karte reservieren → {% endif %}Miete bezahlen → Bestätigung{% endif %}<br><small>Ein Angebot der {{ werkstatt_oeffentlich.name }}</small></header>
-<main>{% block content %}{% endblock %}</main>
-<footer>{{ werkstatt_oeffentlich.name }} · {{ werkstatt_oeffentlich.adresse }} · <a href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a> · <a href="{{ werkstatt_oeffentlich.anfahrt_url }}" target="_blank" rel="noopener">Anfahrt</a> {% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}<a href="{{ url_for('impressum_seite') }}">Impressum</a><a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a></footer>
-</body></html>
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#f7f7f4">
+  <title>{% if not live %}Test · {% endif %}{% block title %}{{ {1:'Mietwagen buchen', 2:'Buchungsübersicht', 3:'Zahlung', 4:'Buchungsstatus'}.get(booking_stage|default(0), 'Buchungsportal') }}{% endblock %} | Autovermietung MOS</title>
+  <link rel="preload" href="{{ url_for('static', filename='mos-portal/manrope-latin.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/portal.css') }}">
+  {% block page_styles %}{% endblock %}
+</head>
+<body>
+  <a class="portal-skip" href="#inhalt">Zum Inhalt springen</a>
+  <header class="portal-header">
+    <div class="portal-shell portal-header-inner">
+      <a class="portal-brand" href="{{ url_for('mos_public.index') }}" aria-label="Autovermietung MOS – zur Fahrzeugauswahl">
+        <span class="portal-wordmark" aria-hidden="true"><i></i>MOS</span>
+        <span class="portal-brand-label">Autovermietung</span>
+      </a>
+      <nav class="portal-help" aria-label="Mietflotte und Kontakt">
+        <a class="portal-fleet-link" href="https://autovermietung-mos.de/#flotte">Zur Mietflotte</a>
+        <a class="portal-phone" href="{{ werkstatt_oeffentlich.telefon_url }}" aria-label="Autovermietung anrufen unter {{ werkstatt_oeffentlich.telefon }}">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"><path d="m7 3 2.2 4.5-2.5 2.2a14 14 0 0 0 7.4 7.4l2.2-2.5L21 17l-.5 3c-.2.8-.8 1.1-1.6 1.1C10.2 21.1 2.9 13.8 2.9 5.1c0-.8.3-1.4 1.1-1.6L7 3Z"/></svg>
+          <span>{{ werkstatt_oeffentlich.telefon }}</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  {% if not live %}
+  <aside class="portal-test-banner"><strong>TEST · Keine echte Anmietung oder Geldbewegung.</strong> Nur Beispieldaten verwenden. Preise und Bedingungen sind ein Testentwurf.</aside>
+  {% endif %}
+  {% if booking_stage|default(0) in [1,2,3,4] %}
+  {% set paid_long = q is defined and q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
+  <div class="portal-progress">
+    <ol class="portal-shell portal-steps" aria-label="Buchungsfortschritt">
+      {% for label in ['Auswahl', 'Preis & Vertrag', 'Miete und Kaution bezahlen' if paid_long else 'Zahlung', 'Bestätigung'] %}
+      <li class="{{ 'is-current' if loop.index == booking_stage else 'is-done' if loop.index < booking_stage else 'is-next' }}"{% if loop.index == booking_stage %} aria-current="step"{% endif %}>
+        <span class="portal-step-marker" aria-hidden="true">{% if loop.index < booking_stage %}<svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg>{% else %}{{ loop.index }}{% endif %}</span>
+        <span class="portal-step-name">{% if loop.index == 2 or (paid_long and loop.index == 3) %}<span class="portal-step-full">{{ label }}</span><span class="portal-step-short">{{ 'Vertrag' if loop.index == 2 else 'Zahlung' }}</span>{% else %}{{ label }}{% endif %}</span>
+      </li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+
+  <main class="portal-shell portal-main{% if not (booking_stage|default(0) in [1,2]) %} portal-main-reading{% endif %}" id="inhalt" tabindex="-1">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="portal-footer">
+    <div class="portal-shell portal-footer-inner">
+      <div class="portal-provider"><strong>{{ werkstatt_oeffentlich.name }}</strong><span>{{ werkstatt_oeffentlich.adresse }}</span></div>
+      <nav aria-label="Service und Rechtliches">
+        <a href="{{ werkstatt_oeffentlich.anfahrt_url }}" target="_blank" rel="noopener">Anfahrt</a>
+        {% if config.MOS_TERMINATION_ENABLED %}<a href="{{ config.MOS_TERMINATION_ORIGIN }}{{ url_for('mos_termination.form') }}">Verträge hier kündigen</a>{% endif %}
+        <a href="{{ url_for('impressum_seite') }}">Impressum</a>
+        <a href="{{ url_for('datenschutz_seite') }}">Datenschutz</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

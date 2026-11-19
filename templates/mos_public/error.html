@@ -1,1 +1,11 @@
-{% extends 'mos_public/base.html' %}{% block content %}<h1>Bitte Angaben prüfen</h1><p class="error" role="alert">{{ message }}</p><a href="{{ url_for('mos_public.index') }}">{{ 'Zur Fahrzeug- und Terminauswahl' if live else 'Zur Testauswahl' }}</a>{% endblock %}
+{% extends 'mos_public/base.html' %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
+{% endblock %}
+{% block content %}
+<section class="card followup-panel">
+  <h1>Bitte Angaben prüfen</h1>
+  <p class="error" role="alert">{{ message }}</p>
+  <a class="button" href="{{ url_for('mos_public.index') }}">{{ 'Zur Fahrzeug- und Terminauswahl' if live else 'Zur Testauswahl' }}</a>
+</section>
+{% endblock %}

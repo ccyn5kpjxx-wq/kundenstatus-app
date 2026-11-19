@@ -1,1 +1,24 @@
-{% extends 'mos_public/base.html' %}{% block content %}<h1>Offline-Testzahlung</h1><section class="card"><h2>{{ q.vehicle_name }}</h2><p>{{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p><div class="price">{{ '%.2f'|format(q.amount_cents/100)|replace('.', ',') }} €</div><p>Inkl. MwSt. · {{ q.included_km }} Freikilometer. Weitere Kilometer {{ '%.2f'|format(q.extra_km_cents/100)|replace('.', ',') }} €/km. {% if q.long_rental_deposit_policy|default('')=='paid_at_booking_v1' %}Synthetischer Gesamtbetrag: {{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} € Miete + {{ '%.2f'|format(q.deposit_charged_cents/100)|replace('.', ',') }} € rückzahlbare Kaution. Die Erstattung nach ordnungsgemäßer oder vollständig geklärter Rückgabe wird ebenfalls nur simuliert.{% else %}Kaution 500 € separat, hier nicht eingezogen;{% endif %} Selbstbeteiligung 1.000 €, Versicherungsumfang ungeprüft.</p><div class="terms">{{ q.terms_text }}</div><p>Keine Kartendaten eingeben. Der Knopf erzeugt eine synthetische Zahlung mit signiertem Testereignis.</p><form method="post">{{ csrf_field()|safe }}<button>Testzahlung bestätigen – keine echte Zahlung</button></form><a href="{{ url_for('mos_public.status',hold_id=h.id) }}">Ohne Zahlung zurück</a></section>{% endblock %}
+{% extends 'mos_public/base.html' %}
+{% set booking_stage = 3 %}
+{% block page_styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
+{% endblock %}
+{% block content %}
+<section class="card followup-panel">
+  <h1>Offline-Testzahlung</h1>
+  <h2>{{ q.vehicle_name }}</h2>
+  <p>{{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p>
+  <div class="followup-amount"><span>Testbetrag inkl. MwSt.</span><strong>{{ '%.2f'|format(q.amount_cents/100)|replace('.', ',') }} €</strong></div>
+  <p>{{ q.included_km }} Freikilometer. Weitere Kilometer {{ '%.2f'|format(q.extra_km_cents/100)|replace('.', ',') }} €/km.</p>
+  {% if q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
+    <p>Synthetischer Gesamtbetrag: {{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} € Miete + {{ '%.2f'|format(q.deposit_charged_cents/100)|replace('.', ',') }} € rückzahlbare Kaution. Die Erstattung nach ordnungsgemäßer oder vollständig geklärter Rückgabe wird ebenfalls nur simuliert.</p>
+  {% else %}
+    <p>Kaution 500 € separat, hier nicht eingezogen.</p>
+  {% endif %}
+  <p>Selbstbeteiligung 1.000 €, Versicherungsumfang ungeprüft.</p>
+  <details class="terms-disclosure"><summary>Mietbedingungen für diesen Test</summary><div class="terms">{{ q.terms_text }}</div></details>
+  <p>Keine Kartendaten eingeben. Mit der Bestätigung wird eine synthetische Zahlung mit signiertem Testereignis erzeugt.</p>
+  <form method="post">{{ csrf_field()|safe }}<button>Testzahlung bestätigen – keine echte Zahlung</button></form>
+  <a class="followup-link" href="{{ url_for('mos_public.status',hold_id=h.id) }}">Ohne Zahlung zurück</a>
+</section>
+{% endblock %}

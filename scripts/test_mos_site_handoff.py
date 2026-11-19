@@ -15,6 +15,7 @@ from jinja2 import Environment, FileSystemLoader
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import mos_site_handoff as handoff
+from werkstatt_kontakt import public_workshop_contact
 
 
 NOW = datetime(2026, 10, 19, 10, tzinfo=timezone.utc)
@@ -80,7 +81,8 @@ class HandoffTests(unittest.TestCase):
         env = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True)
         page = env.get_template('mos_public/site_start.html').render(
             nonce='synthetic-nonce', site_origins=handoff.SITE_ORIGINS, csrf_token=lambda: 'synthetic-csrf',
-            url_for=lambda endpoint: '/' + endpoint, live=True, booking_config={}, config={})
+            url_for=lambda endpoint, **values: '/' + endpoint + ('/' + values['filename'] if 'filename' in values else ''),
+            werkstatt_oeffentlich=public_workshop_contact(), live=True, booking_config={}, config={})
         script = re.search(r'<script>(.*?)</script>', page, re.S)[1]
         harness = r'''
 const vm=require('node:vm'); const assert=require('node:assert/strict');
