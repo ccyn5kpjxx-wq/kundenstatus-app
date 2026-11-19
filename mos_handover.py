@@ -14,6 +14,10 @@ from mos_return import init_vehicle_schema, vehicle_blocked
 
 def init_schema(db):
     init_vehicle_schema(db)
+    db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_onsite_payments (
+        hold_id TEXT PRIMARY KEY, mietvorgang_id INTEGER NOT NULL UNIQUE,
+        rental_cents BIGINT NOT NULL, deposit_cents BIGINT NOT NULL,
+        received_at TEXT NOT NULL, operator_name TEXT NOT NULL, receipt_ref TEXT NOT NULL)''')
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_handovers (
         hold_id TEXT PRIMARY KEY, mietvorgang_id INTEGER NOT NULL UNIQUE,
         handed_at TEXT NOT NULL, operator_name TEXT NOT NULL,
@@ -31,7 +35,8 @@ def existing(db, hold_id):
 def record(db, service, hold_id, provider_intent=None, *, payment_evidence=None,
            operator_name, odometer_km,
            protocol_ref, receipt_confirmed, license_checked, fuel_full,
-           condition_recorded, now=None):
+           condition_recorded, onsite_rent_received=False, onsite_deposit_received=False,
+           onsite_receipt_ref='', now=None):
     """Fail closed, then persist once; caller must hold the vehicle DB lock.
 
     ``provider_intent`` is the freshly retrieved Stripe authorization for the
@@ -57,10 +62,11 @@ def record(db, service, hold_id, provider_intent=None, *, payment_evidence=None,
     if not hold or row['cancellation_id'] or row['status'] != 'sent' or not row['accepted_at']:
         raise ValueError('Übergabe gesperrt: Vertragskopie oder Buchungsstatus muss geprüft werden.')
     quote = json.loads(hold['payload'])['quote']
-    from mietwagen_checkout import is_long_rental_paid_deposit
+    from mietwagen_checkout import is_long_rental_paid_deposit, is_onsite_quote, validate_onsite_quote
+    onsite = is_onsite_quote(quote)
     paid_deposit = is_long_rental_paid_deposit(quote)
     if (quote.get('test_only') is not False or contract.get('test_only') is not False
-            or (not paid_deposit and (quote.get('deposit_method') != 'card_authorization_at_booking'
+            or (not onsite and not paid_deposit and (quote.get('deposit_method') != 'card_authorization_at_booking'
                                      or quote.get('deposit_authorized_cents') != 50000))):
         raise ValueError('Übergabe nur für echte MOS-Direktbuchungen mit passender 500-EUR-Kaution.')
     try:
@@ -117,7 +123,20 @@ def record(db, service, hold_id, provider_intent=None, *, payment_evidence=None,
     if (not rental or rental['mietfahrzeug_id'] != hold['mietfahrzeug_id']
             or rental['status'] != 'aktiv' or rental['rueckgabe_datum']):
         raise ValueError('Übergabe gesperrt: Aktiven Mietvorgang prüfen.')
-    if paid_deposit:
+    if onsite:
+        validate_onsite_quote(quote)
+        if (hold['status'] != 'confirmed' or hold['payment_intent'] or hold['session_id']
+                or any(contract.get(key) != quote[key] for key in
+                       ('payment_method', 'deposit_method', 'amount_cents', 'rental_cents', 'deposit_cents'))
+                or onsite_rent_received is not True or onsite_deposit_received is not True
+                or not isinstance(onsite_receipt_ref, str) or not 3 <= len(onsite_receipt_ref.strip()) <= 100):
+            raise ValueError('Vor der Schlüsselübergabe den vollständigen Erhalt von Miete und Kaution mit Zahlungsbeleg bestätigen.')
+        db.execute('''INSERT INTO miet_checkout_onsite_payments
+            (hold_id,mietvorgang_id,rental_cents,deposit_cents,received_at,operator_name,receipt_ref)
+            VALUES (?,?,?,?,?,?,?) RETURNING hold_id''',
+            (hold_id, hold['mietvorgang_id'], quote['rental_cents'], quote['deposit_cents'],
+             now.isoformat(), operator_name.strip(), onsite_receipt_ref.strip())).fetchone()
+    elif paid_deposit:
         _paid_deposit_ready(db, service, dict(hold), quote, contract, payment_evidence, now)
     else:
         _authorized_deposit_ready(db, service, dict(hold), provider_intent, end, now)

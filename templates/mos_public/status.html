@@ -6,6 +6,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/status.css') }}">
 {% endblock %}
 {% block content %}
+{% set onsite = q.payment_method|default('online') == 'onsite' %}
+{% macro euro(cents) %}{{ '%.2f'|format(cents/100)|replace('.', ',') }} €{% endmacro %}
 {% set deferred = q.deposit_timing|default('') == 'before_pickup' %}
 {% set scoped_access = deposit_link_access|default(false) %}
 {% set paid_long = q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
@@ -21,7 +23,15 @@
       <section class="card followup-state{% if h.status == 'confirmed' and not cancelled %} followup-confirmed{% endif %}">
         {% if cancelled %}
           <h2>Buchung storniert.</h2>
-          <p>{% if paid_long %}Die Erstattung umfasst den Mietpreis nach Abzug der vereinbarten Stornogebühr und die bezahlte Kaution. Die Stornogebühr wird ausschließlich aus dem Mietpreis berechnet.{% elif q.deposit_authorized_cents|default(0) %}Mietpreis-Erstattung und Kartenreservierung werden getrennt bearbeitet.{% else %}Die Erstattung wird getrennt bearbeitet.{% endif %}</p>
+          <p>{% if onsite %}Dein Fahrzeug wurde freigegeben. Bei der Onlinebuchung wurde kein Geld eingezogen.{% elif paid_long %}Die Erstattung umfasst den Mietpreis nach Abzug der vereinbarten Stornogebühr und die bezahlte Kaution. Die Stornogebühr wird ausschließlich aus dem Mietpreis berechnet.{% elif q.deposit_authorized_cents|default(0) %}Mietpreis-Erstattung und Kartenreservierung werden getrennt bearbeitet.{% else %}Die Erstattung wird getrennt bearbeitet.{% endif %}</p>
+        {% elif onsite and h.status == 'confirmed' %}
+          <h2>{{ 'Deine Buchung ist bestätigt.' if live else 'Deine Testbuchung ist bestätigt.' }}</h2>
+          {% if account.onsite_payment %}
+            <p>Die Mietstation hat den Eingang von {{ euro(account.onsite_payment.rental_cents) }} Mietpreis und {{ euro(account.onsite_payment.deposit_cents) }} Kaution bei der Übergabe dokumentiert.</p>
+            {% if account.onsite_repayment %}<p>Die Rückzahlung der Kaution in Höhe von {{ euro(account.onsite_repayment.amount_cents) }} ist dokumentiert.</p>{% endif %}
+          {% else %}
+            <p>Du zahlst bei der Abholung {{ euro(q.rental_cents) }} Mietpreis inkl. MwSt. und {{ euro(q.deposit_cents) }} rückzahlbare Kaution. Insgesamt sind vor Ort <strong>{{ euro(q.rental_cents + q.deposit_cents) }}</strong> fällig.{% if q.cash_at_pickup is sameas true %} Diesen Betrag kannst du bar bezahlen.{% endif %}</p>
+          {% endif %}
         {% elif h.status == 'confirmed' %}
           <h2>{{ 'Zahlung eingegangen. Deine Buchung ist bestätigt.' if live else 'Testzahlung verifiziert. Deine Testbuchung ist bestätigt.' }}</h2>
         {% elif h.status == 'released' and h.grund == 'review_full_refund_completed' %}
@@ -96,10 +106,14 @@
         <div><dt>Rückgabe</dt><dd>{{ q.end_slot|mos_slot }}</dd></div>
       </dl>
       <div class="followup-amount">
-        <span>{{ 'Gesamtbetrag' if q.deposit_charged_cents|default(0) else 'Mietpreis inkl. MwSt.' }}</span>
-        <strong>{{ '%.2f'|format(q.amount_cents/100)|replace('.', ',') }} €</strong>
+        <span>{{ 'Vereinbarter Mietpreis inkl. MwSt.' if onsite else 'Gesamtbetrag' if q.deposit_charged_cents|default(0) else 'Mietpreis inkl. MwSt.' }}</span>
+        <strong>{{ euro(q.rental_cents if onsite else q.amount_cents) }}</strong>
       </div>
+      {% if onsite %}
+      <p>Zahlungsart: vor Ort bei Abholung. Vereinbarte Kaution: {{ euro(q.deposit_cents) }} zusätzlich. Bei Buchung online gezahlt: {{ euro(q.amount_cents) }}.</p>
+      {% else %}
       <p>{% if q.deposit_authorized_cents|default(0) %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}{{ 'Bezahlter' if h.status=='confirmed' else 'Vorgesehener' }} Mietpreis inkl. MwSt.; {{ '%.2f'|format(q.deposit_authorized_cents/100)|replace('.', ',') }} € Kaution {% if deposit and deposit.status=='released' %}{% if deferred %}wurde nach Klärung des Anbieterstatus freigegeben{% else %}war auf der Kreditkarte reserviert und wurde freigegeben{% endif %}{% elif deposit and deposit.status=='releasing' %}wird auf der Kreditkarte freigegeben{% elif deposit and deposit.ready %}ist auf der Kreditkarte reserviert{% else %}ist für die Kreditkartenreservierung vorgesehen; eine gültige Reservierung ist noch nicht bestätigt{% endif %}, nicht abgebucht. {% if deposit and deposit.ready %}Die Kartenautorisierung ist zeitlich begrenzt; eine noch bestehende Reservierung wird nach ordnungsgemäßer Rückgabe freigegeben.{% endif %}{% elif q.deposit_charged_cents|default(0) %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}{% if paid_long %}{{ 'Bezahlter Gesamtbetrag' if h.status=='confirmed' else 'Gesamtbetrag' }}: {{ '%.2f'|format(q.rental_cents/100)|replace('.', ',') }} € Miete inkl. MwSt. + {{ '%.2f'|format(q.deposit_charged_cents/100)|replace('.', ',') }} € rückzahlbare Kaution.{% else %}Gesamtzahlung inklusive separat ausgewiesener, rückzahlbarer Kaution.{% endif %}{% else %}Test-Mietpreis · keine echte Abbuchung. Die Kaution wurde nicht belastet oder reserviert.{% endif %}</p>
+      {% endif %}
       {% if account and account.cancellation %}<p>Stornogebühr nach bisheriger Minderung: {{ '%.2f'|format((account.cancellation.fee_cents-account.cancellation.credit_cents)/100)|replace('.', ',') }} €.</p>{% endif %}
 {% if account %}{% for refund in account.refunds if not paid_long or refund.kind!='deposit_return' %}<p>Erstattung {{ '%.2f'|format(refund.amount_cents/100)|replace('.', ',') }} €: {{ {'queued':'zur Bearbeitung vorgemerkt','submitted':'beim Zahlungsanbieter in Bearbeitung','succeeded':'vom Zahlungsanbieter bestätigt','failed':'fehlgeschlagen, Werkstatt klärt den Vorgang'}[refund.status] }}.</p>{% endfor %}{% endif %}
       <h3>Aktuelle Abholadresse</h3>
@@ -111,7 +125,7 @@
 
   {% include 'mos_public/contract.html' %}
 
-  {% if h.status=='confirmed' and not (account and account.cancellation) and not scoped_access %}
+  {% if h.status=='confirmed' and not (account and account.cancellation) and not scoped_access and not (onsite and handover_completed) %}
 <details class="card followup-cancellation"><summary>Buchung stornieren</summary><div>
 {% if q.cancellation_policy|default('') == 'free_48h_then_10pct_rent' %}
 <p>Bis einschließlich 48 Stunden vor der vereinbarten Abholung kannst du kostenlos stornieren. Bei einer Stornierung weniger als 48 Stunden vor Abholung beträgt der pauschalierte Ausfallersatz 10 % des vereinbarten Mietpreises; die Kaution gehört nicht zur Berechnungsgrundlage. Dasselbe gilt bei persönlich geprüftem Nichterscheinen, wenn das Fahrzeug nicht übergeben oder genutzt wurde. Ersparte Aufwendungen und Vorteile aus einer anderweitigen Vermietung werden angerechnet. Du kannst ausdrücklich nachweisen, dass kein oder ein wesentlich geringerer Schaden entstanden ist. Wende dich für diesen Nachweis an die Werkstatt.</p>

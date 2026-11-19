@@ -92,7 +92,8 @@ class PublicTerminationGateTests(TestCase):
         self.app.config['MOS_TERMINATION_ENABLED'] = True
         response = self.client.get('/mieten/', base_url='https://booking.example.invalid')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('Auto wählen', response.get_data(as_text=True))
+        self.assertIn('Mietwagen buchen', response.get_data(as_text=True))
+        self.assertIn('href="/mieten/kuendigen"', response.get_data(as_text=True))
         with self.app.test_request_context('/mieten/quote', method='POST', base_url='https://booking.example.invalid'):
             self.assertIs(self.setup(), self.app.extensions['mos_public_booking'])
         response = self.client.post('/mieten/webhook', data=b'{}', base_url='https://booking.example.invalid')

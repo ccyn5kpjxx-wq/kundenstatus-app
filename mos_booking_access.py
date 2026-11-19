@@ -34,9 +34,17 @@ def _snapshot(hold):
         quote = payload['quote']
         owner_hash = quote['owner_hash']
         end = datetime.fromisoformat(quote['end_slot'])
+        intent = hold.get('payment_intent')
+        if quote.get('payment_method') == 'onsite':
+            from mietwagen_checkout import validate_onsite_quote
+            validate_onsite_quote(quote)
+            valid_order = (not intent and (hold.get('status') == 'confirmed'
+                           or (hold.get('status') == 'released' and hold.get('grund') == 'onsite_cancelled')))
+        else:
+            valid_order = isinstance(intent, str) and intent.startswith('pi_')
         if (hold.get('status') not in {'confirmed', 'review', 'released'}
                 or not hold.get('mietvorgang_id')
-                or not isinstance(hold.get('payment_intent'), str) or not hold['payment_intent'].startswith('pi_')
+                or not valid_order
                 or quote.get('test_only') is not False
                 or not isinstance(owner_hash, str) or len(owner_hash) != 64
                 or any(char not in '0123456789abcdef' for char in owner_hash)
