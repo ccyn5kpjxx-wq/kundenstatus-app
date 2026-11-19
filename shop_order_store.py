@@ -28,6 +28,7 @@ import json
 import re
 import sqlite3
 from uuid import uuid4
+from shop_workshop_queue import HANDLED_SCHEMA
 
 MAX_CENTS = 100_000_000
 ID = re.compile(r'(?:tyre|alloy_wheel|steel_wheel|parts):[a-f0-9]{24}')
@@ -306,6 +307,8 @@ def init_schema(connection):
             fingerprint TEXT NOT NULL, kind TEXT NOT NULL, received_at TEXT NOT NULL
         );
     ''')
+    connection.execute(HANDLED_SCHEMA)
+    connection.execute('CREATE INDEX IF NOT EXISTS shop_orders_workshop_status_idx ON shop_orders_v2(mode,status,id)')
 
 
 class OrderStore:

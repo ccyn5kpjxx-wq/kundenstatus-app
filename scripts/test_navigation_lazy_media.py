@@ -49,7 +49,7 @@ def render(template, *, full_base=False, **values):
                        document_visible=lambda *args: True,
                        request=SimpleNamespace(args={}), session={}, auftragsarten={}, config={},
                        get_flashed_messages=lambda **kwargs: [], analysis_loading_news=lambda: [])
-    for name in ("mahnungen_faellig_count", "aufgaben_offen_heute_count", "admin_leads_count",
+    for name in ("shop_pending_orders_count", "mahnungen_faellig_count", "aufgaben_offen_heute_count", "admin_leads_count",
                  "admin_bewerbungen_count", "fahrzeugsuche_auktion_alert_count", "fahrzeugsuche_count",
                  "fahrzeugverkauf_count", "fahrzeugeinkauf_count", "mietwagen_anfragen_count",
                  "mietfahrzeuge_unterwegs_count", "admin_versicherung_count", "admin_postfach_count"):
@@ -231,6 +231,32 @@ class NavigationBrowserTests(unittest.TestCase):
         pending.pop().fulfill(json=statistics(version=3))
         expect(page.locator("[data-detail-count]")).to_have_text("3 Fahrzeuge")
         self.assertFalse(any(request.method != "GET" for request in requests))
+
+    def test_shop_order_badge_refreshes_while_visible_and_recovers_after_error(self):
+        html = render("base.html", full_base=True, session={"admin": True}, shop_pending_orders_count=lambda: 1,
+                      request=SimpleNamespace(path="/admin/cockpit", endpoint="betriebs_cockpit", args={}))
+        page, _, _ = self.open_page(html, clock=True)
+        badge = page.locator("[data-shop-pending-count]")
+        expect(badge).to_have_text("1")
+        results = [(200, {"count": 2}), (503, {}), (200, {"count": 0})]
+
+        def respond(route):
+            self.assertEqual(route.request.method, "GET")
+            status, body = results.pop(0)
+            route.fulfill(status=status, json=body)
+
+        page.route("**/shop_admin.pending_order_count", respond)
+        page.clock.fast_forward(60000)
+        expect(badge).to_have_text("2")
+        page.evaluate("window.testHidden = true")
+        page.clock.fast_forward(60000)
+        self.assertEqual(len(results), 2)
+        page.evaluate("window.testHidden = false; document.dispatchEvent(new Event('visibilitychange'))")
+        expect(badge).to_have_text("–")
+        page.clock.fast_forward(60000)
+        expect(badge).to_have_text("0")
+        self.assertFalse(badge.evaluate("el => el.classList.contains('is-alert')"))
+        self.assertFalse(results)
 
     def test_versioned_public_core_assets_keep_logo_content_and_display_size(self):
         with Image.open(ROOT / "static/logo.png") as original, Image.open(ROOT / "static/logo-nav-192.webp") as optimized:

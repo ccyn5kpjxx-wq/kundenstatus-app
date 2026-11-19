@@ -443,7 +443,11 @@
     <div class="d-flex flex-column flex-lg-row align-items-lg-center gap-2 flex-wrap">
       <a class="{{ nav_class(['betriebs_cockpit']) }}"{{ nav_current(['betriebs_cockpit']) }} href="{{ url_for('betriebs_cockpit') }}">Tagesübersicht</a>
       {% if session.get('admin') is sameas true %}
-      <a class="{{ nav_class(['shop_admin.orders', 'shop_admin.order_detail']) }}"{{ nav_current(['shop_admin.orders']) }} href="{{ url_for('shop_admin.orders') }}">Shopbestellungen</a>
+      {% set shop_pending = shop_pending_orders_count() if shop_pending_orders_count is defined else none %}
+      {% set shop_count_label = 'Noch zu bearbeiten' if shop_pending is not none else 'Anzahl derzeit nicht verfügbar' %}
+      <a class="{{ nav_class(['shop_admin.orders', 'shop_admin.order_detail']) }}"{{ nav_current(['shop_admin.orders']) }} aria-label="Shopbestellungen, {{ shop_count_label }}{% if shop_pending is not none %} {{ shop_pending }}{% endif %}" href="{{ url_for('shop_admin.orders') }}">Shopbestellungen
+        <span data-shop-pending-count data-count-url="{{ url_for('shop_admin.pending_order_count') }}" class="nav-badge{% if shop_pending %} is-alert{% endif %}" title="{{ shop_count_label }}">{{ shop_pending if shop_pending is not none else '–' }}</span>
+      </a>
       {% endif %}
       <a class="{{ nav_class(['dashboard', 'auftrag_detail']) }}"{{ nav_current(['dashboard']) }} href="{{ url_for('dashboard') }}#auftraege">Auftragsübersicht</a>
       <a class="{{ nav_class(['neuer_auftrag']) }}"{{ nav_current(['neuer_auftrag']) }} href="{{ url_for('neuer_auftrag') }}">Fahrzeug anlegen</a>

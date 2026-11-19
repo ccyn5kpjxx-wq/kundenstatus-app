@@ -48,6 +48,22 @@
   <a class="top-link" href="{{ url_for('shop_admin.orders') }}">← Alle Shopbestellungen</a>
   <h1>Bestellung</h1><div class="order-id">{{ detail.id }}</div>
   <p class="muted">{{ detail.created }} · {{ detail.mode }}</p>
+  {% if processing_error %}<p class="note warning" role="alert">{{ processing_error }}</p>{% endif %}
+  {% if detail.workshop_pending %}
+  <section class="card" aria-label="Werkstattbearbeitung">
+    <h2>In der Werkstatt zu bearbeiten</h2>
+    {% if detail.processing_blocked_reason %}
+      {% if detail.processing_blocked_reason != processing_error %}<p>{{ detail.processing_blocked_reason }}</p>{% endif %}
+    {% else %}
+      <form class="appointment-actions" method="post" action="{{ url_for('shop_admin.mark_workshop_handled', order_id=detail.id) }}">
+        {% if csrf_field is not defined %}<input type="hidden" name="csrf_token" value="{{ review_csrf }}">{% endif %}
+        <button type="submit">Als bearbeitet markieren</button>
+      </form>
+    {% endif %}
+  </section>
+  {% elif detail.workshop_handled %}
+    <p class="status">In der Werkstatt bearbeitet</p>
+  {% endif %}
   {% if detail.withdrawals %}<section class="card"><h2>Widerrufserklärungen zu dieser Kundenreferenz</h2><p class="note warning">Zuordnung nur anhand der unverifizierten Kundenangabe. Die Bestellung ist dadurch noch nicht storniert oder erstattet.</p><ul>{% for declaration in detail.withdrawals %}<li><a href="{{ url_for('shop_admin.withdrawal_detail',identifier=declaration.id) }}">{{ declaration.created }} · {{ declaration.name }}</a> · {{ declaration.mail }}</li>{% endfor %}</ul>{% if detail.more_withdrawals %}<a href="{{ url_for('shop_admin.withdrawals',order_id=detail.id) }}">Weitere Erklärungen ansehen</a>{% endif %}</section>{% endif %}
   {% if detail.attention %}<p class="note warning" role="status">Manuelle Prüfung erforderlich. Unklare Lieferanten- oder Zahlungsantworten sind keine Bestätigung.</p>{% endif %}
   <section class="card grid" aria-label="Bestellstatus">
@@ -170,7 +186,9 @@
   <p class="note">Diese Ansicht zeigt den gespeicherten Bearbeitungsstand. Sie löst keine Bestellung, Zahlung oder Nachricht aus.</p>
   <section class="card">
   {% if orders %}<div class="table-scroll"><table><thead><tr><th>Bestellung</th><th>Gesamt</th><th>Zahlung</th><th>Bearbeitung</th><th>Bestätigungen / Rechnung</th></tr></thead><tbody>
-    {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a><span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
+    {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a>
+      {% if order.workshop_pending %}<span class="status warning">Zu bearbeiten</span>{% elif order.workshop_handled %}<span class="status">Bearbeitet</span>{% endif %}
+      <span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="empty muted">Noch keine Shopbestellungen auf dieser Seite.</p>{% endif %}
   <nav class="pagination" aria-label="Weitere Bestellungen"><span>{% if page>1 %}<a href="{{ url_for('shop_admin.orders',page=page-1,per_page=per_page) }}">← Neuere Bestellungen</a>{% endif %}</span><span class="muted small">Seite {{ page }}</span><span>{% if has_next %}<a href="{{ url_for('shop_admin.orders',page=page+1,per_page=per_page) }}">Ältere Bestellungen →</a>{% endif %}</span></nav>
   </section>

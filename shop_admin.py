@@ -1,8 +1,8 @@
 """Shop operations on the explicitly provisioned shop SQLite.
 
-The ledger reader remains read-only. Explicit technical review decisions use
-the separately configured review service; never a provider or financial action.
-No schema creation, portal DB fallback or provider lookup.
+Reading order data never changes it. Only an explicit internal handling POST
+records a workshop acknowledgement. Technical review decisions use the separately
+configured review service; no portal DB fallback or provider lookup.
 Registration/construction performs no database IO. Every request requires the
 existing portal's real administrator session, not office or partner access.
 """
@@ -19,20 +19,21 @@ import sqlite3
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, current_app, has_request_context, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, g, has_request_context, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 from shop_order_store import OrderStore
 from shop_goods_margin import admin_goods_margins
 from shop_supplier_status import supplier_status_by_line
 from shop_supplier_delivery_dates import DATE_TABLE, delivery_dates
 from shop_storage import ShopStorage
+from shop_workshop_queue import HANDLED_TABLE, add_workshop_status, appointment_handling_block, mark_handled, pending_count
 
 ORDER=re.compile(r'sho_[a-f0-9]{32}')
 WITHDRAWAL=re.compile(r'swd_[a-f0-9]{32}')
 TABLES={'shop_orders_v2','shop_payment_attempts_v2','shop_fulfillment_v2',
         'shop_fulfillment_positions_v3','shop_order_workflow_v2','shop_order_receipts_v2','shop_withdrawals_v2',
         'shop_order_appointment_requests_v2','shop_order_reviews_v1','shop_quote_goods_cost_v1',
-        DATE_TABLE}
+        DATE_TABLE,HANDLED_TABLE}
 BASE_TABLES={'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
              'shop_payment_events_v2','shop_buyer_sessions_v2'}
 BASE_TRIGGERS={'shop_quotes_v2_immutable','shop_orders_v2_immutable'}
@@ -92,8 +93,11 @@ class ShopAdminReader:
         self.storage,self.store=storage,store
         self.existing_only=existing_only
 
-    @contextmanager
     def read(self):
+        return self._open_ledger()
+
+    @contextmanager
+    def _open_ledger(self, *, workshop_write=False):
         db=None
         try:
             storage=self.storage
@@ -105,15 +109,18 @@ class ShopAdminReader:
                     or storage.marker.stat().st_size!=len(b'shop_storage_v2\n')
                     or storage.marker.read_bytes()!=b'shop_storage_v2\n'):
                 abort(404)
-            db=sqlite3.connect(storage.path.as_uri()+'?mode=ro',uri=True,timeout=2)
+            mode='rw' if workshop_write else 'ro'
+            db=sqlite3.connect(storage.path.as_uri()+'?mode='+mode,uri=True,timeout=2)
             db.row_factory=sqlite3.Row
-            db.execute('PRAGMA query_only=ON')
-            # This connection can never mutate a journal even if a future
-            # handler accidentally gains an UPDATE or provider-side helper.
-            allowed={sqlite3.SQLITE_SELECT,sqlite3.SQLITE_READ,sqlite3.SQLITE_FUNCTION,
-                     sqlite3.SQLITE_TRANSACTION,sqlite3.SQLITE_RECURSIVE}
-            db.set_authorizer(lambda action,*args:sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY)
-            db.execute('BEGIN')
+            if workshop_write:
+                db.execute('PRAGMA foreign_keys=ON')
+                db.execute('BEGIN IMMEDIATE')
+            else:
+                db.execute('PRAGMA query_only=ON')
+                allowed={sqlite3.SQLITE_SELECT,sqlite3.SQLITE_READ,sqlite3.SQLITE_FUNCTION,
+                         sqlite3.SQLITE_TRANSACTION,sqlite3.SQLITE_RECURSIVE}
+                db.set_authorizer(lambda action,*args:sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY)
+                db.execute('BEGIN')
             names=tuple(sorted(TABLES|BASE_TABLES|BASE_TRIGGERS))
             objects={(row[0],row[1]) for row in db.execute("SELECT type,name FROM sqlite_master WHERE name IN ("+','.join('?' for _ in names)+')',names)}
             tables={name for kind,name in objects if kind=='table'}
@@ -121,10 +128,18 @@ class ShopAdminReader:
                     or not {('trigger',name) for name in BASE_TRIGGERS}<=objects):
                 abort(503,description='Shopbestellungen sind vorübergehend nicht verfügbar.')
             yield db,tables
+            if workshop_write:
+                db.commit()
         except (OSError,sqlite3.Error,ValueError):
             abort(503,description='Shopbestellungen sind vorübergehend nicht verfügbar.')
         finally:
             if db is not None:db.close()
+
+    def mark_workshop_handled(self, order_id, confirmed_appointments):
+        with self._open_ledger(workshop_write=True) as (db,tables):
+            if not db.execute('SELECT 1 FROM shop_orders_v2 WHERE id=?',(order_id,)).fetchone():
+                abort(404)
+            return mark_handled(db, tables, order_id, confirmed_appointments)
 
     @staticmethod
     def _related(db,tables,rows):
@@ -187,6 +202,7 @@ class ShopAdminReader:
             related=self._related(db,tables,rows)
             has_next=db.execute('SELECT 1 FROM shop_orders_v2 LIMIT 1 OFFSET ?',(page*per_page,)).fetchone() is not None
             orders = [self._summary(row,related[row['id']]) for row in rows]
+            add_workshop_status(db,tables,orders)
             if show_margin is True:
                 margins = admin_goods_margins(db, tables, [row['id'] for row in rows])
                 for order in orders:
@@ -201,6 +217,7 @@ class ShopAdminReader:
             if row is None:abort(404)
             related=self._related(db,tables,[row])[order_id]
             summary=self._summary(row,related)
+            add_workshop_status(db,tables,[summary])
             if show_margin is True:
                 summary['margin'] = admin_goods_margins(db, tables, [order_id])[order_id]
             if summary['appointment']:
@@ -509,12 +526,33 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         try:
             with reader().read() as (db,tables):
                 result['shop_admin_available']=True
+                g.shop_workshop_pending_count=pending_count(db,tables)
                 if 'shop_withdrawals_v2' in tables:
                     count=db.execute("SELECT COUNT(*) FROM shop_withdrawals_v2 WHERE state='manual_review'").fetchone()[0]
                     result['shop_withdrawal_pending']=min(count,999)
         except HTTPException as error:
+            g.shop_workshop_pending_count=None
             if error.code!=404:result.update(shop_admin_available=True,shop_withdrawal_unavailable=True)
         return result
+
+    @blueprint.app_template_global()
+    def shop_pending_orders_count():
+        if not has_request_context() or session.get('admin') is not True:
+            return None
+        if 'shop_workshop_pending_count' not in g:
+            try:
+                with reader().read() as (db,tables):
+                    g.shop_workshop_pending_count=pending_count(db,tables)
+            except HTTPException:
+                g.shop_workshop_pending_count=None
+        return g.shop_workshop_pending_count
+
+    @blueprint.get('/admin/shop/offen/anzahl')
+    def pending_order_count():
+        if request.args:abort(400)
+        count=shop_pending_orders_count()
+        if count is None:abort(503)
+        return {'count':count}
 
     @blueprint.get('/admin/shop/widerrufe')
     def withdrawals():
@@ -551,9 +589,14 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         detail=reader().detail(order_id,show_margin=session.get('admin') is True)
         return show_order_detail(detail)
 
-    def show_order_detail(detail,appointment_error=None,delivery_error=None):
+    def show_order_detail(detail,appointment_error=None,delivery_error=None,processing_error=None):
         order_id=detail['id']
         attach_appointment_status([detail])
+        if detail['workshop_pending'] and not detail.get('processing_blocked_reason'):
+            detail['processing_blocked_reason']=appointment_handling_block(
+                detail.get('appointment_day'),detail.get('appointment_time'),detail.get('appointment_confirmed'))
+        if processing_error:
+            detail['processing_blocked_reason']=processing_error
         calendar_ready=(callable(blueprint.confirm_appointment) and callable(blueprint.confirmed_appointments)
                         and not detail.get('appointment_calendar_unavailable'))
         appointment_actionable=(calendar_ready and detail['appointment'] and not detail.get('appointment_confirmed')
@@ -566,10 +609,23 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
             except Exception:
                 review={'unavailable':True}
         eta_actionable = any(line['supplier']['eta_editable'] for line in detail.get('lines', []))
-        token=_review_csrf_token() if appointment_actionable or eta_actionable or review and review.get('actionable') else None
+        token=_review_csrf_token() if detail['workshop_pending'] or appointment_actionable or eta_actionable or review and review.get('actionable') else None
         return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,
             review_csrf=token,appointment_actionable=appointment_actionable,appointment_error=appointment_error,
-            delivery_error=delivery_error)
+            delivery_error=delivery_error,processing_error=processing_error)
+
+    @blueprint.post('/admin/shop/<order_id>/bearbeitet')
+    def mark_workshop_handled(order_id):
+        if not ORDER.fullmatch(order_id):abort(404)
+        if request.headers.get('Origin') not in (None,request.host_url.rstrip('/')) or request.headers.get('Sec-Fetch-Site') not in (None,'same-origin'):
+            abort(403)
+        if set(checked_form_fields())!={'csrf_token'}:abort(400)
+        source=reader()
+        reason=source.mark_workshop_handled(order_id,blueprint.confirmed_appointments)
+        if reason:
+            detail=source.detail(order_id,show_margin=True)
+            return show_order_detail(detail,processing_error=reason),409
+        return redirect(url_for('shop_admin.order_detail',order_id=order_id),code=303)
 
     @blueprint.post('/admin/shop/<order_id>/liefertermin/<child_key>')
     def update_delivery_date(order_id, child_key):
