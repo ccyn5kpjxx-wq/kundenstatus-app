@@ -81,9 +81,9 @@ class OnsiteCheckoutTests(unittest.TestCase):
         q = self.quote(token)
         self.assertEqual((q['days'], q['rental_cents'], q['deposit_cents']), (3, 14700, 50000))
         self.assertEqual((q['amount_cents'], q['deposit_authorized_cents'], q['deposit_charged_cents']), (0, 0, 0))
-        self.assertIn('Kartenterminal', q['pickup_payment_note'])
+        self.assertIn('mit Karte oder bar', q['pickup_payment_note'])
         self.assertIn(q['pickup_payment_note'], q['terms_text'])
-        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v3')
+        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v4')
         with (patch.object(self.service.gateway, 'create', side_effect=AssertionError('Unexpected Checkout')),
               patch.object(self.service.gateway, 'create_deposit_intent', side_effect=AssertionError('Unexpected deposit'))):
             first = self.public.checkout(token)
@@ -101,7 +101,7 @@ class OnsiteCheckoutTests(unittest.TestCase):
             pdf = self.public.client.get(first.location + '/vertrag.pdf')
             self.assertEqual(pdf.status_code, 200)
             text = ' '.join(page.extract_text() or '' for page in PdfReader(BytesIO(pdf.data)).pages)
-            self.assertIn('Kartenterminal', text)
+            self.assertIn('mit Karte oder bar', ' '.join(text.split()))
             self.assertEqual(self.public.checkout(token).location, first.location)
             self.assertEqual(len(self.public.rows()), 1)
             self.service.cancel_or_reconcile(hold['id'])

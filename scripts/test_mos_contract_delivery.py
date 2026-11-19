@@ -168,8 +168,11 @@ class DeliveryTests(unittest.TestCase):
     def test_pickup_payment_wording_comes_from_the_signed_contract(self):
         contract = dict(payment_method='onsite', rental_cents=3900, deposit_cents=50000)
         for terms, expected, absent in [
-                ({'cash_at_pickup': True}, 'bar bezahlen', 'Kartenterminal'),
-                ({'pickup_payment_note': 'Zahlung am Kartenterminal.'}, 'Zahlung am Kartenterminal.', 'bar bezahlen')]:
+                ({'cash_at_pickup': True}, 'bar bezahlen', 'mit Karte oder bar'),
+                ({'pickup_payment_note': 'Mietpreis und Kaution können bei Abholung am Kartenterminal bezahlt werden.'},
+                 'am Kartenterminal bezahlt werden', 'mit Karte oder bar'),
+                ({'pickup_payment_note': 'Mietpreis und Kaution können bei der Abholung mit Karte oder bar bezahlt werden.'},
+                 'mit Karte oder bar bezahlt werden', 'am Kartenterminal')]:
             with self.subTest(terms=terms):
                 email = _message(self.hold, 'customer@example.test', self.pdf, False, contract={**contract, **terms})
                 body = email.get_body(preferencelist=('plain',)).get_content()

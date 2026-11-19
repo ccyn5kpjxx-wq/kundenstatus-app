@@ -37,7 +37,7 @@ WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
 # The booking window rolls forward on every request without opening database
 # rows in bulk. Explicit database closures still override these defaults.
 WEEKLY_SLOT_HORIZON_MONTHS = 12
-PICKUP_PAYMENT_NOTE = "Mietpreis und Kaution können bei Abholung am Kartenterminal bezahlt werden."
+PICKUP_PAYMENT_NOTE = "Mietpreis und Kaution können bei der Abholung mit Karte oder bar bezahlt werden."
 
 
 class RentalSelectionError(ValueError):
@@ -552,9 +552,9 @@ def register(portal):
         if onsite:
             quoted['payment_method']='onsite'
             quoted['pickup_payment_note'] = PICKUP_PAYMENT_NOTE
-            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v3'
+            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v4'
             quoted['terms_text'] = (
-                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 3)\n'
+                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 4)\n'
                 'Für diese Buchung gelten folgende vorrangige Regelungen: Mit der Schaltfläche '
                 'zur zahlungspflichtigen Bestellung gibst du eine verbindliche Bestellung ab. '
                 'Wir nehmen sie mit der Buchungsbestätigung an. Online werden weder eine Zahlung '

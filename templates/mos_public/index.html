@@ -105,9 +105,9 @@
         <label for="payment-method">Wie möchtest du bezahlen?</label>
         <select id="payment-method" name="payment_method" required>
           <option value="online"{% if chosen.get('payment_method', 'online') == 'online' %} selected{% endif %}>Online bezahlen</option>
-          <option value="onsite"{% if chosen.get('payment_method') == 'onsite' %} selected{% endif %}>Bei Abholung bezahlen (mit Karte)</option>
+          <option value="onsite"{% if chosen.get('payment_method') == 'onsite' %} selected{% endif %}>Bei Abholung bezahlen (Karte oder Bargeld)</option>
         </select>
-        <p>Bei Zahlung vor Ort buchst du verbindlich ohne Onlinezahlung. Den Mietpreis und die 500 € rückzahlbare Kaution kannst du bei der Abholung mit Karte bezahlen.</p>
+        <p>Bei Zahlung vor Ort buchst du verbindlich ohne Onlinezahlung. Den Mietpreis und die 500 € rückzahlbare Kaution kannst du bei der Abholung mit Karte oder bar bezahlen.</p>
         {% if live %}
           <details class="entry-detail" id="duration-deposit-help">
             <summary>So funktioniert die Kaution bei Onlinezahlung</summary>
