@@ -97,6 +97,40 @@ class ShopAppointmentConfirmation(unittest.TestCase):
         return [item for day in days if day['datum'].isoformat() == self.day
                 for item in day['system'] if item.get('url') == path]
 
+    def test_owner_opens_shop_from_second_sidebar_link(self):
+        cockpit = self.client.get('/admin/cockpit', base_url=PORTAL)
+        self.assertEqual(cockpit.status_code, 200)
+        menu = re.search(r'<nav\b[^>]*\bid="werkstattNavigation"[^>]*>.*?</nav>', cockpit.text, re.DOTALL)
+        self.assertIsNotNone(menu)
+        direct = menu[0].split('id="hauptNavigation"', 1)[1].split('<details', 1)[0]
+        links = re.findall(r'<a\b[^>]*\bhref="([^"]+)"[^>]*>([^<]+)</a>', direct)
+        self.assertEqual(links[0][1], 'Tagesübersicht')
+        self.assertEqual(links[1], ('/admin/shop', 'Shopbestellungen'))
+        self.assertEqual(menu[0].count('href="/admin/shop"'), 1)
+        opened = self.client.get(links[1][0], base_url=PORTAL)
+        self.assertEqual(opened.status_code, 200)
+        self.assertIn('<h1>Shopbestellungen</h1>', opened.text)
+
+        # Existing orders remain reachable from the calendar when sales are paused.
+        with patch.dict(portal.app.config, SHOP_BUYER_ENABLED=False):
+            calendar = self.client.get('/admin/kalender', base_url=PORTAL)
+            self.assertEqual(calendar.status_code, 200)
+            self.assertIn('href="/admin/shop">Shopbestellungen</a>', calendar.text)
+
+        partner = portal.get_autohaus_by_slug('kaesmann')['id']
+        office = {'actor': 'employee', 'mitarbeiter_name': 'Testbüro', 'office_categories': ('preise',)}
+        with patch.object(portal.office_access, 'identity', return_value=office):
+            for path, identity in (('/werkstatt/buero', {'assistent_mid': 99}),
+                                   ('/partner/kaesmann/dashboard', {'partner_autohaus_id': partner})):
+                with self.subTest(path=path):
+                    client = portal.app.test_client()
+                    with client.session_transaction(base_url=PORTAL) as session:
+                        session.update(identity)
+                    page = client.get(path, base_url=PORTAL)
+                    self.assertEqual(page.status_code, 200)
+                    self.assertNotIn('href="/admin/shop"', page.text)
+                    self.assertEqual(client.get('/admin/shop', base_url=PORTAL).status_code, 403)
+
     def test_paid_order_confirmed_once_in_detail_list_calendar_and_cockpit(self):
         path = self.order('calendarpaid', '09:00')
         action, data = self.form(path)
