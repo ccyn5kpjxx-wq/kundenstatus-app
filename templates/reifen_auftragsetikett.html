@@ -8,20 +8,22 @@
     * { box-sizing:border-box }
     :root { font:16px/1.3 system-ui,sans-serif; color:#152720; background:#edf1ee }
     body { margin:0 }
-    nav, article { max-width:210mm; margin:16px auto }
+    nav, article { max-width:148mm; margin:16px auto }
     nav { display:flex; align-items:center; flex-wrap:wrap; gap:1rem; padding:0 16px }
     button, nav a { font:inherit; font-weight:650; border:1px solid #193e30; border-radius:.5rem; padding:.7rem 1rem; cursor:pointer }
     button { background:#193e30; color:white }
     nav a { color:#193e30; background:white; text-decoration:none }
-    article { background:white; padding:8mm; overflow-wrap:anywhere; border:1px solid #d2d9d4 }
+    article { background:white; padding:5mm; overflow-wrap:anywhere; border:1px solid #d2d9d4 }
     header { border-bottom:2px solid; padding-bottom:1.5mm; margin-bottom:4mm }
-    header dl { grid-template-columns:1.3fr 1.05fr auto; gap:3mm }
-    header dt { font-size:9pt; font-weight:600; line-height:1.1 }
+    header dl { grid-template-columns:1.3fr 1.05fr auto; gap:2mm }
+    header dt { margin:0 0 .4mm; font-size:8.5pt; font-weight:600; line-height:1.1 }
     header dd { white-space:nowrap; font-variant-numeric:tabular-nums; line-height:1.1 }
-    .start { font-size:21pt }
-    .end { font-size:15pt }
-    .number { font-size:18pt; text-align:right }
-    .service { font-size:12pt; font-weight:700; margin:1mm 0 0; line-height:1.2 }
+    .start { font-size:17pt }
+    .end { font-size:12.5pt }
+    .number { text-align:right }
+    .number dd { font-size:15pt }
+    .service { font-size:11pt; font-weight:700; margin:.8mm 0 0; line-height:1.12 }
+    .service.long { font-size:9.5pt }
     dl { display:grid; grid-template-columns:1fr 1fr; gap:3mm 6mm; margin:0 }
     dt { margin-bottom:.2em; font-size:10pt }
     dd { font-size:16pt; font-weight:700; line-height:1.2; margin:0 }
@@ -36,7 +38,7 @@
       .end, dd { font-size:13pt }
       .number { text-align:left; font-size:14pt }
     }
-    @page { size:A5 landscape; margin:4mm 7mm 7mm }
+    @page { size:A5 portrait; margin:4mm 5mm 7mm }
     @media print {
       :root { background:white; color:black }
       nav { display:none }
@@ -48,7 +50,7 @@
 <body>
   <nav aria-label="Druckoptionen"><button type="button" onclick="window.print()">A5-Etikett drucken</button>
     <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck' if etikett.tafel else 'auftrag_ausdruck.auftragsdruck', auftrag_id=etikett.number) }}">A4-Auftrag mit Abrissstreifen</a>
-    <span>DIN A5 · Querformat{% if etikett.positions|length > 1 %} · {{ etikett.positions|length }} Etiketten{% endif %}</span></nav>
+    <span>DIN A5 · Hochformat{% if etikett.positions|length > 1 %} · {{ etikett.positions|length }} Etiketten{% endif %}</span></nav>
   <main>
   {% for position in etikett.positions %}
     <article>
@@ -58,7 +60,7 @@
           <div><dt>{{ etikett.end_label }}</dt><dd class="end">{{ etikett.end }}</dd></div>
           <div class="number"><dt>Auftrag</dt><dd><strong>{{ etikett.number }}</strong></dd></div>
         </dl>
-        <p class="service">{{ etikett.service }}</p>
+        <p class="service{% if etikett.service|length > 85 %} long{% endif %}">{{ etikett.service }}</p>
       </header>
       <dl>
         <div><dt>Kunde</dt><dd>{{ etikett.customer }}</dd></div>

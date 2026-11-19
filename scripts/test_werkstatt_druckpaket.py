@@ -52,7 +52,8 @@ class OrderPrintTest(unittest.TestCase):
             pages = [p.get_text() for p in pdf]
             for text in (f"Lackierauftrag {self.oid}", "TEST AB 123", "9617", "LY7W", "Tür hinten rechts"):
                 self.assertIn(text, pages[0])
-            self.assertAlmostEqual(pdf[0].rect.width, 841.89, places=1)
+            self.assertAlmostEqual(pdf[0].rect.width, 595.28, places=1)
+            self.assertAlmostEqual(pdf[0].rect.height, 841.89, places=1)
             self.assertIn("TUER HINTEN RECHTS", pages[1])
             self.assertIn("LACKIERFREIGABE", pages[2])
             self.assertNotIn("PRIVATE INVOICE", "".join(pages))
@@ -93,9 +94,29 @@ class OrderPrintTest(unittest.TestCase):
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertEqual(len(pdf), 2)
             self.assertTrue(pdf[1].get_images())
-            self.assertGreater(pdf[1].rect.width, pdf[1].rect.height)
+            self.assertLess(pdf[1].rect.width, pdf[1].rect.height)
             self.assertIn("Lackauftrag_defekt.pdf", pdf[0].get_text())
             self.assertIn("Fehlende Druckseiten", pdf[0].get_text())
+
+    def test_wide_and_rotated_originals_print_in_portrait_without_losing_edges(self):
+        with fitz.open() as attachment:
+            page = attachment.new_page(width=842, height=595)
+            page.insert_text((12, 20), "LINKS OBEN")
+            page.insert_text((723, 572), "RECHTS UNTEN")
+            page = attachment.new_page(width=595, height=842)
+            page.insert_text((14, 24), "GEDREHTES BLATT")
+            page.set_rotation(90)
+            self.upload("Lackauftrag.pdf", attachment.tobytes())
+        with fitz.open(stream=self.client.get(self.admin).data) as pdf:
+            self.assertEqual(len(pdf), 3)
+            for page in pdf:
+                self.assertAlmostEqual(page.rect.width, 595.28, places=1)
+                self.assertAlmostEqual(page.rect.height, 841.89, places=1)
+            for page, text in ((pdf[1], "LINKS OBEN"), (pdf[1], "RECHTS UNTEN"),
+                               (pdf[2], "GEDREHTES BLATT")):
+                hits = page.search_for(text)
+                self.assertEqual(len(hits), 1)
+                self.assertTrue(page.rect.contains(hits[0]))
 
     def test_permissions_archives_and_orders_without_upload(self):
         partner = portal.app.test_client()

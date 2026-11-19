@@ -8,7 +8,7 @@ import fitz
 from PIL import Image, ImageOps
 from reportlab.lib.colors import HexColor
 from reportlab.graphics.shapes import Drawing, Rect
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Table, TableStyle
@@ -78,7 +78,7 @@ def _boxes(rows, width, style):
 
 def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     stream = BytesIO()
-    size = landscape(A4)
+    size = A4
     doc = SimpleDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
                             author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
                             topMargin=29*mm, bottomMargin=32*mm, allowSplitting=True)
@@ -137,7 +137,7 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     if not rows:
         story.append(_paragraph("Positionen aus der beigefügten Auftragsunterlage übernehmen." if printed
                                 else "Arbeitsumfang vor Beginn klären und hier eintragen.", note))
-        rows = [{"text": "_" * 76, "new_part": False} for _ in range(2)]
+        rows = [{"text": "_" * 56, "new_part": False} for _ in range(2)]
     story.append(_boxes(rows, doc.width - 12, value))
     if tyre and tyre["service_items"] and sheet["arbeit"] and not all(
             item.casefold() in tyre["service"].casefold() for item in sheet["arbeit"].splitlines()):
@@ -152,14 +152,14 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
 
     def chrome(canvas, document):
         width, height = size
-        for x, room, name, content in ((14, 91, start_name, start_value), (110, 84, end_name, end_value),
-                                        (199, 84, "Service", service_name)):
+        for x, room, name, content in ((14, 62, start_name, start_value), (79, 59, end_name, end_value),
+                                        (141, 55, "Service", service_name)):
             canvas.setFillColor(green)
             canvas.setFont("Helvetica-Bold", 9)
             canvas.drawString(x*mm, height-7*mm, name.upper())
             canvas.setFillColor(ink)
             font = "Helvetica-Bold"
-            pts = 23 if x == 14 else 19
+            pts = 20 if x == 14 else 16
             while pts > 11 and canvas.stringWidth(content, font, pts) > room*mm:
                 pts -= 1
             if canvas.stringWidth(content, font, pts) > room*mm:
@@ -170,8 +170,8 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
             canvas.drawString(x*mm, height-16*mm, content)
         rack_id = "   ·   ".join(filter(None, (customer, vehicle)))
         canvas.setFont("Helvetica", 9)
-        if canvas.stringWidth(rack_id, "Helvetica", 9) > 220*mm:
-            while rack_id and canvas.stringWidth(rack_id + "…", "Helvetica", 9) > 220*mm:
+        if canvas.stringWidth(rack_id, "Helvetica", 9) > 148*mm:
+            while rack_id and canvas.stringWidth(rack_id + "…", "Helvetica", 9) > 148*mm:
                 rack_id = rack_id[:-1]
             rack_id = rack_id.rstrip() + "…"
         canvas.drawString(14*mm, height-21*mm, rack_id)
@@ -210,10 +210,25 @@ def _image_pages(raw):
             white.paste(rgba, mask=rgba.getchannel("A"))
             jpeg = BytesIO()
             white.save(jpeg, "JPEG", quality=90)
-            width, height = A4 if white.width <= white.height else A4[::-1]
+            width, height = A4
             page = pages.new_page(width=width, height=height)
             page.insert_image(fitz.Rect(12, 12, width-12, height-12), stream=jpeg.getvalue())
         return pages.tobytes()
+
+
+def _append_portrait_pages(attachments, original):
+    """Keep A4 originals at full size; fit other paper sizes onto upright A4."""
+    for index, page in enumerate(original):
+        if abs(page.rect.width - A4[0]) < 1 and abs(page.rect.height - A4[1]) < 1:
+            attachments.insert_pdf(original, from_page=index, to_page=index, links=False,
+                                   annots=False, widgets=False, final=index == len(original) - 1)
+        else:
+            target = attachments.new_page(width=A4[0], height=A4[1])
+            if page.get_contents():
+                page.remove_rotation()
+                margin = 5*mm
+                frame = fitz.Rect(margin, margin, A4[0] - margin, A4[1] - margin)
+                target.show_pdf_page(frame, original, index, keep_proportion=True)
 
 
 def druckpaket(portal, order_id, *, tafel=False):
@@ -239,7 +254,7 @@ def druckpaket(portal, order_id, *, tafel=False):
                     if original.needs_pass or not original.page_count:
                         raise ValueError("PDF gesperrt oder leer")
                     original.bake()
-                    attachments.insert_pdf(original, links=False, annots=False, widgets=False)
+                    _append_portrait_pages(attachments, original)
                 printed.append(source["original_name"])
             except (OSError, ValueError, RuntimeError, fitz.mupdf.FzErrorBase, Image.DecompressionBombError):
                 if attachments.page_count > start:

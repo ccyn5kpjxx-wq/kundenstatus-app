@@ -799,7 +799,8 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.headers["Cache-Control"], "private, no-store")
         for expected in (f"<strong>{order_id}</strong>", "29.10.2026", "30.10.2026 · 08:00", "30.10.2026 · 08:30",
-                         "Erika Beispiel", "MOS-AB 123", "185/60 R15", "A5 landscape", "CHECK24 TEST9001"):
+                         "Erika Beispiel", "MOS-AB 123", "185/60 R15", "A5 portrait", "DIN A5 · Hochformat",
+                         "CHECK24 TEST9001"):
             self.assertIn(expected, result.text)
         head = result.text.split('<header>', 1)[1].split('</header>', 1)[0]
         for expected in ('Arbeitsbeginn', 'Gebuchtes Ende', 'Reifenmontage für 2 Reifen',
