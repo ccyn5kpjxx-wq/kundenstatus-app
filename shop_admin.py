@@ -63,6 +63,14 @@ INVOICE_LABELS = {
     'ready': 'Rechnung erstellt',
     'blocked': 'Rechnungsdaten prüfen',
 }
+INVOICE_MAIL_LABELS = {
+    'pending': 'Versand vorgemerkt',
+    'sending': 'Übergabe an den Maildienst läuft',
+    'submitted': 'An den Maildienst übergeben',
+    'not_sent': 'Nicht gesendet',
+    'unknown': 'Versandstatus prüfen',
+    'blocked': 'Versand gesperrt – Bestelldaten prüfen',
+}
 LEXWARE_INVOICE_URL = re.compile(
     r'https://app\.lexware\.de/permalink/invoices/(?:edit|view)/'
     r'[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
@@ -83,7 +91,10 @@ def _invoice_projection(record, order):
             label = 'Zahlung ausstehend · keine Rechnung erstellt'
     edit_url = record.get('edit_url')
     number = record.get('voucher_number')
+    mail_state = record.get('mail_state')
     return {'state': state, 'label': label,
+            'mail_label': INVOICE_MAIL_LABELS.get(mail_state) if isinstance(mail_state, str) else None,
+            'predates_automatic_mail': state == 'ready' and record.get('predates_automatic_mail') is True,
             'paid_online': state == 'ready' and order.get('mode') == 'Live' and order.get('status') == STATUS['paid']
                            and order.get('payment') == PAYMENT['paid'],
             'number': number if isinstance(number, str) and 0 < len(number) <= 80 else '',

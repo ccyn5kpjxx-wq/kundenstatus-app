@@ -96,8 +96,14 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
         if production.get('purchasing_enabled') is True and production.get('store') is not None:
             try:
                 from shop_invoice_service import ShopInvoiceService
+                from shop_invoice_mail import ShopInvoiceMailer
                 from shop_lexware_invoices import LexwareShopInvoices
-                invoices = ShopInvoiceService(production['store'], LexwareShopInvoices(portal))
+                receipts = production.get('receipts')
+                mailer = None
+                if receipts is not None and receipts.mode == 'live' and receipts.readiness()['delivery_ready']:
+                    mailer = ShopInvoiceMailer(outbox=receipts.outbox, smtp_config=receipts.smtp_config,
+                                               sender_address=receipts.sender)
+                invoices = ShopInvoiceService(production['store'], LexwareShopInvoices(portal), mailer=mailer)
                 app.extensions['shop_invoice_service'] = invoices
                 invoices.start()
             except Exception:

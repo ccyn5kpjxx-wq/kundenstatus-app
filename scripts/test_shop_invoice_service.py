@@ -11,7 +11,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,15 +89,16 @@ class InvoiceServiceTests(unittest.TestCase):
         self.adapter = InMemoryLexware()
         self.serial = 0
 
-    def service(self):
-        return ShopInvoiceService(self.store, self.adapter, clock=lambda: self.now.timestamp())
+    def service(self, mailer=None):
+        return ShopInvoiceService(self.store, self.adapter, clock=lambda: self.now.timestamp(), mailer=mailer)
 
-    def order(self, *, mode='live', capture=True, paid=True, fulfilled=True, positions=('accepted', 'accepted')):
+    def order(self, *, mode='live', capture=True, paid=True, fulfilled=True, positions=('accepted', 'accepted'),
+              email='buyer@example.test'):
         self.serial += 1
         customer = 'buyer-' + str(self.serial)
         address = {'recipient': 'Synthetic Example', 'street': 'Teststraße 12', 'postcode': '74821',
                    'city': 'Mosbach', 'country': 'DE'}
-        context = {'contact': {'name': 'Synthetic Example', 'email': 'buyer@example.test'},
+        context = {'contact': {'name': 'Synthetic Example', 'email': email},
                    'billing': address, 'delivery': {**address, 'street': 'Anderer Testweg 8'}}
         snapshot = quote(mode=mode, customer=customer, context=context)
         snapshot['created_at'] = (self.now - timedelta(seconds=5)).isoformat()
@@ -306,6 +307,146 @@ class InvoiceServiceTests(unittest.TestCase):
             receipts.customer_receipt(oid, customer_id='buyer-unrelated')
         self.assertFalse(self.adapter.pdf_reads)
         self.assertEqual(len(self.adapter.writes), 1)
+
+    def test_invoice_mail_only_enrolls_new_live_orders_even_when_activation_and_order_share_timestamp(self):
+        inactive = self.service()
+        old = self.order()
+        inactive.prepare(old)
+        old_with_later_invoice = self.order()
+        mailer = Mock()
+        mailer.send.return_value = 'submitted'
+        self.service(mailer)
+        fresh = self.order(email='new-buyer@example.test')
+        test_order = self.order(mode='test')
+        incomplete = self.order(positions=('accepted', 'rejected'))
+        service = self.service(mailer)
+        service.prepare(old_with_later_invoice)
+        service.prepare(fresh)
+        for order_id in (old, old_with_later_invoice, test_order, incomplete):
+            self.assertIsNone(service.status(order_id)['mail_state'])
+        self.assertEqual(service.status(fresh)['mail_state'], 'pending')
+        mailer.send.assert_not_called()
+        self.assertTrue(service.process_next())
+        message = mailer.send.call_args.kwargs
+        self.assertEqual(message, dict(order_id=fresh, recipient='new-buyer@example.test', voucher_number='RE-TEST-1',
+            content=b'%PDF-1.7\nSYNTHETIC\n%%EOF', filename='Rechnung-RE-TEST-1.pdf'))
+        self.assertEqual(self.adapter.records[self.adapter.pdf_reads[0]][0]['introduction'], 'Ihre Shopbestellung ' + fresh)
+        self.assertEqual(service.status(fresh)['mail_state'], 'submitted')
+        self.assertFalse(self.service(mailer).process_next())
+        mailer.send.assert_called_once()
+
+    def test_invoice_mail_read_failure_retries_and_two_workers_submit_only_once(self):
+        mailer = Mock()
+        mailer.send.return_value = 'submitted'
+        workers = [self.service(mailer), self.service(mailer)]
+        oid = self.order()
+        workers[0].prepare(oid)
+        with patch.object(self.adapter, 'pdf', side_effect=ShopLexwareError('unavailable')):
+            self.assertTrue(workers[0].process_next())
+        self.assertFalse(workers[1].process_next())
+        self.assertEqual(workers[1].status(oid)['mail_state'], 'pending')
+        mailer.send.assert_not_called()
+        self.now += timedelta(minutes=6)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda service: service.process_next(), workers))
+        mailer.send.assert_called_once()
+        self.assertEqual(workers[0].status(oid)['mail_state'], 'submitted')
+
+    def test_invoice_mail_discovers_only_enrolled_drafts_finalized_later_in_lexware(self):
+        old = self.order()
+        mailer = Mock()
+        mailer.send.return_value = 'submitted'
+        service = self.service(mailer)
+        fresh = self.order(email='draft-buyer@example.test')
+        create = self.adapter.create_invoice
+        with patch.object(self.adapter, 'create_invoice', side_effect=lambda payload, finalize: create(payload, finalize=False)):
+            for oid in (old, fresh):
+                self.assertEqual(service.prepare(oid)['state'], 'draft')
+        self.now += timedelta(minutes=31)
+        self.assertTrue(service.process_next())
+        self.assertFalse(service.process_next())
+        mailer.send.assert_not_called()
+        for remote_id, (payload, _) in self.adapter.records.items():
+            self.adapter.records[remote_id] = (payload, True)
+        self.now += timedelta(minutes=31)
+        self.assertTrue(self.service(mailer).process_next())
+        self.assertEqual(service.status(fresh)['mail_state'], 'submitted')
+        self.assertEqual(service.status(old)['state'], 'draft')
+        self.assertEqual(mailer.send.call_args.kwargs['order_id'], fresh)
+        self.assertEqual(len(self.adapter.writes), 2)
+        mailer.send.assert_called_once()
+
+    def test_invoice_mail_reconciles_ambiguous_smtp_or_crashed_worker_without_resending(self):
+        mailer = Mock()
+        mailer.send.side_effect = OSError('lost reply')
+        mailer.status.side_effect = ['unknown', 'submitted']
+        service = self.service(mailer)
+        oid = self.order()
+        self.assertTrue(service.process_next())
+        self.assertEqual(service.status(oid)['mail_state'], 'unknown')
+        for expected in ('unknown', 'submitted'):
+            self.now += timedelta(days=1)
+            self.assertTrue(self.service(mailer).process_next())
+            self.assertEqual(service.status(oid)['mail_state'], expected)
+        mailer.status.assert_called_with(order_id=oid, recipient='buyer@example.test')
+        mailer.send.assert_called_once()
+        mailer.reset_mock()
+        mailer.send.side_effect = SystemExit('crash during SMTP')
+        mailer.status.side_effect = ['submitted']
+        crashed = self.order()
+        with self.assertRaises(SystemExit):
+            service.process_next()
+        self.assertEqual(service.status(crashed)['mail_state'], 'sending')
+        self.now += timedelta(days=1)
+        self.assertEqual(service.status(crashed)['mail_state'], 'unknown')
+        self.assertTrue(self.service(mailer).process_next())
+        self.assertEqual(service.status(crashed)['mail_state'], 'submitted')
+        mailer.send.assert_called_once()
+
+    def test_invoice_mail_retries_proven_non_submission_only_for_identical_document_and_contact(self):
+        mailer = Mock()
+        mailer.send.side_effect = ['not_sent', 'submitted', 'not_sent']
+        service = self.service(mailer)
+        oid = self.order()
+        self.assertTrue(service.process_next())
+        self.assertEqual(service.status(oid)['mail_state'], 'not_sent')
+        self.assertFalse(service.process_next())
+        self.now += timedelta(days=1)
+        self.assertTrue(self.service(mailer).process_next())
+        self.assertEqual(mailer.send.call_args_list[0], mailer.send.call_args_list[1])
+        self.assertEqual(service.status(oid)['mail_state'], 'submitted')
+        changed = self.order()
+        self.assertTrue(service.process_next())
+        self.now += timedelta(days=1)
+        with patch.object(self.adapter, 'pdf', return_value=b'%PDF-1.7\nCHANGED\n%%EOF'):
+            self.assertTrue(service.process_next())
+        self.assertEqual(service.status(changed)['mail_state'], 'blocked')
+        self.assertEqual(mailer.send.call_count, 3)
+
+    def test_invoice_mail_rejects_mismatched_frozen_order_and_rechecks_capture_after_pdf_read(self):
+        mailer = Mock()
+        service = self.service(mailer)
+        first = self.order()
+        second = self.order(email='other@example.test')
+        for oid in (first, second):
+            service.prepare(oid)
+        with closing(self.factory()) as db:
+            db.execute("""UPDATE shop_lexware_invoices_v1 SET payload_json=(SELECT payload_json
+                FROM shop_lexware_invoices_v1 WHERE order_id=?) WHERE order_id=?""", (second, first))
+            db.commit()
+        original_pdf = self.adapter.pdf
+        def lose_capture(*args, **kwargs):
+            result = original_pdf(*args, **kwargs)
+            with closing(self.factory()) as db:
+                db.execute("UPDATE shop_payment_actions_v2 SET result_json='{}' WHERE order_id=?", (second,))
+                db.commit()
+            return result
+        with patch.object(self.adapter, 'pdf', side_effect=lose_capture):
+            for _ in range(2):
+                self.assertTrue(service.process_next())
+        self.assertEqual(service.status(first)['mail_state'], 'blocked')
+        self.assertEqual(len(self.adapter.pdf_reads), 1)
+        mailer.send.assert_not_called()
 
 
 if __name__ == '__main__':

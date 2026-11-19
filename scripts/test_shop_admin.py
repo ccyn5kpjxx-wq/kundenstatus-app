@@ -61,11 +61,12 @@ class InvoiceFixture:
     def __init__(self, identifier):
         self.identifier = identifier
         self.state = 'available'
+        self.mail_state = None
         self.writes = []
         self.edit_url = 'https://app.lexware.de/permalink/invoices/edit/00000000-0000-4000-8000-000000000001'
 
     def statuses(self, ids):
-        return {key: {'state': self.state, 'edit_url': self.edit_url,
+        return {key: {'state': self.state, 'edit_url': self.edit_url, 'mail_state': self.mail_state,
                       'voucher_number': 'TEST-101' if self.state == 'ready' else ''}
                 for key in ids if key == self.identifier}
 
@@ -495,6 +496,25 @@ class ShopAdminTests(unittest.TestCase):
                     else:
                         self.assertNotIn(details, html)
             fetch_pdf.assert_not_called()
+        self.assertEqual(source.writes, [])
+
+    def test_order_list_and_detail_show_the_recorded_invoice_mail_status(self):
+        identifier = self.order()['id']
+        source = InvoiceFixture(identifier)
+        source.state = 'ready'
+        self.app.extensions['shop_invoice_service'] = source
+        self.login()
+        for path in ('/admin/shop', '/admin/shop/' + identifier):
+            for state, label in ((None, None), ('pending', 'Versand vorgemerkt'),
+                                 ('submitted', 'An den Maildienst übergeben'), ('unknown', 'Versandstatus prüfen')):
+                with self.subTest(path=path, state=state):
+                    source.mail_state = state
+                    html = self.client.get(path).get_data(as_text=True)
+                    if label:
+                        self.assertIn('Rechnung per E-Mail', html)
+                        self.assertIn(label, html)
+                    else:
+                        self.assertNotIn('Rechnung per E-Mail', html)
         self.assertEqual(source.writes, [])
 
     def test_uncertain_invoice_can_only_be_reconciled_and_draft_links_are_bounded(self):

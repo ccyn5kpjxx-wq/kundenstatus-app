@@ -546,6 +546,8 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.assertTrue(state['enabled']['SHOP_CHECKOUT_ENABLED'])
         starter.assert_called_once_with()
         self.assertIsNone(self.adapters['workflow']._thread)
+        from shop_invoice_mail import ShopInvoiceMailer
+        self.assertIsInstance(app.extensions['shop_invoice_service'].mailer, ShopInvoiceMailer)
         self.assertEqual(app.test_client().get('/shop/api/v2/consumer/terms', base_url=ORIGIN).status_code, 200)
         self.assertEqual(self.count('shop_orders_v2'), 0)
         self.assertEqual(self.client.mock_calls, [])

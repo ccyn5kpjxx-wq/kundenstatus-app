@@ -87,6 +87,8 @@
     <div class="invoice-heading"><h2 id="rechnung-titel">Rechnung</h2><span class="status">{{ detail.invoice.label }}</span></div>
     {% if invoice_error %}<p class="note warning" role="alert">{{ invoice_error }}</p>{% endif %}
     {% if detail.invoice.number %}<p>Rechnungsnummer <strong>{{ detail.invoice.number }}</strong></p>{% endif %}
+    {% if detail.invoice.mail_label %}<p>Rechnung per E-Mail · <strong>{{ detail.invoice.mail_label }}</strong></p>
+    {% elif detail.invoice.predates_automatic_mail %}<p>Dieser Auftrag stammt aus der Zeit vor dem automatischen Rechnungsversand.</p>{% endif %}
     {% if detail.invoice.state == 'available' %}<p>Lexware vergibt eine Rechnungsnummer.</p>{% endif %}
     {% if detail.invoice.paid_online %}<p>Online bezahlt. Die Zahlung lässt sich in Lexware der Rechnung zuordnen.</p>{% endif %}
     {% if detail.invoice.state == 'unknown' %}<p>Die Rückmeldung von Lexware ist unklar. Über „Belegstatus prüfen“ suchen Sie nach einem Beleg zu dieser Bestellung.</p>{% endif %}
@@ -227,6 +229,7 @@
       <span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span>
         {% if order.invoice.state == 'ready' %}
           <a class="small" href="{{ url_for('shop_admin.invoice_pdf', order_id=order.id) }}">Rechnung{% if order.invoice.number %} {{ order.invoice.number }}{% endif %} als PDF öffnen und drucken</a>
+          {% if order.invoice.mail_label %}<span class="small">Rechnung per E-Mail · {{ order.invoice.mail_label }}</span>{% endif %}
         {% elif order.invoice.state in ('available', 'draft', 'unknown') %}
           <a class="small" href="{{ url_for('shop_admin.order_detail', order_id=order.id, _anchor='rechnung') }}">{{ order.invoice.label }}{% if order.invoice.number %} · {{ order.invoice.number }}{% endif %}</a>
         {% else %}

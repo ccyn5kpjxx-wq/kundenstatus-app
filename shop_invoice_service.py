@@ -1,6 +1,7 @@
 """Durable order-to-Lexware handoff. Only a first, committed claim can issue an invoice."""
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import logging
 import re
@@ -12,7 +13,8 @@ from zoneinfo import ZoneInfo
 
 from shop_lexware_invoices import build_shop_invoice_payload, ShopLexwareError
 from shop_measurement import purchase_projection
-from shop_order_store import ORDER_ID
+from shop_order_receipts import _receipt_context
+from shop_order_store import ORDER_ID, _delivery_context, _validate_snapshot
 
 
 class ShopInvoiceError(ValueError):
@@ -34,9 +36,10 @@ _PROOF = """o.mode='live' AND o.status='paid' AND
 
 
 class ShopInvoiceService:
-    def __init__(self, store, adapter, *, clock=time.time):
+    def __init__(self, store, adapter, *, clock=time.time, mailer=None):
         self.connect = store._connect
         self.adapter = adapter
+        self.mailer = mailer
         self.clock = clock
         self._stop = threading.Event()
         self._start_lock = threading.Lock()
@@ -51,7 +54,18 @@ class ShopInvoiceService:
                     voucher_number TEXT, updated_at REAL NOT NULL);
                 CREATE INDEX IF NOT EXISTS shop_lexware_invoice_recovery_idx
                     ON shop_lexware_invoices_v1(state,updated_at);
+                CREATE TABLE IF NOT EXISTS shop_invoice_mail_v1 (
+                    order_id TEXT PRIMARY KEY REFERENCES shop_orders_v2(id) ON DELETE CASCADE,
+                    state TEXT NOT NULL DEFAULT 'pending', next_at REAL NOT NULL DEFAULT 0,
+                    recipient TEXT, voucher_number TEXT, pdf_sha256 TEXT, attempts INTEGER NOT NULL DEFAULT 0);
+                CREATE INDEX IF NOT EXISTS shop_invoice_mail_next_idx ON shop_invoice_mail_v1(state,next_at);
                 """)
+            if mailer is not None:
+                # The trigger itself is the durable activation boundary, including for
+                # concurrent checkouts and orders created in the very same clock tick.
+                db.execute("""CREATE TRIGGER IF NOT EXISTS shop_invoice_mail_new_order_v1
+                    AFTER INSERT ON shop_orders_v2 WHEN NEW.mode='live'
+                    BEGIN INSERT INTO shop_invoice_mail_v1(order_id) VALUES(NEW.id); END""")
             db.execute("INSERT OR IGNORE INTO shop_invoice_activation_v1 VALUES ('live',?)",
                        (self._now().isoformat(),))
             db.commit()
@@ -81,8 +95,9 @@ class ShopInvoiceService:
             return {}
         with self._db() as db:
             rows = db.execute(f"""SELECT o.id, ({_PROOF}) eligible, j.state, j.voucher_number,
-                    j.remote_id, j.updated_at FROM shop_orders_v2 o
+                    j.remote_id, j.updated_at, m.state mail_state, m.next_at FROM shop_orders_v2 o
                     LEFT JOIN shop_lexware_invoices_v1 j ON j.order_id=o.id
+                    LEFT JOIN shop_invoice_mail_v1 m ON m.order_id=o.id
                     WHERE o.id IN ({','.join('?' for _ in ids)})""", ids).fetchall()
         configured = self.adapter.configured()
         now = self._now().timestamp()
@@ -95,7 +110,12 @@ class ShopInvoiceService:
                 state = 'unknown'
             elif state == 'retry':
                 state = 'available' if configured else 'unavailable'
-            record = {'state': state, 'voucher_number': row['voucher_number'] or ''}
+            mail_state = row['mail_state'] if state == 'ready' else None
+            if mail_state == 'sending' and row['next_at'] <= now:
+                mail_state = 'unknown'
+            record = {'state': state, 'voucher_number': row['voucher_number'] or '', 'mail_state': mail_state}
+            if self.mailer is not None and state == 'ready' and mail_state is None:
+                record['predates_automatic_mail'] = True
             if state == 'draft' and row['remote_id']:
                 record['edit_url'] = 'https://app.lexware.de/permalink/invoices/edit/' + row['remote_id']
             result[row['id']] = record
@@ -201,6 +221,9 @@ class ShopInvoiceService:
                                 WHERE order_id=? AND state='ready'""", (order_id,)).fetchone()
         if not row:
             raise ShopInvoiceError('invoice_not_ready')
+        return self._original_pdf(order_id, row)
+
+    def _original_pdf(self, order_id, row):
         try:
             original = self.adapter.pdf(row['remote_id'], json.loads(row['payload_json']),
                                         voucher_number=row['voucher_number'])
@@ -209,9 +232,98 @@ class ShopInvoiceService:
         number = re.sub(r'[^\w.-]+', '-', row['voucher_number']).strip('.-') or order_id
         return original, 'Rechnung-' + number + '.pdf'
 
-    def process_next(self):
-        if not self.adapter.configured():
-            return False
+    def _deliver_mail(self):
+        now = self._now().timestamp()
+        with self._db(write=True) as db:
+            row = db.execute(f"""SELECT o.*, j.remote_id, j.payload_json, j.voucher_number, m.attempts,
+                m.pdf_sha256, m.recipient sent_to, m.voucher_number sent_number
+                FROM shop_invoice_mail_v1 m JOIN shop_orders_v2 o ON o.id=m.order_id
+                JOIN shop_lexware_invoices_v1 j ON j.order_id=o.id
+                WHERE m.state IN ('pending','not_sent') AND m.next_at<=?
+                AND j.state='ready' AND {_PROOF} ORDER BY m.next_at,o.created_at,o.id LIMIT 1""",
+                (now,)).fetchone()
+            if row is None:
+                return False
+            order_id = row['id']
+            try:
+                snapshot = json.loads(row['snapshot_json'])
+                snapshot['quote_hash'] = row['quote_hash']
+                _validate_snapshot(snapshot, row['quote_hash'], row['customer_id'], row['mode'])
+                context = json.loads(row['delivery_context_json'])
+                _delivery_context(snapshot, context)
+                recipient = _receipt_context(context)['contact']['email']
+                payload = json.loads(row['payload_json'])
+                if (payload['introduction'] != 'Ihre Shopbestellung ' + order_id
+                        or not row['voucher_number'] or not row['remote_id']
+                        or not purchase_projection(db, row)):
+                    raise ValueError()
+            except (ValueError, KeyError, TypeError):
+                db.execute("UPDATE shop_invoice_mail_v1 SET state='blocked' WHERE order_id=?", (order_id,))
+                return True
+            # Defer the next read attempt before fetching the PDF. A crash or
+            # transient Lexware failure here has never acquired the right to send.
+            db.execute("UPDATE shop_invoice_mail_v1 SET next_at=? WHERE order_id=?", (now + 300, order_id))
+
+        try:
+            content, filename = self._original_pdf(order_id, row)
+        except ShopInvoiceError:
+            return True
+        digest = sha256(content).hexdigest()
+        attempt = row['attempts'] + 1
+        with self._db(write=True) as db:
+            if row['attempts'] and (row['pdf_sha256'], row['sent_to'], row['sent_number']) != (
+                    digest, recipient, row['voucher_number']):
+                db.execute("""UPDATE shop_invoice_mail_v1 SET state='blocked' WHERE order_id=?
+                           AND state='not_sent' AND attempts=? AND next_at=?""", (order_id, row['attempts'], now + 300))
+                return True
+            # Recheck eligibility and the frozen invoice after the provider read.
+            # Only the committed winner may cross the SMTP boundary.
+            if not purchase_projection(db, row):
+                return True
+            claimed = db.execute(f"""UPDATE shop_invoice_mail_v1 SET state='sending', recipient=?,
+                    voucher_number=?,pdf_sha256=?,attempts=?,next_at=? WHERE order_id=? AND state IN ('pending','not_sent')
+                    AND next_at=? AND EXISTS (SELECT 1 FROM shop_orders_v2 o
+                        JOIN shop_lexware_invoices_v1 j ON j.order_id=o.id WHERE o.id=? AND {_PROOF}
+                        AND j.state='ready' AND j.remote_id=? AND j.voucher_number=? AND j.payload_json=?)""",
+                (recipient, row['voucher_number'], digest, attempt, self._now().timestamp() + 900,
+                 order_id, now + 300, order_id, row['remote_id'], row['voucher_number'], row['payload_json']))
+            if claimed.rowcount != 1:
+                return True
+        try:
+            state = self.mailer.send(order_id=order_id, recipient=recipient, voucher_number=row['voucher_number'],
+                                     content=content, filename=filename)
+        except Exception:
+            state = 'unknown'
+        if state not in ('submitted', 'not_sent', 'unknown'):
+            state = 'unknown'
+        retry_delay = min(86400, 900 * 2 ** min(attempt - 1, 7)) if state == 'not_sent' else 900
+        with self._db(write=True) as db:
+            db.execute("""UPDATE shop_invoice_mail_v1 SET state=?,next_at=?
+                WHERE order_id=? AND state IN ('sending','unknown') AND attempts=?""",
+                (state, self._now().timestamp() + retry_delay, order_id, attempt))
+        return True
+
+    def _reconcile_mail(self):
+        now = self._now().timestamp()
+        with self._db(write=True) as db:
+            row = db.execute("""SELECT order_id,recipient,attempts FROM shop_invoice_mail_v1
+                WHERE state IN ('unknown','sending') AND next_at<=? ORDER BY next_at LIMIT 1""", (now,)).fetchone()
+            if row is None:
+                return False
+            db.execute("""UPDATE shop_invoice_mail_v1 SET state='unknown',next_at=? WHERE order_id=?""",
+                       (now + 900, row['order_id']))
+        # Reconciliation is read-only. An absent Outbox entry is ambiguous.
+        try:
+            state = self.mailer.status(order_id=row['order_id'], recipient=row['recipient'])
+        except Exception:
+            return True
+        if state in ('submitted', 'not_sent'):
+            with self._db(write=True) as db:
+                db.execute("""UPDATE shop_invoice_mail_v1 SET state=? WHERE order_id=? AND state='unknown'
+                           AND attempts=?""", (state, row['order_id'], row['attempts']))
+        return True
+
+    def _process_invoice(self):
         now = self._now().timestamp()
         with self._db() as db:
             order = db.execute(f"""SELECT o.id FROM shop_orders_v2 o LEFT JOIN shop_lexware_invoices_v1 j
@@ -220,9 +332,11 @@ class ShopInvoiceService:
                       (SELECT starts_at FROM shop_invoice_activation_v1 WHERE mode='live'))
                      OR (j.state='retry' AND j.updated_at < ?))
                 ORDER BY COALESCE(j.updated_at,0),o.created_at,o.id LIMIT 1""", (now - 300,)).fetchone()
-            pending = db.execute("""SELECT order_id FROM shop_lexware_invoices_v1
-                WHERE state IN ('preparing','unknown') AND updated_at < ?
-                ORDER BY updated_at LIMIT 1""", (now - 1800,)).fetchone()
+            pending = db.execute("""SELECT j.order_id FROM shop_lexware_invoices_v1 j
+                WHERE (j.state IN ('preparing','unknown') OR (j.state='draft' AND ? AND EXISTS
+                    (SELECT 1 FROM shop_invoice_mail_v1 m WHERE m.order_id=j.order_id)))
+                AND j.updated_at < ? ORDER BY j.updated_at LIMIT 1""",
+                (self.mailer is not None, now - 1800)).fetchone()
         if order:
             try:
                 self.prepare(order['id'])
@@ -236,6 +350,16 @@ class ShopInvoiceService:
             self.refresh(pending['order_id'])
             return True
         return False
+
+    def process_next(self):
+        if not self.adapter.configured():
+            return False
+        issued = self._process_invoice()
+        if self.mailer is None:
+            return issued
+        delivered = self._deliver_mail()
+        reconciled = self._reconcile_mail()
+        return issued or delivered or reconciled
 
     def start(self):
         if not self.adapter.configured():
