@@ -57,6 +57,31 @@ class ReviewStub:
     def ensure(self,*args,**kwargs):raise AssertionError('Admin must not inspect the payment provider')
 
 
+class InvoiceFixture:
+    def __init__(self, identifier):
+        self.identifier = identifier
+        self.state = 'available'
+        self.writes = []
+        self.edit_url = 'https://app.lexware.de/permalink/invoices/edit/00000000-0000-4000-8000-000000000001'
+
+    def statuses(self, ids):
+        return {key: {'state': self.state, 'edit_url': self.edit_url,
+                      'voucher_number': 'TEST-101' if self.state == 'ready' else ''}
+                for key in ids if key == self.identifier}
+
+    def prepare(self, order_id):
+        self.writes.append(('prepare', order_id))
+        self.state = 'draft'
+
+    def refresh(self, order_id):
+        self.writes.append(('refresh', order_id))
+        self.state = 'ready'
+
+    def pdf(self, order_id):
+        assert order_id == self.identifier
+        return b'%PDF-1.4\nSynthetic', 'Rechnung-TEST-101.pdf'
+
+
 class ShopAdminTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
@@ -402,6 +427,65 @@ class ShopAdminTests(unittest.TestCase):
             self.assertEqual(self.client.post('/admin/shop',json={'capture':True}).status_code,405)
         self.assertEqual(self.client.get('/admin/shop/not-an-order').status_code,404)
         self.assertEqual(self.client.get('/admin/shop/sho_'+'f'*32).status_code,404)
+
+    def test_invoice_actions_are_explicit_and_pdf_reads_are_private_and_side_effect_free(self):
+        identifier = self.order()['id']
+        source = InvoiceFixture(identifier)
+        self.app.extensions['shop_invoice_service'] = source
+        path = '/admin/shop/' + identifier
+        prepare, refresh, pdf = (path + suffix for suffix in
+                                 ('/rechnung/vorbereiten', '/rechnung/abgleichen', '/rechnung.pdf'))
+        self.assertEqual(self.client.get(pdf).status_code, 403)
+        self.login()
+        self.assertIn('Bereit zur Rechnungserstellung', self.client.get('/admin/shop').get_data(as_text=True))
+        self.assertIn('Rechnung vorbereiten', self.client.get(path).get_data(as_text=True))
+        with self.client.session_transaction() as saved:
+            csrf = {'csrf_token': saved['csrf_token']}
+        self.assertEqual(self.client.get(prepare).status_code, 405)
+        self.assertEqual(self.client.get(pdf).status_code, 404)
+        self.assertEqual(self.client.post(prepare, data={'csrf_token': 'x'*64}).status_code, 403)
+        self.assertEqual(self.client.post(prepare, data=csrf, headers={'Origin':'https://fremd.example'}).status_code, 403)
+        self.assertEqual(self.client.post(prepare, data={**csrf, 'send': '1'}).status_code, 400)
+        self.assertEqual(source.writes, [])
+        self.assertEqual(self.client.post(prepare, data=csrf).status_code, 303)
+        self.assertIn('Entwurf in Lexware öffnen', self.client.get(path).get_data(as_text=True))
+        self.assertEqual(self.client.post(prepare, data=csrf).status_code, 409)
+        self.assertEqual(self.client.post(refresh, data=csrf).status_code, 303)
+        view = self.client.get(path).get_data(as_text=True)
+        self.assertIn('TEST-101', view)
+        self.assertIn('PDF öffnen und drucken', view)
+        for query, disposition in (('', 'inline'), ('?download=1', 'attachment')):
+            response = self.client.get(pdf + query)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, 'application/pdf')
+            self.assertEqual(response.data, b'%PDF-1.4\nSynthetic')
+            self.assertTrue(response.headers['Content-Disposition'].startswith(disposition + ';'))
+            self.assertIn('no-store', response.headers['Cache-Control'])
+        self.assertEqual(self.client.get(pdf + '?download=1&download=1').status_code, 400)
+        self.assertEqual(source.writes, [('prepare', identifier), ('refresh', identifier)])
+
+    def test_uncertain_invoice_can_only_be_reconciled_and_draft_links_are_bounded(self):
+        identifier = self.order()['id']
+        source = InvoiceFixture(identifier)
+        self.app.extensions['shop_invoice_service'] = source
+        self.login()
+        path = '/admin/shop/' + identifier
+        source.state = 'unknown'
+        html = self.client.get(path).get_data(as_text=True)
+        self.assertIn('Belegstatus prüfen', html)
+        self.assertNotIn(path + '/rechnung/vorbereiten', html)
+        source.state = 'draft'
+        source.edit_url = 'https://app.lexware.de.untrusted.invalid/permalink/invoices/edit/x'
+        html = self.client.get(path).get_data(as_text=True)
+        self.assertNotIn('untrusted.invalid', html)
+        self.assertIn('Belegstatus prüfen', html)
+        source.state = 'ineligible'
+        self.assertNotIn('Belegstatus prüfen', self.client.get(path).get_data(as_text=True))
+        with self.client.session_transaction() as saved:
+            csrf = {'csrf_token': saved['csrf_token']}
+        for action in ('vorbereiten','abgleichen'):
+            self.assertEqual(self.client.post(path + '/rechnung/' + action, data=csrf).status_code, 409)
+        self.assertEqual(source.writes, [])
 
     def test_unknown_workflow_payment_supplier_and_receipt_show_manual_review_without_private_data(self):
         order=self.order()

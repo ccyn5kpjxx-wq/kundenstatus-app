@@ -9,6 +9,11 @@
     .appointment-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:16px}
     .appointment-actions button{font:inherit;font-weight:700;padding:10px 16px;border:0;border-radius:5px;color:white;background:#165d49;cursor:pointer}
     .appointment-actions button:focus-visible{outline:3px solid #2b74b6;outline-offset:3px}
+    .invoice-heading{display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap}
+    .invoice-heading h2,.invoice-actions form{margin:0}
+    .invoice-actions{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin-top:16px}
+    .invoice-actions a,.invoice-actions button{display:inline-flex;align-items:center;min-height:42px;padding:8px 14px;border:1px solid #b7c8d1;border-radius:5px;color:#205578;font:inherit;font-weight:700;background:#fff;cursor:pointer}
+    .invoice-actions .primary{background:#165d49;color:#fff;border-color:#165d49;text-decoration:none}
     .supplier-panel{border-top:1px solid #dce3e7;margin-top:16px;padding-top:16px}
     .supplier-panel:first-of-type{border-top:0;margin-top:0;padding-top:0}
     .supplier-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 20px;flex-wrap:wrap}
@@ -70,6 +75,27 @@
     <div><div class="label">Bestellung</div><div class="value">{{ detail.status }}</div><p class="money">{{ detail.amount }} <span class="small muted">inkl. MwSt.</span></p></div>
     <div><div class="label">Zahlung</div><div class="value">{{ detail.payment }}</div>{% if detail.action %}<p>{{ detail.action }}</p>{% endif %}</div>
     <div><div class="label">Bearbeitung</div><div class="value">{{ detail.workflow }}</div><p>{{ detail.fulfillment }}</p>{% if detail.uncertain_positions %}<p class="warning">{{ detail.uncertain_positions }} Lieferantenantwort(en) ungeklärt</p>{% endif %}</div>
+  </section>
+  <section id="rechnung" class="card" aria-labelledby="rechnung-titel">
+    <div class="invoice-heading"><h2 id="rechnung-titel">Rechnung</h2><span class="status">{{ detail.invoice.label }}</span></div>
+    {% if invoice_error %}<p class="note warning" role="alert">{{ invoice_error }}</p>{% endif %}
+    {% if detail.invoice.number %}<p>Rechnungsnummer <strong>{{ detail.invoice.number }}</strong></p>{% endif %}
+    {% if detail.invoice.state == 'unknown' %}<p>Die Rückmeldung von Lexware ist unklar. Über „Belegstatus prüfen“ suchen Sie nach einem Beleg zu dieser Bestellung.</p>{% endif %}
+    {% if detail.invoice.state == 'draft' %}<p>Prüfen Sie den Entwurf in Lexware. Nach der Fertigstellung können Sie hier den Belegstatus aktualisieren und das PDF öffnen.</p>{% endif %}
+    {% if detail.invoice.state in ('available', 'draft', 'unknown', 'ready') %}
+    <div class="invoice-actions">
+      {% if detail.invoice.state == 'ready' %}
+      <a class="primary" href="{{ url_for('shop_admin.invoice_pdf', order_id=detail.id, download=1) }}">PDF herunterladen</a>
+      <a href="{{ url_for('shop_admin.invoice_pdf', order_id=detail.id) }}" target="_blank" rel="noopener">PDF öffnen und drucken ↗</a>
+      {% else %}
+      {% if detail.invoice.edit_url %}<a class="primary" href="{{ detail.invoice.edit_url }}" target="_blank" rel="noopener noreferrer">Entwurf in Lexware öffnen ↗</a>{% endif %}
+      <form method="post" action="{{ url_for('shop_admin.invoice_action', order_id=detail.id, action='vorbereiten' if detail.invoice.state == 'available' else 'abgleichen') }}">
+        {% if csrf_field is not defined %}<input type="hidden" name="csrf_token" value="{{ review_csrf }}">{% endif %}
+        <button type="submit"{% if detail.invoice.state == 'available' %} class="primary"{% endif %}>{{ 'Rechnung vorbereiten' if detail.invoice.state == 'available' else 'Belegstatus prüfen' }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
   </section>
   {% if detail.lines %}
   <section class="card" aria-labelledby="supplier-title" id="lieferant">
@@ -179,7 +205,7 @@
     <li>Eingang: {{ detail.receipts.get('received','Noch nicht erstellt') }}</li>
     <li>Bestätigung: {{ detail.receipts.get('confirmed','Noch nicht erstellt') }}</li>
     <li>Abbruch: {{ detail.receipts.get('cancelled','Noch nicht erstellt') }}</li>
-  </ul></div><div><h2>Rechnung</h2><p>{{ detail.invoice }}</p><p class="muted small">Bestell- und Statusbestätigungen sind keine Rechnung.</p></div></section>
+  </ul></div></section>
 {% else %}
   <h1>Shopbestellungen</h1>
   <p class="muted">Reifen, Felgen, Ersatzteile und Zubehör · gespeicherte Bestellungen im Überblick</p>
@@ -188,7 +214,7 @@
   {% if orders %}<div class="table-scroll"><table><thead><tr><th>Bestellung</th><th>Gesamt</th><th>Zahlung</th><th>Bearbeitung</th><th>Bestätigungen / Rechnung</th></tr></thead><tbody>
     {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a>
       {% if order.workshop_pending %}<span class="status warning">Zu bearbeiten</span>{% elif order.workshop_handled %}<span class="status">Bearbeitet</span>{% endif %}
-      <span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
+      <span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span>{% if order.invoice.state in ('available', 'draft', 'ready', 'unknown') %}<a class="small" href="{{ url_for('shop_admin.order_detail', order_id=order.id, _anchor='rechnung') }}">{{ order.invoice.label }}{% if order.invoice.number %} · {{ order.invoice.number }}{% endif %}</a>{% else %}<span class="small muted">{{ order.invoice.label }}</span>{% endif %}</td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="empty muted">Noch keine Shopbestellungen auf dieser Seite.</p>{% endif %}
   <nav class="pagination" aria-label="Weitere Bestellungen"><span>{% if page>1 %}<a href="{{ url_for('shop_admin.orders',page=page-1,per_page=per_page) }}">← Neuere Bestellungen</a>{% endif %}</span><span class="muted small">Seite {{ page }}</span><span>{% if has_next %}<a href="{{ url_for('shop_admin.orders',page=page+1,per_page=per_page) }}">Ältere Bestellungen →</a>{% endif %}</span></nav>
   </section>

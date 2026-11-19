@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 import hmac
+from io import BytesIO
 import json
 from pathlib import Path
 import re
@@ -19,7 +20,7 @@ import sqlite3
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, current_app, g, has_request_context, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, g, has_request_context, redirect, render_template, request, send_file, session, url_for
 from werkzeug.exceptions import HTTPException
 from shop_order_store import OrderStore
 from shop_goods_margin import admin_goods_margins
@@ -52,6 +53,40 @@ MAIL={'queued':'Vorgemerkt','sending':'Übergabe läuft','submitted':'An Maildie
       'unknown':'Versand unklar – prüfen','not_sent':'Nicht gesendet'}
 DESTINATION={'customer':'Direkt zum Kunden','workshop':'Zur Werkstatt'}
 SERVICE={'mounting':'Montage','painting':'Lackierung','installation':'Einbau','oil_service':'Ölservice','care':'Aufbereitung'}
+INVOICE_LABELS = {
+    'ineligible': 'Keine Rechnung erforderlich',
+    'available': 'Bereit zur Rechnungserstellung',
+    'preparing': 'Rechnung wird vorbereitet',
+    'unknown': 'Belegabgleich erforderlich',
+    'unavailable': 'Rechnungsstatus derzeit nicht verfügbar',
+    'draft': 'Entwurf in Lexware',
+    'ready': 'Rechnung erstellt',
+    'blocked': 'Rechnungsdaten prüfen',
+}
+LEXWARE_INVOICE_URL = re.compile(
+    r'https://app\.lexware\.de/permalink/invoices/(?:edit|view)/'
+    r'[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}'
+)
+
+
+def _invoice_projection(record, order):
+    state = record.get('state') if isinstance(record, Mapping) else None
+    if not isinstance(state, str) or state not in INVOICE_LABELS:
+        return {'state': 'unavailable', 'label': INVOICE_LABELS['unavailable']}
+    label = INVOICE_LABELS[state]
+    if state == 'ineligible':
+        if order.get('mode') == 'Test':
+            label = 'Testbestellung · keine Rechnung erstellt'
+        elif order.get('status') == STATUS['cancelled']:
+            label = 'Reservierung beendet · keine Rechnung erforderlich'
+        elif order.get('status') in (STATUS['draft'], STATUS['authorized'], STATUS['payment_pending']):
+            label = 'Zahlung ausstehend · keine Rechnung erstellt'
+    edit_url = record.get('edit_url')
+    number = record.get('voucher_number')
+    return {'state': state, 'label': label,
+            'number': number if isinstance(number, str) and 0 < len(number) <= 80 else '',
+            'edit_url': edit_url if state == 'draft' and isinstance(edit_url, str)
+                         and LEXWARE_INVOICE_URL.fullmatch(edit_url) else ''}
 REVIEW_REQUIREMENTS={'mixed_cart_manual_review_required':'Vollständigen Warenkorb und alle Lieferwege bestätigen',
     'fitment_unconfirmed':'Genaue Fahrzeugausführung und Felgenfreigabe prüfen',
     'assembly_fitment_unconfirmed':'Genaue Rad-Reifen-Kombination einschließlich Auflagen prüfen'}
@@ -190,8 +225,7 @@ class ShopAdminReader:
             'fulfillment':FULFILLMENT.get(related['fulfillment'],'Noch nicht gestartet'),
             'action':ACTION.get(related['action'],''),'attention':attention,
             'uncertain_positions':related['uncertain_positions'],
-            'receipts':{key:MAIL.get(value,'Versandstatus unbekannt') for key,value in related['receipts'].items()},
-            'invoice':'Ausstehend – keine Rechnung erstellt'}
+            'receipts':{key:MAIL.get(value,'Versandstatus unbekannt') for key,value in related['receipts'].items()}}
 
     def orders(self,*,page=1,per_page=25,show_margin=False):
         if type(page) is not int or not 1<=page<=9999 or type(per_page) is not int or not 1<=per_page<=100:abort(400)
@@ -518,6 +552,22 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         for row in wishes:
             row['appointment_confirmed']=row['id'] in confirmed
 
+    def attach_invoice_status(orders):
+        if not orders:
+            return
+        service = current_app.extensions.get('shop_invoice_service')
+        records = {}
+        if service is not None:
+            try:
+                records = service.statuses([order['id'] for order in orders])
+            except Exception:
+                current_app.logger.error('Rechnungsstatus der Shopbestellungen konnte nicht gelesen werden.')
+        for order in orders:
+            record = records.get(order['id']) if isinstance(records, Mapping) else None
+            if not record and service is None and (order['mode'] == 'Test' or order['status'] == STATUS['cancelled']):
+                record = {'state': 'ineligible'}
+            order['invoice'] = _invoice_projection(record, order)
+
     @blueprint.app_context_processor
     def staff_queue_badge():
         result={'shop_admin_available':False,'shop_withdrawal_pending':0,'shop_withdrawal_unavailable':False}
@@ -580,6 +630,7 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         if per_page>100:abort(400)
         rows,has_next=reader().orders(page=page,per_page=per_page,show_margin=session.get('admin') is True)
         attach_appointment_status(rows)
+        attach_invoice_status(rows)
         return render_template('shop_v2/admin_orders.html',orders=rows,detail=None,page=page,per_page=per_page,has_next=has_next)
 
     @blueprint.get('/admin/shop/<order_id>')
@@ -589,9 +640,10 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
         detail=reader().detail(order_id,show_margin=session.get('admin') is True)
         return show_order_detail(detail)
 
-    def show_order_detail(detail,appointment_error=None,delivery_error=None,processing_error=None):
+    def show_order_detail(detail,appointment_error=None,delivery_error=None,processing_error=None,invoice_error=None):
         order_id=detail['id']
         attach_appointment_status([detail])
+        attach_invoice_status([detail])
         if detail['workshop_pending'] and not detail.get('processing_blocked_reason'):
             detail['processing_blocked_reason']=appointment_handling_block(
                 detail.get('appointment_day'),detail.get('appointment_time'),detail.get('appointment_confirmed'))
@@ -609,10 +661,66 @@ def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None
             except Exception:
                 review={'unavailable':True}
         eta_actionable = any(line['supplier']['eta_editable'] for line in detail.get('lines', []))
-        token=_review_csrf_token() if detail['workshop_pending'] or appointment_actionable or eta_actionable or review and review.get('actionable') else None
+        invoice_actionable = detail['invoice']['state'] in ('available','draft','unknown')
+        token=_review_csrf_token() if detail['workshop_pending'] or appointment_actionable or eta_actionable or invoice_actionable or review and review.get('actionable') else None
         return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,
             review_csrf=token,appointment_actionable=appointment_actionable,appointment_error=appointment_error,
-            delivery_error=delivery_error,processing_error=processing_error)
+            delivery_error=delivery_error,processing_error=processing_error,invoice_error=invoice_error)
+
+    @blueprint.post('/admin/shop/<order_id>/rechnung/<action>')
+    def invoice_action(order_id, action):
+        if not ORDER.fullmatch(order_id) or action not in ('vorbereiten', 'abgleichen'):
+            abort(404)
+        if (request.headers.get('Origin') not in (None, request.host_url.rstrip('/'))
+                or request.headers.get('Sec-Fetch-Site') not in (None, 'same-origin')):
+            abort(403)
+        if set(checked_form_fields()) != {'csrf_token'}:
+            abort(400)
+        detail = reader().detail(order_id, show_margin=True)
+        attach_invoice_status([detail])
+        state = detail['invoice']['state']
+        if (action == 'vorbereiten' and state != 'available'
+                or action == 'abgleichen' and state not in ('unknown', 'draft')):
+            return show_order_detail(detail, invoice_error='Bitte prüfen Sie den aktuellen Rechnungsstatus.'), 409
+        service = current_app.extensions['shop_invoice_service']
+        from shop_invoice_service import ShopInvoiceError
+        try:
+            if action == 'vorbereiten':
+                service.prepare(order_id)
+            else:
+                service.refresh(order_id)
+        except ShopInvoiceError:
+            return show_order_detail(detail, invoice_error='Der Vorgang konnte nicht abgeschlossen werden. Bitte prüfen Sie den angezeigten Belegstatus.'), 409
+        except Exception:
+            current_app.logger.error('Lexware-Aktion zur Shoprechnung vorübergehend nicht verfügbar.')
+            return show_order_detail(detail, invoice_error='Die Rechnungsbearbeitung ist gerade nicht erreichbar.'), 503
+        return redirect(url_for('shop_admin.order_detail', order_id=order_id, _anchor='rechnung'), code=303)
+
+    @blueprint.get('/admin/shop/<order_id>/rechnung.pdf')
+    def invoice_pdf(order_id):
+        if not ORDER.fullmatch(order_id):
+            abort(404)
+        if request.args and (set(request.args) != {'download'} or request.args.getlist('download') != ['1']):
+            abort(400)
+        detail = reader().detail(order_id)
+        attach_invoice_status([detail])
+        if detail['invoice']['state'] != 'ready':
+            abort(404)
+        service = current_app.extensions['shop_invoice_service']
+        from shop_invoice_service import ShopInvoiceError
+        try:
+            content, filename = service.pdf(order_id)
+        except ShopInvoiceError:
+            abort(409, description='Das Rechnungs-PDF steht momentan nicht bereit.')
+        except Exception:
+            current_app.logger.error('PDF der Shoprechnung konnte nicht gelesen werden.')
+            abort(503)
+        if not isinstance(content, bytes) or not content.startswith(b'%PDF-'):
+            abort(503)
+        if not isinstance(filename, str) or not re.fullmatch(r'[\w.-]{1,120}\.pdf', filename):
+            filename = f'Rechnung-{order_id}.pdf'
+        return send_file(BytesIO(content), mimetype='application/pdf', download_name=filename,
+                         as_attachment=('download' in request.args), conditional=False, etag=False)
 
     @blueprint.post('/admin/shop/<order_id>/bearbeitet')
     def mark_workshop_handled(order_id):
