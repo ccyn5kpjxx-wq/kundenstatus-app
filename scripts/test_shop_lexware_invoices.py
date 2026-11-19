@@ -108,6 +108,31 @@ class LexwareShopInvoiceTests(unittest.TestCase):
                 self.service.create_invoice(self.payload, finalize=True)
         self.assertFalse(any(c.args[0] == 'POST' for c in self.transport.call_args_list))
 
+    def test_documented_voucherlist_pagination_and_invoice_read_projection(self):
+        other = str(UUID(int=3))
+        self.remote.update(voucherDate='2026-06-14T22:00:00.000Z',
+                           introduction=self.payload['introduction'].replace(' ', '\u00a0'))
+        self.remote['paymentConditions'].update(paymentTermLabel='  Bereits bezahlt\nüber Stripe.  ',
+                                               paymentTermLabelTemplate='Bereits bezahlt über Stripe.')
+        self.remote['address'].update(contactId=None, supplement=None)
+        first = {**self.page(other), 'last':False, 'totalElements':2, 'totalPages':2}
+        first['content'][0].update(totalAmount=99.80, contactId=None, voucherStatus='paid')
+        second = {**self.page(RID), 'number':1, 'totalElements':2, 'totalPages':2}
+        second['content'][0].update(contactId=None, voucherStatus='overdue')
+        self.transport.side_effect = [first, second, self.remote]
+        self.assertEqual(self.service.recover(self.payload), RID)
+        self.assertIn('page=1', self.transport.call_args_list[1].kwargs['query'])
+        for status in ['open', 'paid']:
+            self.transport.side_effect = [{**self.remote, 'voucherStatus':status}]
+            self.assertEqual(self.service.inspect(RID, self.payload)['state'], 'final')
+
+    def test_conflicting_payment_terms_and_non_invoice_detail_status_are_rejected(self):
+        for change in [{'paymentConditions':{'paymentTermLabel':'Bitte binnen 14 Tagen überweisen'}},
+                       {'voucherStatus':'overdue'}, {'voucherStatus':'paidoff'}]:
+            with self.subTest(change=list(change)), self.assertRaises(ShopLexwareError):
+                self.transport.return_value = {**self.remote, **change}
+                self.service.inspect(RID, self.payload)
+
     def test_bound_final_original_pdf_get_and_validation(self):
         self.transport.return_value = self.remote
         pdf = b'%PDF-1.7\nSynthetic\n%%EOF\n'

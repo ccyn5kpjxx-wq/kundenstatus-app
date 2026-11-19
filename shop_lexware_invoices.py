@@ -6,6 +6,7 @@ reconciled via recover/inspect. Never repeat a POST to resolve uncertainty.
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 import re
+from unicodedata import normalize
 from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -39,6 +40,12 @@ def _uuid(value):
         return result
     except (ValueError, TypeError, AttributeError):
         raise ShopLexwareError('lexware_invoice_reference_invalid') from None
+
+
+def _printed_text(value):
+    if not isinstance(value, str):
+        raise ShopLexwareError('lexware_invoice_binding_mismatch')
+    return ' '.join(normalize('NFC', value).split())
 
 
 def build_shop_invoice_payload(snapshot, order, context, *, voucher_date):
@@ -149,18 +156,21 @@ class LexwareShopInvoices:
     @staticmethod
     def _verify(raw, remote_id, payload):
         try:
-            if (_uuid(raw['id']) != remote_id or raw.get('introduction') != payload['introduction']
-                    or raw['voucherDate'][:10] != payload['voucherDate'][:10]
+            invoice_day = _day(datetime.fromisoformat(raw['voucherDate'].replace('Z', '+00:00')))
+            if (_uuid(raw['id']) != remote_id or _printed_text(raw['introduction']) != payload['introduction']
+                    or invoice_day.isoformat() != payload['voucherDate'][:10]
                     or any(raw['address'].get(k) != v for k, v in payload['address'].items())
-                    or raw.get('remark') != payload['remark']
-                    or raw['paymentConditions']['paymentTermLabel'] != payload['paymentConditions']['paymentTermLabel']
+                    or _printed_text(raw['remark']) != payload['remark']
+                    or _printed_text(raw['paymentConditions']['paymentTermLabel']) != payload['paymentConditions']['paymentTermLabel']
                     or raw['shippingConditions']['shippingType'] != payload['shippingConditions']['shippingType']
                     or raw['taxConditions']['taxType'] != 'gross' or raw['totalPrice']['currency'] != 'EUR'
                     or _amount(raw['totalPrice']['totalGrossAmount']) != _gross(payload)
                     or [_line(row) for row in raw['lineItems']] != [_line(row) for row in payload['lineItems']]):
                 raise ValueError()
             status = raw['voucherStatus']
-            if status not in {'draft', 'open', 'paid', 'paidoff', 'overdue'} or raw.get('archived') is True:
+            # A voucherlist row may be overdue/paidoff; an invoice resource
+            # itself reports draft, open, paid or voided.
+            if status not in {'draft', 'open', 'paid'} or raw.get('archived') is True:
                 raise ValueError()
             number = raw.get('voucherNumber') or ''
             if ((status != 'draft' and not number) or not isinstance(number, str) or len(number) > 80
@@ -199,7 +209,7 @@ class LexwareShopInvoices:
                 if row.get('totalAmount') is not None and _amount(row['totalAmount']) != amount:
                     continue
                 raw = self._request('GET', '/v1/invoices/' + candidate)
-                if raw.get('introduction') == payload['introduction']:
+                if _printed_text(raw.get('introduction') or '') == payload['introduction']:
                     self._verify(raw, candidate, payload)
                     matches.append(candidate)
             if rows['last']:
