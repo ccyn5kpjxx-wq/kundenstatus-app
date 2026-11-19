@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from html import unescape
+from io import BytesIO
 import json
 import re
 from tempfile import TemporaryDirectory
@@ -10,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from itsdangerous import URLSafeTimedSerializer
+from pypdf import PdfReader
 
 import test_mos_public_booking as public
 from mos_public_contract import presign_quote, signed_payload
@@ -79,9 +81,9 @@ class OnsiteCheckoutTests(unittest.TestCase):
         q = self.quote(token)
         self.assertEqual((q['days'], q['rental_cents'], q['deposit_cents']), (3, 14700, 50000))
         self.assertEqual((q['amount_cents'], q['deposit_authorized_cents'], q['deposit_charged_cents']), (0, 0, 0))
-        self.assertIs(q['cash_at_pickup'], True)
-        self.assertIn('Mietpreis und Kaution kannst du vor Ort bar bezahlen.', q['terms_text'])
-        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v2')
+        self.assertIn('Kartenterminal', q['pickup_payment_note'])
+        self.assertIn(q['pickup_payment_note'], q['terms_text'])
+        self.assertEqual(q['rules_version'], self.public.cfg['terms_version']+' + Vor-Ort-Zahlung v3')
         with (patch.object(self.service.gateway, 'create', side_effect=AssertionError('Unexpected Checkout')),
               patch.object(self.service.gateway, 'create_deposit_intent', side_effect=AssertionError('Unexpected deposit'))):
             first = self.public.checkout(token)
@@ -92,6 +94,14 @@ class OnsiteCheckoutTests(unittest.TestCase):
             self.assertEqual(self.public.rows()[0]['id'], hold['mietvorgang_id'])
             signed, _, _ = signed_payload(json.loads(hold['payload']))
             self.assertEqual(signed['payment_method'], 'onsite')
+            self.assertEqual(signed['pickup_payment_note'], q['pickup_payment_note'])
+            receipt = self.public.client.get(first.location + '/bestaetigung.txt')
+            self.assertEqual(receipt.status_code, 200)
+            self.assertIn(q['pickup_payment_note'], receipt.get_data(as_text=True))
+            pdf = self.public.client.get(first.location + '/vertrag.pdf')
+            self.assertEqual(pdf.status_code, 200)
+            text = ' '.join(page.extract_text() or '' for page in PdfReader(BytesIO(pdf.data)).pages)
+            self.assertIn('Kartenterminal', text)
             self.assertEqual(self.public.checkout(token).location, first.location)
             self.assertEqual(len(self.public.rows()), 1)
             self.service.cancel_or_reconcile(hold['id'])

@@ -37,6 +37,7 @@ WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
 # The booking window rolls forward on every request without opening database
 # rows in bulk. Explicit database closures still override these defaults.
 WEEKLY_SLOT_HORIZON_MONTHS = 12
+PICKUP_PAYMENT_NOTE = "Mietpreis und Kaution können bei Abholung am Kartenterminal bezahlt werden."
 
 
 class RentalSelectionError(ValueError):
@@ -550,16 +551,16 @@ def register(portal):
                 quoted['deposit_authorization_mode']='extended_if_available'
         if onsite:
             quoted['payment_method']='onsite'
-            quoted['cash_at_pickup']=True
-            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v2'
+            quoted['pickup_payment_note'] = PICKUP_PAYMENT_NOTE
+            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v3'
             quoted['terms_text'] = (
-                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 2)\n'
+                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 3)\n'
                 'Für diese Buchung gelten folgende vorrangige Regelungen: Mit der Schaltfläche '
                 'zur zahlungspflichtigen Bestellung gibst du eine verbindliche Bestellung ab. '
                 'Wir nehmen sie mit der Buchungsbestätigung an. Online werden weder eine Zahlung '
                 'noch eine Kartenautorisierung verlangt. Den vereinbarten Mietpreis und die '
                 'rückzahlbare Kaution von 500 € bezahlst du bei Abholung vor der Fahrzeugübergabe. '
-                'Mietpreis und Kaution kannst du vor Ort bar bezahlen. '
+                f'{PICKUP_PAYMENT_NOTE} '
                 'Nach ordnungsgemäßer Rückgabe wird die Kaution nach den vereinbarten Bedingungen '
                 'zurückgezahlt. Diese Vereinbarung geht entgegenstehenden Regelungen zum '
                 'Vertragsschluss, zur Onlinezahlung und zur Kartenreservierung vor. '
@@ -669,7 +670,9 @@ def register(portal):
         text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt."
         if q.get('payment_method') == 'onsite':
             text+='\nZahlungsart: vor Ort bei Abholung.\nBei der Onlinebuchung gezahlt: 0,00 EUR.'
-            if q.get('cash_at_pickup') is True:
+            if q.get('pickup_payment_note'):
+                text += '\n' + q['pickup_payment_note']
+            elif q.get('cash_at_pickup') is True:
                 text+='\nMietpreis und Kaution kannst du vor Ort bar bezahlen.'
             text+=f"\nRückzahlbare Kaution: {q['deposit_cents']/100:.2f} EUR."
             text+=f"\nBei Übergabe vereinbarter Gesamtbetrag: {(q['rental_cents']+q['deposit_cents'])/100:.2f} EUR."

@@ -30,7 +30,7 @@
             <p>Die Mietstation hat den Eingang von {{ euro(account.onsite_payment.rental_cents) }} Mietpreis und {{ euro(account.onsite_payment.deposit_cents) }} Kaution bei der Übergabe dokumentiert.</p>
             {% if account.onsite_repayment %}<p>Die Rückzahlung der Kaution in Höhe von {{ euro(account.onsite_repayment.amount_cents) }} ist dokumentiert.</p>{% endif %}
           {% else %}
-            <p>Du zahlst bei der Abholung {{ euro(q.rental_cents) }} Mietpreis inkl. MwSt. und {{ euro(q.deposit_cents) }} rückzahlbare Kaution. Insgesamt sind vor Ort <strong>{{ euro(q.rental_cents + q.deposit_cents) }}</strong> fällig.{% if q.cash_at_pickup is sameas true %} Diesen Betrag kannst du bar bezahlen.{% endif %}</p>
+            <p>Du zahlst bei der Abholung {{ euro(q.rental_cents) }} Mietpreis inkl. MwSt. und {{ euro(q.deposit_cents) }} rückzahlbare Kaution. Insgesamt sind vor Ort <strong>{{ euro(q.rental_cents + q.deposit_cents) }}</strong> fällig.{% if q.pickup_payment_note %} {{ q.pickup_payment_note }}{% elif q.cash_at_pickup is sameas true %} Diesen Betrag kannst du bar bezahlen.{% endif %}</p>
           {% endif %}
         {% elif h.status == 'confirmed' %}
           <h2>{{ 'Zahlung eingegangen. Deine Buchung ist bestätigt.' if live else 'Testzahlung verifiziert. Deine Testbuchung ist bestätigt.' }}</h2>

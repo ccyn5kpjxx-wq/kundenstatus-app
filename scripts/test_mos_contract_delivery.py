@@ -165,6 +165,17 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn(b'inzwischen storniert', FakeSMTP.raw)
         self.assertNotIn(b'Ihre Fahrzeugbuchung wurde bestaetigt', FakeSMTP.raw)
 
+    def test_pickup_payment_wording_comes_from_the_signed_contract(self):
+        contract = dict(payment_method='onsite', rental_cents=3900, deposit_cents=50000)
+        for terms, expected, absent in [
+                ({'cash_at_pickup': True}, 'bar bezahlen', 'Kartenterminal'),
+                ({'pickup_payment_note': 'Zahlung am Kartenterminal.'}, 'Zahlung am Kartenterminal.', 'bar bezahlen')]:
+            with self.subTest(terms=terms):
+                email = _message(self.hold, 'customer@example.test', self.pdf, False, contract={**contract, **terms})
+                body = email.get_body(preferencelist=('plain',)).get_content()
+                self.assertIn(expected, body)
+                self.assertNotIn(absent, body)
+
     def test_confirmed_pay_at_pickup_sends_contract_and_management_link_without_card_payment(self):
         from email import policy
         from email.parser import BytesParser

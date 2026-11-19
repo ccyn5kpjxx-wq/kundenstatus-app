@@ -33,7 +33,7 @@
 {% if onsite %}
 <label><input type="checkbox" name="onsite_rent_received" value="yes" required> Mietpreis von {{ '%.2f'|format(h.q.rental_cents/100)|replace('.', ',') }} € vollständig vor Ort erhalten.</label>
 <label><input type="checkbox" name="onsite_deposit_received" value="yes" required> Rückzahlbare Kaution von {{ '%.2f'|format(h.q.deposit_cents/100)|replace('.', ',') }} € vollständig vor Ort erhalten.</label>
-<label>Zahlungsbeleg für Mietpreis und Kaution<input name="onsite_receipt_ref" required minlength="3" maxlength="100"></label>
+<label>Belegnummer für Mietpreis und Kaution (z. B. Terminalbeleg)<input name="onsite_receipt_ref" required minlength="3" maxlength="100"></label>
 {% endif %}
 <label><input type="checkbox" name="receipt_confirmed" value="yes" required> Kunde bestätigt den Erhalt der Vertragskopie.</label>
 <label><input type="checkbox" name="license_checked" value="yes" required> Gültigen Führerschein und fahrberechtigte Person geprüft.</label>

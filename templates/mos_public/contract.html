@@ -32,7 +32,7 @@
       <div><dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} {{ 'Miettag' if contract.days == 1 else 'Miettage' }} × {{ contract_euro(contract.daily_cents) }}</dd></div>
       <div><dt>Miete inkl. MwSt.</dt><dd>{{ contract_euro(contract.rental_cents) }}</dd></div>
       {% if onsite %}
-        {% if contract.cash_at_pickup is sameas true %}<div><dt>Zahlung bei Abholung</dt><dd>Mietpreis und Kaution kannst du vor Ort bar bezahlen.</dd></div>{% endif %}
+        {% if contract.pickup_payment_note or contract.cash_at_pickup is sameas true %}<div><dt>Zahlung bei Abholung</dt><dd>{{ contract.pickup_payment_note or 'Mietpreis und Kaution kannst du vor Ort bar bezahlen.' }}</dd></div>{% endif %}
         <div><dt>Rückzahlbare Kaution bei Abholung</dt><dd>{{ contract_euro(contract.deposit_cents) }}</dd></div>
         <div><dt>Bei der Buchung online gezahlt</dt><dd>{{ contract_euro(contract.amount_cents) }}</dd></div>
         <div class="contract-total"><dt>Bei Übergabe vereinbarter Gesamtbetrag</dt><dd>{{ contract_euro(contract.rental_cents + contract.deposit_cents) }}</dd></div>
