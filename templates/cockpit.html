@@ -28,7 +28,12 @@
         <small id="cockpit-suchhinweis">Ab zwei Zeichen erscheinen passende Aufträge.</small>
         <div id="cockpit-suchergebnisse" class="cockpit-search-results" data-search-results aria-live="polite" hidden></div>
       </div>
-      <nav class="cockpit-shortcuts" aria-label="Schnellaktionen"><a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">Fahrzeug anlegen</a><a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Auftragsübersicht</a><a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Schaden aufnehmen</a></nav>
+      <nav class="cockpit-shortcuts" aria-label="Schnellaktionen">
+        <a class="btn btn-brand" href="{{ url_for('neuer_auftrag') }}">Fahrzeug anlegen</a>
+        {% if session.get('admin') %}<a class="btn btn-soft" href="{{ url_for('betriebs_cockpit', mietsperre=1, _anchor='fahrzeug-sperren') }}">Mietwagen blockieren</a>{% endif %}
+        <a class="btn btn-soft" href="{{ url_for('dashboard') }}#auftraege">Auftragsübersicht</a>
+        <a class="btn btn-soft" href="{{ url_for('admin_versicherungsschaden') }}">Schaden aufnehmen</a>
+      </nav>
     </div>
   </div>
   {% if mahn_cockpit_badge or cockpit.get('offene_reklamationen') or cockpit.get('offene_verzoegerungen') or cockpit.get('ueberfaellig') %}

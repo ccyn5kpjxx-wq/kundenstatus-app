@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from run_mos_public_test import build_test_app
@@ -73,8 +74,32 @@ class CalendarBlockFormTests(unittest.TestCase):
             res = guest.post(path, data={**self.fields, "csrf_token": token})
             self.assertIn(res.status_code, (302, 303))
             self.assertIn("/login", res.location)
-        for path in ("/admin/kalender", "/admin/mietfahrzeuge"):
-            self.assertIn("mietsperre=1#fahrzeug-sperren", self.client.get(path).get_data(as_text=True))
+        for path in ("/admin/cockpit", "/admin/kalender", "/admin/mietfahrzeuge",
+                     "/mietwagen-test/admin", "/mietwagen-test/admin/termine"):
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn("mietsperre=1#fahrzeug-sperren", page.get_data(as_text=True))
+
+    def test_calendar_deep_link_survives_login_and_expired_csrf(self):
+        guest = self.portal.app.test_client()
+        target = "/admin/cockpit?mietsperre=1#fahrzeug-sperren"
+        login = "/login?return_to=mietkalender"
+        self.assertEqual(guest.get(target).location, login)
+        self.assertEqual(guest.get(login).status_code, 200)
+        with patch.object(self.portal, "admin_password_matches", return_value=True) as password_check:
+            self.assertEqual(guest.post(login, data={"password": "fixture"}).location, login)
+            password_check.assert_not_called()
+            guest.get(login)
+            with guest.session_transaction() as session:
+                token = session["csrf_token"]
+            result = guest.post(login, data={"password": "fixture", "csrf_token": token})
+            password_check.assert_called_once_with("fixture")
+        self.assertEqual(result.location, target)
+        html = guest.get(result.location).get_data(as_text=True)
+        self.assertIn('id="fahrzeug-sperren-formular"', html)
+        self.assertIn("data-cockpit-kalender open", html)
+        self.assertEqual(guest.get(login).location, target)
 
 
 if __name__ == "__main__":

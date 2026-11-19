@@ -28,7 +28,7 @@ class ChefLoginTests(unittest.TestCase):
     def setUp(self):
         self.app = Flask('isolated-chef-login', template_folder=str(ROOT / 'templates'))
         self.app.config.update(TESTING=True, SECRET_KEY='synthetic-chef-login-test-only')
-        names = {'admin_login_destination', 'admin_required', 'login', 'protect_csrf',
+        names = {'admin_login_return_marker', 'admin_login_destination', 'admin_required', 'login', 'protect_csrf',
                  'get_csrf_token', 'csrf_field', 'add_csrf_fields'}
         nodes = []
         for node in ast.parse((ROOT / 'app.py').read_text(encoding='utf-8')).body:
@@ -89,7 +89,8 @@ class ChefLoginTests(unittest.TestCase):
         for query in ('return_to=https://external.invalid', 'return_to=//external.invalid',
                       'return_to=/admin/mitarbeiter', 'next=https://external.invalid',
                       'return_to=chef&return_to=https://external.invalid', 'return_to=chef%20',
-                      'return_to=chef&return_to=chef'):
+                      'return_to=chef&return_to=chef', 'return_to=mietkalender&return_to=chef',
+                      'return_to=mietkalender%2F%2Fexternal.invalid'):
             self.client = self.app.test_client()
             url = '/login?' + query
             response = self.client.post(url, data=self.form(url))

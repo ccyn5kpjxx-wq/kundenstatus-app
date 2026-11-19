@@ -3294,8 +3294,8 @@ def protect_csrf():
         if request.endpoint in {"login", "partner_login", "partner_login_key", "versicherung_login", "versicherung_login_key", "werkstatt_login"}:
             session.pop(CSRF_FIELD_NAME, None)
             flash("Die Login-Seite war veraltet. Bitte Passwort noch einmal eingeben.", "warning")
-            if request.endpoint == "login" and admin_login_destination() == "admin_mitarbeiter":
-                return redirect(url_for("login", return_to="chef"))
+            if request.endpoint == "login":
+                return redirect(url_for("login", return_to=admin_login_return_marker()))
             return redirect(request.path)
         abort(400)
     return None
@@ -39649,9 +39649,18 @@ def iso_date_filter(value):
     return iso_date(value)
 
 
+def admin_login_return_marker():
+    values = request.args.getlist("return_to")
+    return values[0] if len(values) == 1 and values[0] in {"chef", "mietkalender"} else None
+
+
 def admin_login_destination():
-    # A fixed destination for the direct Chef entry, never a caller-provided URL.
-    return "admin_mitarbeiter" if request.args.getlist("return_to") == ["chef"] else "betriebs_cockpit"
+    marker = admin_login_return_marker()
+    if marker == "chef":
+        return url_for("admin_mitarbeiter")
+    if marker == "mietkalender":
+        return url_for("betriebs_cockpit", mietsperre=1, _anchor="fahrzeug-sperren")
+    return url_for("betriebs_cockpit")
 
 
 def admin_required(func):
@@ -39665,6 +39674,9 @@ def admin_required(func):
                 abort(403, description="Dieser Bereich gehört nicht zum Bürozugang.")
             if request.endpoint == "admin_mitarbeiter" and request.method == "GET":
                 return redirect(url_for("login", return_to="chef"))
+            if (request.endpoint == "betriebs_cockpit" and request.method == "GET"
+                    and request.args.getlist("mietsperre") == ["1"]):
+                return redirect(url_for("login", return_to="mietkalender"))
             return redirect(url_for("login"))
         return func(*args, **kwargs)
 
@@ -39843,9 +39855,8 @@ def render_partner_new_form(autohaus, form=None):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    destination = admin_login_destination()
     if request.method == "GET" and session.get("admin"):
-        return redirect(url_for(destination))
+        return redirect(admin_login_destination())
     if request.method == "POST":
         limited, wait_seconds = login_rate_limit_status("admin", "admin")
         if limited:
@@ -39857,7 +39868,7 @@ def login():
             session.clear()
             session.permanent = True
             session["admin"] = True
-            response = redirect(url_for(destination))
+            response = redirect(admin_login_destination())
             remember_authenticated_login(response, "admin")
             return response
         record_failed_login("admin", "admin")
