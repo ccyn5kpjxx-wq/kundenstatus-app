@@ -101,7 +101,7 @@ async function statusPage(status, technical){
  assert.equal(f.nodes['request-quote'].disabled,false);await f.request();
  const rendered=walk(f.nodes['quote-review']);assert.ok(rendered.some(n=>n.textContent==='890,00 €'));assert.ok(f.nodes['checkout-note'].textContent.includes('zunächst auf Ihrer Karte reserviert'));
  assert.ok(f.nodes['checkout-note'].textContent.includes('Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab.'));
- assert.ok(walk(f.nodes['cart-items']).some(n=>n.textContent==='Montage nach Wareneingang abstimmen'));
+ assert.ok(walk(f.nodes['cart-items']).some(n=>n.textContent==='Montageauswahl ansehen'));
  assert.equal(rendered.filter(n=>n.textContent==='Montage').length,1,'montage shown once from server quote');
  assert.ok(rendered.some(n=>n.textContent==='Die genaue Rad-Reifen-Kombination wird technisch geprüft.'));
  assert.ok(rendered.some(n=>n.textContent.includes('Apple Pay')));assert.equal(f.nodes['checkout-button'].textContent,'Gesamtbetrag online reservieren');assert.equal(f.nodes['checkout-button'].hidden,false);assert.equal(f.nodes['checkout-button'].disabled,true);

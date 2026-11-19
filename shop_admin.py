@@ -26,7 +26,8 @@ from shop_storage import ShopStorage
 ORDER=re.compile(r'sho_[a-f0-9]{32}')
 WITHDRAWAL=re.compile(r'swd_[a-f0-9]{32}')
 TABLES={'shop_orders_v2','shop_payment_attempts_v2','shop_fulfillment_v2',
-        'shop_fulfillment_positions_v3','shop_order_workflow_v2','shop_order_receipts_v2','shop_withdrawals_v2'}
+        'shop_fulfillment_positions_v3','shop_order_workflow_v2','shop_order_receipts_v2','shop_withdrawals_v2',
+        'shop_order_appointment_requests_v2'}
 BASE_TABLES={'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
              'shop_payment_events_v2','shop_buyer_sessions_v2'}
 BASE_TRIGGERS={'shop_quotes_v2_immutable','shop_orders_v2_immutable'}
@@ -126,6 +127,10 @@ class ShopAdminReader:
             for row in db.execute(sql+' WHERE order_id IN ('+placeholders+') LIMIT 100',ids):
                 result[row['order_id']][key]=row['state']
                 if key=='fulfillment':result[row['order_id']]['action']=row['action_state']
+        if 'shop_order_appointment_requests_v2' in tables:
+            for row in db.execute('''SELECT order_id, strftime('%d.%m.%Y', requested_date) AS day, requested_time
+                FROM shop_order_appointment_requests_v2 WHERE order_id IN ('''+placeholders+')',ids):
+                result[row['order_id']]['appointment']=f"{row['day']}, {row['requested_time']} Uhr"
         if 'shop_fulfillment_positions_v3' in tables:
             for row in db.execute('''SELECT order_id,SUM(CASE WHEN state IN ('claimed','unknown') THEN 1 ELSE 0 END) AS uncertain
                 FROM shop_fulfillment_positions_v3 WHERE order_id IN ('''+placeholders+') GROUP BY order_id LIMIT 100',ids):
@@ -150,6 +155,7 @@ class ShopAdminReader:
             'status':STATUS.get(state,'Status unbekannt'),'mode':{'live':'Live','test':'Test'}.get(row['mode'],'Unbekannt'),
             'payment':PAYMENT.get(related['payment'],'Noch kein Zahlungsversuch'),
             'workflow':FLOW.get(related['workflow'],'Noch nicht gestartet'),
+            'appointment':related.get('appointment'),
             'fulfillment':FULFILLMENT.get(related['fulfillment'],'Noch nicht gestartet'),
             'action':ACTION.get(related['action'],''),'attention':attention,
             'uncertain_positions':related['uncertain_positions'],
@@ -173,6 +179,12 @@ class ShopAdminReader:
                 substr(snapshot_json,1,131073) AS snapshot_json FROM shop_orders_v2 WHERE id=? LIMIT 1''',(order_id,)).fetchone()
             if row is None:abort(404)
             summary=self._summary(row,self._related(db,tables,[row])[order_id])
+            if summary['appointment']:
+                stored = db.execute('SELECT delivery_context_json FROM shop_orders_v2 WHERE id=?', (order_id,)).fetchone()
+                context = json.loads(stored['delivery_context_json'])
+                contact = context.get('contact') if isinstance(context, dict) else None
+                if isinstance(contact, dict) and any(contact.get(key) for key in ('name','phone','email')):
+                    summary['appointment_contact']={key:_text(contact.get(key),254) for key in ('name','phone','email')}
             summary['_review_binding']={key:row[key] for key in ('mode','status','amount_gross_cent','currency','quote_hash')}
             try:
                 if len(row['snapshot_json'].encode('utf-8'))>131072:raise ValueError()

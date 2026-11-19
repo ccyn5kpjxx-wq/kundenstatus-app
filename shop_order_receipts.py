@@ -206,8 +206,14 @@ class ShopOrderReceipts:
             if shipment['destination'] == 'workshop' and 'workshop_delivery' in context:
                 label += '; ' + WORKSHOP_DELIVERY_LABELS[context['workshop_delivery']]
             lines.append(label + ': ' + _money(shipment['gross_cent']))
+        appointment_note = 'Montage-/Servicetermin vereinbaren wir nach Wareneingang; hier ist kein Termin reserviert.'
+        preference = order.get('appointment_preference')
+        if preference and kind in {'order_received', 'order_confirmed'}:
+            day = datetime.fromisoformat(preference['date']).strftime('%d.%m.%Y')
+            appointment_note = (f"Ihr Wunschtermin für die Reifenmontage ist der {day} um {preference['time']} Uhr. "
+                                "Wir stimmen den Termin mit Ihnen ab, sobald die Reifenlieferung geklärt ist.")
         lines += ['', 'Gesamt inkl. 19 % MwSt.: ' + _money(order['amount_gross_cent']),
-                  '', 'Montage-/Servicetermin vereinbaren wir nach Wareneingang; hier ist kein Termin reserviert.',
+                  '', appointment_note,
                   '', 'RECHNUNGSANSCHRIFT']
         for key in ('billing', 'delivery'):
             if key == 'delivery':

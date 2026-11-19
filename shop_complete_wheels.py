@@ -9,7 +9,7 @@ NOTICE = ('Der Gesamtbetrag wird bei der Zahlung zunächst auf Ihrer Karte reser
           'Wir prüfen Fahrzeugpassung, Gutachten und die vollständige Lieferbarkeit. '
           'Erst nach erfolgreicher Prüfung und vollständiger Lieferantenbestätigung buchen wir ab. '
           'Kann die Bestellung nicht bestätigt werden, geben wir die Reservierung frei. '
-          'Den Montagetermin vereinbaren wir nach Wareneingang.')
+          'Bei Abholung in Mosbach können Sie einen Montagetermin anfragen. Wir bestätigen ihn nach Klärung der Lieferung.')
 
 
 def valid_proposal(proof, rim, tyre):

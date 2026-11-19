@@ -89,7 +89,7 @@ def reifenservice_checks():
             bad = post(changes)
             result.append(check(label+' wird ohne Leadanlage abgewiesen', bad.status_code == 400 and error in bad.text and scalar('SELECT COUNT(*) FROM leads') == count))
             if 'Wunschdatum' in label:
-                result.append(check(label+': Reifenwahl und notwendige neue Uhrzeitwahl bleiben sichtbar', 'value="radwechsel" checked' in bad.text and 'name="wunschzeit"' in bad.text and 'Freie Uhrzeit auswählen' in bad.text))
+                result.append(check(label+': Reifenwahl und notwendige neue Uhrzeitwahl bleiben sichtbar', 'value="radwechsel" checked' in bad.text and 'name="wunschzeit"' in bad.text and '<option value="">Keine Zeit frei</option>' in bad.text))
         count = scalar('SELECT COUNT(*) FROM leads')
         no_csrf = post([(portal.CSRF_FIELD_NAME,'wrong')])
         result.append(check('Neue Reifenroute bleibt CSRF-geschützt', no_csrf.status_code == 400 and scalar('SELECT COUNT(*) FROM leads') == count))

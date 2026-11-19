@@ -120,6 +120,10 @@ class HomepageShopNavigationChecks(unittest.TestCase):
         self.assertEqual(self.client.get(shop[0]['href']).status_code, 200)
         self.assertTrue(any('?anliegen=reifenangebot#kurzanfrage' in item['href'] for item in links))
         self.assertTrue(any('anliegen=reifenservice' in item['href'] and 'leistungsart=reifenservice' in item['href'] for item in links))
+        self.app.config['SHOP_CHECKOUT_ENABLED'] = True
+        active_links = Links(self.client.get('/leistungen/reifenservice').text).links
+        self.assertTrue(any(item['href'] == '/shop/reifen/?montage=1' and 'Reifen mit Montage' in item['text']
+                            for item in active_links))
 
     def test_other_service_does_not_gain_tyre_purchase_action(self):
         response = self.client.get('/leistungen/autoglas')

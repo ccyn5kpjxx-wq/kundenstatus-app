@@ -455,6 +455,12 @@
   const readCart = () => normaliseCart(JSON.parse(root.localStorage.getItem(CART_KEY) || '[]'));
   const partialToken = body.dataset.page === 'warenkorb' ? new URLSearchParams(root.location.search || '').get('auswahl') : null;
   const partial = partialToken !== null;
+  const mountingEntry = byId('catalog-mounting');
+  const appointmentPanel = byId('cart-appointment');
+  const appointment = appointmentPanel && root.ShopAppointmentPreference?.create(appointmentPanel, {
+    getItem: key => root.sessionStorage.getItem(key), setItem: (key, value) => root.sessionStorage.setItem(key, value),
+    removeItem: key => root.sessionStorage.removeItem(key),
+  }, date => requestJSON('/appointment-slots?datum=' + encodeURIComponent(date)), partialToken || 'cart');
   let basket = [], selectedSnapshot = null;
   try {
     basket = readCart();
@@ -502,6 +508,11 @@
     if (code === 'request_not_allowed') return 'Bitte öffnen Sie den Warenkorb erneut auf auto-lackierzentrum.de, um Ihre Anschrift zu bestätigen.';
     if (code === 'buyer_session_required' || code === 'buyer_session_changed') return 'Bitte laden Sie den Warenkorb neu und bestätigen Sie die Anschrift in Ihrer aktuellen Shopsitzung.';
     if (code === 'unsupported_delivery_address') return 'Bitte prüfen Sie Straße, Hausnummer und Postleitzahl. Für den Versand benötigen wir eine deutsche Straßenanschrift.';
+    if (code === 'invalid_appointment_preference') return 'Bitte Datum und freie Uhrzeit wählen oder ohne Terminwunsch fortfahren.';
+    if (code === 'appointment_slot_unavailable') return 'Die Uhrzeit ist inzwischen belegt. Bitte wählen Sie einen anderen Terminwunsch.';
+    if (code === 'appointment_service_unavailable') return 'Die freien Montagezeiten sind gerade nicht abrufbar. Bitte erneut prüfen oder den Wunsch abwählen.';
+    if (code === 'appointment_not_eligible') return 'Ein Terminwunsch ist für ausgewählte Reifen mit Montage in Mosbach möglich. Bitte die Auswahl und Lieferung prüfen.';
+    if (code === 'appointment_preference_conflict') return 'Für diesen Bestellversuch ist bereits eine andere Auswahl gespeichert. Bitte den bestehenden Bestellstatus prüfen.';
     if (code === 'combined_quantity_limit') return 'Für denselben Artikel wurde die bestellbare Menge überschritten. Bitte die Menge im Warenkorb anpassen.';
     if (['authorization_required', 'invalid_session', 'session_expired', 'csrf_invalid'].includes(code)) return 'Die Sitzung ist abgelaufen. Bitte diese Seite neu laden und Ihre Anschrift erneut bestätigen.';
     if (code === 'parts_vehicle_required') return 'Bitte das genaue Fahrzeug mit Motorisierung und Bauzeit auswählen und die Anschrift erneut bestätigen.';
@@ -675,7 +686,7 @@
       controls.append(button(configure ? 'Komplettrad zusammenstellen' : 'Ausführung wählen', view));
     } else {
       label.append(quantitySelect(product.id, count, value => { count = value; changePriceQuantity(price, value); }));
-      add = button(inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb', () => addToCart(product, count));
+      add = button(inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb', () => addToCart(product, count, product.category === 'tyre' && mountingEntry?.checked ? {mounting: true} : {}));
       controls.append(label, add);
     }
     if (product.department === 'parts') node.append(el('p', 'Lieferzeit wird bestätigt', 'shop-card-meta'));
@@ -946,7 +957,7 @@
         showMountedTotal(output, rimPrice.total + tyrePrice.total, [{rim, tyre: selected, quantity, services: {mounting: true}}], true);
       } else if (rimPrice && tyrePrice) summary.append(el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
       else if (!inquiry) summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
-      summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Den Montagetermin vereinbaren wir nach Wareneingang.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
+      summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Ihren Montagetermin können Sie im Warenkorb anfragen. Wir bestätigen ihn nach Lieferklärung.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrage hinzufügen' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
@@ -1072,8 +1083,8 @@
       const quantityLabel = configure ? 'Anzahl Kompletträder' : 'Anzahl';
       const quantity = el('label', quantityLabel); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); }, quantityLabel)); form.append(quantity);
       if (product.category === 'tyre') {
-        checkbox('Montage bei uns in Mosbach dazu wählen', 'mounting', form);
-        form.append(el('small', 'Terminvereinbarung erst nach Wareneingang. Servicepreis wird im Gesamtpreis geprüft.', 'shop-muted'));
+        checkbox('Montage bei uns in Mosbach dazu wählen', 'mounting', form).checked = Boolean(mountingEntry?.checked);
+        form.append(el('small', 'Ihren Montagetermin können Sie im Warenkorb anfragen. Den Servicepreis sehen Sie im geprüften Gesamtangebot.', 'shop-muted'));
       }
       if (product.category === 'body_part') {
         const painting = checkbox('Wunschlackierung dazu wählen', 'painting', form), color = el('input');
@@ -1157,22 +1168,15 @@
   function mountingRequest(row, product) {
     const target = row.assembly_group ? cart.find(item => item.assembly_group === row.assembly_group && item.id.startsWith('tyre:')) : row;
     if (!target || !target.id.startsWith('tyre:')) return;
-    const dialog = el('dialog', null, 'shop-mounting-dialog'), form = el('form'), heading = el('h2', 'Montage und Terminwunsch.');
+    const dialog = el('dialog', null, 'shop-mounting-dialog'), form = el('form');
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.checked = Boolean(target.services.mounting || target.assembly_group); mounting.disabled = Boolean(target.assembly_group);
     mountingLabel.append(mounting, el('span', 'Montage bei uns in Mosbach auswählen. Der Servicepreis wird im Gesamtangebot geprüft.'));
-    const dateLabel = el('label', 'Terminwunsch (optional)'), date = el('input'); date.type = 'date'; date.name = 'mounting_date';
-    const today = new Date(); date.min = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-'); dateLabel.append(date);
-    const periodLabel = el('label', 'Tageszeit'), period = el('select');
-    for (const [value, label] of [['flexible', 'Flexibel'], ['morning', 'Vormittags'], ['afternoon', 'Nachmittags']]) { const option = el('option', label); option.value = value; period.append(option); }
-    period.value = 'flexible'; periodLabel.append(period);
-    const fields = el('div', null, 'shop-form-grid'); fields.append(dateLabel, periodLabel);
-    const status = el('p', 'Noch keine Anfrage übermittelt.', 'shop-muted'); status.setAttribute('role', 'status');
-    const submit = el('button', 'Auswahl und Terminwunsch prüfen', 'shop-button'); submit.type = 'submit';
-    form.append(mountingLabel, fields, submit, status);
-    form.addEventListener('submit', event => {
+    const status = el('p', '', 'shop-muted'); status.setAttribute('role', 'status');
+    const submit = el('button', 'Montageauswahl übernehmen', 'shop-button'); submit.type = 'submit';
+    form.append(mountingLabel, submit, status);
+    form.addEventListener('submit', async event => {
       event.preventDefault();
-      if (!cart.includes(target)) { status.textContent = 'Die Auswahl hat sich geändert. Bitte den Dialog erneut öffnen.'; return; }
-      if (date.value && (!/^\d{4}-\d{2}-\d{2}$/.test(date.value) || date.value < date.min)) { status.textContent = 'Bitte einen zukünftigen Terminwunsch auswählen.'; return; }
+      if (checkoutInProgress || !cart.includes(target)) { status.textContent = 'Die Auswahl hat sich geändert. Bitte den Dialog erneut öffnen.'; return; }
       if (!target.assembly_group && Boolean(target.services.mounting) !== mounting.checked) {
         const pair = wheelSetFor(cart, target);
         if (pair && target.selection_pair && mounting.checked) {
@@ -1186,19 +1190,20 @@
           }
         }
         if (mounting.checked) target.services.mounting = true; else delete target.services.mounting;
-        saveCart(); renderCart();
+        saveCart(); await renderCart();
       }
-      status.textContent = mounting.checked ? 'Montage ausgewählt. ' + (date.value ? 'Terminwunsch ' + date.value.split('-').reverse().join('.') + ' · ' + ({flexible: 'Flexibel', morning: 'Vormittags', afternoon: 'Nachmittags'})[period.value] + '. ' : '') + 'Noch nicht übermittelt. Wir bestätigen den Termin nach Lieferklärung.' : 'Montage nicht ausgewählt. Ein Terminwunsch löst keine Buchung aus.';
+      if (mounting.checked && appointment && paymentCheckout && !inquiryOnly(product)) {
+        dialog.close(); appointment.focus();
+      } else status.textContent = mounting.checked ? 'Montage ausgewählt. Den Termin stimmen wir nach Lieferklärung ab.' : 'Ohne Montage. Die Auswahl löst keine Buchung aus.';
     });
-    dialog.setAttribute('aria-label', 'Reifenmontage und Terminwunsch');
-    dialog.append(button('×', () => dialog.close(), 'shop-close'), el('p', 'Montage in Mosbach', 'shop-eyebrow'), heading,
+    dialog.setAttribute('aria-label', 'Montage auswählen');
+    dialog.append(button('×', () => dialog.close(), 'shop-close'), el('h2', 'Montage in Mosbach'),
       el('p', target.quantity + ' × ' + (product.category === 'tyre' ? product.name : 'Reifen Ihrer Komplettrad-Auswahl'), 'shop-muted'),
-      el('p', 'Terminbestätigung nach Lieferklärung', 'shop-appointment-helper'),
-      el('p', 'Wir stimmen den Termin ab, sobald Lieferung und Montageumfang geklärt sind. Hier werden keine freien Kalendertermine angezeigt.', 'shop-muted'), form);
+      el('p', 'Terminbestätigung nach Lieferklärung', 'shop-appointment-helper'), form);
     const serviceUrl = body.dataset.serviceRequestUrl;
     if (typeof serviceUrl === 'string' && /^\/(?!\/)/.test(serviceUrl) && !/[\x00-\x20\\]/.test(serviceUrl)) {
-      const link = el('a', 'Terminwunsch im Werkstattformular anfragen ↗', 'shop-detail-link'); link.href = serviceUrl;
-      dialog.append(link, el('p', 'Das Werkstattformular wird separat geöffnet. Ihre Auswahl hier hat noch keinen Termin reserviert.', 'shop-muted'));
+      const link = el('a', 'Werkstatttermin ohne Reifenbestellung anfragen ↗', 'shop-detail-link'); link.href = serviceUrl;
+      dialog.append(link, el('p', 'Für einen Werkstatttermin ohne Einkauf können Sie das separate Formular nutzen.', 'shop-muted'));
     }
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
   }
@@ -1225,6 +1230,7 @@
       }
       const token = root.crypto.randomUUID();
       root.sessionStorage.setItem(PARTIAL_KEY + token, JSON.stringify(rows));
+      appointment?.copyFor(rows, token);
       root.location.assign(root.location.pathname + '?auswahl=' + token);
     } catch (_) { notice('Der separate Kauf konnte nicht geöffnet werden. Bitte den Warenkorb neu laden.'); }
   }
@@ -1280,6 +1286,7 @@
     if (partial && (!sourceReady || nextFlow !== 'checkout')) nextFlow = 'unavailable';
     if (allLoaded && nextFlow !== 'checkout' && quote) invalidateQuote();
     cartFlow = nextFlow;
+    appointment?.show(cartFlow === 'checkout');
     const form = byId('buyer-address'), primary = byId('request-quote'), note = byId('cart-workflow-note');
     updateMainlandRequirement(form);
     updateVehicleRequirement(form);
@@ -1309,6 +1316,10 @@
   async function renderCart() {
     const run = ++cartRun, container = byId('cart-items'), summary = byId('cart-summary');
     container.replaceChildren(); summary.replaceChildren(); offerSelection = []; sourceReady = false; offerReady = false; byId('cart-status').textContent = cart.length ? 'Artikel werden geprüft …' : partial ? '' : 'Ihr Warenkorb ist noch leer.';
+    if (appointment) {
+      const destination = byId('buyer-address')?.elements.namedItem('workshop_delivery')?.value || 'collection';
+      appointment.sync(paymentCheckout && destination === 'collection' ? cart : []);
+    }
     updateCartAction(); separateChoices();
     if (!cart.length) return;
     let subtotal = 0, complete = true, subtotalExpires = Infinity, subtotalOutput = null, subtotalLabel = null, inquiryNote = null;
@@ -1371,7 +1382,7 @@
           if (product.category === 'tyre') copy.append(el('p', TYRE_PURCHASE_NOTE, 'shop-muted'));
           if (!partial && (product.category === 'tyre' || (row.assembly_group && !wheelSet))) {
             const deferredMontage = row.assembly_group && body.dataset.deferredCompleteWheelsEnabled === 'true';
-            const action = el('div', null, 'shop-mounting-action'); action.append(button(deferredMontage ? 'Montage nach Wareneingang abstimmen' : 'Montagetermin in Mosbach buchen', () => mountingRequest(row, product), 'shop-button shop-button-secondary'), el('small', deferredMontage ? 'Montage ist ausgewählt. Terminvereinbarung nach Wareneingang.' : 'Terminbestätigung nach Lieferklärung', 'shop-muted')); copy.append(action);
+            const action = el('div', null, 'shop-mounting-action'); action.append(button(deferredMontage ? 'Montageauswahl ansehen' : 'Montage auswählen oder ändern', () => mountingRequest(row, product), 'shop-button shop-button-secondary'), el('small', deferredMontage ? 'Montage ist ausgewählt. Bei Abholung in Mosbach können Sie einen Terminwunsch angeben.' : 'Terminbestätigung nach Lieferklärung', 'shop-muted')); copy.append(action);
           }
           article.append(copy);
         }
@@ -1575,8 +1586,8 @@
       const reservation = reviewPayment
         ? 'Der vollständige Gesamtbetrag wird zunächst auf Ihrer Karte reserviert. Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab.'
         : 'Wir reservieren den Gesamtbetrag einmal. Sobald alle Artikel bestätigt sind, buchen wir ihn ab.';
-      const includesMounting = offerSelection.some(item => item.selection.services.mounting === true);
-      byId('checkout-note').textContent = reservation + (includesMounting ? ' Den Montagetermin vereinbaren wir nach Wareneingang.' : '');
+      const includesMounting = confirmedWorkshopDelivery === 'collection' && offerSelection.some(item => item.selection.services.mounting === true);
+      byId('checkout-note').textContent = reservation + (includesMounting ? ' Ihren Montagetermin bestätigen wir nach Klärung der Lieferung.' : '');
       if (reviewPayment) {
         review.append(el('p', byId('checkout-note').textContent, 'shop-review-note'), el('p', 'Sicher mit Karte. Apple Pay erscheint im Zahlungsfenster, wenn Ihr Gerät und Konto es unterstützen.', 'shop-muted'));
         const pending = el('ul', null, 'shop-review-requirements'), descriptions = {
@@ -1685,6 +1696,10 @@
       if (!currentSeparateCart()) return;
       if (cartFlow !== 'checkout' || body.dataset.orderEnabled !== 'true' || body.dataset.checkoutEnabled !== 'true' || body.dataset.consumerEnabled !== 'true' || !quote || !retained || !addressReady || !sourceReady || !offerReady || checkoutInProgress || !consumerState || consumerState.quoteHash !== quote.quote_hash || !consumerState.consumer.checked || !consumerState.accept.checked) return;
       if (Date.parse(quote.expires_at) <= Date.now() || quote.version === 2 && !reviewQuoteReady(quote, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) { invalidateQuote(); byId('quote-status').textContent = 'Das Angebot ist abgelaufen oder wurde geändert. Bitte den Gesamtpreis erneut prüfen.'; return; }
+      let preference;
+      try { preference = appointment?.selected(); }
+      catch (error) { byId('quote-status').textContent = errorText(error); return; }
+      appointment?.lock(true);
       const frozenQuote = quote, hash = frozenQuote.quote_hash, submittedRevision = revision, pack = consumerState.packHash; checkoutInProgress = true; byId('checkout-button').disabled = true; byId('quote-status').textContent = 'Ihre geprüfte Auswahl wird übernommen …';
       let orderId = null;
       try {
@@ -1694,9 +1709,14 @@
         const keyName = 'shop-order-key:' + hash; let key;
         try { key = root.sessionStorage.getItem(keyName); } catch (_) { /* memory fallback */ }
         if (!key) { key = 'shop-' + root.crypto.randomUUID(); try { root.sessionStorage.setItem(keyName, key); } catch (_) { /* server idempotency still binds this attempt */ } }
-        const draft = await requestJSON('/orders', {method: 'POST', body: JSON.stringify({quote_hash: hash, idempotency_key: key})});
+        const payload = {quote_hash: hash, idempotency_key: key};
+        if (preference) payload.appointment_preference = preference;
+        const draft = await requestJSON('/orders', {method: 'POST', body: JSON.stringify(payload)});
         if (!draft.order || !/^sho_[a-f0-9]{32}$/.test(draft.order.id)) throw new Error('order_unavailable');
         orderId = draft.order.id;
+        try { root.sessionStorage.setItem('shop-draft-id:' + hash, orderId); } catch (_) { /* The order remains on the server. */ }
+        if ((preference || draft.order.appointment_preference) && (!preference || draft.order.appointment_preference?.status !== 'requested' ||
+            draft.order.appointment_preference.date !== preference.date || draft.order.appointment_preference.time !== preference.time)) throw new Error('appointment_preference_conflict');
         if (!currentSeparateCart() || submittedRevision !== revision || quote !== frozenQuote || cartFlow !== 'checkout' || !sourceReady) throw new Error('terms_changed_new_quote_required');
         if (draft.payment_enabled !== true || draft.order.quote_hash !== hash || draft.order.amount_gross_cent !== frozenQuote.total_gross_cent) throw new Error('checkout_unavailable');
         try {
@@ -1709,7 +1729,18 @@
         try { root.gaertnerAdsRememberCheckout?.(orderId); } catch (_) { /* Measurement must not block payment navigation. */ }
         root.location.assign(result.checkout.checkout_url);
       } catch (error) {
-        if (!orderId && ['terms_acceptance_required', 'terms_changed_new_quote_required', 'legal_terms_unavailable', 'consumer_unavailable'].includes(error && error.message)) { invalidateQuote(); checkoutInProgress = false; byId('quote-status').textContent = errorText(error); return; }
+        if (!orderId && ['invalid_appointment_preference', 'appointment_slot_unavailable', 'appointment_service_unavailable', 'appointment_not_eligible'].includes(error.message)) {
+          checkoutInProgress = false; appointment?.lock(false); byId('checkout-button').disabled = false;
+          byId('quote-status').textContent = errorText(error);
+          appointment?.focus(); appointment?.refresh(); return;
+        }
+        if (!orderId && error.message === 'appointment_preference_conflict') {
+          let priorId;
+          try { priorId = root.sessionStorage.getItem('shop-draft-id:' + hash); } catch (_) {}
+          if (typeof priorId === 'string' && /^sho_[a-f0-9]{32}$/.test(priorId)) orderId = priorId;
+          else { byId('quote-status').textContent = errorText(error); return; }
+        }
+        if (!orderId && ['terms_acceptance_required', 'terms_changed_new_quote_required', 'legal_terms_unavailable', 'consumer_unavailable'].includes(error && error.message)) { invalidateQuote(); checkoutInProgress = false; appointment?.lock(false); byId('quote-status').textContent = errorText(error); return; }
         byId('quote-status').textContent = orderId ? 'Der Zahlungsstatus muss sicher geprüft werden. Bitte keine neue Bestellung starten.' : 'Der Abschluss konnte nicht sicher bestätigt werden. Bitte prüfen Sie den Status vor einem neuen Versuch.';
         if (orderId) { const link = el('a', 'Bestellstatus prüfen'); link.href = root.location.pathname.replace(/\/warenkorb\/?$/, '') + '/orders/' + orderId + '/success'; byId('quote-review').append(link); }
       }
@@ -1725,6 +1756,12 @@
         const result = await requestJSON('/orders/' + id), order = result.order;
         if (!order || order.id !== id || !Object.hasOwn(labels, order.status)) throw new Error('order_unavailable');
         status.textContent = labels[order.status]; summary.replaceChildren(el('p', 'Bestellung ' + id), el('p', money(order.amount_gross_cent), 'shop-summary-total'));
+        const preferred = order.appointment_preference;
+        if (preferred?.status === 'requested' && typeof preferred.date === 'string' && typeof preferred.time === 'string') {
+          const ended = ['cancelled', 'payment_failed'].includes(order.status);
+          const ending = ended ? '. Aus diesem Zahlungsvorgang ergibt sich kein bestätigter Montagetermin.' : '. Die Werkstatt bestätigt den Termin nach Klärung der Reifenlieferung.';
+          summary.append(el('p', 'Montagetermin angefragt: ' + root.ShopAppointmentPreference.label(preferred) + ending, 'shop-review-note'));
+        }
         if (order.status === 'paid' || order.status === 'authorized') {
           try {
             const record = JSON.parse(root.sessionStorage.getItem(PARTIAL_KEY + id));
@@ -1736,6 +1773,7 @@
                 const remaining = latest.filter(row => !selected.includes(row));
                 root.localStorage.setItem(CART_KEY, JSON.stringify(remaining)); updateBasketCount(remaining);
               }
+              if (preferred) root.sessionStorage.removeItem('gaertner-shop-montagetermin:' + (hasToken ? record.token : 'cart'));
               if (hasToken) root.sessionStorage.removeItem(PARTIAL_KEY + record.token);
               root.sessionStorage.removeItem(PARTIAL_KEY + id);
             }

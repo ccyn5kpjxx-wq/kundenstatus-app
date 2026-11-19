@@ -55,6 +55,8 @@ class FrontendChecks(unittest.TestCase):
                     self.assertEqual(page.status_code, 302)
                     self.assertEqual(page.location, origin + path + '?artikel=test&utm_source=ads')
                 previous = self.client.get('/shop/warenkorb/?auswahl=old', base_url=alias)
+                tyre_entry = self.client.get('/shop/reifen/?montage=1&email=PRIVATE', base_url=alias)
+                self.assertEqual(tyre_entry.location, origin + '/shop/reifen/?montage=1')
                 self.assertIn('data-transfer="send"', previous.text)
                 self.assertIn('href="' + origin + '/shop/warenkorb/"', previous.text)
                 self.assertNotIn('id="buyer-address"', previous.text)
@@ -111,9 +113,9 @@ class FrontendChecks(unittest.TestCase):
         source = self.client.get('/shop/warenkorb/').get_data(as_text=True)
         self.assertIn('id="buyer-address"', source)
         selects = [attrs for tag, attrs in Markup(source).tags if tag == 'select']
-        self.assertEqual(selects, [{'name': 'delivery_salutation', 'autocomplete': 'off'}, {'name': 'workshop_delivery'}])
+        self.assertEqual(selects, [{'name': 'appointment_time', 'disabled': None}, {'name': 'delivery_salutation', 'autocomplete': 'off'}, {'name': 'workshop_delivery'}])
         options = [attrs for tag, attrs in Markup(source).tags if tag == 'option']
-        self.assertEqual([attrs.get('value') for attrs in options], ['', 'Herr', 'Frau', 'Firma', 'personal_offer', 'collection', 'customer_reshipment'])
+        self.assertEqual([attrs.get('value') for attrs in options], ['', '', 'Herr', 'Frau', 'Firma', 'personal_offer', 'collection', 'customer_reshipment'])
         self.assertEqual([attrs.get('value') for attrs in options if 'selected' in attrs], ['collection'])
         self.assertIn('data-checkout-enabled="true"', source)
         self.assertIn('data-consumer-enabled="true"', source)
@@ -750,7 +752,7 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible'}={}){
  const marketCart=await boot(()=>({item:marketCartProduct,prices_refreshing:true}),{mode:'warenkorb',cart:[{id:A,quantity:2,services:{}}]});assert.equal(find(marketCart.nodes['cart-items'],'shop-price-kind'),undefined);assert.equal(find(marketCart.nodes['cart-summary'],'shop-summary-total').textContent,'Gesamtangebot auf Anfrage');assert.equal(walk(marketCart.nodes['cart-items']).some(n=>n.textContent.includes('88,88')||n.textContent.includes('Richtpreis')),false);assert.equal(marketCart.nodes['request-quote'].disabled,true);assert.equal(marketCart.clock.jobs.size,0);assert.deepEqual(JSON.parse(marketCart.stored.at(-1)),[{id:A,quantity:2,services:{}}]);assert.ok(walk(marketCart.nodes['cart-items']).some(n=>n.tagName==='BUTTON'&&n.textContent==='Entfernen'));
  // Opening and reviewing a mounting wish neither books nor alters the cart.
  const writesBefore=cart.stored.length,readsBefore=cart.calls.length;
- const appointment=walk(cartLine).find(n=>n.tagName==='BUTTON'&&n.textContent==='Montagetermin in Mosbach buchen');assert.ok(appointment);appointment.listeners.click();
+ const appointment=walk(cartLine).find(n=>n.tagName==='BUTTON'&&n.textContent==='Montage auswählen oder ändern');assert.ok(appointment);appointment.listeners.click();
  const requestDialog=find(cart.document.body,'shop-mounting-dialog');assert.equal(requestDialog.open,true);assert.equal(cart.stored.length,writesBefore);assert.equal(cart.calls.length,readsBefore);
  assert.ok(walk(requestDialog).some(n=>n.textContent==='Terminbestätigung nach Lieferklärung'));
  const requestForm=walk(requestDialog).find(n=>n.tagName==='FORM');requestForm.listeners.submit({preventDefault(){}});

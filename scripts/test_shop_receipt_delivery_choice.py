@@ -52,6 +52,18 @@ class ReceiptDeliveryChecks(unittest.TestCase):
         self.assertEqual(one['fingerprint'],two['fingerprint'])
         self.assertNotIn('workshop_delivery',f.receipts.customer_receipt(f.order_id,customer_id='customer-a'))
 
+    def test_accepted_order_receipt_repeats_the_wish_without_reserving(self):
+        original = fixtures.OrderStore.create_order
+        def with_wish(store, *args, **kwargs):
+            return original(store, *args, **kwargs, appointment_preference={'date':'2026-11-20','time':'10:00'},
+                            appointment_calendar=lambda day: ['10:00'])
+        with patch.object(fixtures.OrderStore, 'create_order', with_wish):
+            f = self.fixture('collection')
+        prepared = f.receipts.prepare(f.order_id,customer_id='customer-a',kind='order_received')
+        self.assertIn('Wunschtermin für die Reifenmontage ist der 20.11.2026 um 10:00 Uhr',prepared['body'])
+        self.assertIn('sobald die Reifenlieferung geklärt ist',prepared['body'])
+        self.assertEqual(f.outbox.sent,[])
+
     def test_invalid_saved_enum_never_enters_customer_or_queued_receipt(self):
         f=self.fixture('collection');order,snapshot,context=f.receipts._load(f.order_id,'customer-a')
         context['workshop_delivery']='already-shipped'

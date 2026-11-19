@@ -21,7 +21,7 @@ implemented here. Connections returned by the factory are owned and closed.
 from collections import Counter
 from collections.abc import Mapping
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 import hmac
 import json
@@ -75,6 +75,44 @@ def _identity(customer_id, mode):
     if (not isinstance(customer_id, str) or not PRINCIPAL.fullmatch(customer_id)
             or not isinstance(mode, str) or mode not in {'test', 'live'}):
         raise OrderStoreError('invalid_order_identity')
+
+
+def available_appointment_times(day, calendar):
+    try:
+        if not isinstance(day, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', day):
+            raise ValueError()
+        date.fromisoformat(day)
+    except ValueError:
+        raise OrderStoreError('invalid_appointment_preference') from None
+    try:
+        times = calendar(day)
+        if not isinstance(times, (tuple, list)) or len(times) > 24 or not all(
+                isinstance(slot, str) and re.fullmatch(r'(?:[01][0-9]|2[0-3]):00', slot) for slot in times):
+            raise ValueError()
+        return list(times)
+    except Exception:
+        raise OrderStoreError('appointment_service_unavailable') from None
+
+
+def _workshop_tyre_mounting(snapshot):
+    tyre_groups, mounted_groups, other_destination_groups = set(), set(), set()
+    for line, item in zip(snapshot['lines'], snapshot['request']):
+        group = item['assembly_group']
+        if line['destination'] != 'workshop':
+            if group:
+                other_destination_groups.add(group)
+            continue
+        tyre = line['id'].startswith('tyre:')
+        mounting_charge = any(service['code'] == 'mounting' for service in line['services'])
+        if not group:
+            if tyre and item['services'].get('mounting') and mounting_charge:
+                return True
+        else:
+            if tyre:
+                tyre_groups.add(group)
+            if mounting_charge:
+                mounted_groups.add(group)
+    return bool((tyre_groups & mounted_groups) - other_destination_groups)
 
 
 def _validate_snapshot(snapshot, expected_hash, customer_id, mode):
@@ -248,6 +286,10 @@ def init_schema(connection):
         BEFORE UPDATE OF customer_id,mode,idempotency_key,quote_hash,snapshot_json,delivery_context_json,
             amount_gross_cent,currency,quote_created_at,quote_expires_at,created_at
         ON shop_orders_v2 BEGIN SELECT RAISE(ABORT,'immutable_order'); END;
+        CREATE TABLE IF NOT EXISTS shop_order_appointment_requests_v2 (
+            order_id TEXT PRIMARY KEY REFERENCES shop_orders_v2(id),
+            requested_date TEXT NOT NULL, requested_time TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS shop_payment_attempts_v2 (
             id TEXT PRIMARY KEY, order_id TEXT NOT NULL UNIQUE REFERENCES shop_orders_v2(id),
             idempotency_key TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
@@ -352,22 +394,69 @@ class OrderStore:
                 raise OrderStoreError('quote_expired')
             return snapshot
 
-    def create_order(self, quote_hash, *, customer_id, mode, idempotency_key):
+    def _order_with_preference(self, db, row):
+        order = self._public_order(row)
+        wish = db.execute('''SELECT requested_date, requested_time FROM shop_order_appointment_requests_v2
+                             WHERE order_id=?''', (row['id'],)).fetchone()
+        if wish:
+            order['appointment_preference'] = {'date': wish['requested_date'], 'time': wish['requested_time'],
+                                               'status': 'requested'}
+        return order
+
+    def _replayed_order(self, db, idempotency_key, customer_id, mode, quote_hash, encoded, wish):
+        prior = db.execute('SELECT * FROM shop_orders_v2 WHERE idempotency_key=?', (idempotency_key,)).fetchone()
+        if prior is None:
+            return None
+        if (prior['customer_id'] != customer_id or prior['mode'] != mode
+                or prior['quote_hash'] != quote_hash or prior['snapshot_json'] != encoded):
+            raise OrderStoreError('idempotency_conflict')
+        order = self._order_with_preference(db, prior)
+        if wish is not None and order.get('appointment_preference') != {**wish, 'status': 'requested'}:
+            raise OrderStoreError('appointment_preference_conflict')
+        return order
+
+    def create_order(self, quote_hash, *, customer_id, mode, idempotency_key,
+                     appointment_preference=None, appointment_calendar=None):
         if not isinstance(idempotency_key, str) or not KEY.fullmatch(idempotency_key):
             raise OrderStoreError('invalid_idempotency_key')
+        calendar_error = None
+        if appointment_preference is not None:
+            if (not isinstance(appointment_preference, dict) or set(appointment_preference) != {'date', 'time'}
+                    or not isinstance(appointment_preference['date'], str)
+                    or not isinstance(appointment_preference['time'], str)
+                    or not re.fullmatch(r'(?:[01][0-9]|2[0-3]):00', appointment_preference['time'])):
+                raise OrderStoreError('invalid_appointment_preference')
+            with self._connection() as db:
+                snapshot, encoded, context_json, start, expiry = self._saved_quote(db, quote_hash, customer_id, mode)
+                prior = self._replayed_order(db, idempotency_key, customer_id, mode, quote_hash, encoded, appointment_preference)
+                if prior is not None:
+                    return prior
+                if not start <= self._now() < expiry:
+                    raise OrderStoreError('quote_expired')
+                delivery = json.loads(context_json)
+                if (not isinstance(delivery, dict) or delivery.get('workshop_delivery', 'collection') != 'collection'
+                        or not _workshop_tyre_mounting(snapshot)):
+                    raise OrderStoreError('appointment_not_eligible')
+            day, time = appointment_preference['date'], appointment_preference['time']
+            # The portal calendar may use a separate database. Wait for its
+            # answer without holding the shop lock; the preference is no hold.
+            try:
+                if time not in available_appointment_times(day, appointment_calendar):
+                    calendar_error = OrderStoreError('appointment_slot_unavailable')
+            except OrderStoreError as error:
+                calendar_error = error
         with self._connection(write=True) as db:
             snapshot, encoded, context_json, start, expiry = self._saved_quote(db, quote_hash, customer_id, mode)
-            prior = db.execute('SELECT * FROM shop_orders_v2 WHERE idempotency_key=?', (idempotency_key,)).fetchone()
+            prior = self._replayed_order(db, idempotency_key, customer_id, mode, quote_hash, encoded, appointment_preference)
             if prior is not None:
-                if (prior['customer_id'] != customer_id or prior['mode'] != mode
-                        or prior['quote_hash'] != quote_hash or prior['snapshot_json'] != encoded):
-                    raise OrderStoreError('idempotency_conflict')
-                return self._public_order(prior)
+                return prior
             if db.execute('SELECT 1 FROM shop_orders_v2 WHERE quote_hash=?', (quote_hash,)).fetchone():
                 raise OrderStoreError('quote_already_ordered')
             now = self._now()
             if not start <= now < expiry:
                 raise OrderStoreError('quote_expired')
+            if calendar_error is not None:
+                raise calendar_error
             order_id = 'sho_' + uuid4().hex
             db.execute('''INSERT INTO shop_orders_v2
                 (id,customer_id,mode,idempotency_key,quote_hash,snapshot_json,delivery_context_json,amount_gross_cent,
@@ -375,11 +464,14 @@ class OrderStore:
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft')''',
                 (order_id, customer_id, mode, idempotency_key, quote_hash, encoded, context_json,
                  snapshot['total_gross_cent'], 'eur', start.isoformat(), expiry.isoformat(), now.isoformat()))
-            return self._public_order(self._row(db, order_id, customer_id, mode))
+            if appointment_preference is not None:
+                db.execute('''INSERT INTO shop_order_appointment_requests_v2
+                              (order_id, requested_date, requested_time) VALUES (?,?,?)''', (order_id, day, time))
+            return self._order_with_preference(db, self._row(db, order_id, customer_id, mode))
 
     def get_order(self, order_id, *, customer_id, mode):
         with self._connection() as db:
-            return self._public_order(self._row(db, order_id, customer_id, mode))
+            return self._order_with_preference(db, self._row(db, order_id, customer_id, mode))
 
     def purchase_conversion(self, order_id, *, customer_id, mode):
         """Read verified sale evidence for this owner; never reconcile or pay."""

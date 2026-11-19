@@ -1,4 +1,5 @@
 {% set ist_reifenangebot = formdata.get('anliegen') == 'reifenangebot' or reifenangebot_gesendet %}
+{% set ist_reifentermin = ausgewaehltes_anliegen == 'reifenservice' and not gesendet %}
 {% set ist_probeauftrag = ausgewaehltes_anliegen == 'autohaus_probeauftrag' %}
 <!doctype html>
 {% from "_homepage_images.html" import image_attrs, image_preload %}
@@ -143,8 +144,9 @@
     .probeauftrag .hero { padding-block:30px 8px; }
     .probeauftrag .partner-login { display:inline-flex; align-items:center; min-height:44px; font-weight:650; text-underline-offset:.16em; }
   </style>
+  {% if ist_reifentermin %}<link rel="stylesheet" href="{{ url_for('static', filename='homepage/reifentermin.css') }}">{% endif %}
 </head>
-<body{% if ist_probeauftrag %} class="probeauftrag"{% endif %}>
+<body{% if ist_probeauftrag %} class="probeauftrag"{% elif ist_reifentermin %} class="reifentermin"{% endif %}>
   <header class="top">
     <nav class="wrap nav" aria-label="Navigation">
       <a class="brand" href="{{ url_for('oeffentliche_homepage') }}"><img {{ image_attrs('logo-transparent.png', sizes='104px', dimensions=true) }} alt="{{ werkstatt_oeffentlich.name }}" decoding="async"><span>{{ werkstatt_oeffentlich.name }}</span></a>
@@ -152,7 +154,7 @@
     </nav>
   </header>
   <main>
-    <section class="hero">
+    <section class="hero"{% if ist_reifentermin %} id="kurzanfrage"{% endif %}>
       <div class="wrap">
         {% if ist_probeauftrag %}
         <div class="eyebrow">Für Autohäuser &amp; Werkstätten</div>
@@ -165,9 +167,25 @@
         {% elif ausgewaehltes_anliegen == 'bremsenservice' or bremsen_gesendet %}
         <div class="time-pill">● Passende Teile vorbereiten</div><div class="eyebrow">Bremsenservice in Mosbach</div>
         <h1>Bremsenservice anfragen.</h1><p>Fahrzeug und FIN angeben, Achse und Teilequalität auswählen. Die Arbeiten und den Termin stimmen wir persönlich mit Ihnen ab.</p>
-        {% elif ausgewaehltes_anliegen == 'reifenservice' or reifen_gesendet %}
-        <div class="time-pill">● Freie Termine online</div><div class="eyebrow">Reifenservice in Mosbach</div>
-        <h1>Reifen-Termin jetzt buchen.</h1><p>Service wählen, freie Uhrzeit aussuchen und Termin reservieren. Fotos sind optional.</p>
+        {% elif ist_reifentermin %}
+        <h1>Ihr Reifentermin</h1>
+        <nav class="booking-paths" aria-label="Reifenservice auswählen">
+          <a class="booking-path" href="#terminbuchung" aria-current="page">
+            <strong>Werkstatttermin buchen</strong>
+            <span>Ich habe schon Reifen oder Räder.</span>
+          </a>
+          {% if formdata.get('service_context') or not (config.SHOP_FRONTEND_ENABLED and config.SHOP_ORDER_DRAFT_ENABLED and config.SHOP_CHECKOUT_ENABLED) %}
+          <a class="booking-path" href="{{ url_for('website_anfrage', anliegen='reifenangebot', service_context=formdata.get('service_context') or None) }}#kurzanfrage">
+            <strong>Neue Reifen anfragen</strong><span>Persönliches Angebot mit Montage.</span>
+          </a>
+          {% else %}
+          <a class="booking-path" href="{{ homepage_shop_links.reifen }}?montage=1">
+            <strong>Reifen mit Montage bestellen</strong><span>Im Shop Reifen und Wunschtermin wählen.</span>
+          </a>
+          {% endif %}
+        </nav>
+        {% elif reifen_gesendet %}
+        <h1>Ihr Reifentermin</h1>
         {% elif kurzanfrage and ausgewaehltes_anliegen in kurzanfrage_optionen %}
         <div class="time-pill">● Schnell &amp; unverbindlich</div>
         <div class="eyebrow">Ihre Anfrage direkt bei uns</div>
@@ -272,13 +290,13 @@
     </section>
     {% endif %}
 
-    {% if formdata.get('anliegen') in ['reifenservice', 'reifenangebot'] and not gesendet %}
+    {% if ist_reifenangebot and not gesendet %}
     <nav class="wrap tire-modes" aria-label="Reifenservice auswählen">
       <a class="tire-mode" href="{{ url_for('website_anfrage', anliegen='reifenangebot', service_context=formdata.get('service_context') or None) }}#kurzanfrage" {% if ist_reifenangebot %}aria-current="page"{% endif %}><strong>Reifen finden und bestellen</strong><span>Komplettpreis · Zahlung wählen · auf Wunsch mit Montage</span></a>
       <a class="tire-mode" href="{{ url_for('website_anfrage', anliegen='reifenservice', service_context=formdata.get('service_context') or None) }}#kurzanfrage" {% if not ist_reifenangebot %}aria-current="page"{% endif %}><strong>Werkstatttermin buchen</strong><span>Radwechsel, Montage oder Einlagerung · freie Uhrzeit wählen</span></a>
     </nav>
     {% endif %}
-    <section class="wrap layout" id="kurzanfrage" aria-label="Anfrageformular">
+    <section class="wrap layout" id="{{ 'terminbuchung' if ist_reifentermin else 'kurzanfrage' }}" aria-label="{{ 'Reifentermin buchen' if ist_reifentermin else 'Anfrageformular' }}">
       {% if gesendet %}
       {% if kundenlink and not ist_probeauftrag %}<p><a class="btn btn-primary" href="{{ kundenlink }}">Meine Anfrage und Angebote öffnen</a></p><p>Speichern Sie Ihren persönlichen Link. Falls Sie eine E-Mail-Adresse angegeben haben, versuchen wir, Ihnen den Link auch per E-Mail zu senden.</p>{% endif %}
         <div class="success" role="status">
@@ -288,6 +306,18 @@
           {% if ist_probeauftrag and kundenlink %}<p><a href="{{ kundenlink }}">Meine Anfrage und Angebote öffnen</a></p>{% endif %}
           <div class="success-actions"><a class="primary" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
         </div>
+      {% elif ist_reifentermin %}
+        <noscript>
+          <form class="booking-noscript" action="{{ url_for('website_anfrage') }}#terminbuchung" method="get">
+            <input type="hidden" name="anliegen" value="reifenservice">
+            {% if formdata.get('shop_leistung') %}<input type="hidden" name="shop_leistung" value="{{ formdata.shop_leistung }}">{% endif %}
+            {% if formdata.get('service_context') %}<input type="hidden" name="service_context" value="{{ formdata.service_context }}">{% endif %}
+            <label for="slot-datum">Freie Uhrzeiten für diesen Tag anzeigen</label>
+            <input id="slot-datum" name="wunschdatum" type="date" required min="{{ today_iso }}" value="{{ formdata.get('wunschdatum', '') }}">
+            <button class="button" type="submit">Uhrzeiten anzeigen</button>
+          </form>
+        </noscript>
+        {% include "_homepage_reifentermin_form.html" %}
       {% elif kurzanfrage and formdata.get('anliegen') in kurzanfrage_optionen %}
         {% if not ist_probeauftrag %}<aside class="info">
           <div class="eyebrow">Ganz einfach</div>
@@ -299,11 +329,6 @@
           <h2>Passende Teile. Klar abgestimmt.</h2>
           <p>Mit Ihrer FIN können wir die passenden Teile zuordnen.</p>
           <ul><li>FIN im Fahrzeugschein unter Feld E</li><li>Achse und Teilequalität auswählen</li><li>Wir stimmen den Termin persönlich ab</li></ul>
-          {% elif formdata.get('anliegen') == 'reifenservice' %}
-          <h2>Ihr nächster Reifentermin.</h2>
-          <button class="tire-price-open tire-price-desktop" type="button" data-tire-price-open aria-haspopup="dialog" aria-controls="reifenpreise">Preise</button>
-          <p>Wählen Sie die gewünschten Arbeiten und Ihren Wunschtermin.</p>
-          <ul><li>Radwechsel, Montage oder Einlagerung</li><li>Freies Datum und genaue Ankunftszeit</li><li>Telefonnummer für Rückfragen</li></ul>
           {% else %}
           <h2>Kurz schildern. Wir kümmern uns.</h2>
           <p>Sie müssen noch keine Versicherungsdaten, Termine oder langen Fahrzeugangaben zusammensuchen.{% if formdata.get('anliegen') == 'glasschaden' %} Für die eindeutige Scheibenzuordnung benötigen wir lediglich die FIN.{% endif %}</p>
@@ -321,14 +346,13 @@
           <input type="hidden" name="besichtigungsart" value="werkstatt">
           <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
           <h2>{% if ist_probeauftrag %}Angaben zum Probeauftrag{% elif ist_reifenangebot %}Welche Reifen suchen Sie?{% else %}{{ kurzanfrage_optionen[formdata.get('anliegen')]['label'] }}{% endif %}</h2>
-          {% if formdata.get('anliegen') == 'reifenservice' %}<button class="tire-price-open tire-price-mobile" type="button" data-tire-price-open aria-haspopup="dialog" aria-controls="reifenpreise">Preise</button>{% endif %}
-          <p class="form-intro">{% if ist_probeauftrag %}Für unsere Rückmeldung genügt eine Telefonnummer oder E-Mail-Adresse.{% elif ist_reifenangebot %}Reifendaten auswählen und Preise abrufen oder direkt ein persönliches Angebot anfragen. Dafür genügt auch ein Foto. Pflichtfelder sind mit * gekennzeichnet.{% elif formdata.get('anliegen') == 'bremsenservice' %}Fahrzeugdaten und gewünschte Arbeiten angeben. Wir melden uns persönlich.{% elif formdata.get('anliegen') == 'reifenservice' %}Gewünschte Arbeiten und eine freie Uhrzeit auswählen.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
+          <p class="form-intro">{% if ist_probeauftrag %}Für unsere Rückmeldung genügt eine Telefonnummer oder E-Mail-Adresse.{% elif ist_reifenangebot %}Reifendaten auswählen und Preise abrufen oder direkt ein persönliches Angebot anfragen. Dafür genügt auch ein Foto. Pflichtfelder sind mit * gekennzeichnet.{% elif formdata.get('anliegen') == 'bremsenservice' %}Fahrzeugdaten und gewünschte Arbeiten angeben. Wir melden uns persönlich.{% else %}Nur das Nötigste – in etwa einer Minute erledigt.{% endif %}</p>
           {% if errors %}<ul class="errors" role="alert">{% for error in errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
           <div class="grid">
             {% if not ist_reifenangebot %}
             {% if ist_probeauftrag %}<div class="field"><label for="betrieb">Autohaus oder Betrieb *</label><input id="betrieb" name="betrieb" autocomplete="organization" minlength="2" maxlength="160" value="{{ formdata.get('betrieb','') }}" required></div>{% endif %}
             <div class="field"><label for="name">{{ 'Ansprechperson' if ist_probeauftrag else 'Name' }} *</label><input id="name" name="name" maxlength="120" autocomplete="name" value="{{ formdata.get('name','') }}" required></div>
-            <div class="field"><label for="telefon">{% if formdata.get('anliegen') in ['reifenservice','bremsenservice'] %}Telefonnummer *{% else %}Telefon (optional){% endif %}</label><input id="telefon" name="telefon" maxlength="80" type="tel" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="z. B. 0171 1234567" {% if formdata.get('anliegen') in ['reifenservice','bremsenservice'] %}required{% endif %}><p class="hint">{% if ist_reifenangebot %}Für Rückfragen zu passenden Reifen.{% elif formdata.get('anliegen') == 'bremsenservice' %}Für Rückfragen und die persönliche Terminabstimmung.{% elif formdata.get('anliegen') == 'reifenservice' %}Für Rückfragen zu Ihrer Buchung.{% else %}Telefon oder E-Mail genügt.{% endif %}</p></div>
+            <div class="field"><label for="telefon">{% if formdata.get('anliegen') == 'bremsenservice' %}Telefonnummer *{% else %}Telefon (optional){% endif %}</label><input id="telefon" name="telefon" maxlength="80" type="tel" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="z. B. 0171 1234567" {% if formdata.get('anliegen') == 'bremsenservice' %}required{% endif %}><p class="hint">{% if ist_reifenangebot %}Für Rückfragen zu passenden Reifen.{% elif formdata.get('anliegen') == 'bremsenservice' %}Für Rückfragen und die persönliche Terminabstimmung.{% else %}Telefon oder E-Mail genügt.{% endif %}</p></div>
             <div class="field"><label for="email">E-Mail{% if ist_reifenangebot %} *{% endif %}</label><input id="email" name="email" maxlength="200" type="email" autocomplete="email" value="{{ formdata.get('email','') }}" {% if ist_reifenangebot %}required{% endif %}></div>
             {% if formdata.get('anliegen') != 'mietwagenanfrage' %}<div class="field"><label for="fahrzeug">Fahrzeug {% if formdata.get('anliegen') == 'bremsenservice' %}*{% else %}<span class="hint">(optional)</span>{% endif %}</label><input id="fahrzeug" name="fahrzeug" maxlength="160" placeholder="z. B. VW Golf 8" value="{{ formdata.get('fahrzeug','') }}" {% if formdata.get('anliegen') == 'bremsenservice' %}required{% endif %}></div>{% endif %}
             {% endif %}
@@ -367,12 +391,6 @@
               <p class="tire-search-status" data-tire-search-status role="status" aria-live="polite">Für die Preissuche sind noch keine Kontaktdaten nötig.</p>
               <div class="tire-search-results" data-tire-search-results></div>
             </section>
-            {% elif formdata.get('anliegen') == 'reifenservice' %}
-            <div class="field"><label for="kennzeichen">Kennzeichen <span class="hint">(optional)</span></label><input id="kennzeichen" name="kennzeichen" maxlength="30" placeholder="z. B. MOS AB 123" value="{{ formdata.get('kennzeichen','') }}"></div>
-            <fieldset><legend>Welche Reifenleistungen wünschen Sie? *</legend><div class="choice-grid">{% for key,label in reifen_leistungen.items() %}<label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}" {% if key in reifen_auswahl %}checked{% endif %}><span>{{ label }}</span></label>{% endfor %}</div><p class="hint">Mehrfachauswahl möglich. Reifengröße und Lagerwunsch können Sie unten ergänzen.</p></fieldset>
-            <div class="field"><label for="wunschdatum">Wunschdatum *</label><input id="wunschdatum" name="wunschdatum" type="date" min="{{ today_iso }}" value="{{ formdata.get('wunschdatum','') }}" required></div>
-            <div class="field"><label for="wunschzeit">Ankunftszeit *</label><select id="wunschzeit" name="wunschzeit" required><option value="">{% if formdata.get('wunschdatum') %}Freie Uhrzeit auswählen{% else %}Zuerst Datum auswählen{% endif %}</option>{% for zeit in reifen_slots %}<option value="{{ zeit }}" {% if formdata.get('wunschzeit') == zeit %}selected{% endif %}>{{ zeit }} Uhr</option>{% endfor %}</select><p class="hint" id="reifen-slot-hinweis" aria-live="polite">Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.</p></div>
-            <p class="hint field full">Wir reservieren einen Stundenblock mit Planungspuffer. Die Arbeitszeit kann je nach Fahrzeug und Leistungsumfang abweichen. Den genauen Leistungsumfang und mögliche Besonderheiten stimmen wir persönlich ab.</p>
             {% elif formdata.get('anliegen') == 'fahrzeugpflege' %}
             <fieldset>
               <legend>Welche Fahrzeugpflege wünschen Sie? *</legend>
@@ -424,7 +442,7 @@
             <div class="field"><label for="telefon">Telefon (optional)</label><input id="telefon" name="telefon" maxlength="80" type="tel" inputmode="tel" autocomplete="tel" value="{{ formdata.get('telefon','') }}" placeholder="Für Rückfragen"></div>
             <div class="field"><label for="fahrzeug">Fahrzeug (optional)</label><input id="fahrzeug" name="fahrzeug" maxlength="160" value="{{ formdata.get('fahrzeug','') }}" placeholder="z. B. VW Golf 8"></div>
             {% endif %}
-            <div class="field full"><label for="nachricht">{% if ist_reifenangebot %}Herstellerwunsch oder weitere Hinweise <span class="hint">(optional)</span>{% elif formdata.get('anliegen') == 'bremsenservice' %}Hinweise zu den Bremsen <span class="hint">(optional)</span>{% elif formdata.get('anliegen') == 'reifenservice' %}Reifengröße oder weitere Hinweise <span class="hint">(optional)</span>{% else %}{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *{% endif %}</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" {% if formdata.get('anliegen') not in ['reifenservice','reifenangebot','bremsenservice'] %}required{% endif %}>{{ formdata.get('nachricht','') }}</textarea></div>
+            <div class="field full"><label for="nachricht">{% if ist_reifenangebot %}Herstellerwunsch oder weitere Hinweise <span class="hint">(optional)</span>{% elif formdata.get('anliegen') == 'bremsenservice' %}Hinweise zu den Bremsen <span class="hint">(optional)</span>{% else %}{{ kurzanfrage_optionen[formdata.get('anliegen')]['frage'] }} *{% endif %}</label><textarea id="nachricht" name="nachricht" maxlength="2000" placeholder="{{ kurzanfrage_optionen[formdata.get('anliegen')]['placeholder'] }}" {% if formdata.get('anliegen') not in ['reifenangebot','bremsenservice'] %}required{% endif %}>{{ formdata.get('nachricht','') }}</textarea></div>
             <label class="upload-box" for="bilder">
               <span class="upload-icon" aria-hidden="true">＋📷</span>
               <span class="upload-copy"><strong>Bilder hinzufügen <span class="hint">(optional)</span></strong><span>Bis zu {{ bilder_max_anzahl }} Bilder · JPG, PNG, WebP oder HEIC · je max. {{ bilder_max_datei_mb }} MB, zusammen max. {{ bilder_max_gesamt_mb }} MB. Sie können die Anfrage auch ohne Bilder senden.</span></span>
@@ -433,7 +451,7 @@
             <div class="photo-preview" id="photo-preview" aria-live="polite"></div>
           </div>
           <p class="privacy">Wir verwenden Ihre Angaben und die optionalen Bilder ausschließlich zur Bearbeitung dieser Anfrage und zur persönlichen Kontaktaufnahme. Mehr dazu in der <a href="{{ url_for('datenschutz_seite') }}" target="_blank" rel="noopener">Datenschutzerklärung</a>.</p>
-          <button class="button" type="submit">{% if ist_probeauftrag %}Probeauftrag unverbindlich anfragen{% elif ist_reifenangebot %}Reifenangebot unverbindlich anfragen{% elif formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% elif formdata.get('anliegen') == 'reifenservice' %}Termin buchen{% elif formdata.get('anliegen') == 'bremsenservice' %}Anfrage senden{% else %}Kurzanfrage senden{% endif %}</button>
+          <button class="button" type="submit">{% if ist_probeauftrag %}Probeauftrag unverbindlich anfragen{% elif ist_reifenangebot %}Reifenangebot unverbindlich anfragen{% elif formdata.get('anliegen') == 'glasschaden' %}Glasschaden melden{% elif formdata.get('anliegen') == 'bremsenservice' %}Anfrage senden{% else %}Kurzanfrage senden{% endif %}</button>
         </form>
       {% elif not kurzanfrage %}
         {% set ausgewaehltes_anliegen = formdata.get('anliegen','allgemein') %}
@@ -485,7 +503,7 @@
   {% include "_besucher_tracking.html" %}
   {% if gesendet and ads_event %}<span hidden data-shop-lead-id="{{ ads_event.id }}" data-ads-event-kind="{{ ads_event.kind }}"></span><script src="{{ url_for('static', filename='shop_v2/conversions.js') }}" defer></script>{% endif %}
   <script src="{{ url_for('static', filename='homepage-anfrage-upload.js') }}" defer></script>
-  {% if not gesendet %}<script src="{{ url_for('static', filename='shop_v2/offer-request.js') }}" defer></script>{% endif %}
+  {% if not gesendet and not ist_reifentermin %}<script src="{{ url_for('static', filename='shop_v2/offer-request.js') }}" defer></script>{% endif %}
   {% if ist_reifenangebot and not gesendet %}<script src="{{ url_for('static', filename='homepage-reifen-suche.js') }}" defer></script>{% endif %}
   <script>
     (() => {
@@ -534,27 +552,31 @@
       const zeit = document.getElementById('wunschzeit');
       const hinweis = document.getElementById('reifen-slot-hinweis');
       if (!datum || !zeit || !hinweis) return;
+      const leistungen = [...document.querySelectorAll('.tire-booking-form [name="reifen_leistung"]')];
+      const pruefeLeistung = () => leistungen[0].setCustomValidity(
+        leistungen.some(feld => feld.checked) ? '' : 'Bitte wählen Sie mindestens eine Leistung.'
+      );
+      leistungen.forEach(feld => feld.addEventListener('change', pruefeLeistung));
+      pruefeLeistung();
+      const dauerHinweis = 'Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.';
       let abfrage = 0;
       datum.addEventListener('change', async () => {
         const nr = ++abfrage;
-        zeit.replaceChildren(new Option(datum.value ? 'Freie Zeiten werden geladen …' : 'Zuerst Datum auswählen', ''));
-        zeit.disabled = false;
+        zeit.replaceChildren(new Option(datum.value ? 'Zeiten laden …' : 'Erst Datum wählen', ''));
+        hinweis.textContent = dauerHinweis;
         if (!datum.value) return;
-        zeit.disabled = true;
         try {
           const antwort = await fetch({{ url_for('reifenservice_termine')|tojson }} + '?datum=' + encodeURIComponent(datum.value), {cache:'no-store'});
           if (!antwort.ok) throw new Error('Zeiten nicht verfügbar');
           const daten = await antwort.json();
           if (nr !== abfrage) return;
-          zeit.replaceChildren(new Option(daten.zeiten.length ? 'Freie Uhrzeit auswählen' : 'An diesem Tag keine freien Termine', ''));
+          zeit.replaceChildren(new Option(daten.zeiten.length ? 'Uhrzeit wählen' : 'Keine Zeit frei', ''));
           daten.zeiten.forEach(wert => zeit.add(new Option(wert + ' Uhr', wert)));
-          hinweis.textContent = daten.zeiten.length ? 'Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.' : 'Bitte einen anderen Tag wählen. Sonntag geschlossen.';
+          hinweis.textContent = daten.zeiten.length ? dauerHinweis : 'Bitte einen anderen Tag wählen. Sonntag geschlossen.';
         } catch (_fehler) {
           if (nr !== abfrage) return;
-          zeit.replaceChildren(new Option('Zeiten konnten nicht geladen werden', ''));
+          zeit.replaceChildren(new Option('Keine Auskunft', ''));
           hinweis.textContent = 'Bitte das Datum erneut wählen oder uns anrufen.';
-        } finally {
-          if (nr === abfrage) zeit.disabled = false;
         }
       });
     })();

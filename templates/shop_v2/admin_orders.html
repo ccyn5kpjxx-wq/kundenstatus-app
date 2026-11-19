@@ -37,6 +37,13 @@
     <div><div class="label">Zahlung</div><div class="value">{{ detail.payment }}</div>{% if detail.action %}<p>{{ detail.action }}</p>{% endif %}</div>
     <div><div class="label">Bearbeitung</div><div class="value">{{ detail.workflow }}</div><p>{{ detail.fulfillment }}</p>{% if detail.uncertain_positions %}<p class="warning">{{ detail.uncertain_positions }} Lieferantenantwort(en) ungeklärt</p>{% endif %}</div>
   </section>
+  {% if detail.appointment %}
+  <section class="card"><h2>Montagetermin angefragt</h2><strong>{{ detail.appointment }}</strong>
+    <p>Nach Klärung des Liefertermins die Verfügbarkeit prüfen und den Termin mit dem Kunden abstimmen.</p>
+    {% if detail.appointment_contact %}<p>{% for value in detail.appointment_contact.values() if value %}{{ value }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    <a href="/admin/reifentermine">Reifenkalender öffnen</a>
+  </section>
+  {% endif %}
   <section class="card"><h2>Bestellte Artikel und Leistungen</h2>
   {% if detail.snapshot_unavailable %}<p class="note warning">Die gespeicherten Artikeldaten konnten nicht sicher angezeigt werden. Bitte intern prüfen.</p>{% endif %}
   {% if detail.lines %}<div class="table-scroll"><table><thead><tr><th>Artikel</th><th>Anzahl</th><th>Stückpreis</th><th>Artikel gesamt</th><th>Warenweg</th></tr></thead><tbody>
@@ -81,7 +88,7 @@
   <p class="note">Diese Ansicht zeigt den gespeicherten Bearbeitungsstand. Sie löst keine Bestellung, Zahlung oder Nachricht aus.</p>
   <section class="card">
   {% if orders %}<div class="table-scroll"><table><thead><tr><th>Bestellung</th><th>Gesamt</th><th>Zahlung</th><th>Bearbeitung</th><th>Bestätigungen / Rechnung</th></tr></thead><tbody>
-    {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a><span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="money">{{ order.amount }}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span></td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
+    {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a><span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="money">{{ order.amount }}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">Montagetermin angefragt<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="empty muted">Noch keine Shopbestellungen auf dieser Seite.</p>{% endif %}
   <nav class="pagination" aria-label="Weitere Bestellungen"><span>{% if page>1 %}<a href="{{ url_for('shop_admin.orders',page=page-1,per_page=per_page) }}">← Neuere Bestellungen</a>{% endif %}</span><span class="muted small">Seite {{ page }}</span><span>{% if has_next %}<a href="{{ url_for('shop_admin.orders',page=page+1,per_page=per_page) }}">Ältere Bestellungen →</a>{% endif %}</span></nav>
   </section>

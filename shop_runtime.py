@@ -67,6 +67,7 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
         catalogue=catalogue, quote_service=quote_service,
         authorize_quote=authorize_quote, quote_context=quote_context,
         quote_sink=quote_sink, order_store=order_store,
+        appointment_calendar=getattr(portal, 'freie_reifen_slots', None),
         checkout_service=checkout_service, catalogue_warmup=catalogue_warmup))
     app.config['SHOP_FRONTEND_ENABLED'] = (app.config['SHOP_FRONTEND_ENABLED'] is True
                                           and app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'])

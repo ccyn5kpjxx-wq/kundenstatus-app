@@ -3221,6 +3221,9 @@ def restrict_public_site_service():
                             "shop_public_v2.complete_wheel_price"} and request.method == "GET":
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {
+            "reifenservice_termine", "shop_public_v2.appointment_slots"} and request.method == "GET":
+        return None
+    if not PUBLIC_SITE_ONLY and request.endpoint in {
             "shop_public_v2.cart_quote", "shop_public_v2.create_order_draft",
             "shop_public_v2.order_status", "shop_public_v2.order_measurement", "shop_public_v2.start_checkout", "shop_public_v2.stripe_webhook",
             "shop_buyer_v2.session_state", "shop_buyer_v2.address", "shop_buyer_v2.sign_out",
@@ -46867,10 +46870,14 @@ def website_anfrage():
     ))
     service_key = request.args.get("shop_leistung")
     service = selected_workshop_service(service_key, vorauswahl)
+    slot_datum = request.args.get("wunschdatum", "") if vorauswahl == "reifenservice" else ""
+    if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", slot_datum):
+        slot_datum = ""
     if service and service.intent == "mechanikanfrage" and service.option and not mechanik_vorauswahl:
         mechanik_vorauswahl = [service.option]
     return render_website_anfrage(
         formdata={"anliegen": vorauswahl, "besichtigungsart": besichtigungsart,
+                  "wunschdatum": slot_datum,
                   "shop_leistung": service_key if service else "",
                   "reifen_leistung": [service.option] if service and service.intent == "reifenservice" else [],
                   "mechanik_kategorie": mechanik_vorauswahl,

@@ -9,7 +9,7 @@ import re
 from urllib.parse import urlsplit
 
 from flask import Blueprint, current_app, request, Response
-from shop_order_store import OrderStoreError
+from shop_order_store import OrderStoreError, available_appointment_times
 
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
                          'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete',
@@ -19,7 +19,7 @@ MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024
 
 
-def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None, catalogue_warmup=None):
+def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authorize_quote=None, quote_context=None, quote_sink=None, order_store=None, checkout_service=None, catalogue_warmup=None, appointment_calendar=None):
     """Return an unregistered blueprint; all features default off.
 
     ``authorize_quote(request)`` must verify the host session and CSRF token and
@@ -295,6 +295,18 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
     def orders_enabled():
         return catalogue_enabled() and current_app.config.get('SHOP_ORDER_DRAFT_ENABLED') is True
 
+    @bp.get('/appointment-slots')
+    def appointment_slots():
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if set(request.args) != {'datum'} or len(request.args.getlist('datum')) != 1:
+            return reply({'error': 'invalid_appointment_preference'}, 400)
+        try:
+            times = available_appointment_times(request.args['datum'], appointment_calendar)
+            return reply({'zeiten': times})
+        except OrderStoreError as error:
+            return reply({'error': error.code}, 400 if error.code == 'invalid_appointment_preference' else 503)
+
     def checkout_enabled():
         return orders_enabled() and current_app.config.get('SHOP_CHECKOUT_ENABLED') is True
 
@@ -315,7 +327,11 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
     def public_order(row):
         fields = ('id', 'mode', 'quote_hash', 'amount_gross_cent', 'currency',
                   'created_at', 'quote_expires_at', 'status')
-        return {key: row[key] for key in fields}
+        result = {key: row[key] for key in fields}
+        wish = row.get('appointment_preference')
+        if wish:
+            result['appointment_preference'] = {key: wish[key] for key in ('date', 'time', 'status')}
+        return result
 
     @bp.post('/orders')
     def create_order_draft():
@@ -329,7 +345,7 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'order_unavailable'}, 503)
         try:
             payload = json_payload()
-            if (set(payload) != {'quote_hash', 'idempotency_key'}
+            if (not {'quote_hash', 'idempotency_key'} <= set(payload) <= {'quote_hash', 'idempotency_key', 'appointment_preference'}
                     or not isinstance(payload['quote_hash'], str)
                     or not re.fullmatch(r'[a-f0-9]{64}', payload['quote_hash'])
                     or not isinstance(payload['idempotency_key'], str)
@@ -338,11 +354,23 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except (ValueError, UnicodeError, RecursionError):
             return reply({'error': 'invalid_request'}, 400)
         try:
+            options = {}
+            if 'appointment_preference' in payload:
+                if payload['appointment_preference'] is None:
+                    return reply({'error': 'invalid_appointment_preference'}, 400)
+                options = {'appointment_preference': payload['appointment_preference'],
+                           'appointment_calendar': appointment_calendar}
             order = order_store.create_order(payload['quote_hash'], customer_id=principal,
-                mode=mode, idempotency_key=payload['idempotency_key'])
+                mode=mode, idempotency_key=payload['idempotency_key'], **options)
             return reply({'order': public_order(order), 'payment_enabled': payment_available(),
                           'supplier_order_created': False})
         except OrderStoreError as error:
+            if error.code in {'appointment_not_eligible', 'invalid_appointment_preference'}:
+                return reply({'error': error.code}, 400)
+            if error.code in {'appointment_slot_unavailable', 'appointment_preference_conflict'}:
+                return reply({'error': error.code}, 409)
+            if error.code == 'appointment_service_unavailable':
+                return reply({'error': error.code}, 503)
             if error.code in {'idempotency_conflict', 'quote_already_ordered', 'quote_not_found',
                               'quote_expired', 'quote_expired_or_order_closed'}:
                 return reply({'error': 'quote_unavailable'}, 409)

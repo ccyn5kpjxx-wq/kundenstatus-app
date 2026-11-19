@@ -21,3 +21,12 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
   .shop-detail-grid:has(.shop-rim-details) .shop-thumbnails img {max-height: 36px;}
   .shop-detail-grid:has(.shop-rim-details) .shop-bundle-panel {padding-top: 12px;}
 }
+
+.shop-cart-appointment,.shop-montage-entry{min-inline-size:0;margin:20px 0;padding:18px 20px;border:1px solid #c5d0d6;border-radius:8px;background:#f5f8f9}
+.shop-cart-appointment legend{padding:0 4px;font-size:18px;font-weight:700}.shop-montage-entry label{font-weight:700}
+.shop-cart-appointment p,.shop-montage-entry p{margin:8px 0 0}.shop-cart-appointment p:empty{display:none}
+.shop-appointment-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.shop-appointment-fields label{display:grid;gap:6px;font-size:14px;font-weight:600}
+.shop-appointment-fields input,.shop-appointment-fields select{box-sizing:border-box;min-width:0;width:100%;min-height:44px;padding:8px;border:1px solid #879aa6;border-radius:4px;background:#fff;color:#203541;font:inherit}
+.shop-cart-appointment[hidden],.shop-appointment-fields[hidden],.shop-cart-appointment button[hidden]{display:none}
+@media(max-width:480px){.shop-appointment-fields{grid-template-columns:1fr}.shop-cart-appointment,.shop-montage-entry{padding:14px}}
