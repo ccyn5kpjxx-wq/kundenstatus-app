@@ -21,7 +21,7 @@ from mos_public_contract import signed_payload
 from mos_handover import init_schema as init_handover_schema, existing as existing_handover, record as record_handover
 from mos_return import (init_schema as init_return_schema, deposit_release_eligible,
                         record as record_return, record_clearance,
-                        record_vehicle_readiness,
+                        record_vehicle_readiness, record_onsite_repayment,
                         release_review_deadline)
 from mos_order_receipt import init_schema as init_order_receipt_schema, enqueue as enqueue_order_receipt
 from mos_contract_delivery import _single_address
@@ -153,7 +153,7 @@ def default_end_slot(slots, max_days):
 def booking_selection(values):
     """Keep only public booking fields when redisplaying a failed selection."""
     selected={key:str(values.get(key,'') or '').strip()[:40]
-              for key in ('vehicle','start_date','start_time','end_date','end_time') if key in values}
+              for key in ('vehicle','start_date','start_time','end_date','end_time','payment_method') if key in values}
     for name in ('start','end'):
         if name+'_date' not in selected and values.get(name):
             try:
@@ -438,8 +438,10 @@ def register(portal):
             app.logger.exception('MOS Kartenreservierung/Checkout nach Terminschließung muss geprüft werden')
         return render_status(hold_id,'Der Übergabetermin ist nicht mehr geöffnet. Bitte neu buchen.'),409
 
-    def quote(slug,start,end):
+    def quote(slug,start,end,payment_method='online'):
         state=setup();cfg=state['cfg']
+        if payment_method not in ('online','onsite'):
+            raise ValueError('Bitte Onlinezahlung oder Zahlung vor Ort wählen.')
         if slug not in cfg['fleet']:
             raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
         db=portal.get_db()
@@ -469,18 +471,22 @@ def register(portal):
         except Exception:
             db.rollback();raise
         finally:db.close()
-        deposit_method=(cfg['long_rental_deposit_method'] if days>5 and cfg.get('long_rental_deposit_method')
-                        else cfg.get('deposit_method',''))
+        onsite=payment_method=='onsite'
+        long_deposit=not onsite and days>5 and cfg.get('long_rental_deposit_method')
+        if onsite:
+            deposit_method='pay_at_pickup'
+        else:
+            deposit_method=long_deposit or cfg.get('deposit_method','')
         authorization=deposit_method=='card_authorization_at_booking'
-        charged=(deposit_method=='charge_with_rent_refund_after_return'
-                 or (cfg['mode'] in {'live','stripe_test'} and not authorization))
+        charged=not onsite and (deposit_method=='charge_with_rent_refund_after_return'
+                                or (cfg['mode'] in {'live','stripe_test'} and not authorization))
         quoted={'slug':slug,'vehicle_id':f['id'],'vehicle_name':LISTINGS[slug],
             'portal_vehicle_name':vehicle['bezeichnung'],
             'vehicle_plate':vehicle['kennzeichen'] or '', 'vehicle_vin':vehicle['fin_nummer'] or '',
             'start_slot':start,'end_slot':end,
             'slot_policy':'db_open_slots_v1',
             'days':days,'daily_cents':rate,'rental_cents':days*rate,
-            'amount_cents':days*rate+(50000 if charged else 0),'currency':'eur',
+            'amount_cents':0 if onsite else days*rate+(50000 if charged else 0),'currency':'eur',
             'deposit_charged_cents':50000 if charged else 0,
             'deposit_authorized_cents':50000 if authorization else 0,
             'deposit_method':deposit_method,
@@ -493,12 +499,26 @@ def register(portal):
             'lessor_email':cfg.get('merchant_email',''),'lessor_phone':cfg.get('merchant_phone','')}
         if cfg.get('cancellation_policy'):
             quoted['cancellation_policy']=cfg['cancellation_policy']
-        if days>5 and cfg.get('long_rental_deposit_method'):
+        if long_deposit:
             quoted['long_rental_deposit_policy']='paid_at_booking_v1'
         if authorization and cfg.get('deposit_timing')=='before_pickup':
             quoted['deposit_timing']='before_pickup'
             if cfg.get('deposit_authorization_mode')=='extended_if_available':
                 quoted['deposit_authorization_mode']='extended_if_available'
+        if onsite:
+            quoted['payment_method']='onsite'
+            quoted['rules_version']=cfg['terms_version']+' + Vor-Ort-Zahlung v1'
+            quoted['terms_text'] = (
+                'Zusatzvereinbarung zur Vor-Ort-Zahlung (Fassung 1)\n'
+                'Für diese Buchung gelten folgende vorrangige Regelungen: Mit der Schaltfläche '
+                'zur zahlungspflichtigen Bestellung gibst du eine verbindliche Bestellung ab. '
+                'Wir nehmen sie mit der Buchungsbestätigung an. Online werden weder eine Zahlung '
+                'noch eine Kartenautorisierung verlangt. Den vereinbarten Mietpreis und die '
+                'rückzahlbare Kaution von 500 € bezahlst du bei Abholung vor der Fahrzeugübergabe. '
+                'Nach ordnungsgemäßer Rückgabe wird die Kaution nach den vereinbarten Bedingungen '
+                'zurückgezahlt. Diese Vereinbarung geht entgegenstehenden Regelungen zum '
+                'Vertragsschluss, zur Onlinezahlung und zur Kartenreservierung vor. '
+                'Im Übrigen gelten die folgenden Mietbedingungen.\n\n' + quoted['terms_text'])
         return quoted
 
     def owned(hold_id,deposit_access=False):
@@ -574,13 +594,21 @@ def register(portal):
             raise ValueError('Unterschrift nach der Reservierung geändert. Bitte neue Preisübersicht öffnen.')
         return retry(h['id'])
 
-    def account(hold_id):
+    def account(hold_id, *, onsite=False):
         db=portal.get_db()
         try:
             c=db.execute('SELECT * FROM miet_checkout_cancellations WHERE id=?',(hold_id,)).fetchone()
-            refunds=db.execute('SELECT * FROM miet_checkout_refunds WHERE hold_id=? ORDER BY created_at',(hold_id,)).fetchall()
-            review=db.execute('SELECT * FROM miet_checkout_review_refunds WHERE hold_id=?',(hold_id,)).fetchone()
+            if onsite:
+                payment=db.execute('SELECT * FROM miet_checkout_onsite_payments WHERE hold_id=?',(hold_id,)).fetchone()
+                repayment=db.execute('SELECT * FROM miet_checkout_onsite_repayments WHERE hold_id=?',(hold_id,)).fetchone()
+                refunds,review=[],None
+            else:
+                refunds=db.execute('SELECT * FROM miet_checkout_refunds WHERE hold_id=? ORDER BY created_at',(hold_id,)).fetchall()
+                review=db.execute('SELECT * FROM miet_checkout_review_refunds WHERE hold_id=?',(hold_id,)).fetchone()
+                payment=repayment=None
             return {'cancellation':dict(c) if c else None,'refunds':[dict(r) for r in refunds],
+                    'onsite_payment':dict(payment) if payment else None,
+                    'onsite_repayment':dict(repayment) if repayment else None,
                     'review_refund':dict(review) if review else None}
         finally:db.close()
 
@@ -594,7 +622,11 @@ def register(portal):
         text+='\nReferenz: '+h['id']+'\n'+q['vehicle_name']+'\n'+q['start_slot']+' bis '+q['end_slot']
         text+='\nMieter: '+p['customer']['name']+'\nE-Mail: '+p['customer']['email']
         text+=f"\nMiete: {q.get('rental_cents',q['amount_cents'])/100:.2f} EUR inkl. MwSt."
-        if q.get('deposit_authorized_cents'):
+        if q.get('payment_method') == 'onsite':
+            text+='\nZahlungsart: vor Ort bei Abholung.\nBei der Onlinebuchung gezahlt: 0,00 EUR.'
+            text+=f"\nRückzahlbare Kaution: {q['deposit_cents']/100:.2f} EUR."
+            text+=f"\nBei Übergabe vereinbarter Gesamtbetrag: {(q['rental_cents']+q['deposit_cents'])/100:.2f} EUR."
+        elif q.get('deposit_authorized_cents'):
             if deferred_deposit_quote(q):
                 text+=f"\nKaution separat vor Abholung auf Kreditkarte zu reservieren, nicht abgebucht: {q['deposit_authorized_cents']/100:.2f} EUR"
             else:
@@ -630,8 +662,9 @@ def register(portal):
         h,p=owned(hold_id)
         if request.form.get('confirm')!='yes':raise ValueError('Stornierung bitte ausdrücklich bestätigen.')
         rid=setup()['ledger'].cancel(hold_id)
-        try:setup()['ledger'].process(rid)
-        except Exception:pass  # Durable queued operation remains visible to admin/customer.
+        if rid:
+            try:setup()['ledger'].process(rid)
+            except Exception:pass  # Durable queued operation remains visible to admin/customer.
         if p['quote'].get('deposit_authorized_cents'):
             try:setup()['service'].release_deposit(hold_id,'Kundenstorno')
             except Exception:app.logger.exception('MOS Kartenreservierung nach Storno noch offen')
@@ -679,7 +712,8 @@ def register(portal):
             closed_slots=listed_slots(db,False)
         finally:db.close()
         for h in holds:
-            h['q']=json.loads(h['payload'])['quote'];h['account']=account(h['id'])
+            h['q']=json.loads(h['payload'])['quote']
+            h['account']=account(h['id'], onsite=h['q'].get('payment_method')=='onsite')
             h['order_receipt_open_minutes']=None
             h['order_receipt_delay_seconds']=None
             if h['order_receipt_enqueued_at']:
@@ -836,13 +870,16 @@ def register(portal):
                       ('receipt_confirmed','license_checked','fuel_full','condition_recorded')}
         if not all(attestations.values()):
             raise ValueError('Alle Übergabeprüfungen müssen ausdrücklich bestätigt werden.')
-        from mietwagen_checkout import is_long_rental_paid_deposit
+        from mietwagen_checkout import is_long_rental_paid_deposit, is_onsite_quote
         paid_deposit=is_long_rental_paid_deposit(q)
         payment_evidence=(state['service'].verify_charged_deposit(hold_id) if paid_deposit else None)
-        intent=(None if paid_deposit else state['service'].reconcile_deposit(hold_id))
+        intent=(None if paid_deposit or is_onsite_quote(q) else state['service'].reconcile_deposit(hold_id))
         with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
             record_handover(db,state['service'],hold_id,intent,
                             payment_evidence=payment_evidence,
+                            onsite_rent_received=request.form.get('onsite_rent_received')=='yes',
+                            onsite_deposit_received=request.form.get('onsite_deposit_received')=='yes',
+                            onsite_receipt_ref=request.form.get('onsite_receipt_ref',''),
                             operator_name=request.form.get('operator_name',''),
                             odometer_km=odometer,protocol_ref=request.form.get('protocol_ref',''),
                             **attestations)
@@ -895,7 +932,7 @@ def register(portal):
                 fuel_resolved=request.form.get('fuel_resolved')=='yes',
                 damage_resolved=request.form.get('damage_resolved')=='yes',
                 time_km_resolved=request.form.get('time_km_resolved')=='yes')
-        portal.flash('Nachträgliche Klärung getrennt vom ursprünglichen Rückgabeprotokoll dokumentiert. Kartenfreigabe bei noch bestehender Autorisierung separat ausführen.','success')
+        portal.flash('Nachträgliche Klärung getrennt vom ursprünglichen Rückgabeprotokoll dokumentiert. Kaution gemäß vereinbarter Zahlungsart abwickeln.','success')
         return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
 
     @bp.post('/admin/<hold_id>/fahrzeug-freigeben')
@@ -927,6 +964,19 @@ def register(portal):
         h=state['service'].read(hold_id)
         q=json.loads(h['payload'])['quote']
         if not reason:raise ValueError('Begründung/Prüfvermerk erforderlich.')
+        from mietwagen_checkout import is_onsite_quote
+        onsite=is_onsite_quote(q)
+        if onsite and action not in ('cancel','credit','onsite_repayment'):
+            raise ValueError('Für diese Vor-Ort-Buchung ist keine Online-Zahlungsaktion vorgesehen.')
+        if action=='onsite_repayment':
+            if not onsite or state['cfg']['mode']!='live' or not portal.USE_POSTGRES:
+                raise ValueError('Auszahlungen nur bei echten Vor-Ort-Buchungen dokumentieren.')
+            with state['service'].locked(h['mietfahrzeug_id']) as (db,_):
+                record_onsite_repayment(db,hold_id,
+                    confirmed=request.form.get('repaid')=='yes',
+                    operator_name=request.form.get('operator_name',''),receipt_ref=reason)
+            portal.flash('Auszahlung der Kaution dokumentiert.','success')
+            return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
         if action=='cancel':
             no_show=request.form.get('no_show')=='yes'
             contact_time=(datetime.fromisoformat(local_slot_to_iso(
@@ -973,6 +1023,8 @@ def register(portal):
             state['service'].cancel_or_reconcile(hold_id)
             return redirect(url_for('mos_public.admin_bookings'),code=303)
         else:abort(400)
+        if rid is None:
+            return redirect(url_for('mos_public.admin_bookings',hold_id=hold_id)+'#hold-'+hold_id,code=303)
         try:state['ledger'].process(rid)
         except Exception:
             portal.flash('Erstattungsauftrag gespeichert; Providerstatus unklar. Dieselbe Referenz erneut prüfen, keinen neuen Auftrag erzeugen.','warning')
@@ -1210,22 +1262,26 @@ def register(portal):
     @bp.post('/quote')
     def preview():
         prefill={}
+        payment_method=request.form.get('payment_method','online')
         try:
             if 'handoff_nonce' in request.form:
                 mos_site_handoff.consume_nonce(session,request.form.get('handoff_nonce'))
                 prefill=mos_site_handoff.validated_prefill(request.form,setup()['cfg'])
-                q=quote(prefill['vehicle'],prefill['start'],prefill['end'])
+                q=quote(prefill['vehicle'],prefill['start'],prefill['end'],payment_method)
             else:
                 def form_slot(name):
                     if name+'_date' in request.form or name+'_time' in request.form:
                         return local_slot_to_iso(request.form.get(name+'_date','')+'T'+request.form.get(name+'_time',''),require_future=False)
                     return request.form.get(name)
-                q=quote(request.form.get('vehicle'),form_slot('start'),form_slot('end'))
+                q=quote(request.form.get('vehicle'),form_slot('start'),form_slot('end'),payment_method)
         except ValueError as error:
             return render_index(booking_selection(request.form),error=str(error),
                                 status=400 if 'handoff_nonce' in request.form else 409)
         token=serializer().dumps({'quote':q,'nonce':secrets.token_urlsafe(20)})
-        change_url=url_for('mos_public.index',**booking_selection({'vehicle':q['slug'],'start':q['start_slot'],'end':q['end_slot']}))
+        selection=booking_selection({'vehicle':q['slug'],'start':q['start_slot'],'end':q['end_slot']})
+        if payment_method=='onsite':
+            selection['payment_method']=payment_method
+        change_url=url_for('mos_public.index',**selection)
         return render_template('mos_public/quote.html',q=q,token=token,prefill=prefill,change_url=change_url)
 
     @bp.get('/start')
@@ -1245,18 +1301,21 @@ def register(portal):
         except BadSignature:raise ValueError('Preisübersicht abgelaufen oder ungültig. Bitte neu prüfen.')
         q=data['quote']
         if q['owner_hash']!=owner():abort(404)
+        payment_method=q.get('payment_method','online')
+        if request.form.get('payment_method',payment_method)!=payment_method:
+            raise ValueError('Die Zahlungsart wurde geändert. Bitte die Preisübersicht erneut öffnen.')
         state=setup();key=hashlib.sha256((owner()+token).encode()).hexdigest()
         customer={'name':request.form.get('name','').strip(),'email':request.form.get('email','').strip(),'telefon':''}
         if (not customer['name'] or len(customer['name'])>150 or len(customer['email'])>254
                 or not _single_address(customer['email'])):
             raise ValueError('Bitte gültigen Namen und E-Mail angeben.')
         if request.form.get('sign_confirm')!='yes':
-            raise ValueError('Bitte den Vertrag vor der Zahlung ausdrücklich unterschreiben.')
+            raise ValueError('Bitte den Vertrag vor der Bestellung ausdrücklich unterschreiben.')
         # A repeated POST retries the same immutable hold, even though it now occupies the period.
         signature_data=request.form.get('signature_data','')
         existing=retry_existing_checkout(key,customer,signature_data)
         if existing is not None:return existing
-        try:current_quote=quote(q['slug'],q['start_slot'],q['end_slot'])
+        try:current_quote=quote(q['slug'],q['start_slot'],q['end_slot'],payment_method)
         except ValueError:
             existing=retry_existing_checkout(key,customer,signature_data)
             if existing is not None:return existing
@@ -1380,8 +1439,10 @@ def register(portal):
     def render_status(hold_id,error=None):
         h,p=owned(hold_id,deposit_access=True)
         deferred=deferred_deposit_quote(p['quote'])
-        try:setup()['service'].cancel_or_reconcile(hold_id)
-        except Exception:pass
+        onsite=p['quote'].get('payment_method') == 'onsite'
+        if not onsite:
+            try:setup()['service'].cancel_or_reconcile(hold_id)
+            except Exception:pass
         h,_=owned(hold_id,deposit_access=True)
         deposit=None
         if p['quote'].get('deposit_authorized_cents'):
@@ -1404,12 +1465,12 @@ def register(portal):
             current_card_state=deposit_state(hold_id)
             if current_card_state in {'released','releasing','review'}:
                 deposit={'status':current_card_state,'ready':False}
-        acc=account(hold_id)
-        if h['status']=='confirmed':
+        acc=account(hold_id, onsite=onsite)
+        if h['status']=='confirmed' or (onsite and acc.get('cancellation')):
             try:finalize_contract(portal,hold_id)
             except Exception:
                 app.logger.exception('MOS Vertrags-PDF konnte nicht abgeschlossen werden')
-                error=error or 'Zahlung bestätigt; die Vertragskopie wird noch erstellt. Bitte aktualisiere den Status.'
+                error=error or 'Die Vertragskopie wird noch erstellt. Bitte aktualisiere den Status.'
         db=portal.get_db()
         try:
             signed=read_contract(db,hold_id)

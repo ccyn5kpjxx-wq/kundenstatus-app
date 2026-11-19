@@ -1,4 +1,4 @@
-"""Customer signs the booked terms before Checkout; verified payment freezes the PDF."""
+"""Preserve the signed offer and freeze its PDF when the rental is confirmed."""
 
 from base64 import b64decode, b64encode
 from datetime import datetime, timezone
@@ -46,6 +46,9 @@ def snapshot(payload):
     q, customer = payload['quote'], payload['customer']
     if q.get('accepted_terms') is not True:
         raise ValueError('Die Mietbedingungen wurden bei der Buchung nicht bestätigt.')
+    if q.get('payment_method') == 'onsite' or q.get('deposit_method') == 'pay_at_pickup':
+        from mietwagen_checkout import validate_onsite_quote
+        validate_onsite_quote(q)
     if q.get('lessor_name', LESSOR_NAME) != LESSOR_NAME or q.get('lessor_address', LESSOR_ADDRESS) != LESSOR_ADDRESS:
         raise ValueError('Die Vertragspartei der Buchung muss geprüft werden.')
     if q.get('deposit_authorized_cents', 0) and (
@@ -90,7 +93,7 @@ def snapshot(payload):
     }
     # Preserve hashes of already signed contracts. New deposit/cancellation
     # fields are signed only when they were present in the displayed quote.
-    for key in ('deposit_authorized_cents', 'deposit_method', 'deposit_timing',
+    for key in ('payment_method', 'deposit_authorized_cents', 'deposit_method', 'deposit_timing',
                 'deposit_authorization_mode', 'long_rental_deposit_policy', 'cancellation_policy'):
         if key in q:
             contract[key] = q[key]
@@ -155,7 +158,7 @@ def _slot(value):
 
 
 def render_pdf(contract, signed_at, signature, document_hash, signature_record_hash, reference):
-    """Render once after verified payment; keep the exact PDF bytes in the DB."""
+    """Render the confirmed contract once and keep its exact PDF bytes in the DB."""
     from reportlab.lib.pagesizes import A4
 
     output = BytesIO()
@@ -202,7 +205,15 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
         ('Mietdauer / Tagessatz', f"{contract['days']} Miettag(e) / {_eur(contract['daily_cents'])}"),
         ('Mietpreis inkl. MwSt.', _eur(contract['rental_cents'])),
     ]
-    if contract.get('deposit_authorized_cents', 0):
+    onsite = contract.get('payment_method') == 'onsite'
+    if onsite:
+        rows += [
+            ('Zahlungsart', 'Vor Ort bei Abholung'),
+            ('Rückzahlbare Kaution', _eur(contract['deposit_cents'])),
+            ('Bei Buchung online gezahlt', _eur(0)),
+            ('Bei Übergabe fällig', _eur(contract['rental_cents'] + contract['deposit_cents'])),
+        ]
+    elif contract.get('deposit_authorized_cents', 0):
         deferred = contract.get('deposit_timing') == 'before_pickup'
         rows += [
             ('Kaution vor Abholung online reservieren' if deferred else 'Kaution auf Kreditkarte reserviert',
@@ -259,8 +270,10 @@ def render_pdf(contract, signed_at, signature, document_hash, signature_record_h
     rendered_height = rendered_width * sig_height / sig_width
     story.append(KeepTogether([
         para('Digitale Unterschrift des Mieters', 'MOSSection'),
-        para('Der Mieter hat die angezeigten Vertragsbedingungen vor der Zahlung mit Maus oder Finger unterschrieben. '
-             'Die Buchungsbestätigung dokumentiert die anschließende Zahlung. '
+        para(('Der Mieter hat die angezeigten Vertragsbedingungen vor der verbindlichen Buchung mit Maus oder Finger unterschrieben. '
+              'Mietpreis und Kaution werden bei der Übergabe fällig. ' if onsite else
+              'Der Mieter hat die angezeigten Vertragsbedingungen vor der Zahlung mit Maus oder Finger unterschrieben. '
+              'Die Buchungsbestätigung dokumentiert die anschließende Zahlung. ') +
              'Diese einfache elektronische Unterschrift ist keine qualifizierte elektronische Signatur.', 'MOSSmall'),
         Image(BytesIO(signature), width=rendered_width, height=rendered_height),
         para(contract['customer_name'] + ' · ' + local_time, 'MOSSmall'),
@@ -319,7 +332,7 @@ def signed_payload(payload):
 
 
 def finalize(portal, hold_id):
-    """A paid, confirmed hold gets exactly one immutable copy of its pre-signed terms."""
+    """A confirmed rental gets exactly one immutable copy of its pre-signed terms."""
     db = portal.get_db()
     try:
         if not portal.USE_POSTGRES:
@@ -335,9 +348,11 @@ def finalize(portal, hold_id):
             enqueue(db, hold, json.loads(existing['contract_json']), existing['pdf_sha256'])
             db.commit()
             return existing
-        if hold['status'] != 'confirmed' or not hold['mietvorgang_id'] or not hold['payment_intent']:
-            return None
         payload = json.loads(hold['payload'])
+        from mos_contract_delivery import confirmed_order
+        if not hold['mietvorgang_id'] or not confirmed_order(
+                hold['status'], hold['payment_intent'], payload['quote'], hold.get('grund') == 'onsite_cancelled'):
+            return None
         if not payload['quote'].get('signature_png_base64'):
             return None  # Historic in-flight holds are not reinterpreted as pre-signed.
         contract, digest, signature = signed_payload(payload)

@@ -35,7 +35,8 @@
   {% set paid_long = q is defined and q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
   <div class="portal-progress">
     <ol class="portal-shell portal-steps" aria-label="Buchungsfortschritt">
-      {% for label in ['Auswahl', 'Preis & Vertrag', 'Miete und Kaution bezahlen' if paid_long else 'Zahlung', 'Bestätigung'] %}
+      {% set onsite = q is defined and q.payment_method|default('online') == 'onsite' %}
+      {% for label in ['Auswahl', 'Preis & Vertrag', 'Bestellung' if onsite else 'Miete und Kaution bezahlen' if paid_long else 'Zahlung', 'Bestätigung'] %}
       <li class="{{ 'is-current' if loop.index == booking_stage else 'is-done' if loop.index < booking_stage else 'is-next' }}"{% if loop.index == booking_stage %} aria-current="step"{% endif %}>
         <span class="portal-step-marker" aria-hidden="true">{% if loop.index < booking_stage %}<svg viewBox="0 0 16 16"><path d="m3 8 3 3 7-7"/></svg>{% else %}{{ loop.index }}{% endif %}</span>
         <span class="portal-step-name">{% if loop.index == 2 or (paid_long and loop.index == 3) %}<span class="portal-step-full">{{ label }}</span><span class="portal-step-short">{{ 'Vertrag' if loop.index == 2 else 'Zahlung' }}</span>{% else %}{{ label }}{% endif %}</span>

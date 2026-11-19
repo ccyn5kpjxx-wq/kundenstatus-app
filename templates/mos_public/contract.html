@@ -1,10 +1,13 @@
 {% if contract and not deposit_link_access|default(false) %}
+{% set onsite = contract.payment_method|default('online') == 'onsite' %}
 {% macro contract_euro(cents) %}{{ '%.2f'|format(cents/100)|replace('.', ',') }} €{% endmacro %}
 <section class="card signed-contract" id="mietvertrag">
   {% if contract.test_only %}<p class="small muted">TEST · Keine echte Anmietung</p>{% endif %}
   <h2>{{ 'Dein unterschriebener Mietvertrag' if signed else 'Dein unterschriebenes Buchungsangebot' }}</h2>
   {% if account and account.cancellation %}
     <p><strong>Die Buchung wurde storniert.</strong> Die ursprünglich unterschriebene Vertragsfassung bleibt dokumentiert.</p>
+  {% elif h.status == 'confirmed' and signed and onsite %}
+    <p><strong>Buchung bestätigt.</strong> Du hast den Mietvertrag am {{ signed_local }} mit Zahlung vor Ort unterschrieben.</p>
   {% elif h.status == 'confirmed' and signed %}
     <p><strong>Zahlung bestätigt.</strong> Du hast den Vertrag am {{ signed_local }}{% if presigned %} vor der Zahlung{% endif %} unterschrieben. Die gespeicherte Fassung steht zum Download bereit.</p>
   {% elif h.status == 'pending' %}
@@ -28,7 +31,11 @@
       <div><dt>Rückgabe</dt><dd>{{ contract.end_slot|mos_slot }}</dd></div>
       <div><dt>Mietdauer und Tagessatz</dt><dd>{{ contract.days }} {{ 'Miettag' if contract.days == 1 else 'Miettage' }} × {{ contract_euro(contract.daily_cents) }}</dd></div>
       <div><dt>Miete inkl. MwSt.</dt><dd>{{ contract_euro(contract.rental_cents) }}</dd></div>
-      {% if contract.deposit_authorized_cents|default(0) %}
+      {% if onsite %}
+        <div><dt>Rückzahlbare Kaution bei Abholung</dt><dd>{{ contract_euro(contract.deposit_cents) }}</dd></div>
+        <div><dt>Bei der Buchung online gezahlt</dt><dd>{{ contract_euro(contract.amount_cents) }}</dd></div>
+        <div class="contract-total"><dt>Bei Übergabe vereinbarter Gesamtbetrag</dt><dd>{{ contract_euro(contract.rental_cents + contract.deposit_cents) }}</dd></div>
+      {% elif contract.deposit_authorized_cents|default(0) %}
         <div><dt>Kaution als Kreditkartenreservierung</dt><dd>{{ contract_euro(contract.deposit_authorized_cents) }} · {% if contract.deposit_timing|default('') == 'before_pickup' %}separat online frühestens zwölf Stunden vor der Abholung selbst auf einer Kreditkarte zu reservieren, ohne Abbuchung. Der Mietpreis wird bei der Buchung bezahlt. Die tatsächliche Autorisierungsfrist muss länger als 24 Stunden nach der Rückgabe reichen. Ein Kautionsproblem hebt die bezahlte Buchung nicht auf. Ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich.{% else %}bei der Online-Reservierung zur Autorisierung vorgesehen, nicht zur Abbuchung. Die Autorisierung ist zeitlich begrenzt.{% endif %}</dd></div>
         <div class="contract-total"><dt>{{ 'Bezahlter Mietpreis' if h.status == 'confirmed' else 'Vorgesehener Zahlbetrag (nur Miete)' }}</dt><dd>{{ contract_euro(contract.amount_cents) }}</dd></div>
       {% else %}

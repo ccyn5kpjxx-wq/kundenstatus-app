@@ -5,6 +5,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='mos-portal/checkout.css') }}">
 {% endblock %}
 {% block content %}
+{% set onsite = q.payment_method|default('online') == 'onsite' %}
 {% set paid_long = q.long_rental_deposit_policy|default('') == 'paid_at_booking_v1' %}
 {% set deferred = q.deposit_timing|default('') == 'before_pickup' %}
 {% set reserved_deposit = q.deposit_authorized_cents|default(0) %}
@@ -38,16 +39,19 @@
     </div>
 
     <div class="quote-price">
-      <h2>{{ 'Bei der Buchung zu zahlen' if live else 'Testbetrag bei der Buchung' }}</h2>
-      <p class="quoted-total">{{ euro(q.amount_cents) }}</p>
+      <h2>{{ 'Bei Abholung zu zahlen' if onsite else 'Bei der Buchung zu zahlen' if live else 'Testbetrag bei der Buchung' }}</h2>
+      <p class="quoted-total">{{ euro(q.rental_cents + q.deposit_cents if onsite else q.amount_cents) }}</p>
       <p class="quote-breakdown">
-        {% if reserved_deposit %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}Zahlbetrag: nur die Miete inkl. MwSt.; die Kaution wird nicht abgebucht.
+        {% if onsite %}Du zahlst Mietpreis inkl. MwSt. und rückzahlbare Kaution vor Ort. Heute online fällig: {{ euro(q.amount_cents) }}.
+        {% elif reserved_deposit %}{% if not live %}TEST – keine echte Abbuchung oder Kartenreservierung. {% endif %}Zahlbetrag: nur die Miete inkl. MwSt.; die Kaution wird nicht abgebucht.
         {% elif paid_deposit %}{% if not live %}TEST – keine echte Abbuchung. {% endif %}Gesamtzahlung: {{ euro(q.rental_cents) }} Miete inkl. MwSt. + {{ euro(paid_deposit) }} rückzahlbare Kaution.
         {% else %}Mietpreis inkl. MwSt. · im Checkout ausschließlich als Testbetrag.{% endif %}
       </p>
       <dl class="quote-price-lines">
         <div><dt>{{ q.days }} {{ 'Miettag' if q.days == 1 else 'Miettage' }} × {{ euro(q.daily_cents) }}</dt><dd>{{ euro(q.rental_cents) }}</dd></div>
-        {% if reserved_deposit %}
+        {% if onsite %}
+          <div><dt>Rückzahlbare Kaution bei Abholung</dt><dd>{{ euro(q.deposit_cents) }}</dd></div>
+        {% elif reserved_deposit %}
           <div><dt>Kartenreservierung{% if deferred %} vor Abholung{% else %} bei Buchung{% endif %}</dt><dd>{{ euro(reserved_deposit) }}</dd></div>
         {% elif paid_deposit %}
           <div><dt>Enthaltene Kaution</dt><dd>{{ euro(paid_deposit) }}</dd></div>
@@ -59,7 +63,9 @@
 
   <div class="card quote-policies">
     <h2>Kaution und Mietbedingungen</h2>
-    {% if reserved_deposit %}
+    {% if onsite %}
+      <p>Die verbindliche Buchung erfolgt ohne Onlinezahlung und ohne Kartenreservierung. Vor der Schlüsselübergabe zahlst du den Mietpreis und hinterlegst die Kaution bei der Mietstation.</p>
+    {% elif reserved_deposit %}
       <p><strong>{{ euro(reserved_deposit) }} Kaution als Kreditkartenreservierung.</strong> {% if not live %}Im Testmodus wird dies ohne echte Geldbewegung simuliert. {% endif %}
         {% if deferred %}Du bezahlst den Mietpreis bei der Buchung. Die Kaution reservierst du separat online, frühestens zwölf Stunden vor der Abholung, selbst auf einer Kreditkarte. Ohne gültige Kartenreservierung ist keine Schlüsselübergabe möglich.
         {% else %}Die Kaution wird bei der Online-Reservierung auf der Kreditkarte autorisiert und nicht abgebucht. Vor Ort ist dafür keine Zahlung oder weitere Kartenbestätigung vorgesehen.{% endif %}
@@ -137,11 +143,20 @@
   <details class="checkout-details">
     <summary>Angaben korrigieren und Unterschrift speichern</summary>
     <p>Mit „Auswahl ändern“ kannst du Eingabefehler vor der Unterschrift korrigieren. Name und E-Mail lassen sich direkt im Formular berichtigen. Eine gezeichnete Unterschrift kannst du mit „Unterschrift löschen“ zurücksetzen.</p>
+    {% if onsite %}
+    <p>Bis zum Absenden kannst du Fahrzeug, Zeitraum und Zahlungsart über „Auswahl ändern“ korrigieren. Gärtner prüft die Verfügbarkeit und nimmt deine Bestellung mit der Buchungsbestätigung an. Die unterschriebene Fassung ist im Buchungsstatus als PDF abrufbar. Die Vertragssprache ist Deutsch.</p>
+    {% else %}
     <p>Wenn du nach der Unterschrift und vor der Mietzahlung etwas ändern möchtest, beende den offenen Checkout im Buchungsstatus und beginne erneut. Falls die Zahlung schon läuft, prüfe zuerst den Buchungsstatus.</p>
     <p>{% if live %}Der Vertragsschluss erfolgt in deutscher Sprache. Deine Unterschrift wird mit den angezeigten Buchungsdaten und dem Zeitpunkt zur Vorbereitung der Buchungsunterlagen gespeichert.{% else %}Die Testoberfläche ist auf Deutsch. Die gezeichnete Unterschrift wird mit der angezeigten Angebotsfassung und dem Zeitpunkt gespeichert.{% endif %} Sie ist keine qualifizierte elektronische Signatur. Gärtner nimmt eine Buchung erst nach bestätigter Zahlung und Verfügbarkeitsprüfung an. Die unterschriebene Fassung steht nach bestätigter Buchung als PDF im Buchungsstatus bereit.</p>
+    {% endif %}
   </details>
   <div class="quote-next">
-    {% if live %}
+    {% if onsite %}
+      <p><strong>{{ q.vehicle_name }}</strong> · {{ q.start_slot|mos_slot }} bis {{ q.end_slot|mos_slot }}</p>
+      <p>{{ euro(q.rental_cents) }} Miete inkl. MwSt. und {{ euro(q.deposit_cents) }} rückzahlbare Kaution, zusammen <strong>{{ euro(q.rental_cents + q.deposit_cents) }} bei Abholung.</strong> Bei der Onlinebuchung sind {{ euro(q.amount_cents) }} fällig.</p>
+      {% if live %}<p class="small"><a href="{{ booking_config.privacy_url }}">Datenschutzhinweise</a></p>{% endif %}
+      <button>{{ 'Zahlungspflichtig buchen' if live else 'Testbuchung mit Vor-Ort-Zahlung bestätigen' }}</button>
+    {% elif live %}
       <p>{% if paid_long %}Anschließend bezahlst du bei Stripe den Mietpreis und 500 € rückzahlbare Kaution zusammen. Die beiden Beträge und der Gesamtbetrag werden getrennt ausgewiesen.{% elif deferred %}Anschließend bezahlst du bei Stripe den Mietpreis. Die Kaution reservierst du separat online, frühestens zwölf Stunden vor der Abholung. Eine gültige Kreditkartenreservierung ist Voraussetzung für die Schlüsselübergabe.{% elif reserved_deposit %}Anschließend reservierst du die Kaution auf einer Kreditkarte ohne Abbuchung. Danach bezahlst du den Mietpreis online. Vor Ort ist kein Zahlungsschritt vorgesehen.{% else %}Anschließend öffnet sich Stripe zur Zahlung des angezeigten Betrags.{% endif %}</p>
       <p><strong>Deine verbindliche, zahlungspflichtige Bestellung gibst du erst mit dem letzten Bezahlbutton bei Stripe ab.</strong></p>
       <p class="small"><a href="{{ booking_config.privacy_url }}">Datenschutzhinweise einschließlich Stripe</a></p>

@@ -26,12 +26,18 @@ def init_schema(db):
         accepted_at TEXT, detail TEXT NOT NULL DEFAULT '')''')
 
 
+def confirmed_order(status, payment_intent, quote, cancelled=False):
+    if quote.get('payment_method') == 'onsite':
+        return (status == 'confirmed' or (status == 'released' and cancelled)) and not payment_intent
+    return status == 'confirmed' and bool(payment_intent)
+
+
 def enqueue(db, hold, contract, pdf_sha256):
-    """Queue only a verified paid booking; keep the recipient and PDF immutable."""
+    """Queue a confirmed live rental with a fixed recipient and PDF."""
     if contract.get('test_only') is not False:
         return False
-    if (hold['status'] != 'confirmed' or not hold['mietvorgang_id']
-            or not hold['payment_intent'] or not pdf_sha256):
+    if (not hold['mietvorgang_id'] or not pdf_sha256 or not confirmed_order(
+            hold['status'], hold['payment_intent'], contract, hold.get('grund') == 'onsite_cancelled')):
         return False
     recipient = contract['customer_email']
     if not _single_address(recipient):
@@ -55,7 +61,7 @@ def _single_address(value):
     return not name and address == value and address.count('@') == 1 and ' ' not in address
 
 
-def _message(hold_id, recipient, pdf, cancelled, management_url=None):
+def _message(hold_id, recipient, pdf, cancelled, management_url=None, contract=None):
     message = EmailMessage()
     message['To'] = recipient
     message['Subject'] = 'Ihre MOS-Vertragskopie'
@@ -68,6 +74,15 @@ def _message(hold_id, recipient, pdf, cancelled, management_url=None):
     if cancelled:
         body += ('\nDie Buchung wurde inzwischen storniert. Diese Vertragskopie ist keine '
                  'erneute Buchungszusage; bitte beachten Sie den Storno- und Erstattungsstand.\n')
+    elif contract and contract.get('payment_method') == 'onsite':
+        def euro(cents):
+            return f'{cents // 100},{cents % 100:02d} EUR'
+        message.replace_header('Subject', 'Ihre MOS-Buchungsbestätigung und Ihr Mietvertrag')
+        body += ('\nIhre Buchung ist bestätigt. Sie haben die Zahlung vor Ort gewählt. '
+                 'Bei der Buchung haben Sie online 0,00 EUR gezahlt.\n'
+                 f'Mietpreis inkl. MwSt.: {euro(contract["rental_cents"])}\n'
+                 f'Rückzahlbare Kaution: {euro(contract["deposit_cents"])}\n'
+                 f'Bei Abholung vereinbart: {euro(contract["rental_cents"] + contract["deposit_cents"])}\n')
     if management_url:
         body += ('\nIhre Buchung sicher verwalten:\n' + management_url + '\n\n'
                  'Über diesen persönlichen Link können Sie Ihren Buchungsstatus und Vertrag '
@@ -97,7 +112,7 @@ def _verified_row(db, hold_id):
     contract = json.loads(row['contract_json'])
     pdf = b64decode(row['pdf_base64'], validate=True)
     canonical = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    if (row['hold_status'] != 'confirmed' or not row['payment_intent'] or not row['mietvorgang_id']
+    if (not confirmed_order(row['hold_status'], row['payment_intent'], contract, bool(row['cancellation_id'])) or not row['mietvorgang_id']
             or contract.get('test_only') is not False or not row['signed_at']
             or not row['signature_png_base64'] or not _single_address(row['recipient'])
             or row['recipient'] != contract.get('customer_email')
@@ -168,7 +183,7 @@ def deliver_one(portal, hold_id, cfg, *, live, enabled):
             hold = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
             try:management_url = access_url(portal, hold)
             except AccessExpired:management_url = None
-            message = _message(hold_id, row['recipient'], pdf, bool(row['cancellation_id']), management_url)
+            message = _message(hold_id, row['recipient'], pdf, bool(row['cancellation_id']), management_url, contract)
             message['From'] = formataddr((cfg.get('display_name', ''), cfg['from_address']))
             message['Message-ID'] = '<mos-contract-' + sha256(hold_id.encode()).hexdigest()[:32] + '@' + cfg['from_address'].rsplit('@', 1)[1] + '>'
         except (ValueError, KeyError, TypeError):
@@ -231,16 +246,20 @@ def unfinished_live_ids(portal, limit=None):
     """Find confirmed bookings missing a PDF/outbox, excluding explicit test holds."""
     db = portal.get_db()
     try:
-        cursor = db.execute('''SELECT h.id,h.payload FROM miet_checkout_holds h
+        cursor = db.execute('''SELECT h.id,h.payload,h.status,h.payment_intent,
+            cancellation.id AS cancellation_id FROM miet_checkout_holds h
             LEFT JOIN miet_checkout_contracts c ON c.hold_id=h.id
             LEFT JOIN miet_checkout_contract_delivery d ON d.hold_id=h.id
-            WHERE h.status='confirmed' AND h.payment_intent IS NOT NULL
+            LEFT JOIN miet_checkout_cancellations cancellation ON cancellation.id=h.id
+            WHERE h.status IN ('confirmed','released')
               AND h.mietvorgang_id IS NOT NULL AND (c.hold_id IS NULL OR d.hold_id IS NULL)
             ORDER BY h.id''')
         ids = []
         for row in cursor.fetchall():
             try:
-                if json.loads(row['payload'])['quote'].get('test_only') is True:
+                quote = json.loads(row['payload'])['quote']
+                if quote.get('test_only') is True or not confirmed_order(
+                        row['status'], row['payment_intent'], quote, bool(row['cancellation_id'])):
                     continue
             except (TypeError, ValueError, KeyError):
                 pass  # Corrupt payload needs review; do not silently exclude it.

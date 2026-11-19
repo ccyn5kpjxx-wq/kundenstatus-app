@@ -165,6 +165,38 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn(b'inzwischen storniert', FakeSMTP.raw)
         self.assertNotIn(b'Ihre Fahrzeugbuchung wurde bestaetigt', FakeSMTP.raw)
 
+    def test_confirmed_pay_at_pickup_sends_contract_and_management_link_without_card_payment(self):
+        from email import policy
+        from email.parser import BytesParser
+        import re
+        from mos_booking_access import validate_access_token
+
+        db = self.portal.get_db()
+        quote = json.loads(db.execute('SELECT payload FROM miet_checkout_holds WHERE id=?',
+                                      (self.hold,)).fetchone()['payload'])['quote']
+        quote.update(payment_method='onsite', deposit_method='pay_at_pickup', amount_cents=0,
+                     rental_cents=3900, days=1, daily_cents=3900, deposit_cents=50000,
+                     deposit_authorized_cents=0, deposit_charged_cents=0, checkout_deposit=False)
+        self.contract.update(payment_method='onsite', rental_cents=3900, deposit_cents=50000)
+        canonical = json.dumps(self.contract, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        db.execute('UPDATE miet_checkout_contracts SET contract_json=?, contract_sha256=? WHERE hold_id=?',
+                   (canonical, sha256(canonical.encode()).hexdigest(), self.hold))
+        db.execute('UPDATE miet_checkout_holds SET payload=?,payment_intent=NULL WHERE id=?',
+                   (json.dumps({'quote': quote}), self.hold))
+        db.commit()
+        db.close()
+        self.assertEqual(unfinished_live_ids(self.portal), [self.hold])
+        self.queue()
+        self.assertEqual(self.send_fake(), 'sent')
+        message = BytesParser(policy=policy.default).parsebytes(FakeSMTP.raw)
+        body = message.get_body(preferencelist=('plain',)).get_content()
+        self.assertIn('39,00 EUR', body)
+        self.assertIn('500,00 EUR', body)
+        self.assertIn('539,00 EUR', body)
+        self.assertIn('online 0,00 EUR gezahlt', body)
+        token = re.search(r'/mieten/buchung-verwalten#([^\s]+)', body).group(1)
+        self.assertEqual(validate_access_token(self.portal, token)['hold_id'], self.hold)
+
     def test_no_send_without_explicit_live_enablement(self):
         self.queue()
         self.assertEqual(self.send_fake(live=False), 'disabled')
