@@ -56674,7 +56674,9 @@ def werkstatt_tafel():
         for auftrag in list_auftraege()
         if werkstatt_tafel_auftrag_sichtbar(auftrag)
     ]
+    from reifen_auftragsetikett import tafel_etikett_sichtbar
     for auftrag in auftraege:
+        auftrag["tafel_etikett"] = tafel_etikett_sichtbar(sys.modules[__name__], auftrag)
         if auftrag.get('quelle') == 'check24':
             intake = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
             start, end = intake.get('check24_start', ''), intake.get('check24_ende', '')
@@ -56864,9 +56866,11 @@ def werkstatt_auftrag(auftrag_id):
     dateien = [datei for datei in list_dateien(auftrag_id) if werkstatt_datei_sichtbar(datei)]
     bilder = [datei for datei in dateien if datei.get("is_browser_image")]
     unterlagen = [datei for datei in dateien if not datei.get("is_browser_image")]
+    from reifen_auftragsetikett import tafel_etikett_sichtbar
     return render_template(
         "werkstatt_auftrag.html",
         auftrag=auftrag,
+        tafel_etikett=tafel_etikett_sichtbar(sys.modules[__name__], auftrag),
         bilder=bilder,
         unterlagen=unterlagen,
         statusliste=STATUSLISTE,

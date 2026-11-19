@@ -26,15 +26,25 @@ def _position(title="", size="", delivery=""):
     return dict(title=title, size=size or "Nicht angegeben", delivery=_date(delivery) or "Termin offen")
 
 
-def reifenetikett(portal, order_id):
+def tafel_etikett_sichtbar(portal, order):
+    return (not order.get("archiviert") and not order.get("angebotsphase")
+            and portal.werkstatt_tafel_auftrag_sichtbar(order)
+            and (order.get("quelle") == "shop" or auftrag_leistungsart(order) == "reifenservice"))
+
+
+def reifenetikett(portal, order_id, *, tafel=False):
     db = portal.get_db()
     try:
         row = db.execute("""SELECT id, quelle, leistungsart, kunde_name, kennzeichen, annahme_datum,
-            annahme_uhrzeit, schaden_aufnahme_json, beschreibung FROM auftraege WHERE id=?""",
+            annahme_uhrzeit, schaden_aufnahme_json, beschreibung, archiviert, angebotsphase,
+            status, versicherung_id, versicherung_freigabe_status, schaden_eigenauftrag
+            FROM auftraege WHERE id=?""",
                          (order_id,)).fetchone()
         if row is None:
             return None
         order = dict(row)
+        if tafel and not tafel_etikett_sichtbar(portal, order):
+            return None
         intake = aufnahme_daten(order)
         is_shop = order["quelle"] == "shop"
         if not is_shop and auftrag_leistungsart(order) != "reifenservice":

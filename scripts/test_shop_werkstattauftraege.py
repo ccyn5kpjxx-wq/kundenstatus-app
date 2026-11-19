@@ -113,6 +113,39 @@ class ShopWerkstattauftragTest(TestCase):
             session["partner_autohaus_id"] = 2
         self.assertNotIn(shop_url, partner.get(url).get_data(as_text=True))
 
+    def test_board_print_requires_workshop_session_and_current_operational_release(self):
+        number = self.ensure()
+        label = f"/werkstatt/auftrag/{number}/reifenetikett"
+        client = portal.app.test_client()
+        self.assertEqual(client.get(label).status_code, 302)
+        with client.session_transaction() as session:
+            session["partner_autohaus_id"] = 2
+        self.assertEqual(client.get(label).status_code, 302)
+        portal.set_app_setting(portal.WERKSTATT_TAFEL_CODE_SETTING, "SYNTHETIC99")
+        with client.session_transaction() as session:
+            session.clear()
+            session["werkstatt_tafel"] = portal.werkstatt_tafel_session_token()
+        self.assertIn(label, client.get("/werkstatt/tafel").get_data(as_text=True))
+        self.assertIn(label, client.get(f"/werkstatt/auftrag/{number}").get_data(as_text=True))
+        with patch("shop_admin.shop_admin_reader") as reader:
+            reader.return_value.detail.return_value = {"lines": [{"quantity": 4, "name": "Testreifen",
+                "tyre_size": "205/55 R16", "category": "tyre", "supplier": {"eta_date": ""}}]}
+            result = client.get(label)
+            self.assertEqual(result.status_code, 200)
+            self.assertIn("205/55 R16", result.get_data(as_text=True))
+            self.assertIn("no-store", result.headers["Cache-Control"])
+            self.assertEqual(result.headers["Referrer-Policy"], "no-referrer")
+            self.assertNotEqual(client.get(f"/admin/auftrag/{number}/reifenetikett").status_code, 200)
+            reader.reset_mock()
+            for status, archived, proposal, insurer in ((5, 0, 0, 0), (2, 1, 0, 0), (1, 0, 1, 0), (2, 0, 0, 1)):
+                with closing(portal.get_db()) as db:
+                    db.execute("UPDATE auftraege SET status=?,archiviert=?,angebotsphase=?,versicherung_id=? WHERE id=?",
+                               (status, archived, proposal, insurer, number))
+                    db.commit()
+                self.assertEqual(client.get(label).status_code, 404)
+                self.assertNotIn(label, client.get("/werkstatt/tafel").get_data(as_text=True))
+            reader.assert_not_called()
+
     def test_failed_transaction_can_retry_and_unpaid_or_test_never_creates(self):
         for mode, status in (("test", "paid"), ("live", "payment_pending")):
             self.order.update(mode=mode, status=status)
