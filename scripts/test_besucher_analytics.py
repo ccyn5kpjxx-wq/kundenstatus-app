@@ -432,19 +432,19 @@ def main():
                 """,
                 [
                     (heute.isoformat(sep=" "), "auto-lackierzentrum", "/shop/felgen"),
+                    (heute.isoformat(sep=" "), "auto-lackierzentrum", "/shop"),
+                    (heute.isoformat(sep=" "), "auto-lackierzentrum", "/shop/warenkorb"),
                     (heute.isoformat(sep=" "), "autovermietung-mos", "/shop"),
                     ((heute - timedelta(days=12)).isoformat(sep=" "), "auto-lackierzentrum", "/shop/reifen"),
                 ],
             )
             datenbank.commit()
             datenbank.close()
-            kurz = portal.list_besucher_statistik(7)["shop_klicks"]["seitenaufrufe"]
-            lang = portal.list_besucher_statistik(30, website="auto-lackierzentrum")["shop_klicks"]["seitenaufrufe"]
+            kurz = portal.list_besucher_statistik(7)["shop_klicks"]["aufrufe"]
+            lang = portal.list_besucher_statistik(30, website="auto-lackierzentrum")["shop_klicks"]["aufrufe"]
             ok &= check(
-                "Shop-Seitenaufrufe zeigen auch Nullwerte und berücksichtigen Website, Zeitraum und Bots",
-                [(row["seite"], row["aufrufe"]) for row in kurz]
-                == [("/", 2), ("/shop", 0), ("/shop/felgen", 1), ("/shop/reifen", 0)]
-                and [row["aufrufe"] for row in lang] == [2, 0, 1, 1],
+                "Shop-Seitenaufrufe zählen nur den Shop und berücksichtigen Website und Zeitraum",
+                kurz == 3 and lang == 4,
             )
         finally:
             portal.get_db = original_get_db
@@ -452,6 +452,15 @@ def main():
             portal.PUBLIC_SITE_ONLY = original_public_only
 
         portal.log_shop_klick("/shop/felgen", "hero-felgen-angebot", chrome_ua)
+        db = portal.get_db()
+        try:
+            db.execute(
+                "INSERT INTO besucher_events (erstellt_am, visitor_hash, website, seite) VALUES (?, ?, ?, ?)",
+                (datetime.now().isoformat(sep=" "), "cockpit-test", "auto-lackierzentrum", "/shop/felgen"),
+            )
+            db.commit()
+        finally:
+            db.close()
         render_client = portal.app.test_client()
         with render_client.session_transaction() as session:
             session["admin"] = True
@@ -467,10 +476,12 @@ def main():
             and "Autovermietung MOS" in rendered_html
             and "Erkannte Bots" in rendered_html
             and "Google Ads Kosten" in rendered_html
-            and "Shop-Klicks auf der Website" in rendered_html
-            and 'id="shop-seitenaufrufe"' in rendered_html
-            and "Felgenangebot anfragen" in rendered_html
-            and "1 Klick · 30 Tage" in rendered_html
+            and 'id="shop-klicks-title"' in rendered_html
+            and "<strong>1</strong> Seitenaufruf</span>" in rendered_html
+            and "<strong>1</strong> Shop-Klick</span>" in rendered_html
+            and "Angeklicktes Element" not in rendered_html
+            and "Felgenangebot anfragen" not in rendered_html
+            and "/shop/felgen" not in rendered_html
             and "Kosten je Abschluss" in rendered_html
             and "Weitere Kennzahlen" in rendered_html
             and "12,50 € Tagesbudget eingerichtet" in rendered_html

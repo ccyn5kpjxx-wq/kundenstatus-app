@@ -32257,22 +32257,16 @@ def list_besucher_statistik(tage=30, website="alle", ausgeblendete_websites=()):
     seiten = []
     for row in seiten_rows:
         item = dict(row)
+        item["ist_shopseite"] = item["website"] == "auto-lackierzentrum" and (
+            item["seite"] == "/shop" or item["seite"].startswith("/shop/")
+        )
         item["label"] = besucher_seiten_label(item["website"], item["seite"])
         item["website_label"] = BESUCHER_WEBSITES.get(item["website"], {}).get(
             "label", item["website"] or "Unbekannt"
         )
         seiten.append(item)
     if shop_klicks is not None:
-        shop_aufrufe = {row["seite"]: row["aufrufe"] for row in seiten if row["website"] == "auto-lackierzentrum"}
-        shop_klicks["seitenaufrufe"] = [
-            {
-                "seite": seite,
-                "label": besucher_seiten_label("auto-lackierzentrum", seite),
-                "aufrufe": shop_aufrufe.get(seite, 0),
-            }
-            for seite in ("/", "/shop", "/shop/felgen", "/shop/reifen", "/shop/komplettraeder",
-                          "/shop/ersatzteile", "/shop/zubehoer", "/shop/service", "/shop/warenkorb", "/shop/felgenstudio")
-        ]
+        shop_klicks["aufrufe"] = sum(row["aufrufe"] for row in seiten if row["ist_shopseite"])
     website_lookup = {row["website"]: dict(row) for row in website_rows}
     websites = []
     for key, config in BESUCHER_WEBSITES.items():
