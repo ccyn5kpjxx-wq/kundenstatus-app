@@ -202,7 +202,8 @@ class ShopInvoiceService:
         if not row:
             raise ShopInvoiceError('invoice_not_ready')
         try:
-            original = self.adapter.pdf(row['remote_id'], json.loads(row['payload_json']))
+            original = self.adapter.pdf(row['remote_id'], json.loads(row['payload_json']),
+                                        voucher_number=row['voucher_number'])
         except ShopLexwareError:
             raise ShopInvoiceError('invoice_pdf_unavailable') from None
         number = re.sub(r'[^\w.-]+', '-', row['voucher_number']).strip('.-') or order_id

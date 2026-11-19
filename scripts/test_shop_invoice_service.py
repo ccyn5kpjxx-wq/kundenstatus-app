@@ -33,6 +33,7 @@ class InMemoryLexware:
         self.writes = []
         self.lookups = []
         self.pdf_reads = []
+        self.voucher_number = 'RE-TEST-1'
         self.lose_reply = False
 
     def configured(self):
@@ -57,10 +58,12 @@ class InMemoryLexware:
         record, final = self.records[identifier]
         assert record == payload
         return {'state': 'final' if final else 'draft', 'voucher_status': 'open' if final else 'draft',
-                'voucher_number': 'RE-TEST-1' if final else ''}
+                'voucher_number': self.voucher_number if final else ''}
 
-    def pdf(self, identifier, payload):
-        assert self.inspect(identifier, payload)['state'] == 'final'
+    def pdf(self, identifier, payload, *, voucher_number=None):
+        remote = self.inspect(identifier, payload)
+        if remote['state'] != 'final' or remote['voucher_number'] != voucher_number:
+            raise ShopLexwareError('lexware_invoice_binding_mismatch')
         self.pdf_reads.append(identifier)
         return b'%PDF-1.7\nSYNTHETIC\n%%EOF'
 
@@ -276,6 +279,19 @@ class InvoiceServiceTests(unittest.TestCase):
             list(pool.map(lambda worker: worker.process_next(), workers))
         self.assertEqual(len(self.adapter.writes), 1)
         self.assertEqual(workers[0].status(oid)['state'], 'ready')
+
+    def test_pdf_rechecks_number_against_original_final_invoice(self):
+        service = self.service()
+        oid = self.order()
+        self.assertEqual(service.prepare(oid)['voucher_number'], 'RE-TEST-1')
+        self.adapter.voucher_number = 'RE-UNRELATED'
+        with patch.object(self.adapter, 'pdf', wraps=self.adapter.pdf) as download:
+            with self.assertRaises(ShopInvoiceError):
+                service.pdf(oid)
+            self.assertEqual(download.call_args.kwargs, {'voucher_number': 'RE-TEST-1'})
+        self.assertFalse(self.adapter.pdf_reads)
+        self.assertEqual(service.status(oid)['voucher_number'], 'RE-TEST-1')
+        self.assertEqual(len(self.adapter.writes), 1)
 
     def test_customer_receipt_shows_only_own_issued_invoice_number_without_provider_access(self):
         oid = self.order()
