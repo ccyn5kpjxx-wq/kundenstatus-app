@@ -16,6 +16,12 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
 .shop-tyre-documents { flex-wrap: wrap; }
 .shop-tyre-documents > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .shop-rim-details summary {cursor: pointer; padding-block: 8px; font-weight: 700;}
+.shop-rim-fitment {margin-block: 14px; padding: 12px 16px; border-left: 3px solid #506b7a; background: #f2f6f8; overflow-wrap: anywhere;}
+.shop-rim-fitment h3, .shop-rim-fitment p {margin: 0 0 6px;}
+.shop-rim-fitment small {display: block; line-height: 1.5;}
+.shop-rim-fitment summary {cursor: pointer; padding-block: 6px;}
+.shop-rim-fitment ul {margin: 4px 0 8px; padding-inline-start: 18px;}
+.shop-rim-fitment a {display: inline-block; padding-block: 4px; text-underline-offset: 3px;}
 .shop-cost-lines {display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); gap: 6px 16px; margin-block: 12px; font-size: 14px;}
 .shop-cost-lines dd {margin: 0; text-align: right;}
 @media (max-width: 900px) {
@@ -32,3 +38,6 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
 .shop-appointment-fields input,.shop-appointment-fields select{box-sizing:border-box;min-width:0;width:100%;min-height:44px;padding:8px;border:1px solid #879aa6;border-radius:4px;background:#fff;color:#203541;font:inherit}
 .shop-cart-appointment[hidden],.shop-appointment-fields[hidden],.shop-cart-appointment button[hidden]{display:none}
 @media(max-width:480px){.shop-appointment-fields{grid-template-columns:1fr}.shop-cart-appointment,.shop-montage-entry{padding:14px}}
+.shop-bundle-option { position: relative; }
+.shop-bundle-option h3 label::after { content: ""; position: absolute; inset: 0; cursor: pointer; }
+.shop-bundle-option :is(input, a, details) { position: relative; z-index: 1; }

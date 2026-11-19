@@ -35,6 +35,44 @@ def catalogue(rows, **kwargs):
 
 
 class EnrichmentChecks(unittest.TestCase):
+    def test_wheel_make_filters_exact_supplier_or_reviewed_variants_without_fitment_approval(self):
+        from test_shop_catalog_public import verified
+        def source_rim(letter, make, diameter):
+            return wheel(letter, name='Dealer design', diameter=diameter,
+                identifiers={'provider': 'ALZURA', 'provider_id': '341'},
+                vehicle_candidates=[{'scope': 'provider', 'car_id': 34567, 'brand': make, 'model': 'test vehicle'}])
+
+        bmw, mini = source_rim('a', 'BMW', '17'), source_rim('b', 'MINI', '18')
+        audi = wheel('c', name='Dealer design', diameter='19')
+        unrelated = wheel('d', name='BMW Original style', diameter='18')
+        unbound = source_rim('e', 'BMW', '20')
+        unbound['identifiers'] = {}
+        store = catalogue([bmw, mini, audi, unrelated, unbound],
+                          verified_fitments={audi['selection_id']: verified(audi)},
+                          document_urls={'REPORT': '/shop/reports/test.pdf'})
+        app = Flask('synthetic-wheel-make')
+        app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
+        app.register_blueprint(create_shop_public_blueprint(catalogue=store))
+        client = app.test_client()
+        for make, row in [('bmw', bmw), ('MiNi', mini), ('Audi', audi)]:
+            with self.subTest(make=make):
+                response = client.get('/shop/api/v2/products', query_string={
+                    'department':'wheels', 'group':'family', 'wheel_make':make})
+                self.assertEqual(response.status_code, 200)
+                listing = response.json
+                self.assertEqual(listing['wheel_makes'], ['Audi', 'BMW', 'MINI'])
+                self.assertEqual(listing['total'], 1)
+                shown = listing['items'][0]
+                self.assertEqual(shown['id'], row['selection_id'])
+                self.assertEqual(shown['family'], {'variant_count': 1, 'diameters': [row['diameter']]})
+                variants = client.get('/shop/api/v2/products/' + shown['id'] + '/variants',
+                                      query_string={'wheel_make': make}).json
+                self.assertEqual([item['id'] for item in variants['items']], [shown['id']])
+                self.assertNotIn('car_id', json.dumps(variants))
+        self.assertEqual(store.page(make='BMW')['total'], 0)
+        self.assertEqual(store.get(bmw['selection_id'])['fitment']['status'], 'not_confirmed')
+        self.assertEqual(store.page(department='wheels', wheel_make='No such make')['total'], 0)
+
     def setUp(self):
         self.network = patch.object(socket, 'socket', side_effect=AssertionError('Network forbidden'))
         self.network.start()

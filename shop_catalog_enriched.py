@@ -10,7 +10,7 @@ import math
 import re
 import unicodedata
 
-from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, _quote, _stamp, variant_fingerprint
+from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, _quote, _stamp, variant_fingerprint, wheel_make_term
 from shop_wheel_prices import published_wheel_tier, tyre_service_gross_cent
 
 
@@ -373,10 +373,17 @@ class EnrichedPublicCatalog(PublicCatalog):
             product.update(price=None, price_status='not_offered', price_label='')
         return product
 
-    def _family(self, product, *, complete=False):
-        identifiers = self._families.get(self._family_for.get(product['id']), [product['id']])
+    def _family_ids(self, identifier, complete=False, wheel_make=None):
+        identifiers = self._families.get(self._family_for.get(identifier), [identifier])
         if complete:
             identifiers = [i for i in identifiers if self._rows[i]['public'].get('tyre_seasons')]
+        if wheel_make is not None:
+            selected = wheel_make_term(wheel_make)
+            identifiers = [i for i in identifiers if selected in self._rows[i]['wheel_make_terms']]
+        return identifiers
+
+    def _family(self, product, *, complete=False, wheel_make=None):
+        identifiers = self._family_ids(product['id'], complete, wheel_make)
         diameters = sorted({self._rows[i]['public']['geometry'].get('diameter', '') for i in identifiers} - {''}, key=lambda n: (len(n), n))
         return {'variant_count': len(identifiers), 'diameters': diameters}
 
@@ -401,22 +408,20 @@ class EnrichedPublicCatalog(PublicCatalog):
                     continue
                 seen.add(key)
             matches.append(entry)
-        result = self._page_result(matches, current, page=page, page_size=size)
+        result = self._page_result(matches, current, page=page, page_size=size, department=kwargs.get('department'))
         if group == 'family':
             for product in result['items']:
-                product['family'] = self._family(product, complete=complete == '1')
+                product['family'] = self._family(product, complete=complete == '1', wheel_make=kwargs.get('wheel_make'))
         return result
 
-    def variants(self, identifier, *, page=1, page_size=24, diameter=None, complete=None):
+    def variants(self, identifier, *, page=1, page_size=24, diameter=None, complete=None, wheel_make=None):
         if type(page) is not int or not 1 <= page <= 10000 or type(page_size) is not int or not 1 <= page_size <= 48:
             raise CatalogError('invalid_pagination')
         if complete not in (None, '1'):
             raise CatalogError('invalid_filter')
         if self.get(identifier) is None:
             return None
-        ids = self._families.get(self._family_for.get(identifier), [identifier])
-        if complete == '1':
-            ids = [i for i in ids if self._rows[i]['public'].get('tyre_seasons')]
+        ids = self._family_ids(identifier, complete == '1', wheel_make)
         if diameter is not None:
             import re
             if not isinstance(diameter, str) or not re.fullmatch(r'(?:[89]|[12][0-9]|30)', diameter):

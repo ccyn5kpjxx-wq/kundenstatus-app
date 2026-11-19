@@ -312,6 +312,7 @@
   function buildQuery(values, department, page) {
     const query = new URLSearchParams({page: String(Number.isInteger(page) && page > 0 ? Math.min(page, 10000) : 1), page_size: '24'});
     if (['tyres', 'wheels', 'parts', 'accessories'].includes(department)) query.set('department', department);
+    if (department === 'wheels' && typeof values.wheel_make === 'string' && values.wheel_make.trim()) query.set('wheel_make', values.wheel_make.trim());
     if (department === 'tyres' && (values.sort === undefined || values.sort === 'rating')) query.set('sort', 'rating');
     if (department === 'tyres' && values.sort === 'wet_grip') query.set('sort', 'wet_grip');
     for (const field of ['q', 'brand', 'category', 'make', 'model', 'year', 'hsn', 'tsn', 'width', 'ratio', 'diameter', 'season']) {
@@ -320,7 +321,10 @@
     }
     // The mixed shop start page also contains rims. Group their designs on
     // the server before pagination; tyres and parts retain their exact IDs.
-    if (!department || department === 'wheels' || values.group === 'family') query.set('group', 'family');
+    // A vehicle-specific report belongs to an exact variant. Show those articles
+    // individually so a family picker cannot reintroduce an unreviewed sibling.
+    const exactVehicle = department === 'wheels' && (query.has('make') || query.has('hsn'));
+    if (!exactVehicle && (!department || department === 'wheels' || values.group === 'family')) query.set('group', 'family');
     if (values.studio === '1') query.set('studio', '1');
     if (values.complete === '1') query.set('complete', '1');
     return query;
@@ -623,7 +627,7 @@
     priceChanged(node, state);
     fetchQuantityPrice(node, state.generation);
   }
-  function setImageSource(img, source) {
+  function setImageSource(img, source, fallback) {
     const old = imageLoads.get(img);
     if (old && old.timer != null) root.clearTimeout(old.timer);
     const state = {source, retries: 0, timer: null}; imageLoads.set(img, state);
@@ -634,6 +638,10 @@
     img.onload = () => { if (imageLoads.get(img) === state && state.timer != null) { root.clearTimeout(state.timer); state.timer = null; } };
     img.onerror = () => {
       if (imageLoads.get(img) !== state || state.timer != null || !active()) return;
+      if (fallback && safeMedia(fallback) && fallback !== source) {
+        setImageSource(img, fallback);
+        return;
+      }
       if (state.retries >= MAX_IMAGE_RETRIES) { img.replaceWith(el('span', 'Produktbild gerade nicht verfügbar', 'shop-no-image')); return; }
       const delay = Math.min(5000, 400 * (2 ** state.retries)) + Math.floor(Math.random() * 300);
       state.retries++;
@@ -664,7 +672,7 @@
         rating.stars > 5 || !Number.isFinite(rating.grade)) {
       const wetGrip = product.quality_facts?.wet_grip;
       const label = !showSource && /^[A-E]$/.test(wetGrip || '') ? ' · Nasshaftung ' + wetGrip : '';
-      parent.append(el('p', 'Ohne ADAC-Testnote' + label, 'shop-card-meta'));
+      parent.append(el('p', (showSource ? 'Für diese Reifenausführung ist keine ADAC-Testnote hinterlegt.' : 'Ohne ADAC-Testnote') + label, 'shop-card-meta'));
       return;
     }
     const block = el('div', null, 'shop-test-rating');
@@ -677,7 +685,7 @@
     if (!showSource && /^[A-E]$/.test(product.quality_facts?.wet_grip || '')) block.append(el('span', 'Nasshaftung ' + product.quality_facts.wet_grip));
     if (showSource) {
       if (typeof rating.url === 'string' && rating.url.startsWith('https://www.adac.de/rund-ums-fahrzeug/ausstattung-technik-zubehoer/reifen/reifentest/')) {
-        const link = el('a', 'ADAC-Originaltest ' + rating.year + ' ↗');
+        const link = el('a', ['ADAC-Originaltest ' + rating.year, product.size].filter(Boolean).join(' · ') + ' ↗');
         link.href = rating.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
         block.append(link);
       }
@@ -767,6 +775,8 @@
   async function loadPage() {
     const run = ++sequence, status = byId('catalog-status'), grid = byId('catalog-products');
     const modelPicker = byId('parts-model-refinement');
+    const wheelMakeOptions = byId('wheel-make-options'), wheelInquiry = byId('wheel-make-inquiry');
+    if (wheelInquiry) wheelInquiry.hidden = true;
     if (modelPicker) { modelPicker.parentElement.hidden = true; modelPicker.disabled = true; }
     if (pageTimer != null) root.clearTimeout(pageTimer); pageTimer = null;
     pendingPageRefresh = null;
@@ -782,6 +792,14 @@
       const result = await requestJSON('/products?' + query);
       if (run !== sequence) return;
       if (!Array.isArray(result.items) || result.items.length > 24 || !Number.isInteger(result.total) || result.page !== page) throw new Error('invalid_catalogue');
+      if (wheelMakeOptions && Array.isArray(result.wheel_makes)) {
+        const known = new Set(Array.from(wheelMakeOptions.options, option => option.value.toLocaleLowerCase('de')));
+        for (const make of result.wheel_makes) {
+          if (typeof make !== 'string' || !make || make.length > 80 || known.has(make.toLocaleLowerCase('de'))) continue;
+          const option = el('option', make); option.value = make; wheelMakeOptions.append(option);
+          known.add(make.toLocaleLowerCase('de'));
+        }
+      }
       const cards = result.items.filter(validProduct).map(product => card(product, () => run === sequence));
       for (const item of cards) visibleCards.set(item.product.id, item);
       grid.replaceChildren(...cards.map(item => item.node));
@@ -802,6 +820,10 @@
         modelPicker.disabled = modelPicker.parentElement.hidden;
       }
       status.textContent = result.total ? result.total + ' Artikel · ' + result.items.length + ' auf dieser Seite' : 'Keine bestätigten Treffer für diese Auswahl. Bitte die Filter ändern.';
+      if (wheelMakeOptions && filters.wheel_make && !result.total) {
+        status.textContent = 'Für ' + filters.wheel_make + ' und diese Auswahl ist derzeit keine Felge mit Fahrzeugzuordnung hinterlegt.';
+        if (wheelInquiry) wheelInquiry.hidden = false;
+      }
       if (body.dataset.department === 'tyres' && page === 1 && result.total > 0 &&
           (filters.sort || 'rating') === 'rating' && !result.items.some(item => item.test_rating)) {
         status.textContent += ' Für diese Auswahl liegt keine passende ADAC-Testnote vor.';
@@ -821,11 +843,17 @@
     }
   });
   if (byId('catalog-products')) {
-    byId('catalog-filters').addEventListener('submit', event => { event.preventDefault(); filters = Object.fromEntries(new FormData(event.currentTarget)); page = 1; loadPage(); });
+    let makeTimer = null;
+    byId('catalog-filters').addEventListener('submit', event => { event.preventDefault(); root.clearTimeout(makeTimer); filters = Object.fromEntries(new FormData(event.currentTarget)); page = 1; loadPage(); });
+    byId('wheel-make')?.addEventListener('input', event => {
+      root.clearTimeout(makeTimer);
+      const form = event.currentTarget.form;
+      makeTimer = root.setTimeout(() => form.requestSubmit(), 350);
+    });
     byId('catalog-filters').addEventListener('change', event => {
       if (event.target.name === 'season' || event.target.name === 'sort') event.currentTarget.requestSubmit();
     });
-    byId('catalog-filters').addEventListener('reset', () => { filters = {}; page = 1; loadPage(); });
+    byId('catalog-filters').addEventListener('reset', () => { root.clearTimeout(makeTimer); filters = {}; page = 1; loadPage(); });
     if (byId('vehicle-filters')) {
       let vehicleTimer = null;
       const applyVehicle = form => {
@@ -857,12 +885,71 @@
     const wrap = el('label', null, 'shop-checkbox'), input = el('input'); input.type = 'checkbox'; input.name = name;
     wrap.append(input, el('span', label)); form.append(wrap); return input;
   }
+  function reviewedRimVehicles(product) {
+    const fitment = product.fitment;
+    if (fitment?.status !== 'reviewed_with_conditions' || !Array.isArray(fitment.vehicles) ||
+        !Array.isArray(fitment.reports) || !fitment.reports.some(url => safeMedia(url, true))) return [];
+    return fitment.vehicles.filter(vehicle => vehicle?.make && vehicle.model);
+  }
+  function appendRimFitment(parent, product) {
+    const section = el('section', null, 'shop-fitment shop-rim-fitment');
+    section.append(el('h3', 'Fahrzeuge und Gutachten'));
+    const vehicles = reviewedRimVehicles(product);
+    if (vehicles.length) {
+      const models = [...new Set(vehicles.map(vehicle => vehicle.make + ' ' + vehicle.model))];
+      section.append(el('small', 'Im Gutachten zugeordnete Modelle'));
+      section.append(el('strong', models.join(', ')));
+      const details = el('details');
+      details.append(el('summary', 'Fahrzeugausführungen und Auflagen ansehen'));
+      for (const vehicle of vehicles) {
+        const years = vehicle.year_from && vehicle.year_to ? vehicle.year_from + '–' + vehicle.year_to : '';
+        const keys = vehicle.hsn && vehicle.tsn ? 'HSN/TSN ' + vehicle.hsn + '/' + vehicle.tsn : '';
+        details.append(el('p', [vehicle.make + ' ' + vehicle.model, years, keys].filter(Boolean).join(' · ')));
+        if (vehicle.conditions?.length) {
+          const list = el('ul');
+          for (const condition of vehicle.conditions) list.append(el('li', condition));
+          details.append(list);
+        }
+      }
+      section.append(details);
+    } else {
+      section.append(el('p', 'Für diese Felgenausführung ist die Zuordnung zu einem Fahrzeug noch offen.'));
+    }
+    const listedMake = filters.wheel_make?.toLocaleLowerCase('de');
+    const supplierMake = product.wheel_vehicle_makes?.find(make => make.toLocaleLowerCase('de') === listedMake);
+    if (supplierMake && !vehicles.some(v => v.make.toLocaleLowerCase('de') === listedMake)) {
+      section.append(el('p', 'Für ' + supplierMake + ' im Lieferantenkatalog gelistet. Die Zuordnung zu Ihrem konkreten Modell ist noch zu prüfen.'));
+    }
+    const reports = new Map();
+    if (vehicles.length) {
+      for (const url of product.fitment.reports.filter(url => safeMedia(url, true))) reports.set(url, 'Felgengutachten');
+    }
+    for (const report of product.product_documents?.rim_reports || []) {
+      if (report?.scope === 'provider_document_not_vehicle_approval' && safeMedia(report.url, true)) {
+        const title = reports.get(report.url) || 'Gutachten des Lieferanten';
+        reports.set(report.url, [title, report.report_number, report.type_description].filter(Boolean).join(' · '));
+      }
+    }
+    if (reports.size) {
+      const list = el('ul');
+      for (const [url, name] of reports) {
+        const item = el('li'), link = el('a', name + ' (PDF) ↗');
+        link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        item.append(link); list.append(item);
+      }
+      section.append(list, el('small', 'Bitte vergleichen Sie Fahrzeugtyp, Felgenausführung und Auflagen im PDF.'));
+    } else {
+      section.append(el('small', 'Zu dieser Ausführung ist derzeit kein Gutachten im Shop hinterlegt.'));
+    }
+    parent.append(section);
+  }
   let detailSequence = 0;
   async function openFamily(representative, variantPage = 1, diameter = '', configure = false) {
     const run = ++detailSequence, dialog = byId('product-dialog'), content = byId('product-detail');
     content.replaceChildren(el('p', 'Ausführungen werden geladen …')); if (!dialog.open) dialog.showModal();
     try {
       const query = new URLSearchParams({page: String(variantPage), page_size: '24'}); if (diameter) query.set('diameter', diameter);
+      if (filters.wheel_make) query.set('wheel_make', filters.wheel_make);
       if (body.dataset.page === 'komplettraeder') query.set('complete', '1');
       const result = await requestJSON('/products/' + encodeURIComponent(representative.id) + '/variants?' + query);
       if (run !== detailSequence || !dialog.open) return;
@@ -880,6 +967,8 @@
         if (!['alloy_wheel', 'steel_wheel'].includes(product.category)) continue;
         const row = el('article', null, 'shop-family-variant'), description = el('div');
         description.append(el('h3', product.size || product.name), el('p', [product.specifications?.Ausführung, product.article_number && 'Art.-Nr. ' + product.article_number].filter(Boolean).join(' · '), 'shop-muted'));
+        const models = [...new Set(reviewedRimVehicles(product).map(vehicle => vehicle.make + ' ' + vehicle.model))];
+        if (models.length) description.append(el('p', 'Gutachten für ' + models.join(', ')));
         const price = priceBox(product, 1, {active: () => run === detailSequence && dialog.open});
         row.append(description, price, button(configure ? 'Passende Reifen wählen' : 'Diese Felge ansehen', () => openProduct(product.id, configure))); grid.append(row);
         Promise.resolve().then(() => scheduleQuantityPrice(price, result, 0));
@@ -1022,8 +1111,14 @@
         if (comparison) status.textContent += ' Angebote gleicher Reifengröße nach Preis aufsteigend. Last- und Geschwindigkeitsindex gesondert beachten.';
         for (const tyre of result.items.filter(validProduct)) {
           if (tyre.category !== 'tyre') continue;
-          const row = el('label', null, 'shop-bundle-option'), radio = el('input'); radio.type = 'radio'; radio.name = 'bundle_tyre'; radio.value = tyre.id;
-          const details = el('div'); details.append(el('h3', tyre.name), el('p', tyre.size, 'shop-muted'));
+          const row = el('article', null, 'shop-bundle-option'), radio = el('input');
+          radio.type = 'radio'; radio.name = 'bundle_tyre'; radio.value = tyre.id;
+          radio.id = 'bundle-choice-' + tyre.id;
+          const name = el('label', tyre.name), heading = el('h3'), details = el('div');
+          name.htmlFor = radio.id;
+          heading.append(name);
+          details.append(heading, el('p', tyre.size, 'shop-muted'));
+          appendTyreRating(details, tyre, true);
           const price = priceBox(tyre, quantity, {active: () => run === serial && active(), onUpdate: updateSummary});
           choicePrices.add(price);
           details.append(price);
@@ -1111,9 +1206,10 @@
       }
       const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', product.size, 'shop-muted'));
       appendTyreRating(copy, product, true);
+      if (isRim) appendRimFitment(copy, product);
       const dimensions = rimDimensions(product);
       const details = configure && isRim ? el('details', null, 'shop-rim-details') : copy;
-      if (details !== copy) details.append(el('summary', 'Felgendetails, Gutachten und Einzelkauf'));
+      if (details !== copy) details.append(el('summary', 'Felgendetails und Einzelkauf'));
       if (dimensions.length) {
         const specification = el('dl', null, 'shop-specs');
         for (const [label, value] of dimensions) specification.append(el('dt', label), el('dd', value));
@@ -1161,32 +1257,20 @@
       }
       const quality = qualityFacts(product);
       if (quality.length) { const labels = el('dl', null, 'shop-specs'); for (const [label, value] of quality) labels.append(el('dt', label), el('dd', value)); copy.append(el('h3', 'EU-Reifenlabel'), labels); }
-      const fitment = el('section', null, 'shop-fitment'); fitment.append(el('h3', product.category === 'tyre' ? 'Ihre Reifenauswahl' : product.department === 'parts' ? 'Bestätigte Fahrzeugzuordnung' : 'Gutachten und Fahrzeugzuordnung'));
-      if (isRim) {
-        const originals = product.product_documents?.rim_reports;
-        if (Array.isArray(originals) && originals.length) {
-          fitment.append(el('h4', 'Originalgutachten zu dieser Ausführung'));
-          for (const report of originals.slice(0, 48)) {
-            if (report.scope !== 'provider_document_not_vehicle_approval' || !safeMedia(report.url, true)) continue;
-            const link = el('a', [report.report_number, report.type_description].filter(Boolean).join(' · ') || 'Originalgutachten öffnen ↗');
-            link.href = report.url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br'));
+      if (!isRim) {
+        const fitment = el('section', null, 'shop-fitment'); fitment.append(el('h3', product.category === 'tyre' ? 'Ihre Reifenauswahl' : product.department === 'parts' ? 'Bestätigte Fahrzeugzuordnung' : 'Gutachten und Fahrzeugzuordnung'));
+        if (product.category === 'tyre') fitment.append(el('p', TYRE_PURCHASE_NOTE));
+        if (product.fitment && (product.fitment.status === 'reviewed_with_conditions' || product.department === 'parts' && product.fitment.status === 'provider_vehicle')) {
+          for (const url of (product.fitment.reports || []).filter(url => safeMedia(url, true))) { const link = el('a', 'Gutachten zur Ausführung öffnen ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br')); }
+          for (const vehicle of (product.fitment.vehicles || []).slice(0, 128)) {
+            fitment.append(el('p', [vehicle.label || [vehicle.make, vehicle.model].filter(Boolean).join(' '), vehicle.year_from && vehicle.year_to ? vehicle.year_from + '–' + vehicle.year_to : 'Baujahr nicht belegt · genaue Ausführung im Gutachten prüfen', vehicle.hsn && vehicle.hsn + '/' + vehicle.tsn].filter(Boolean).join(' · ')));
+            const list = el('ul'); for (const condition of vehicle.conditions || []) list.append(el('li', condition)); fitment.append(list);
           }
-          fitment.append(el('p', 'Originalunterlagen des Anbieters. Die genaue Felgenausführung, Fahrzeugausführung und Auflagen im Dokument prüfen. Eine bestätigte Fahrzeugzuordnung ist unten gesondert aufgeführt.', 'shop-muted'));
-        }
+          fitment.append(el('p', product.department === 'parts' ? 'Bestätigte Anbieterzuordnung. Motorisierung, Karosserieausführung und Artikelhinweise vor dem Kauf prüfen.' : 'Auflagen und genaue Ausführung vor der Montage prüfen. Die Zuordnung ersetzt keine Prüfung am Fahrzeug.'));
+        } else if (product.category !== 'tyre') fitment.append(el('p', 'Für diese Ausführung ist hier noch keine bestätigte Fahrzeugzuordnung mit Gutachten hinterlegt. Passung vor einer Bestellung prüfen lassen.'));
+        details.append(fitment);
       }
-      if (product.category === 'tyre') fitment.append(el('p', TYRE_PURCHASE_NOTE));
-      if (product.fitment && (product.fitment.status === 'reviewed_with_conditions' || product.department === 'parts' && product.fitment.status === 'provider_vehicle')) {
-        for (const url of (product.fitment.reports || []).filter(url => safeMedia(url, true))) { const link = el('a', 'Gutachten zur Ausführung öffnen ↗'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; fitment.append(link, el('br')); }
-        for (const vehicle of (product.fitment.vehicles || []).slice(0, 128)) {
-          fitment.append(el('p', [vehicle.label || [vehicle.make, vehicle.model].filter(Boolean).join(' '), vehicle.year_from && vehicle.year_to ? vehicle.year_from + '–' + vehicle.year_to : 'Baujahr nicht belegt · genaue Ausführung im Gutachten prüfen', vehicle.hsn && vehicle.hsn + '/' + vehicle.tsn].filter(Boolean).join(' · ')));
-          const list = el('ul'); for (const condition of vehicle.conditions || []) list.append(el('li', condition)); fitment.append(list);
-        }
-        fitment.append(el('p', product.department === 'parts' ? 'Bestätigte Anbieterzuordnung. Motorisierung, Karosserieausführung und Artikelhinweise vor dem Kauf prüfen.' : 'Auflagen und genaue Ausführung vor der Montage prüfen. Die Zuordnung ersetzt keine Prüfung am Fahrzeug.'));
-      } else if (product.category !== 'tyre') fitment.append(el('p', dimensions.length ?
-        'Verkauf nach den angegebenen Felgenmaßen. Fahrzeugpassung und Auflagen sind vor der Montage zu prüfen.' :
-        'Für diese Ausführung ist hier noch keine bestätigte Fahrzeugzuordnung mit Gutachten hinterlegt. Passung vor einer Bestellung prüfen lassen.'));
       if (product.department === 'parts' || product.department === 'accessories') copy.append(el('p', 'Lieferzeit wird bestätigt. Gemeldeter Bestand ist keine Lieferzusage.', 'shop-muted'));
-      details.append(fitment);
       if (isRim) {
         const rimPane = el('section', null, 'shop-rim-pane'); rimPane.append(gallery, copy);
         bundle = bundlePanel(product, () => count, () => run === detailSequence && dialog.open, configure);
@@ -1865,7 +1949,7 @@
   if (body.dataset.page === 'home') {
     for (const photo of document.querySelectorAll('.shop-category-tile img')) {
       const source = photo.getAttribute('src');
-      if (!photo.naturalWidth && safeMedia(source)) setImageSource(photo, source);
+      if (!photo.naturalWidth && safeMedia(source)) setImageSource(photo, source, photo.getAttribute('data-fallback-src'));
     }
   }
   if (body.dataset.page === 'komplettraeder') {

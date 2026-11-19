@@ -96,6 +96,33 @@ def _matches_vehicle(vehicle, criteria, hsn, tsn, parts):
     return True
 
 
+def _wheel_vehicle_makes(row, fitment):
+    """Make-level discovery only, from this exact variant's reviewed or supplier data."""
+    from shop_partner_native.alzura_live_products import VEHICLE_BRANDS
+
+    makes = {vehicle['make'] for vehicle in fitment['vehicles']}
+    candidates, identifiers = row.get('vehicle_candidates'), row.get('identifiers')
+    if (isinstance(identifiers, Mapping) and identifiers.get('provider') == 'ALZURA'
+            and re.fullmatch(r'[1-9][0-9]{0,17}', str(identifiers.get('provider_id', '')))
+            and isinstance(candidates, list) and len(candidates) <= 500):
+        for candidate in candidates:
+            if (isinstance(candidate, Mapping) and candidate.get('scope') == 'provider'
+                    and _integer(candidate.get('car_id'), 1, 10**18-1)
+                    and isinstance(candidate.get('brand'), str)):
+                make = VEHICLE_BRANDS.get(candidate['brand'])
+                if make:
+                    makes.add(make)
+                elif candidate['brand'] in VEHICLE_BRANDS.values():
+                    makes.add(candidate['brand'])
+    return sorted(makes, key=str.casefold)
+
+
+def wheel_make_term(value):
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= 80:
+        raise CatalogError('invalid_filter')
+    return _fold(value.strip())
+
+
 def _condition(value):
     # Conditions are safety constraints, not marketing HTML. Never shorten an
     # exclusion into an apparent approval. JSON consumers must render as text.
@@ -361,9 +388,14 @@ class PublicCatalog:
                     product["images"].append(url)
             evidence = verified.get(sid)
             product["fitment"] = self._fitment(row, evidence, documents)
+            if department == 'wheels':
+                product['wheel_vehicle_makes'] = _wheel_vehicle_makes(row, product['fitment'])
             self._rows[sid] = {"public": product, "quote": _quote(row, allow_published_prices=self._allow_published_prices),
+                               "wheel_make_terms": frozenset(_fold(name) for name in product.get('wheel_vehicle_makes', ())),
                                "search": _fold(" ".join([product["name"], product["brand"], product["size"],
                                                             product["article_number"], *product["specifications"].values()]))}
+        self._wheel_makes = sorted({name for entry in self._rows.values()
+                                    for name in entry['public'].get('wheel_vehicle_makes', ())}, key=str.casefold)
 
     @staticmethod
     def _fitment(row, evidence, documents):
@@ -479,7 +511,7 @@ class PublicCatalog:
             return (*self._parts_vehicle_terms[dated[1]], int(dated[2]))
         return None
 
-    def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
+    def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None, wheel_make=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
              width=None, ratio=None, diameter=None, season=None, sort=None, now=None):
         if not _integer(page, 1, 10_000) or not _integer(page_size, 1, MAX_PAGE_SIZE):
@@ -498,6 +530,10 @@ class PublicCatalog:
         for value in (brand, make, model):
             if value is not None and (not isinstance(value, str) or not value.strip() or len(value) > 120):
                 raise CatalogError("invalid_filter")
+        if wheel_make is not None:
+            if department not in (None, 'wheels'):
+                raise CatalogError("invalid_filter")
+            wheel_make = wheel_make_term(wheel_make)
         if model is not None and make is None or year is not None and (make is None or model is None or not _integer(year, 1900, 2100)):
             raise CatalogError("invalid_vehicle_filter")
         if (hsn is None) != (tsn is None) or hsn is not None and (not isinstance(hsn, str) or not isinstance(tsn, str)
@@ -528,6 +564,8 @@ class PublicCatalog:
             if size_conflict:
                 continue
             if category is not None and public["category"] != category or department is not None and public["department"] != department:
+                continue
+            if wheel_make is not None and wheel_make not in entry['wheel_make_terms']:
                 continue
             if brand is not None and _fold(public["brand"]) != _fold(brand.strip()):
                 continue
@@ -561,7 +599,7 @@ class PublicCatalog:
             rows.sort(key=lambda entry: _wet_grip_rank(entry["public"]))
         return rows, current
 
-    def _page_result(self, rows, current, *, page, page_size):
+    def _page_result(self, rows, current, *, page, page_size, department=None):
         offset = (page - 1) * page_size
         result = {"items": [self._project(row, current, detail=False) for row in rows[offset:offset + page_size]],
                   "page": page, "page_size": page_size, "total": len(rows),
@@ -569,12 +607,14 @@ class PublicCatalog:
         if rows and "matching_models" in rows[0]:
             models = sorted({pair for row in rows for pair in row["matching_models"]})
             result["vehicle_models"] = [{"make": make, "model": model} for make, model in models[:128]]
+        if department == 'wheels':
+            result['wheel_makes'] = self._wheel_makes.copy()
         return result
 
-    def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
+    def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None, wheel_make=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
              width=None, ratio=None, diameter=None, season=None, sort=None, now=None):
         rows, current = self._page_entries(page=page, page_size=page_size, q=q,
-            category=category, department=department, brand=brand, make=make, model=model,
+            category=category, department=department, brand=brand, wheel_make=wheel_make, make=make, model=model,
             year=year, hsn=hsn, tsn=tsn, width=width, ratio=ratio, diameter=diameter, season=season, sort=sort, now=now)
-        return self._page_result(rows, current, page=page, page_size=page_size)
+        return self._page_result(rows, current, page=page, page_size=page_size, department=department)
