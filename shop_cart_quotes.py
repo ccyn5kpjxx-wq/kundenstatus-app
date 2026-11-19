@@ -528,6 +528,8 @@ class CartQuoteService:
                     'items_gross_cent': price['unit_gross_cent'] * row['quantity'] if price else None, 'services': []}
             if price and 'base_unit_gross_cent' in price:
                 item['base_unit_gross_cent'] = price['base_unit_gross_cent']
+            if p['category'] == 'tyre' and _text(p.get('tyre_size'), 100):
+                item['tyre_size'] = p['tyre_size'].strip()
             if item['items_gross_cent'] is not None:
                 known += item['items_gross_cent']
                 known_any = True

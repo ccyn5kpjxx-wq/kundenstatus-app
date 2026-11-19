@@ -3,7 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -71,6 +71,53 @@ class ReceiptDeliveryChecks(unittest.TestCase):
             with self.assertRaises(ReceiptError):f.receipts.prepare(f.order_id,customer_id='customer-a',kind='order_received')
             with self.assertRaises(ReceiptError):f.receipts.customer_receipt(f.order_id,customer_id='customer-a')
         self.assertEqual(f.count('shop_order_receipts_v2'),0)
+
+    def test_paid_customer_sees_same_number_and_items_as_the_confirmation(self):
+        f = self.fixture('collection')
+        order, snapshot, context = f.receipts._load(f.order_id, 'customer-a')
+        order.update(mode='live', status='paid', appointment_preference={'date': '2026-11-20', 'time': '10:00'})
+        lookup = Mock(return_value={f.order_id: 582})
+        with patch.object(f.receipts, 'mode', 'live'), patch.object(f.receipts, 'workshop_order_lookup', lookup), \
+                patch.object(f.receipts, '_load', return_value=(order, snapshot, context)):
+            view = f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a')
+            message = f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_confirmed')
+            self.assertEqual(view['number'], 582)
+            self.assertTrue(view['mounting'])
+            self.assertIn('Montageauftrag Nr. 582', message['subject'])
+            self.assertIn('Montageauftrag Nr. 582', message['body'])
+            self.assertIn('20.11.2026 um 10:00 Uhr', message['body'])
+            self.assertEqual(len(view['items']), len(snapshot['lines']))
+            self.assertTrue(any('Komplettradmontage' in item['services'] for item in view['items']))
+            for item in view['items']:
+                self.assertEqual(set(item), {'name', 'quantity', 'services'})
+                self.assertIn(f"{item['quantity']} × {item['name']}", message['body'])
+            lookup.return_value = {}
+            self.assertEqual(f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a'), {'pending': True})
+            with self.assertRaisesRegex(ReceiptError, 'workshop_order_pending'):
+                f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_confirmed')
+        self.assertFalse(f.outbox.sent)
+
+    def test_goods_order_has_order_number_and_only_its_purchased_goods(self):
+        f = self.fixture()
+        order, snapshot, context = f.receipts._load(f.order_id, 'customer-a')
+        order.update(mode='live', status='paid')
+        oil = next(i for i, row in enumerate(snapshot['lines']) if row['category'] == 'oil')
+        snapshot.update(lines=[snapshot['lines'][oil]], request=[snapshot['request'][oil]])
+        lookup = Mock(return_value={f.order_id: 583})
+        with patch.object(f.receipts, 'mode', 'live'), patch.object(f.receipts, 'workshop_order_lookup', lookup), \
+                patch.object(f.receipts, '_load', return_value=(order, snapshot, context)):
+            view = f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a')
+            self.assertFalse(view['mounting'])
+            self.assertEqual(len(view['items']), 1)
+            message = f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_confirmed')
+            self.assertIn('Auftrag Nr. 583', message['body'])
+            self.assertNotIn('Montagetermin', message['body'])
+            order['status'] = 'authorized'
+            lookup.reset_mock()
+            receipt = f.receipts.prepare(f.order_id, customer_id='customer-a', kind='order_received')
+            self.assertNotIn('Auftrag Nr.', receipt['body'])
+            self.assertIsNone(f.receipts.customer_workshop_order(f.order_id, customer_id='customer-a'))
+            lookup.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

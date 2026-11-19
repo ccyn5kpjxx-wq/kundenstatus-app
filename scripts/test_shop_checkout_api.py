@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from flask import Flask
+from shop_order_store import OrderStoreError
 from shop_public_api import create_shop_public_blueprint
 
 
@@ -38,8 +39,9 @@ class CheckoutApiChecks(unittest.TestCase):
             'amount_gross_cent': 148449, 'currency': 'eur', 'created_at': '2026-11-16T12:00:00Z',
             'quote_expires_at': '2026-11-16T12:15:00Z', 'status': 'payment_pending'}
         self.app = Flask(__name__)
+        self.workshop_view = Mock(return_value=None)
         self.app.register_blueprint(create_shop_public_blueprint(checkout_service=self.checkout, authorize_quote=self.auth,
-            order_store=self.orders))
+            order_store=self.orders, workshop_order_view=self.workshop_view))
         self.client = self.app.test_client()
 
     def tearDown(self):
@@ -121,6 +123,29 @@ class CheckoutApiChecks(unittest.TestCase):
         self.checkout.status.assert_called_once_with(self.order_id, customer_id='customer-a')
         self.checkout.start.assert_not_called()
         self.checkout.handle_webhook.assert_not_called()
+
+    def test_workshop_view_only_after_owner_check_on_paid_live_orders(self):
+        self.enable()
+        path = '/shop/api/v2/orders/' + self.order_id
+        self.orders.get_order.return_value['status'] = 'paid'
+        self.client.get(path, base_url=self.origin)
+        self.workshop_view.assert_not_called()
+        self.app.config['SHOP_ORDER_MODE'] = 'live'
+        self.orders.get_order.return_value['mode'] = 'live'
+        self.orders.get_order.return_value['status'] = 'authorized'
+        self.client.get(path, base_url=self.origin)
+        self.workshop_view.assert_not_called()
+        self.orders.get_order.return_value['status'] = 'paid'
+        self.workshop_view.return_value = {'number': 582, 'items': [], 'mounting': False}
+        response = self.client.get(path, base_url=self.origin)
+        self.assertEqual(response.get_json()['workshop_order']['number'], 582)
+        self.workshop_view.assert_called_once_with(self.order_id, customer_id='customer-a')
+        self.workshop_view.reset_mock()
+        self.orders.get_order.side_effect = OrderStoreError('order_not_found')
+        response = self.client.get(path, base_url=self.origin)
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn('workshop_order', response.get_json())
+        self.workshop_view.assert_not_called()
 
     def test_malformed_or_cross_origin_checkout_url_and_provider_exceptions_are_not_exposed(self):
         self.enable()

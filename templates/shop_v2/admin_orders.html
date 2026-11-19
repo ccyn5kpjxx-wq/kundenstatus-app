@@ -48,6 +48,12 @@
   <a class="top-link" href="{{ url_for('shop_admin.orders') }}">← Alle Shopbestellungen</a>
   <h1>Bestellung</h1><div class="order-id">{{ detail.id }}</div>
   <p class="muted">{{ detail.created }} · {{ detail.mode }}</p>
+  {% if detail.workshop_order_number %}
+    <p><a href="{{ url_for('auftrag_detail', auftrag_id=detail.workshop_order_number) }}"><strong>Werkstattauftrag Nr. {{ detail.workshop_order_number }} öffnen</strong></a>
+    · <a href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=detail.workshop_order_number) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a></p>
+  {% elif detail.workshop_lookup_unavailable %}
+    <p class="note warning">Die Werkstatt-Auftragsnummer ist derzeit nicht abrufbar.</p>
+  {% endif %}
   {% if processing_error %}<p class="note warning" role="alert">{{ processing_error }}</p>{% endif %}
   {% if detail.workshop_pending %}
   <section class="card" aria-label="Werkstattbearbeitung">
@@ -187,6 +193,7 @@
   <section class="card">
   {% if orders %}<div class="table-scroll"><table><thead><tr><th>Bestellung</th><th>Gesamt</th><th>Zahlung</th><th>Bearbeitung</th><th>Bestätigungen / Rechnung</th></tr></thead><tbody>
     {% for order in orders %}<tr><td class="stack"><a class="order-id" href="{{ url_for('shop_admin.order_detail',order_id=order.id) }}">{{ order.id }}</a>
+      {% if order.workshop_order_number %}<a href="{{ url_for('auftrag_detail', auftrag_id=order.workshop_order_number) }}">Werkstattauftrag Nr. {{ order.workshop_order_number }}</a>{% endif %}
       {% if order.workshop_pending %}<span class="status warning">Zu bearbeiten</span>{% elif order.workshop_handled %}<span class="status">Bearbeitet</span>{% endif %}
       <span class="small muted">{{ order.created }} · {{ order.mode }}</span><span>{{ order.status }}</span></td><td class="stack money">{{ order.amount }}{% if order.margin %}<span class="small muted">Warenmarge</span><span class="small">{% if order.margin.amount %}{{ order.margin.amount }} · {{ order.margin.percent }}{% else %}{{ order.margin.status }}{% endif %}</span>{% endif %}</td><td class="stack"><span>{{ order.payment }}</span>{% if order.action %}<span class="small">{{ order.action }}</span>{% endif %}</td><td class="stack">{% if order.attention %}<span class="status warning">Manuelle Prüfung</span>{% endif %}<span>{{ order.workflow }}</span><span class="small muted">{{ order.fulfillment }}</span>{% if order.appointment %}<strong class="small">{% if order.appointment_calendar_unavailable %}Terminstatus nicht verfügbar{% elif order.appointment_confirmed %}Montagetermin bestätigt{% else %}Montagetermin angefragt{% endif %}<br>{{ order.appointment }}</strong>{% endif %}</td><td class="stack"><span class="small">Eingang: {{ order.receipts.get('received','Noch nicht erstellt') }}</span><span class="small">Bestätigung: {{ order.receipts.get('confirmed','Noch nicht erstellt') }}</span><span class="small muted">{{ order.invoice }}</span></td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="empty muted">Noch keine Shopbestellungen auf dieser Seite.</p>{% endif %}

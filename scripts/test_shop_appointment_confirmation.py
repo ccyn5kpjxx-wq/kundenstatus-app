@@ -17,7 +17,7 @@ from shop_order_review import init_order_review_schema
 from shop_order_workflow import init_order_workflow_schema
 from shop_production_payments import ConsumerOrderStore
 from shop_storage import ShopStorage
-from test_shop_order_store import NOW, quote
+from test_shop_order_store import NOW, quote, rehash
 from test_shop_production_payments import pack
 
 
@@ -49,9 +49,12 @@ class ShopAppointmentConfirmation(unittest.TestCase):
             day += timedelta(days=1)
         self.day = day.isoformat()
 
-    def order(self, customer, time, payment='paid', mode='live'):
+    def order(self, customer, time, payment='paid', mode='live', tyre_size=None):
         context = {'contact': {'name': 'Montage ' + customer, 'email': customer + '@example.invalid'}}
         value = quote(customer=customer, mode=mode, context=context)
+        if tyre_size:
+            value['lines'][0]['tyre_size'] = tyre_size
+            value = rehash(value)
         key = value['quote_hash']
         self.store.save_quote(value, expected_quote_hash=key, customer_id=customer, mode=mode,
                               delivery_context=context)
@@ -121,6 +124,32 @@ class ShopAppointmentConfirmation(unittest.TestCase):
             self.assertEqual('is-alert' in badge[1], count > 0)
             self.assertEqual(refresh.status_code, 200)
             self.assertEqual(refresh.json, {'count': count})
+
+    def test_workshop_number_links_to_order_and_a5_label_before_and_after_confirmation(self):
+        customer = 'etikettkunde'
+        path = self.order(customer, '12:00', tyre_size='225/40 R18 92Y XL')
+        shop_id = path.rsplit('/', 1)[1]
+        owner = dict(customer_id=customer, mode='live')
+        order = self.store.get_order(shop_id, **owner)
+        snapshot = self.store.snapshot_for_order(shop_id, **owner)
+        context = self.store.delivery_context_for_order(shop_id, **owner)
+        number = portal.erstelle_shop_montageauftrag(order, snapshot, context)
+        label_path = f'/admin/auftrag/{number}/reifenetikett'
+        self.assertIn(label_path, self.client.get(path, base_url=PORTAL).text)
+        self.assertIn(f'Werkstattauftrag Nr. {number}', self.client.get('/admin/shop', base_url=PORTAL).text)
+        label = self.client.get(label_path, base_url=PORTAL)
+        self.assertEqual(label.status_code, 200)
+        self.assertIn('225/40 R18 92Y XL', label.text)
+        self.assertIn('Reifenservice · Wunschtermin', label.text)
+        self.assertNotIn('@example.invalid', label.text)
+        self.assertEqual(label.text.count('<article>'), 2)
+        action, fields = self.form(path)
+        self.assertEqual(self.post(action, fields).status_code, 303)
+        confirmed = self.client.get(label_path, base_url=PORTAL)
+        self.assertIn('12:00', confirmed.text)
+        self.assertNotIn('Wunschtermin', confirmed.text)
+        slots = [e for e in portal.gebuchte_reifen_kalendereintraege() if e['shop_order_id'] == shop_id]
+        self.assertEqual([e['auftrag_id'] for e in slots], [number])
 
     def test_owner_opens_shop_from_second_sidebar_link(self):
         cockpit = self.client.get('/admin/cockpit', base_url=PORTAL)

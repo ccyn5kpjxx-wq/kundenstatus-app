@@ -20,7 +20,8 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
                           authorize_quote=None, quote_context=None,
                           quote_sink=None, order_store=None, checkout_service=None,
                           buyer_service=None, feature_links=None, catalogue_warmup=None,
-                          media_service=None, consumer_service=None, documents_service=None):
+                          media_service=None, consumer_service=None, documents_service=None,
+                          workshop_order_view=None):
     app = portal.app
     if 'shop_v2' in app.extensions:
         raise ValueError('shop_already_registered')
@@ -67,6 +68,7 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
         catalogue=catalogue, quote_service=quote_service,
         authorize_quote=authorize_quote, quote_context=quote_context,
         quote_sink=quote_sink, order_store=order_store,
+        workshop_order_view=workshop_order_view,
         appointment_calendar=getattr(portal, 'freie_reifen_slots', None),
         checkout_service=checkout_service, catalogue_warmup=catalogue_warmup))
     app.config['SHOP_FRONTEND_ENABLED'] = (app.config['SHOP_FRONTEND_ENABLED'] is True

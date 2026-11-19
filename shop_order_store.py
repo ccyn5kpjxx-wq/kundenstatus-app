@@ -96,25 +96,51 @@ def available_appointment_times(day, calendar):
         raise OrderStoreError('appointment_service_unavailable') from None
 
 
-def _workshop_tyre_mounting(snapshot):
-    tyre_groups, mounted_groups, other_destination_groups = set(), set(), set()
-    for line, item in zip(snapshot['lines'], snapshot['request']):
+def workshop_mounting_services(snapshot):
+    """Map purchased tyre installation lines to their options by snapshot index."""
+    rows = list(zip(snapshot['lines'], snapshot['request']))
+    groups = {}
+    for line, item in rows:
+        if item['assembly_group']:
+            groups.setdefault(item['assembly_group'], []).append((line, item))
+
+    def has_mounting_charge(line):
+        return any(service['code'] == 'mounting' for service in line['services'])
+
+    mounted_groups = {
+        group for group, members in groups.items()
+        if all(line['destination'] == 'workshop' for line, _ in members)
+        and any(line['id'].startswith('tyre:') for line, _ in members)
+        and any(has_mounting_charge(line) for line, _ in members)
+    }
+    result = {}
+    for index, (line, item) in enumerate(rows):
         group = item['assembly_group']
-        if line['destination'] != 'workshop':
-            if group:
-                other_destination_groups.add(group)
-            continue
         tyre = line['id'].startswith('tyre:')
-        mounting_charge = any(service['code'] == 'mounting' for service in line['services'])
-        if not group:
-            if tyre and item['services'].get('mounting') and mounting_charge:
-                return True
+        if group in mounted_groups:
+            services = ['Komplettradmontage'] if tyre else []
+            options = [member['services'] for _, member in groups[group]]
+        elif (not group and tyre and line['destination'] == 'workshop'
+                and item['services'].get('mounting') and has_mounting_charge(line)):
+            services = ['Reifenmontage']
+            options = [item['services']]
         else:
-            if tyre:
-                tyre_groups.add(group)
-            if mounting_charge:
-                mounted_groups.add(group)
-    return bool((tyre_groups & mounted_groups) - other_destination_groups)
+            continue
+        if services:
+            for key, label in (('runflat', 'Runflat'), ('disposal', 'Altreifenentsorgung')):
+                if any(selection.get(key) for selection in options):
+                    services.append(label)
+        result[index] = services
+    return result
+
+
+def workshop_mounting_items(snapshot):
+    return [{'name': snapshot['lines'][index]['name'], 'quantity': snapshot['lines'][index]['quantity'],
+             'services': services} for index, services in workshop_mounting_services(snapshot).items()]
+
+
+def _workshop_tyre_mounting(snapshot):
+    return bool(workshop_mounting_services(snapshot))
 
 
 def _validate_snapshot(snapshot, expected_hash, customer_id, mode):

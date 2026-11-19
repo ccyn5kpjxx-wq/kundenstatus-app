@@ -182,7 +182,7 @@ class Check24Bookings:
                   'check24_ende': data['end_at'], 'check24_preis_brutto': data['total_gross']}
         order_id = self.p.create_auftrag('check24', kunde_name=data['customer_name'],
             kunde_email=data['customer_email'], kontakt_telefon=data['customer_phone'],
-            fahrzeug='Reifenservice · CHECK24', auftragsnummer=data['provider_id'],
+            fahrzeug='Reifenservice · CHECK24', kennzeichen=data.get('vehicle_plate', ''), auftragsnummer=data['provider_id'],
             schadenart='Reifenservice', leistungsart='reifenservice', beschreibung=description,
             analyse=description, annahme_datum=start.strftime('%d.%m.%Y'),
             schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False), _db=db)

@@ -785,6 +785,27 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertEqual([c for c in calls if c[0]=='PEEK'], [('PEEK','1'),('PEEK','2'),('PEEK','3')])
         self.assertTrue(all('UNSEEN' not in c and 'STORE' not in c and 'EXPUNGE' not in c for c in calls))
 
+    def test_a5_label_uses_supplier_date_and_service_slot_after_early_dropoff(self):
+        body = BODY.replace("Gebuchter Termin\n", "Fahrzeugdaten\nKennzeichen: MOS-AB 123\nGebuchter Termin\n")
+        event = self.service.ingest(synthetic_mail(body), verified=True, auto_apply=True)
+        order_id = self.service.rows()[0]["order_id"]
+        self.service.arrival(order_id, "2026-10-30", "07:00", "")
+        client = self.p.app.test_client()
+        path = f"/admin/auftrag/{order_id}/reifenetikett"
+        self.assertNotEqual(client.get(path).status_code, 200)
+        with client.session_transaction() as session:
+            session["admin"] = True
+        result = client.get(path)
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.headers["Cache-Control"], "private, no-store")
+        for expected in (f"<strong>{order_id}</strong>", "29.10.2026", "30.10.2026 · 08:00–08:30",
+                         "Erika Beispiel", "MOS-AB 123", "185/60 R15", "A5 landscape", "CHECK24 TEST9001"):
+            self.assertIn(expected, result.text)
+        for private in ("07:00", "kundenalias@example.invalid", "45,00", "Provision"):
+            self.assertNotIn(private, result.text)
+        self.service.reschedule(event, "2026-10-30", "10:00", "10:30", "Abgeglichen")
+        self.assertIn("10:00–10:30", client.get(path).text)
+
     def test_reschedule_updates_order_and_slot_atomically_and_checks_conflicts(self):
         import json
         event = self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)

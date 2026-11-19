@@ -254,6 +254,11 @@ def parse_check24_mail(raw_bytes):
         except ValueError as exc:
             errors.append("Lieferdatum: " + str(exc))
 
+    vehicle = _section(text, r"Fahrzeugdaten", r"Kunde|Gebuchter Termin|Gebuchte Leistungen|Bestellnummer")
+    plates = {value.strip().upper() for value in re.findall(
+        r"(?im)^[ \t]*(?:Kfz[- ]?)?Kennzeichen[ \t]*:?[ \t]*(?:\n[ \t]*)?"
+        r"([A-ZÄÖÜ]{1,3}[ -]+[A-Z]{1,2}[ -]*\d{1,4}[EH]?)[ \t]*$", vehicle)}
+    result["vehicle_plate"] = plates.pop() if len(plates) == 1 else ""
     customer = _section(text, r"Kunde", r"Fahrzeugdaten|Gebuchter Termin|Gebuchte Leistungen|Bestellnummer")
     lines = customer.splitlines()
     names = [line for line in lines if not EMAIL.search(line) and
