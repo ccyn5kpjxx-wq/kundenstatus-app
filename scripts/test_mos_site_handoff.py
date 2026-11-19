@@ -38,6 +38,17 @@ class HandoffTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             handoff.validated_prefill(FIELDS, {**CFG, 'fleet': {'i10': {'id': 7}}}, NOW)
 
+    def test_doblo_slug_and_legacy_inventory_ids_use_configured_stock(self):
+        cfg = {**CFG, 'fleet': {**CFG['fleet'], 'doblo-xl': {'id': 42}}}
+        fields = {k: v for k, v in FIELDS.items() if k != 'vehicle_id'}
+        for vehicle in ({'vehicle': 'doblo-xl'}, {'vehicle': 'doblo-xl', 'vehicle_id': '42'}):
+            self.assertEqual(handoff.validated_prefill({**fields, **vehicle}, cfg, NOW)['vehicle'], 'doblo-xl')
+        for vehicle in ({'vehicle_id': '42'}, {'vehicle': 'fiat-doblo'}, {'vehicle': 'doblo-xl', 'vehicle_id': '3'}):
+            with self.assertRaises(ValueError):
+                handoff.validated_prefill({**fields, **vehicle}, cfg, NOW)
+        with self.assertRaises(ValueError):
+            handoff.validated_prefill({**fields, 'vehicle': 'doblo-xl'}, CFG, NOW)
+
     def test_hours_weekdays_future_and_elapsed_five_day_cap(self):
         for values in ({'start': '2026-10-22T07:00'}, {'end': '2026-10-23T21:00'},
                        {'start': '2026-10-22T10:30'}, {'start': '2026-10-25T10:00'},

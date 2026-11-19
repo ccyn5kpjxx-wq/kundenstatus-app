@@ -9,6 +9,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from mos_contract_delivery import _single_address
+from mos_booking.fleet import LISTINGS
 
 
 SITE_ORIGINS = (
@@ -16,7 +17,8 @@ SITE_ORIGINS = (
     'https://www.autovermietung-mos.de',
     'https://autovermietung-mos.info979896.chatgpt.site',
 )
-VEHICLES = {'1': 'i10', '3': 'kona'}
+# Historical Site handoffs contained only these fixed numeric IDs. Keep their original meaning.
+LEGACY_VEHICLES = {'1': 'i10', '3': 'kona'}
 SESSION_KEY = 'mos_site_handoffs'
 MAX_AGE_SECONDS = 300
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -49,11 +51,14 @@ def consume_nonce(session, nonce, now=None):
 def validated_prefill(fields, cfg, now=None):
     """Validate Site fields; prices/availability still come only from quote()."""
     now = now or datetime.now(timezone.utc)
-    vehicle = fields.get('vehicle_id', '')
-    if not isinstance(vehicle, str) or vehicle not in VEHICLES:
+    fleet = cfg.get('fleet', {})
+    slug = fields.get('vehicle')
+    if slug is None:
+        vehicle_id = fields.get('vehicle_id')
+        slug = LEGACY_VEHICLES.get(vehicle_id) if isinstance(vehicle_id, str) else None
+    if not isinstance(slug, str) or slug not in LISTINGS or slug not in fleet:
         raise ValueError('Dieses Fahrzeug ist nur auf Anfrage verfügbar.')
-    slug = VEHICLES[vehicle]
-    if cfg.get('fleet', {}).get(slug, {}).get('id') != int(vehicle):
+    if 'vehicle_id' in fields and fields['vehicle_id'] != str(fleet[slug]['id']):
         raise ValueError('Die Fahrzeugzuordnung muss geprüft werden.')
 
     slots = []

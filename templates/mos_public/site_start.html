@@ -32,9 +32,12 @@
     const data = event.data;
     if (!data || data.type !== 'mos-booking-data' || data.version !== 1 || data.nonce !== nonce) return;
     const payload = data.payload;
-    const fields = ['vehicle_id', 'start', 'end', 'name', 'email', 'planned_km'];
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload) ||
-        !fields.every(key => typeof payload[key] === 'string')) return;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+    const fields = ['start', 'end', 'name', 'email', 'planned_km'];
+    for (const key of ['vehicle', 'vehicle_id']) {
+      if (Object.hasOwn(payload, key)) fields.push(key);
+    }
+    if (fields.length === 5 || !fields.every(key => typeof payload[key] === 'string')) return;
     try { if (JSON.stringify(payload).length > 2048) return; } catch (_) { return; }
     accepted = true;
     stop();

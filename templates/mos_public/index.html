@@ -50,13 +50,15 @@
             {% set rate = fleet_rates.get(slug, {}) %}
             <button type="button" class="entry-vehicle" data-model="{{ slug }}" aria-pressed="false">
               <span class="entry-vehicle-media">
-                {% if slug in ('i10', 'kona') %}
+                {% if slug == 'doblo-xl' %}
+                  <img src="{{ url_for('static', filename='mietwagen/doblo-xl-hersteller.png') }}" alt="" width="1100" height="619">
+                {% elif slug in ('i10', 'kona') %}
                   <img src="{{ url_for('static', filename='mos-portal/' ~ slug ~ '.webp') }}" alt="" width="1100" height="619">
                 {% endif %}
                 <span class="entry-selector" aria-hidden="true"></span>
               </span>
               <span class="entry-vehicle-copy">
-                {% if slug == 'i10' %}<span class="entry-category">Kleinwagen</span>{% elif slug == 'kona' %}<span class="entry-category">Kompakt-SUV</span>{% endif %}
+                {% if slug == 'i10' %}<span class="entry-category">Kleinwagen</span>{% elif slug == 'kona' %}<span class="entry-category">Kompakt-SUV</span>{% elif slug == 'doblo-xl' %}<span class="entry-category">Transporter</span>{% endif %}
                 <strong class="entry-model-name">{{ name }}</strong>
                 {% if rate.daily_cents is defined %}
                   <span class="entry-rate"><b>{{ euro(rate.daily_cents) }}</b> / Tag</span>

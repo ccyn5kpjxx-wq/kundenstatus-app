@@ -194,6 +194,19 @@ class ProductionTests(unittest.TestCase):
             cfg['launch']['insurance'][slug]={'verified':True,'use':'paid_self_drive','evidence':'TEST ONLY','vehicle_id':v['id']}
         return cfg
 
+    def test_optional_doblo_requires_its_own_insurance_and_exact_xl_identity(self):
+        cfg = self.ready_config()
+        cfg['fleet']['doblo-xl'] = {'id': 987, 'expected_name': 'Fiat Doblò Maxi 1.5 Diesel', 'daily_cents': 5900}
+        errors = launch_errors(cfg)
+        self.assertTrue(any('doblo-xl' in error and 'Selbstfahrervermietungsschutz' in error for error in errors))
+        cfg['launch']['insurance']['doblo-xl'] = {'verified': True, 'use': 'paid_self_drive',
+                                                  'vehicle_id': 987, 'evidence': 'TEST ONLY'}
+        self.assertEqual(launch_errors(cfg), [])
+        cfg['fleet']['doblo-xl']['expected_name'] = 'Fiat Doblò'
+        self.assertTrue(any('Fahrzeugidentität' in error for error in launch_errors(cfg)))
+        cfg['fleet']['doblo-xl']['id'] = cfg['fleet']['i10']['id']
+        self.assertTrue(any('eindeutige' in error for error in launch_errors(cfg)))
+
     def test_each_launch_gate_independently_required(self):
         cfg=self.ready_config();self.assertEqual(launch_errors(cfg),[])
         old_method=json.loads(json.dumps(cfg));old_method['deposit_method']='charge_with_rent_refund_after_return'
