@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from .gateway import StripeTestGateway
 from mos_public_contract import LESSOR_ADDRESS, LESSOR_NAME, valid_lessor_contact
 
-ACTIVE_LISTINGS={'kona','i10'}
+from .fleet import is_doblo_xl, valid_booking_fleet
 CANCELLATION_POLICY_48H_10_PERCENT='free_48h_then_10pct_rent'
 BERLIN=ZoneInfo('Europe/Berlin')
 
@@ -34,8 +34,9 @@ def _is_draft_terms(value):
 
 def launch_errors(cfg):
     errors=[]
-    if set(cfg.get('fleet',{})) != ACTIVE_LISTINGS:
-        errors.append('Nur die bestätigten Fahrzeuge KONA und i10 dürfen freigegeben werden.')
+    fleet = cfg.get('fleet', {})
+    if not valid_booking_fleet(fleet):
+        errors.append('KONA, i10 und der optional freigegebene Doblò XL benötigen eindeutige Bestandsfahrzeuge.')
     launch=cfg.get('launch',{})
     for name in ('business_review','legal_review','finance_review','privacy_review','sandbox_acceptance',
                  'postgres_acceptance','contract_delivery_acceptance','checkout_button_acceptance',
@@ -75,12 +76,14 @@ def launch_errors(cfg):
         errors.append('Bedingungstext oder Version enthält Entwurfsmarker.')
     if type(launch.get('termination_review', {}).get('applies')) is not bool:
         errors.append('§-312k-Entscheidung zur Kündigungsstrecke fehlt.')
-    for slug in ACTIVE_LISTINGS:
+    for slug, listing in (fleet.items() if isinstance(fleet, dict) else ()):
+        if not isinstance(listing, dict):
+            continue
         record=launch.get('insurance',{}).get(slug,{})
         if not (record.get('verified') is True and record.get('use')=='paid_self_drive'
-                and record.get('evidence') and record.get('vehicle_id')==cfg.get('fleet',{}).get(slug,{}).get('id')):
+                and record.get('evidence') and record.get('vehicle_id')==listing.get('id')):
             errors.append('Belegter Selbstfahrervermietungsschutz fehlt: '+slug)
-        if not cfg.get('fleet',{}).get(slug,{}).get('expected_name'):
+        if not listing.get('expected_name') or (slug == 'doblo-xl' and not is_doblo_xl(listing['expected_name'])):
             errors.append('Geprüfte Fahrzeugidentität fehlt: '+slug)
     if cfg.get('deposit_method')!='card_authorization_at_booking':
         errors.append('Online-Kartenautorisierung ohne Kautionseinzug ist nicht konfiguriert.')

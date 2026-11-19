@@ -60,6 +60,9 @@
 .entry-help dd {font-size: .94rem; line-height: 1.5; color: #50574d; margin-top: .2rem;}
 .entry-help dd a {display: inline-block; padding-top: .25rem; color: #96351f; font-weight: 700; text-underline-offset: 3px;}
 .entry-empty {align-self: start;}
+@media(min-width: 846px) {
+  .entry-vehicles:has(.entry-vehicle:nth-child(3)) {grid-template-columns: repeat(3,minmax(0,1fr));}
+}
 @media(max-width: 1100px) {
   .entry-date-grid {gap: .95rem;}
   .entry-handover-fields {grid-template-columns: 1fr;}

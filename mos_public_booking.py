@@ -29,7 +29,8 @@ import mos_site_handoff
 from mietwagen_checkout import deferred_deposit_quote, deposit_authorization_opens, deposit_authorization_due
 from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS, public_workshop_contact
 
-LISTINGS = {'kona':'Hyundai KONA N Line X', 'i10':'Hyundai i10'}
+from mos_booking.fleet import LISTINGS, is_doblo_xl, valid_booking_fleet
+
 BERLIN = ZoneInfo('Europe/Berlin')
 WEEKLY_HANDOVER = {'timezone':'Europe/Berlin', 'weekdays':[0,1,2,3,4,5],
                    'first_hour':8, 'last_hour':20, 'step_minutes':60}
@@ -234,7 +235,7 @@ def website_response(response, test_url=None, live=False):
         not (parsed.scheme == 'https' or parsed.scheme == 'http' and parsed.hostname in {'localhost','127.0.0.1'})):
         raise ValueError('Testlink benötigt HTTPS oder Loopback.')
     response.direct_passthrough = False
-    label='KONA oder i10 online buchen' if live else 'Testbuchung für KONA oder i10 öffnen'
+    label='Mietwagen online buchen' if live else 'Testbuchung für Mietwagen öffnen'
     banner = ('<aside style="position:fixed;bottom:0;left:0;right:0;padding:12px;background:#fff0cf;z-index:9999;text-align:center">'
               +('' if live else '<strong>Nur Testumgebung:</strong> ')+'<a href="'+str(escape(test_url))+'">'+label+'</a></aside>')
     response.set_data(response.get_data(as_text=True).replace('</body>',banner+'</body>'))
@@ -282,8 +283,8 @@ def register(portal):
             raise ValueError('Ungültige Test-Origin.')
         cfg=json.loads(json.dumps(cfg))
         if not live:cfg['fleet']={k:v for k,v in cfg['fleet'].items() if k in LISTINGS}
-        if set(cfg['fleet']) != set(LISTINGS) or len({v['id'] for v in cfg['fleet'].values()}) != 2:
-            raise ValueError('Nur zwei explizite, unterschiedliche Flottenzuordnungen für KONA und i10 sind zulässig.')
+        if not valid_booking_fleet(cfg['fleet']):
+            raise ValueError('Die Buchungsflotte benötigt eindeutige, freigegebene Fahrzeugzuordnungen.')
         for slug,v in cfg['fleet'].items():
             if type(v['id']) is not int or type(v['daily_cents']) is not int or v['daily_cents']<=0:
                 raise ValueError('Ungültige Test-Flotte/Preis.')
@@ -439,7 +440,7 @@ def register(portal):
 
     def quote(slug,start,end):
         state=setup();cfg=state['cfg']
-        if slug not in LISTINGS:
+        if slug not in cfg['fleet']:
             raise ValueError('Bitte ein verfügbares Fahrzeug und freigegebene Termine wählen.')
         db=portal.get_db()
         try:
@@ -455,7 +456,8 @@ def register(portal):
             vehicle=db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',(f['id'],)).fetchone()
             if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
                 raise ValueError('Das zugeordnete Fahrzeug ist nicht verfügbar.')
-            if cfg['mode']=='live' and vehicle['bezeichnung']!=f['expected_name']:
+            if ((slug == 'doblo-xl' and not is_doblo_xl(vehicle['bezeichnung']))
+                    or (cfg['mode']=='live' and vehicle['bezeichnung']!=f['expected_name'])):
                 raise ValueError('Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
             if not portal.mietfahrzeug_zeitraum_frei_db(db,f['id'],a.date(),b.date()):
                 raise ValueError('Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
@@ -997,7 +999,11 @@ def register(portal):
             cfg=setup()['cfg']
             slots=[row['slot'] for row in listed_slots(db,True,weekly_handover_enabled(cfg))]
         finally:db.close()
-        return render_template('mos_public/index.html',listings=LISTINGS,slots=slots,
+        listings = {slug: name for slug, name in LISTINGS.items() if slug in cfg['fleet']}
+        if selection and selection.get('vehicle') in LISTINGS and selection['vehicle'] not in listings and not error:
+            error = 'Dieses Fahrzeug ist aktuell nicht für die Onlinebuchung freigegeben.'
+            status = 409
+        return render_template('mos_public/index.html',listings=listings,slots=slots,
                                default_end=default_end_slot(slots,cfg['max_days']),
                                weekly_schedule=weekly_handover_enabled(cfg),max_days=cfg['max_days'],
                                selection=selection or {},error=error),status

@@ -673,6 +673,45 @@ class PublicTests(unittest.TestCase):
                 self.assertFalse(gateway.livemode)
         finally:self.cfg['mode']='offline'
 
+    def test_optional_doblo_prefill_quote_and_occupied_vehicle(self):
+        booking = '/mietwagen-test/'
+        deep_link = booking + '?vehicle=doblo-xl'
+        self.assertEqual(self.client.get(deep_link).status_code, 409)
+        self.assertNotIn('data-model="doblo-xl"', self.client.get(booking).get_data(as_text=True))
+        db = portal.get_db()
+        stamp = portal.now_str()
+        vid = db.execute('INSERT INTO mietfahrzeuge (kennzeichen,bezeichnung,erstellt_am,geaendert_am) '
+                         'VALUES (?,?,?,?)', ('TEST-XL','Fiat Doblò XL',stamp,stamp)).lastrowid
+        db.commit()
+        self.cfg['fleet']['doblo-xl'] = {'id': vid, 'daily_cents': 5900, 'discount_after_days': 3, 'discount_cents': 4900}
+        fields = {'vehicle': 'doblo-xl', 'start': self.cfg['slots'][0], 'end': self.cfg['slots'][3]}
+        try:
+            selected = self.client.get(deep_link)
+            self.assertEqual(selected.status_code, 200)
+            self.assertIn('value="doblo-xl" selected', selected.get_data(as_text=True))
+            self.assertIn('mietwagen/doblo-xl-hersteller.png', selected.get_data(as_text=True))
+            token, quote = self.quote('doblo-xl')
+            self.assertIn('Fiat Doblò XL', quote.get_data(as_text=True))
+            self.assertIn('147,00', quote.get_data(as_text=True))
+            _, one_day = self.quote('doblo-xl', end_index=1)
+            self.assertIn('59,00', one_day.get_data(as_text=True))
+            db.execute('UPDATE mietfahrzeuge SET bezeichnung=? WHERE id=?', ('Fiat Doblò',vid))
+            db.commit()
+            self.assertEqual(self.post(booking+'quote',fields).status_code, 409)
+            db.execute('UPDATE mietfahrzeuge SET bezeichnung=? WHERE id=?', ('Fiat Doblò XL',vid))
+            db.execute('INSERT INTO mietvorgaenge (mietfahrzeug_id,start_datum,end_datum,erstellt_am,geaendert_am) '
+                       'VALUES (?,?,?,?,?)',(vid,fields['start'][:10],fields['end'][:10],stamp,stamp))
+            db.commit()
+            self.assertEqual(self.post(booking+'quote',fields).status_code, 409)
+            self.assertEqual(self.checkout(token).status_code, 409)
+            self.quote('i10')
+        finally:
+            self.cfg['fleet'].pop('doblo-xl')
+            db.execute('DELETE FROM mietvorgaenge WHERE mietfahrzeug_id=?', (vid,))
+            db.execute('DELETE FROM mietfahrzeuge WHERE id=?', (vid,))
+            db.commit()
+            db.close()
+
     def test_two_listings_server_prices(self):
         db=portal.get_db()
         try:

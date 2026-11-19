@@ -59157,9 +59157,7 @@ def notify_workshop_whatsapp_mietanfrage(name, telefon, zeitraum, fahrzeug_label
 
 def mietwagen_public_fahrzeuge():
     """Aktive Mietfahrzeuge mit Titelbild und belegten Zeiträumen für die öffentliche Seite."""
-    def ist_doblo_xl(bezeichnung):
-        name = clean_text(bezeichnung).lower().replace("ò", "o")
-        return bool(re.search(r"\bfiat doblo\b.*\b(?:xl|maxi)\b", name))
+    from mos_booking.fleet import is_doblo_xl as ist_doblo_xl
 
     def bild_von_vermietungsseite(bezeichnung):
         name = clean_text(bezeichnung).lower().replace("ò", "o")

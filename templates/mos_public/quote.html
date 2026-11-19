@@ -19,9 +19,9 @@
   <div class="quote-summary">
     <div class="card quote-trip">
       <div class="quote-vehicle">
-        {% if q.slug in ('i10', 'kona') %}
+        {% if q.slug in ('i10', 'kona', 'doblo-xl') %}
           <figure>
-            <img src="{{ url_for('static', filename='mos-portal/' ~ q.slug ~ '.webp') }}" alt="" width="230" height="128">
+            <img src="{{ url_for('static', filename='mietwagen/doblo-xl-hersteller.png' if q.slug == 'doblo-xl' else 'mos-portal/' ~ q.slug ~ '.webp') }}" alt="" width="230" height="128">
             <figcaption>Herstellerabbildung</figcaption>
           </figure>
         {% endif %}
