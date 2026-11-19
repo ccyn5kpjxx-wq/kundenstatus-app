@@ -1,8 +1,10 @@
 """Exercise the public pay-at-pickup path against the isolated portal inventory."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from html import unescape
 import json
 import re
+from tempfile import TemporaryDirectory
 from threading import Barrier
 import unittest
 from unittest.mock import patch
@@ -15,6 +17,17 @@ from mietwagen_checkout import validate_onsite_quote
 
 
 class OnsiteCheckoutTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        directory = TemporaryDirectory(prefix='mos-onsite-checkout-')
+        cls.addClassCleanup(directory.cleanup)
+        portal = public.build_test_app(directory.name, origin='http://localhost')
+        portal.app.extensions.pop('mos_public_booking', None)
+        portal.app.config['MOS_PUBLIC_BOOKING']['slots'] = [
+            (public.first_slot + timedelta(days=day)).astimezone(public.ZoneInfo('Europe/Berlin')).isoformat()
+            for day in range(5)
+        ]
+
     def setUp(self):
         self.public = public.PublicTests()
         self.public.setUp()
