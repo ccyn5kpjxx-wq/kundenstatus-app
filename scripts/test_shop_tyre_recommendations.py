@@ -69,6 +69,35 @@ class RecommendationChecks(unittest.TestCase):
         self.assertEqual(result['items'][0]['geometry']['load_index'], '94')
         self.assertEqual(result['items'][0]['geometry']['speed_index'], 'W')
 
+    def test_best_tested_variant_survives_price_sampling_and_model_grouping(self):
+        rows = [tyre(n, n * 1000) for n in range(1, 10)]
+        tested = tyre(10, 6400, model=rows[4]['name'])
+        tested['geometry'].update(load_index='94', speed_index='V')
+        tested['test_rating'] = {'source': 'ADAC', 'grade': 2.2}
+        rows[2]['test_rating'] = {'source': 'ADAC', 'grade': 5.5}
+        result = self.choose([*rows, tested])
+        ids = [item['id'] for item in result['items']]
+        self.assertEqual(ids, [rows[0]['id'], rows[2]['id'], tested['id'], rows[6]['id'], rows[-1]['id']])
+        self.assertEqual(result['items'][2]['geometry']['speed_index'], 'V')
+        self.assertNotIn('test_rating', rows[4])
+        self.assertEqual(result['rated_sizes'], ['225/40 R18'])
+        self.assertEqual(self.choose([tested, *reversed(rows)]), result)
+
+    def test_rated_sizes_respect_quantity_and_do_not_change_requested_or_default_size(self):
+        plain = tyre(1)
+        tested = tyre(2, 3000, size=('235', '45', '18'), stock=2)
+        tested['test_rating'] = {'source': 'ADAC', 'grade': 5.5}
+        self.assertEqual(self.choose([plain, tested])['rated_sizes'], [])
+        result = self.choose([plain, tested], quantity=2)
+        self.assertEqual(result['selected_size'], '225/40 R18')
+        self.assertEqual(result['rated_sizes'], ['235/45 R18'])
+        self.assertEqual(result['items'], [plain])
+        explicit = self.choose([plain, tested], quantity=2, size_key='235/45 R18')
+        self.assertEqual(explicit['items'], [tested])
+        for grade in (True, 0, 6, '2.4', float('nan')):
+            tested['test_rating']['grade'] = grade
+            self.assertEqual(self.choose([tested], quantity=2)['rated_sizes'], [])
+
     def test_exact_size_cohorts_are_not_mixed_to_reach_five(self):
         rows = [tyre(1, 1000), tyre(2, 2000), tyre(3, 500, size=('235', '45', '18'))]
         result = self.choose(rows)
@@ -152,7 +181,7 @@ class RecommendationChecks(unittest.TestCase):
         rows = [tyre(2, 2000), tyre(1, 1000)]
         self.assertEqual(len(self.choose(rows)['items']), 2)
         self.assertEqual(self.choose(rows, limit=1)['items'][0]['id'], rows[1]['id'])
-        self.assertEqual(self.choose([]), {'items': [], 'available_sizes': [], 'selected_size': None})
+        self.assertEqual(self.choose([]), {'items': [], 'available_sizes': [], 'selected_size': None, 'rated_sizes': []})
 
     def test_bad_bounds_clocks_and_size_syntax_rejected(self):
         for kwargs in ({'quantity': True}, {'quantity': 0}, {'quantity': 5}, {'limit': 0},

@@ -103,22 +103,37 @@ const requestQueries = state => state.calls.filter(call => call.url.includes('/c
   const testURL = 'https://www.adac.de/rund-ums-fahrzeug/ausstattung-technik-zubehoer/reifen/reifentest/synthetic/';
   const reviews = await boot(query => {
     const result = recommendations(query);
-    if (result.selected_size === SIZES[0]) {
+    result.rated_sizes = query.get('season') === 'winter' ? [SIZES[0]] : [];
+    if (result.rated_sizes.includes(result.selected_size)) {
       result.items[0].test_rating = {source: 'ADAC', grade: 2.5, stars: 4, verdict: 'gut', year: 2025, url: testURL};
       result.items[1].test_rating = {source: 'ADAC', grade: 5.5, stars: 0, verdict: 'mangelhaft', year: 2024, url: testURL};
+      result.items[2].quality_facts = {wet_grip: 'A'};
+      result.items[3].test_rating = {...result.items[0].test_rating, url: 'https://example.invalid/test'};
     }
     return result;
   }, {configure: true});
-  const [rated, zero, unknown] = reviews.choices.children.map(walk);
+  assert.equal(walk(reviews.choices).some(n => n.className === 'shop-rating-stars'), false);
+  reviews.season.value = 'winter'; reviews.season.listeners.change(); await flush();
+  assert.equal(reviews.size.value, SIZES[0]);
+  assert.deepEqual(reviews.size.children.map(n => n.textContent), [SIZES[0] + ' · mit ADAC-Test', SIZES[1]]);
+  const [rated, zero, unknown, unverified] = reviews.choices.children.map(walk);
   assert.ok(rated.some(n => n.textContent === '★★★★☆' && n['aria-label'].includes('4 von 5')));
   assert.ok(rated.some(n => n.textContent === 'ADAC 2,5 · gut'));
   assert.ok(rated.some(n => n.href === testURL && n.textContent.includes('2025 · 225/40 R18 92Y')));
   assert.ok(rated.some(n => n.tagName === 'LABEL' && n.htmlFor === radios(reviews)[0].id));
   assert.ok(zero.some(n => n.textContent === '☆☆☆☆☆'));
   assert.equal(unknown.some(n => n.className === 'shop-rating-stars'), false);
+  assert.equal(unverified.some(n => n.className === 'shop-rating-stars'), false);
   assert.ok(unknown.some(n => n.textContent.includes('keine ADAC-Testnote hinterlegt')));
+  const reviewedChoice = radios(reviews)[0];
+  reviewedChoice.checked = true; reviewedChoice.listeners.change();
+  const reviewedSummary = reviews.panel.children.find(n => n.className === 'shop-bundle-summary');
+  assert.ok(walk(reviewedSummary).some(n => n.textContent === '★★★★☆'));
+  assert.ok(walk(reviewedSummary).some(n => n.href === testURL));
   reviews.size.value = SIZES[1]; reviews.size.listeners.change(); await flush();
   assert.equal(walk(reviews.choices).some(n => n.href === testURL || n.className === 'shop-rating-stars'), false);
+  assert.equal(walk(reviewedSummary).some(n => n.href === testURL), false);
+  assert.ok(walk(reviews.panel).some(n => n.textContent.includes('in ' + SIZES[1] + ' ist keine ADAC-Testnote hinterlegt')));
   const first=radios(direct)[0];first.checked=true;first.listeners.change();
   direct.mounting.checked=true;direct.mounting.listeners.change();
   direct.quantity.value='3';direct.quantity.listeners.change();await flush();

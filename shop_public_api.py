@@ -11,8 +11,9 @@ from urllib.parse import urlsplit
 from flask import Blueprint, current_app, request, Response
 from shop_order_store import OrderStoreError, available_appointment_times
 
+WHEEL_VEHICLE_FIELDS = frozenset({'wheel_make', 'wheel_vehicle', 'wheel_query', 'make', 'model', 'year', 'hsn', 'tsn'})
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
-                         'brand', 'make', 'wheel_make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete',
+                         'brand', 'wheel_vehicle', 'wheel_query', 'make', 'wheel_make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete',
                          'width', 'ratio', 'diameter', 'season', 'sort'})
 MAX_REQUEST = 16384
 MAX_RESPONSE = 1024 * 1024
@@ -136,20 +137,31 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except Exception:
             return reply({'error': 'catalogue_unavailable'}, 503)
 
+    def scope_params():
+        params = {key: request.args[key] for key in WHEEL_VEHICLE_FIELDS if key in request.args}
+        if any(len(value) > 160 for value in params.values()):
+            raise ValueError()
+        if 'year' in params:
+            if not re.fullmatch(r'[0-9]{4}', params['year']):
+                raise ValueError()
+            params['year'] = int(params['year'])
+        return params
+
     @bp.get('/products/<string:product_id>')
     def product(product_id):
         if not catalogue_enabled():
             return reply({'error': 'not_found'}, 404)
         if catalogue is None:
             return reply({'error': 'catalogue_unavailable'}, 503)
-        if (set(request.args) - {'quantity'} or any(len(v) != 1 for _, v in request.args.lists())
+        if (set(request.args) - {'quantity'} - WHEEL_VEHICLE_FIELDS or any(len(v) != 1 for _, v in request.args.lists())
                 or len(product_id) > 100):
             return reply({'error': 'invalid_query'}, 400)
         quantity = request.args.get('quantity')
         if quantity is not None and (not re.fullmatch(r'[0-9]{1,2}', quantity) or not 1 <= int(quantity) <= 20):
             return reply({'error': 'invalid_query'}, 400)
         try:
-            value = catalogue.get(product_id)
+            params = scope_params()
+            value = catalogue.get(product_id, **params)
         except ValueError:
             return reply({'error': 'invalid_product_id'}, 400)
         except Exception:
@@ -163,7 +175,7 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             pending = warm_prices([value], quantities=(int(quantity),) if quantity else (1, 4))
             if not pending:
                 try:
-                    value = catalogue.get(product_id)
+                    value = catalogue.get(product_id, **params)
                 except Exception:
                     return reply({'error': 'catalogue_unavailable'}, 503)
                 if value is None:
@@ -178,13 +190,12 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'not_found'}, 404)
         if not callable(getattr(catalogue, 'variants', None)):
             return reply({'error': 'catalogue_unavailable'}, 503)
-        if set(request.args) - {'page', 'page_size', 'diameter', 'complete', 'wheel_make'} or any(len(v) != 1 for _, v in request.args.lists()):
+        if set(request.args) - {'page', 'page_size', 'diameter', 'complete'} - WHEEL_VEHICLE_FIELDS or any(len(v) != 1 for _, v in request.args.lists()):
             return reply({'error': 'invalid_query'}, 400)
         try:
-            params = {}
+            params = scope_params()
             for key, value in request.args.items():
-                if key == 'wheel_make':
-                    params[key] = value
+                if key in WHEEL_VEHICLE_FIELDS:
                     continue
                 if key == 'complete':
                     if value != '1':
@@ -214,7 +225,7 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         if not callable(getattr(catalogue, 'compatible_tyres', None)):
             return reply({'rim_id': product_id, 'items': [], 'scope': 'blocked',
                           'reason': 'Passende Reifenausführungen werden geprüft.'})
-        if (set(request.args) - {'quantity', 'season', 'tyre_size', 'make', 'model', 'year', 'hsn', 'tsn'}
+        if (set(request.args) - {'quantity', 'season', 'tyre_size'} - WHEEL_VEHICLE_FIELDS
                 or any(len(v) != 1 for _, v in request.args.lists())
                 or any(len(v) > 160 for v in request.args.values())):
             return reply({'error': 'invalid_query'}, 400)
@@ -245,7 +256,7 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         if not callable(getattr(catalogue, 'complete_wheel_price', None)):
             return reply({'error': 'catalogue_unavailable'}, 503)
         args = request.args
-        if (set(args) - {'tyre_id', 'quantity', 'runflat', 'disposal'}
+        if (set(args) - {'tyre_id', 'quantity', 'runflat', 'disposal'} - WHEEL_VEHICLE_FIELDS
                 or any(len(values) != 1 for _, values in args.lists())
                 or not re.fullmatch(r'(?:alloy_wheel|steel_wheel):[a-f0-9]{24}', product_id)
                 or not re.fullmatch(r'tyre:[a-f0-9]{24}', args.get('tyre_id', ''))
@@ -254,7 +265,9 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'invalid_query'}, 400)
         try:
             result = catalogue.complete_wheel_price(product_id, args['tyre_id'], quantity=int(args['quantity']),
-                                                    runflat='runflat' in args, disposal='disposal' in args)
+                                                    runflat='runflat' in args, disposal='disposal' in args, **scope_params())
+        except ValueError:
+            return reply({'error': 'invalid_query'}, 400)
         except Exception:
             return reply({'error': 'catalogue_unavailable'}, 503)
         if result is None:

@@ -86,6 +86,8 @@ class SetPreviewChecks(unittest.TestCase):
         for inch, unit in (('13',2250),('16',2250),('17',2500),('18',2500),('19',3000),('20',3000),('21',None)):
             with self.subTest(inch=inch):
                 self.tyre['diameter'] = self.rim['diameter'] = inch
+                self.tyre['size'] = f'205/55 R{inch} 91V'
+                self.rim['size'] = f'8 × {inch} Zoll'
                 result = self.client().get(self.url, query_string={'quantity': 3, 'tyre_id': TYRE,
                     'runflat': '1', 'disposal': '1'}).get_json()
                 self.assertEqual(result['mounting_gross_cent'], (unit + 900) * 3 if unit is not None else None)
@@ -104,9 +106,9 @@ class SetPreviewChecks(unittest.TestCase):
         for diameter in ('17', ''):
             with self.subTest(diameter=diameter):
                 self.rim['diameter'] = diameter
-                price = self.preview(3)
-                self.assertIsNone(price['mounting_gross_cent'])
-                self.assertIsNone(price['total_gross_cent'])
+                response = self.client().get(self.url, query_string={'quantity': 3, 'tyre_id': TYRE})
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.json, {'error': 'combination_not_found'})
 
     def test_missing_tier_insufficient_stock_future_stock_and_inquiry_do_not_get_a_total(self):
         missing_tier = self.book[RIM]['prices_by_quantity'].pop('3')

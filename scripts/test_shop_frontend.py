@@ -396,7 +396,7 @@ const puts=f=>f.calls.filter(c=>c.url.endsWith('/buyer/address'));
         rim = wheel(name='SYNTHETIC Rim Black')
         smaller = wheel('b', name='SYNTHETIC Rim Black', size='7.5 × 17 Zoll', diameter='17')
         tyre = wheel('c', selection_id='tyre:' + 'c' * 24, category='tyre',
-                     name='SYNTHETIC Tyre', size='225/40 R18 92Y', season='Sommerreifen')
+                     name='SYNTHETIC Tyre', size='225/40 R18 92Y', width='225', ratio='40', season='Sommerreifen')
         body = part(category='body_part', department='parts', name='SYNTHETIC Fender')
         face = {'reviewed': True, 'width': 800, 'height': 800, 'cx': 400, 'cy': 400,
                 'rx': 350, 'ry': 350, 'rotation': 0, 'hub': {'x': 400, 'y': 400}}
@@ -700,6 +700,9 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[]
    const form=nodes['catalog-filters'];
    const input=nodes['wheel-make']=new Node('input');
    input.name='wheel_make';input.value='';input.form=form;form.fields[input.name]=input;
+   form.fields.q=new Node('input');form.fields.q.value='';
+   const vehicle=nodes['wheel-vehicle']=new Node('select');vehicle.value='';form.fields.wheel_vehicle=vehicle;
+   nodes['wheel-vehicle-field']=new Node('label');
    form.requestSubmit=()=>form.listeners.submit({preventDefault(){},currentTarget:form});
    nodes['wheel-make-options']=new Node('datalist');nodes['wheel-make-options'].options=nodes['wheel-make-options'].children;
    nodes['wheel-make-inquiry']=new Node('a');
@@ -857,7 +860,7 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[]
  const winterOnly=await boot(url=>{const u=new URL('https://shop.test'+url),item={...rim(),tyre_seasons:['winter','allseason','unreviewed']};if(u.pathname.endsWith('/products'))return page({...item,family:{variant_count:2,diameters:['18']}},false);if(u.pathname.endsWith('/variants'))return {items:[item],page:1,total:1,has_more:false};if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,items:[priced(A,1,3000)],scope:'rim_width_candidate',prices_refreshing:false};return {item,prices_refreshing:false};},{mode:'komplettraeder'});
  configureCard(winterOnly);await flush();
  assert.ok(winterOnly.calls.some(call=>call.url.includes('/variants?')&&new URL('https://shop.test'+call.url).searchParams.get('complete')==='1'));
- walk(winterOnly.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Passende Reifen wählen').listeners.click();await flush();
+ walk(winterOnly.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Reifen zu dieser Felge').listeners.click();await flush();
  const winterBundle=find(winterOnly.nodes['product-detail'],'shop-bundle-panel'),winterSeason=walk(winterBundle).find(n=>n.tagName==='SELECT');assert.deepEqual(winterSeason.children.map(n=>n.value),['winter','allseason']);assert.equal(winterSeason.value,'winter');
  await walk(winterBundle).find(n=>n.tagName==='BUTTON'&&n.textContent.startsWith('Passende Reifen')).listeners.click();assert.ok(winterOnly.calls.some(call=>call.url.includes('/compatible-tyres?')&&new URL('https://shop.test'+call.url).searchParams.get('season')==='winter'));assert.ok(walk(winterBundle).some(n=>n.name==='bundle_tyre'));
  const noCandidates=await boot(url=>new URL('https://shop.test'+url).pathname.endsWith('/products')?page({...rim(),tyre_seasons:[]},false):{item:{...rim(),tyre_seasons:[]},prices_refreshing:false},{mode:'felgen'});
@@ -881,6 +884,26 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[]
  const familyCard=family.nodes['catalog-products'].children[0];assert.equal(find(familyCard,'shop-quantity'),undefined);find(familyCard,'shop-detail-link').listeners.click();await flush();
  assert.ok(family.calls.some(call=>call.url.includes('/variants?')&&call.url.includes('page_size=24')&&call.url.includes('wheel_make=Audi')));assert.deepEqual(JSON.parse(family.stored.at(-1)),[]);
  const exact=walk(family.nodes['product-detail']).find(n=>n.tagName==='BUTTON'&&n.textContent==='Diese Felge ansehen');exact.listeners.click();await flush();assert.ok(find(family.nodes['product-detail'],'shop-bundle-panel'));
+ // Free-text vehicle scope survives selection, the exact detail and the season lookup.
+ const vehicleKey='e'.repeat(24), proof={key:vehicleKey,make:'MINI',model:'Cooper',variant:'UKL-L',has_report:true};
+ const scoped=await boot(url=>{
+   const u=new URL('https://shop.test'+url);
+   if(u.pathname.endsWith('/products'))return {...page(rim(),false),wheel_query_make:u.searchParams.has('q')?'MINI':undefined,wheel_vehicles:[proof]};
+   if(u.pathname.endsWith('/compatible-tyres'))return {rim_id:rimId,scope:'blocked',items:[]};
+   return {item:rim(),prices_refreshing:false};
+ },{mode:'komplettraeder'});
+ const scopedForm=scoped.nodes['catalog-filters'];scopedForm.fields.q.value='MINI Cooper';scopedForm.requestSubmit();await flush();
+ const selector=scoped.nodes['wheel-vehicle'];
+ assert.ok(walk(selector).some(n=>n.value===vehicleKey && n.textContent.includes('mit Gutachten')));
+ selector.value=vehicleKey;scopedForm.listeners.change({currentTarget:scopedForm,target:{name:'wheel_vehicle'}});await flush();
+ configureCard(scoped);await flush();
+ for(const suffix of [encodeURIComponent(rimId),'/compatible-tyres']){
+   const url=scoped.calls.map(call=>new URL('https://shop.test'+call.url)).find(u=>u.pathname.endsWith(suffix));
+   assert.equal(url.searchParams.get('wheel_query'),'MINI Cooper');assert.equal(url.searchParams.get('wheel_vehicle'),vehicleKey);
+   assert.equal(url.searchParams.get('wheel_make'),'MINI');
+ }
+ assert.ok(walk(scoped.nodes['product-detail']).some(n=>n.textContent==='Passung dieser Felge anfragen'));
+ assert.ok(!walk(scoped.nodes['product-detail']).some(n=>n.textContent==='Nur Felge in den Warenkorb'));
  for(const fixture of [f,bounded,changed,quantity,tiers,detail,closed,cart,hidden,paused,pausedTier,images,standalone,standaloneCart,complete,winterOnly,noCandidates,delayedPair,unofferedBundle,family,market,parts,bound,marketPoll,marketCart,documented,badDocs])assert.ok(fixture.calls.every(call=>call.options.method===undefined&&call.url.startsWith('/shop/api/v2/products')),'read-only product calls only');
  console.log('Bounded price/image polling passed');
 })().catch(error=>{console.error(error);process.exit(1)});

@@ -1,0 +1,193 @@
+{
+  "f6d30f1133d6ea32306b721241cba6bcbbdea6feb9a67acb060d8791215818f7": [
+    {
+      "make": "Audi",
+      "model": "Q5",
+      "variant": "Typ 8R",
+      "condition": "Audi Q5, Typ 8R, e13*2007/46*1083*.., 100–200 kW",
+      "report": "6b0bd5cc599277e3b8a9bd96ee95620e91cc620eb3a9e7d063ac2941c897bbda",
+      "page": 1,
+      "size": "235/60 R18",
+      "min_load_index": 0,
+      "size_condition": "235/60 R18 mit Auflage 51G. Befestigung und vollständige fahrzeugspezifische Auflagen der Anlage prüfen."
+    },
+    {
+      "make": "Audi",
+      "model": "Q5",
+      "variant": "Typ 8R2 Hybrid",
+      "condition": "Audi Q5 Hybrid, Typ 8R2, e13*2007/46*1179*.., 100–200 kW",
+      "report": "6b0bd5cc599277e3b8a9bd96ee95620e91cc620eb3a9e7d063ac2941c897bbda",
+      "page": 2,
+      "size": "235/60 R18",
+      "min_load_index": 0,
+      "size_condition": "235/60 R18 mit Auflage 51G. Befestigung und vollständige fahrzeugspezifische Auflagen der Anlage prüfen."
+    },
+    {
+      "make": "Audi",
+      "model": "Q5",
+      "variant": "Typ FY – quattro",
+      "condition": "Audi Q5 / Q5 Sportback, Typ FY, e1*2007/46*1685*.. (QUATTRO), 100–210 kW",
+      "report": "7ae3a3fbbbda058311746012201d2b6fafa213d0c7df6df695e712a265d43bca",
+      "page": 2,
+      "size": "235/60 R18",
+      "min_load_index": 103,
+      "size_condition": "235/60 R18 mit mindestens Lastindex 103. Genehmigungsstand, Antrieb, Befestigung und vollständige Auflagen der Anlage prüfen."
+    }
+  ],
+  "613510a665d4864234182c69d9dab560ddfe022d27195926749985ca66f9ebf5": [
+    {
+      "make": "Volvo",
+      "model": "XC60",
+      "variant": "Typ D / D-N2D / D-2D",
+      "condition": "Volvo XC60, Typen D / D-N2D / D-2D, 100–224 kW; Genehmigungsnummer nach Originalgutachten prüfen",
+      "report": "e936d7e4624af707bb981a77d4ae0b19547552c38a64c123abd20c76cdff613a",
+      "page": 6,
+      "size": "235/55 R18",
+      "min_load_index": 100,
+      "size_condition": "235/55 R18 mit mindestens Lastindex 100 und Auflagen 11A, 24J und 248. Befestigung und weitere Auflagen der Anlage prüfen."
+    },
+    {
+      "make": "Ford",
+      "model": "Focus",
+      "variant": "Typ DA3 Kombi",
+      "condition": "Ford Focus, Typ DA3, e13*2001/116*0144*.., 59–107 kW, ausschließlich Kombi für diese Zuordnung",
+      "report": "a9ce59d7b0ef414cc775533b7a0c1f61321cf55880a7916a174e64754783b938",
+      "page": 2,
+      "size": "215/40 R18",
+      "min_load_index": 89,
+      "size_condition": "215/40 R18 mit mindestens Lastindex 89 und Auflage 51J. Nur für den genannten Kombi. Befestigung und weitere Auflagen der Anlage prüfen."
+    }
+  ],
+  "b470c9c12f6b332b3b6c73ef7b62d61230edde39072cfb3289b71c33aaac1002": [
+    {
+      "make": "Ford",
+      "model": "C-MAX",
+      "variant": "Typ DM2 / DM2-CNG / DM2-LPG",
+      "condition": "Typen DM2/DM2-CNG/DM2-LPG, 66–107 kW, 215/35 R19; u. a. K01, K04, K57, K58, N225, S01 und T85",
+      "report": "55c49c4a28d495b1182c41d877fcedddf4f5cbc7736a7f2a5b9913de8f93e66c",
+      "page": 1,
+      "size": "215/35 R19",
+      "min_load_index": 85
+    },
+    {
+      "make": "Ford",
+      "model": "Focus",
+      "variant": "Typ DA3 / DA3-CNG / DA3-LPG / DB3",
+      "condition": "Typen DA3/DA3-CNG/DA3-LPG/DB3, 59–107 kW, 215/35 R19; u. a. K01, K04, K60, K61, K62, S01 und T85",
+      "report": "55c49c4a28d495b1182c41d877fcedddf4f5cbc7736a7f2a5b9913de8f93e66c",
+      "page": 2,
+      "size": "215/35 R19",
+      "min_load_index": 85
+    }
+  ],
+  "f8b4281dc70aad63a44ed52aa7703bbc4122290df93ac806d7a91c8bb41083c0": [
+    {
+      "make": "Audi",
+      "model": "A3",
+      "variant": "Typ 8V Limousine / Cabrio",
+      "condition": "Typ 8V, Limousine/Cabrio inkl. Facelift 2016, 77–140 kW, 225/45 R17; u. a. A57/F24",
+      "report": "f41212355779b358b444fd5d7e6e6e677874ebc27c641914255bd59540aa891f",
+      "page": 2,
+      "size": "225/45 R17",
+      "min_load_index": 0
+    },
+    {
+      "make": "Audi",
+      "model": "A3",
+      "variant": "Typ GY Sportback",
+      "condition": "Typ GY, Sportback, 110 kW, 225/45 R17; u. a. F24, NoE, NoP und V00",
+      "report": "f41212355779b358b444fd5d7e6e6e677874ebc27c641914255bd59540aa891f",
+      "page": 2,
+      "size": "225/45 R17",
+      "min_load_index": 0
+    }
+  ],
+  "cc1abc6357d6df9df3e6f0a2db4b5012c90c8ca8faf100246c5ac972d8d76579": [
+    {
+      "make": "Mazda",
+      "model": "3",
+      "variant": "Typ BK",
+      "condition": "Mazda 3 I, Typ BK, 62–110 kW, 205/55 R16; u. a. A39, B02 und B03",
+      "report": "e95b3035ab2ed38fef3792264d0b3c9a80a677153c46910275784d16eb3328af",
+      "page": 7,
+      "size": "205/55 R16",
+      "min_load_index": 0
+    },
+    {
+      "make": "Mazda",
+      "model": "3",
+      "variant": "Typ BL",
+      "condition": "Mazda 3 II, Typ BL, FIN beginnt mit JMZBL, 77–136 kW, 205/55 R16; u. a. A90 und B03",
+      "report": "e95b3035ab2ed38fef3792264d0b3c9a80a677153c46910275784d16eb3328af",
+      "page": 7,
+      "size": "205/55 R16",
+      "min_load_index": 0
+    }
+  ],
+  "8be20a9b7818e104dd241030cdff0c307cd5185da2b96b0f60cfda8b20914071": [
+    {
+      "make": "Mazda",
+      "model": "CX-5",
+      "variant": "Typ GH / GHE / KE",
+      "condition": "Typen GH/GHE/KE, 110–141 kW, 245/40 R21; u. a. BF1",
+      "report": "e695353f7638d98eb3309d6fb6dc7532f3635908bae6bcac405f80a07c19295f",
+      "page": 2,
+      "size": "245/40 R21",
+      "min_load_index": 0
+    },
+    {
+      "make": "Mazda",
+      "model": "6",
+      "variant": "Typ GH / GHE / GJ",
+      "condition": "Typen GH ab e1*2001/116*0448*14, GHE ab e13*2007/46*1075*06 oder GJ, 88–143 kW, 245/30 R21; u. a. E51a und K01",
+      "report": "e695353f7638d98eb3309d6fb6dc7532f3635908bae6bcac405f80a07c19295f",
+      "page": 2,
+      "size": "245/30 R21",
+      "min_load_index": 0
+    }
+  ],
+  "03f9215f4e62b470560f2006b9811f9346c033a7ce29e627cf08b8794b6b4616": [
+    {
+      "make": "Audi",
+      "model": "A3",
+      "variant": "Typ 8P / 8PB",
+      "condition": "Typ 8P/8PB, 3-/5-Türer oder Cabrio, ohne S3 und RS3, 66–147 kW, 225/40 R18; u. a. K01, K04, K58 und K59",
+      "report": "b1f2a61ebfecd5e6e5c10d948ad93782ffaaa6ba999a49ca72bf6954fb1e2686",
+      "page": 2,
+      "size": "225/40 R18",
+      "min_load_index": 0
+    },
+    {
+      "make": "Audi",
+      "model": "A3",
+      "variant": "Typ 8V Sportback / 3-/5-Türer",
+      "condition": "Typ 8V, 3-/5-Türer inkl. Sportback, 77–140 kW, 225/40 R18; u. a. K01, K20, K27, K28 und K68",
+      "report": "b1f2a61ebfecd5e6e5c10d948ad93782ffaaa6ba999a49ca72bf6954fb1e2686",
+      "page": 2,
+      "size": "225/40 R18",
+      "min_load_index": 0
+    }
+  ],
+  "82173269f9acd24c56ba55cc2fdbe9211c64ad7cebce3bfd260048710c4dba77": [
+    {
+      "make": "GWM",
+      "model": "Ora 03",
+      "variant": "Typ ES11 · 17-Zoll-Serie",
+      "condition": "Ora 03/Funky Cat, Typ ES11, 17 Zoll Serie ohne Radhausverbreiterungen, 60 (126) kW laut Gutachten, 225/40 R19; u. a. K2b, KOV und Z17",
+      "report": "6eac1907e8df50e3426374c1e3e9c421395225ba225635e6a33a4302454562bb",
+      "page": 2,
+      "size": "225/40 R19",
+      "min_load_index": 0
+    },
+    {
+      "make": "GWM",
+      "model": "Ora 03 GT",
+      "variant": "Typ ES11 · 18-Zoll-Serie",
+      "condition": "Ora 03 GT/Funky Cat GT, Typ ES11, 18 Zoll Serie mit Radhausverbreiterungen, 60 (126) kW laut Gutachten, 225/40 R19; u. a. A90, KMV und Z18",
+      "report": "6eac1907e8df50e3426374c1e3e9c421395225ba225635e6a33a4302454562bb",
+      "page": 2,
+      "size": "225/40 R19",
+      "min_load_index": 0
+    }
+  ]
+}

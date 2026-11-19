@@ -97,12 +97,15 @@
   {% if page_key in ['felgen', 'komplettraeder'] and feature_links.studio %}<aside class="shop-feature"><div><p class="shop-eyebrow">Ihr Foto. Ihr Look.</p><h3>Wie steht die Felge Ihrem Auto?</h3><p>Felgen am eigenen Fahrzeug ansehen. Optische Simulation; Fahrzeugfreigabe separat prüfen.</p></div><a class="shop-button" href="{{ feature_links.studio }}">Felgenstudio öffnen ↗</a></aside>{% endif %}
   {% if department == 'parts' %}<section class="shop-vehicle" id="vehicle-filter"><h3>Das passende Teil für Ihr Fahrzeug.</h3><form id="vehicle-filters" class="shop-filters"><label>Automarke<input name="make" maxlength="80" placeholder="z. B. Audi" autocomplete="off"></label><label>Modell (optional)<input name="model" maxlength="120" placeholder="z. B. A3"></label><label hidden>Baureihe eingrenzen<select id="parts-model-refinement" disabled></select></label><label>Baujahr (optional)<input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><label>oder HSN / TSN<input name="keys" maxlength="20" placeholder="0588 / BHT"></label><button class="shop-button" type="submit">Passende Teile anzeigen</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur bestätigte Fahrzeugzuordnungen. Marke allein zeigt bereits die zugeordneten Artikel; genaue Ausführung vor dem Kauf prüfen.</p></section>{% endif %}
   <form id="catalog-filters" class="shop-filters" role="search">
-    {% if department == 'wheels' %}
+    {% if department in ['tyres', 'wheels'] or page_key == 'home' %}
     <label>Fahrzeugmarke<input type="search" id="wheel-make" name="wheel_make" maxlength="80"
       placeholder="z. B. Audi, BMW oder MINI" autocomplete="off" list="wheel-make-options" aria-describedby="wheel-make-help"></label>
     <datalist id="wheel-make-options">
       {% for make in ['Audi', 'BMW', 'MINI'] %}<option value="{{ make }}">{{ make }}</option>{% endfor %}
     </datalist>
+    <label id="wheel-vehicle-field" hidden>Modell und Ausführung
+      <select id="wheel-vehicle" name="wheel_vehicle" disabled><option value="">Fahrzeug auswählen</option></select>
+    </label>
     {% endif %}
     {% if department == 'tyres' %}
     <fieldset class="shop-season-filter">
@@ -114,7 +117,7 @@
       </div>
     </fieldset>
     {% endif %}
-    <label>Produktsuche<input type="search" name="q" maxlength="100" placeholder="Marke, Bezeichnung oder Größe"></label>
+    <label>Produktsuche<input type="search" name="q" maxlength="100" placeholder="Produktname oder Größe"></label>
     <label>{{ 'Felgenhersteller' if department == 'wheels' else 'Hersteller' }}<input name="brand" maxlength="90" placeholder="{{ 'z. B. BBS' if department == 'wheels' else 'z. B. Continental' }}"></label>
     {% if department == 'tyres' %}
     <label>Reifenbreite (mm)<input type="number" name="width" inputmode="numeric" min="100" max="455" step="1" placeholder="255"></label>
@@ -132,9 +135,10 @@
     <button class="shop-button" type="submit">Anzeigen</button>
   </form>
   {% if department == 'wheels' %}<details class="shop-vehicle" id="vehicle-filter"><summary>Nach Fahrzeug und bestätigtem Gutachten filtern</summary><form id="vehicle-filters" class="shop-filters"><label>HSN<input name="hsn" pattern="[0-9]{4}" maxlength="4" placeholder="0588"></label><label>TSN<input name="tsn" pattern="[A-Za-z0-9]{3}" maxlength="3" placeholder="BHT"></label><span class="shop-filter-or">oder</span><label>Marke<input name="make" maxlength="80" placeholder="Audi"></label><label>Modell<input name="model" maxlength="120" placeholder="A3"></label><label>Baujahr<input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><button class="shop-button" type="submit">Fahrzeug anwenden</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur einzeln geprüfte Zuordnungen werden angezeigt. Auflagen und die konkrete Ausführung im Gutachten beachten.</p></details>{% endif %}
-  {% if department == 'wheels' %}<p id="wheel-make-help" class="shop-muted">Die Markensuche zeigt Felgen mit Fahrzeugzuordnung. Prüfen Sie die genaue Ausführung und die Auflagen für Ihr Modell.</p>{% endif %}
+  {% if department in ['tyres', 'wheels'] or page_key == 'home' %}<p id="wheel-make-help" class="shop-muted">{% if department == 'tyres' %}Für die Suche nach Fahrzeug wählen Sie die genaue Ausführung. Für die Suche nach Reifengröße verwenden Sie die Maße aus Ihren Fahrzeugpapieren.{% else %}Wählen Sie nach der Marke Ihr Modell und die genaue Ausführung. So sehen Sie, welche Gutachten zu Ihrem Fahrzeug vorliegen.{% endif %}</p>{% endif %}
   <p id="catalog-status" class="shop-muted" role="status" aria-live="polite">Sortiment wird geladen …</p>
-  {% if department == 'wheels' %}<a id="wheel-make-inquiry" hidden href="/anfrage?anliegen=felgenservice#kurzanfrage">Felgen für mein Fahrzeug anfragen</a>{% endif %}
+  {% if department in ['tyres', 'wheels'] or page_key == 'home' %}<a id="wheel-make-inquiry" hidden href="/anfrage?anliegen=felgenservice#kurzanfrage">Passung für mein Fahrzeug prüfen lassen</a>{% endif %}
+  {% if department == 'tyres' %}<button id="tyre-size-search" type="button" class="shop-button shop-button-light" hidden>Nach Reifengröße suchen</button>{% endif %}
   <div id="catalog-products" class="tire-search-results"></div>
   <nav class="shop-pagination" aria-label="Katalogseiten"><button id="previous-page" class="shop-button shop-button-light" type="button" disabled>← Zurück</button><span id="page-label">Seite 1</span><button id="next-page" class="shop-button shop-button-light" type="button" disabled>Weiter →</button></nav>
 </section>

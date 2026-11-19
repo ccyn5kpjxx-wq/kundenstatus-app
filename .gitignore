@@ -21,6 +21,8 @@ instance/
 *.key
 *.p12
 *.json
+!resources/shop_wheel_report_rows.json
+!resources/shop_mini_report_rows.json
 !native/ios/GaertnerMitarbeiter/Assets.xcassets/**/Contents.json
 !native/ios/GaertnerMitarbeiter/Assets.xcassets/Contents.json
 

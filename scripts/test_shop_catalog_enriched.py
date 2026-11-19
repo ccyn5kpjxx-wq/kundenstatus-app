@@ -346,8 +346,9 @@ class EnrichmentChecks(unittest.TestCase):
                 self.assertEqual(result['price_status'], 'update_required')
 
     def test_complete_browse_and_family_variants_only_include_exact_documented_candidates(self):
-        a, no_pair, native = wheel(diameter='17'), wheel('b', diameter='20'), wheel('c', diameter='18')
+        a, no_pair, native = wheel(diameter='17', size='8 × 17 Zoll'), wheel('b', diameter='20'), wheel('c', diameter='18')
         summer, winter = tyre('d'), tyre('e', 'Winterreifen')
+        summer.update(diameter='17', size='205/55 R17 91V')
         identifier = native['selection_id']
         proof = {'confirmed': True, 'product_id': identifier, 'identity_hash': variant_fingerprint(native),
                  'supplier': 'RSU', 'evidence_id': 'synthetic-proof', 'geometry': {'width': '8', 'diameter': '18',

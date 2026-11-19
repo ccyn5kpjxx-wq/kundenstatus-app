@@ -10,7 +10,8 @@ import math
 import re
 import unicodedata
 
-from shop_catalog_public import PublicCatalog, CatalogError, _text, _fold, _quote, _stamp, variant_fingerprint, wheel_make_term
+from shop_catalog_public import PublicCatalog, CatalogError, PUBLIC_ID, _text, _fold, _quote, _stamp, variant_fingerprint, _size_value
+from shop_wheel_vehicles import WheelVehicleIndex, consistent_tyre_size
 from shop_wheel_prices import published_wheel_tier, tyre_service_gross_cent
 
 
@@ -156,7 +157,7 @@ def validated_inquiry_prices(rows, released_ids, procurement_ids, values):
 class EnrichedPublicCatalog(PublicCatalog):
     def __init__(self, products, *, browsing_evidence=None, compatible_pairs=None,
                  procurement_ids=None, product_documents=None, standalone_rims=None,
-                 rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
+                 released_rim_report_resources=None, rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
                  checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None,
                  recommendation_ladder=False, recommendation_document_ids=None, wheel_pickup_freight=None, **kwargs):
         if type(rsu_only_prices) is not bool:
@@ -298,16 +299,18 @@ class EnrichedPublicCatalog(PublicCatalog):
         # reserve goods or turn a width candidate into vehicle approval.
         identities = {identifier: variant_fingerprint(self._source_rows[identifier]) for identifier in self._rows}
         self._candidate_tyres = {}
+        documented_pairs = {}
         for identifier, entry in self._rows.items():
             if entry['public']['department'] != 'wheels':
                 continue
             candidates, seen = [], set()
+            documented_pairs[identifier] = set()
             pairs = self._pairs.get(identifier, [])
             for pair in pairs[:1000] if isinstance(pairs, list) else ():
                 if not isinstance(pair, Mapping) or pair.get('reviewed') is not True:
                     continue
                 tyre_id = pair.get('tyre_id')
-                if not isinstance(tyre_id, str) or tyre_id not in self._rows or tyre_id in seen:
+                if not isinstance(tyre_id, str) or tyre_id not in self._rows:
                     continue
                 tyre = self._rows[tyre_id]['public']
                 docs = tyre.get('product_documents', {})
@@ -317,13 +320,26 @@ class EnrichedPublicCatalog(PublicCatalog):
                         or not docs.get('tyre_label_url') or not docs.get('tyre_sheet_url')):
                     continue
                 if (tyre['category'] != 'tyre' or pair.get('rim_identity') != identities[identifier]
-                        or pair.get('tyre_identity') != identities[tyre_id]):
+                        or pair.get('tyre_identity') != identities[tyre_id]
+                        or consistent_tyre_size(tyre) is None
+                        or _size_value(tyre['geometry']['diameter']) != _size_value(entry['public']['geometry'].get('diameter'))):
+                    continue
+                source = pair.get('source')
+                if (pair.get('scope') == 'rim_width_candidate' and isinstance(source, Mapping)
+                        and re.fullmatch(r'[a-f0-9]{64}', str(source.get('sha256', '')))
+                        and type(source.get('page')) is int and source['page'] >= 1 and _text(pair.get('evidence_id'), 200)
+                        and tyre_id not in self._checkout_excluded_ids):
+                    documented_pairs[identifier].add(tyre_id)
+                if tyre_id in seen:
                     continue
                 seen.add(tyre_id)
                 candidates.append((tyre_id, tyre['tyre_season']))
             self._candidate_tyres[identifier] = candidates
             seasons = {season for _, season in candidates}
             entry['public']['tyre_seasons'] = [season for season in ('summer', 'winter', 'allseason') if season in seasons]
+
+        self._wheel_index = WheelVehicleIndex(self._rows, self._source_rows, identities, documented_pairs,
+            released_rim_report_resources or {})
 
     def _cached_entry(self, entry):
         identifier = entry['public']['id']
@@ -373,66 +389,127 @@ class EnrichedPublicCatalog(PublicCatalog):
             product.update(price=None, price_status='not_offered', price_label='')
         return product
 
-    def _family_ids(self, identifier, complete=False, wheel_make=None):
-        identifiers = self._families.get(self._family_for.get(identifier), [identifier])
-        if complete:
-            identifiers = [i for i in identifiers if self._rows[i]['public'].get('tyre_seasons')]
-        if wheel_make is not None:
-            selected = wheel_make_term(wheel_make)
-            identifiers = [i for i in identifiers if selected in self._rows[i]['wheel_make_terms']]
-        return identifiers
+    def _wheel_selection(self, filters, *, query='', department=None):
+        options = {key: filters.pop(key) for key in ('wheel_make', 'wheel_vehicle', 'wheel_query') if key in filters}
+        if not options.get('wheel_query') and isinstance(query, str) and query and department in (None, 'tyres', 'wheels'):
+            if self._wheel_index.parse_query(query)[0]:
+                options['wheel_query'] = query
+                filters['q'] = ''
+        legacy = ('make', 'model', 'year', 'hsn', 'tsn')
+        if not any(v is not None for v in options.values()) and not (
+                department in ('wheels', 'tyres') and any(filters.get(k) is not None for k in legacy)):
+            return None
+        if department not in (None, 'wheels', 'tyres'):
+            raise CatalogError('invalid_vehicle_filter')
+        options.update({key: filters.pop(key) for key in legacy if key in filters})
+        return self._wheel_index.selection(**options)
 
-    def _family(self, product, *, complete=False, wheel_make=None):
-        identifiers = self._family_ids(product['id'], complete, wheel_make)
-        diameters = sorted({self._rows[i]['public']['geometry'].get('diameter', '') for i in identifiers} - {''}, key=lambda n: (len(n), n))
-        return {'variant_count': len(identifiers), 'diameters': diameters}
+    def get(self, product_id, *, now=None, **filters):
+        if not filters:
+            return super().get(product_id, now=now)
+        self._validate_scope_fields(filters)
+        selection = self._wheel_selection(filters, department='wheels')
+        if selection is None:
+            return super().get(product_id, now=now)
+        if not isinstance(product_id, str) or not PUBLIC_ID.fullmatch(product_id):
+            raise CatalogError('invalid_product_id')
+        entry = self._rows.get(product_id)
+        entry = self._wheel_index.project(entry, selection) if entry else None
+        return self._project(self._cached_entry(entry), self._now(now)) if entry else None
+
+    @staticmethod
+    def _validate_scope_fields(filters):
+        if set(filters) - {'wheel_make', 'wheel_vehicle', 'wheel_query', 'make', 'model', 'year', 'hsn', 'tsn'}:
+            raise CatalogError('invalid_vehicle_filter')
+
+    def _selection_metadata(self, result, selection, department, matching_rims):
+        if department in ('wheels', 'tyres') or selection:
+            result['wheel_makes'] = self._wheel_index.make_names.copy()
+        if selection:
+            choices = []
+            for option in selection['options'].values():
+                if not option['model'] or not option['variant']:
+                    continue
+                choice = dict(option)
+                aliases = self._wheel_index.model_aliases.get(option['key'], {})
+                names = {name for name, article_ids in aliases.items() if matching_rims is None or article_ids & matching_rims}
+                if names:
+                    names.add(self._wheel_index.options[option['key']]['model'])
+                    choice['reviewed_model_names'] = sorted(names, key=str.casefold)
+                choices.append(choice)
+            result['wheel_vehicles'] = sorted(choices,
+                key=lambda o: (not o.get('has_report', False), _norm(o['make']), _norm(o['model']), _norm(o['variant'])))
+            if selection['query_make']:
+                result['wheel_query_make'] = selection['query_make']
 
     def page(self, *, group=None, studio=None, complete=None, **kwargs):
         if group not in (None, 'family') or studio not in (None, '1') or complete not in (None, '1'):
             raise CatalogError('invalid_filter')
-        # Validate/filter/rank once, before either family grouping or pagination.
-        # Every cache access is local. A family uses its best matching variant,
-        # so a late representative swap cannot leave it on the wrong page.
         page, size = kwargs.get('page', 1), kwargs.get('page_size', 24)
+        department = kwargs.get('department')
+        selection = self._wheel_selection(kwargs, query=kwargs.get('q'), department=department)
+        if selection:
+            kwargs['_entries'] = (match for entry in self._rows.values()
+                if (department is None or entry['public']['department'] == department)
+                and (match := self._wheel_index.project(entry, selection)) is not None)
         rows, current = self._page_entries(**kwargs)
-        matches, seen = [], set()
+        if selection and kwargs.get('sort') is None:
+            def vehicle_rank(entry):
+                product = entry['public']
+                if product['department'] == 'wheels':
+                    return 0 if product['fitment']['reports'] else 2
+                return 1 if product.get('wheel_fitment_scope') == 'documented_rim_tyre_candidate' else 3
+            rows.sort(key=vehicle_rank)
+        matches, family_members = [], {}
+        matching_rims = set() if selection and department != 'tyres' else None
         for entry in rows:
             product = entry['public']
-            if complete == '1' and not product.get('tyre_seasons'):
+            if complete == '1' and not (product.get('tyre_seasons') or product.get('vehicle_sizes')):
                 continue
             if studio == '1' and not product.get('photo_face'):
                 continue
+            if matching_rims is not None and product['department'] == 'wheels' and product['fitment']['reports']:
+                matching_rims.add(product['id'])
             if group == 'family':
                 key = self._family_for.get(product['id'], (product['id'],))
-                if key in seen:
+                if key in family_members:
+                    family_members[key].append(product)
                     continue
-                seen.add(key)
+                family_members[key] = [product]
             matches.append(entry)
-        result = self._page_result(matches, current, page=page, page_size=size, department=kwargs.get('department'))
+        result = self._page_result(matches, current, page=page, page_size=size, department=department)
+        self._selection_metadata(result, selection, department, matching_rims)
         if group == 'family':
             for product in result['items']:
-                product['family'] = self._family(product, complete=complete == '1', wheel_make=kwargs.get('wheel_make'))
+                members = family_members[self._family_for.get(product['id'], (product['id'],))]
+                diameters = {p['geometry'].get('diameter', '') for p in members} - {''}
+                product['family'] = {'variant_count': len(members), 'diameters': sorted(diameters, key=lambda n: (len(n), n))}
         return result
 
-    def variants(self, identifier, *, page=1, page_size=24, diameter=None, complete=None, wheel_make=None):
+    def variants(self, identifier, *, page=1, page_size=24, diameter=None, complete=None, **filters):
         if type(page) is not int or not 1 <= page <= 10000 or type(page_size) is not int or not 1 <= page_size <= 48:
             raise CatalogError('invalid_pagination')
-        if complete not in (None, '1'):
+        if complete not in (None, '1') or diameter is not None and (not isinstance(diameter, str)
+                or not re.fullmatch(r'(?:[89]|[12][0-9]|30)', diameter)):
             raise CatalogError('invalid_filter')
+        self._validate_scope_fields(filters)
+        selection = self._wheel_selection(filters, department='wheels')
         if self.get(identifier) is None:
             return None
-        ids = self._family_ids(identifier, complete == '1', wheel_make)
-        if diameter is not None:
-            import re
-            if not isinstance(diameter, str) or not re.fullmatch(r'(?:[89]|[12][0-9]|30)', diameter):
-                raise CatalogError('invalid_filter')
-            ids = [i for i in ids if self._rows[i]['public']['geometry'].get('diameter') == diameter]
-        current = self._now(None)
-        rows = [self._cached_entry(self._rows[i]) for i in ids]
+        ids = self._families.get(self._family_for.get(identifier), [identifier])
+        current, rows = self._now(None), []
+        for i in ids:
+            entry = self._rows[i]
+            if selection:
+                entry = self._wheel_index.project(entry, selection)
+            if entry is None or complete and not (entry['public'].get('tyre_seasons') or entry['public'].get('vehicle_sizes')):
+                continue
+            if diameter is None or entry['public']['geometry'].get('diameter') == diameter:
+                rows.append(self._cached_entry(entry))
         rows.sort(key=lambda entry: self._ranked_order(entry, current))
         offset = (page - 1) * page_size
         return {'items': [self._project(entry, current) for entry in rows[offset:offset + page_size]], 'page': page,
-                'page_size': page_size, 'total': len(ids), 'has_more': offset + page_size < len(ids)}
+                'page_size': page_size, 'total': len(rows), 'has_more': offset + page_size < len(rows)}
 
     def compatible_tyres(self, identifier, *, quantity=4, season=None, tyre_size=None, **filters):
         if type(quantity) is not int or not 1 <= quantity <= 4 or season not in (None, 'summer', 'winter', 'allseason'):
@@ -444,15 +521,26 @@ class EnrichedPublicCatalog(PublicCatalog):
                   'reason': 'Fahrzeugfreigabe und Reifenausführung sind vor der Bestellung zu prüfen.'}
         # Evidence is exact-ID AND exact-variant bound. A width/diameter match
         # alone never changes the scope to vehicle-approved.
-        # Validate vehicle filter syntax, but never infer a tyre's vehicle
-        # approval from a rim-width candidate or filter presence.
-        self.page(department='wheels', page_size=1, **filters)
+        self._validate_scope_fields(filters)
+        selection = self._wheel_selection(filters, department='wheels')
+        allowed = None
+        if selection:
+            records = self._wheel_index.rim_records(identifier, selection)
+            result['vehicle_sizes'] = sorted({v['tyre_size'] for record in records if record['option']['key'] == selection['exact']
+                                              for v in record['vehicles'] if v.get('tyre_size')})
+            allowed = {tid for record in records if record['option']['key'] == selection['exact'] for tid in record['tyres']}
+            result['reason'] = 'Für diese Fahrzeugauswahl sind nur im Gutachten der konkreten Felge aufgeführte Reifengrößen berücksichtigt. Fahrzeugpapiere, Traglast, Geschwindigkeitsindex und Auflagen prüfen.'
         current = self._now(None)
         candidates = []
         for tyre_id, canonical_season in self._candidate_tyres.get(identifier, []):
-            if tyre_id in self._checkout_excluded_ids or season and canonical_season != season:
+            if (tyre_id in self._checkout_excluded_ids or season and canonical_season != season
+                    or allowed is not None and tyre_id not in allowed):
                 continue
-            candidates.append(self._cached_entry(self._rows[tyre_id]))
+            entry = self._rows[tyre_id]
+            if selection:
+                entry = self._wheel_index.project(entry, selection)
+            if entry:
+                candidates.append(self._cached_entry(entry))
         if self._recommendation_ladder:
             from shop_tyre_recommendations import select_priced_tyres
             try:
@@ -486,10 +574,15 @@ class EnrichedPublicCatalog(PublicCatalog):
                 break
         return result
 
-    def complete_wheel_price(self, rim_id, tyre_id, *, quantity, runflat=False, disposal=False):
+    def complete_wheel_price(self, rim_id, tyre_id, *, quantity, runflat=False, disposal=False, **filters):
         """Display the selected quantity at workshop pickup, without a buyer or supplier call."""
         if type(quantity) is not int or not 1 <= quantity <= 4 or type(runflat) is not bool or type(disposal) is not bool:
             raise CatalogError('invalid_set_options')
+        self._validate_scope_fields(filters)
+        selection = self._wheel_selection(filters, department='wheels')
+        if selection and not any(record['option']['key'] == selection['exact'] and tyre_id in record['tyres']
+                                 for record in self._wheel_index.rim_records(rim_id, selection)):
+            return None
         if not any(candidate == tyre_id for candidate, _ in self._candidate_tyres.get(rim_id, ())):
             return None
         now = self._now(None)

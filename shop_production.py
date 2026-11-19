@@ -342,6 +342,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             compatible_pairs=compatible_pairs, quote_lookup=cache.get,
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
             product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
+            released_rim_report_resources={asset: document_resources[asset]
+                for asset in (bundle.get('documents') or {}).get('approved_assets', [])
+                if isinstance(document_resources.get(asset), Mapping) and document_resources[asset].get('kind') == 'wheel_report'},
             checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices, tyre_payment_costs=True,
             preferred_ids=set(seeds['records']) if fixed_prices else None,

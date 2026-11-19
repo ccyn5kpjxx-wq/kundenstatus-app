@@ -68,6 +68,27 @@ def _offer(product, quantity, now):
     return {'product': product, 'size': size, 'family': family, 'unit': line['unit_gross_cent']}
 
 
+def _price_order(offer):
+    return offer['unit'], offer['family'], offer['product']['id']
+
+
+def _include_tested_offer(offers, tested, limit):
+    """Keep the two price anchors and show the best tested execution in its own right."""
+    if limit < 3 or any(x['product']['id'] == tested['product']['id'] for x in offers):
+        return offers
+    middle = range(1, len(offers) - 1)
+    same_model = next((i for i in middle if offers[i]['family'] == tested['family']), None)
+    if same_model is not None:
+        offers[same_model] = tested
+    elif len(offers) < limit:
+        offers.append(tested)
+    else:
+        # Keep the other price points spread out by replacing the nearest interior price.
+        nearest = min(middle, key=lambda i: abs(offers[i]['unit'] - tested['unit']))
+        offers[nearest] = tested
+    return sorted(offers, key=_price_order)
+
+
 def select_priced_tyres(products, *, quantity=4, limit=5, now, size_key=None):
     """Choose a same-size, model-diverse price ladder without side effects.
 
@@ -77,8 +98,8 @@ def select_priced_tyres(products, *, quantity=4, limit=5, now, size_key=None):
     the size with the most distinct models wins, followed by brand diversity,
     lowest actual price and the numeric size as stable tie breakers.
 
-    Selection preserves both price extremes and spreads remaining cards over
-    rank quantiles. Neither rank nor cost creates a Budget/Premium label.
+    Selection preserves both model-price extremes. Between them it includes
+    the best exact ADAC-tested offer and spreads other cards over price ranks.
     """
     if (not isinstance(products, (list, tuple)) or len(products) > MAX_OFFERS
             or type(quantity) is not int or not 1 <= quantity <= 4
@@ -100,13 +121,21 @@ def select_priced_tyres(products, *, quantity=4, limit=5, now, size_key=None):
             conflicts.add(identifier)
         else:
             by_id[identifier] = product
-    cohorts = {}
+    cohorts, tested_by_size = {}, {}
     for identifier, product in by_id.items():
         if identifier in conflicts:
             continue
         offer = _offer(product, quantity, current)
         if offer is None:
             continue
+        rating = product.get('test_rating')
+        if isinstance(rating, Mapping) and rating.get('source') == 'ADAC':
+            grade = rating.get('grade')
+            if type(grade) in (int, float) and 0.6 <= grade <= 5.5:
+                rating_order = (grade, _price_order(offer))
+                best = tested_by_size.get(offer['size'])
+                if best is None or rating_order < best[0]:
+                    tested_by_size[offer['size']] = rating_order, offer
         models = cohorts.setdefault(offer['size'], {})
         previous = models.get(offer['family'])
         # A model's load/speed variants are not separate comparison cards. The
@@ -122,8 +151,7 @@ def select_priced_tyres(products, *, quantity=4, limit=5, now, size_key=None):
         selected = min(cohorts, key=rank)
     else:
         selected = size_key
-    offers = sorted(cohorts.get(selected, {}).values(),
-                    key=lambda offer: (offer['unit'], offer['family'], offer['product']['id']))
+    offers = sorted(cohorts.get(selected, {}).values(), key=_price_order)
     if len(offers) > limit:
         if limit == 1:
             offers = offers[:1]
@@ -132,5 +160,8 @@ def select_priced_tyres(products, *, quantity=4, limit=5, now, size_key=None):
             denominator = limit - 1
             positions = [(2 * i * (len(offers) - 1) + denominator) // (2 * denominator) for i in range(limit)]
             offers = [offers[position] for position in positions]
+    if selected in tested_by_size:
+        offers = _include_tested_offer(offers, tested_by_size[selected][1], limit)
     return {'items': [deepcopy(offer['product']) for offer in offers],
-            'available_sizes': available, 'selected_size': selected}
+            'available_sizes': available, 'selected_size': selected,
+            'rated_sizes': [size for size in available if size in tested_by_size]}

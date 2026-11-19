@@ -41,3 +41,6 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
 .shop-bundle-option { position: relative; }
 .shop-bundle-option h3 label::after { content: ""; position: absolute; inset: 0; cursor: pointer; }
 .shop-bundle-option :is(input, a, details) { position: relative; z-index: 1; }
+.shop-tyre-fitment-source { display: grid; justify-items: start; gap: .4rem; margin-block: .85rem; }
+#wheel-vehicle-field { min-width: 0; }
+#wheel-vehicle { width: 100%; max-width: 100%; }

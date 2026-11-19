@@ -513,7 +513,7 @@ class PublicCatalog:
 
     def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None, wheel_make=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
-             width=None, ratio=None, diameter=None, season=None, sort=None, now=None):
+             width=None, ratio=None, diameter=None, season=None, sort=None, now=None, _entries=None):
         if not _integer(page, 1, 10_000) or not _integer(page_size, 1, MAX_PAGE_SIZE):
             raise CatalogError("invalid_pagination")
         if not isinstance(q, str) or len(q) > 100 or len(q.split()) > 12:
@@ -559,7 +559,7 @@ class PublicCatalog:
         if text_vehicle:
             criteria.append(text_vehicle)
         rows = []
-        for entry in self._rows.values():
+        for entry in self._rows.values() if _entries is None else _entries:
             public = entry["public"]
             if size_conflict:
                 continue

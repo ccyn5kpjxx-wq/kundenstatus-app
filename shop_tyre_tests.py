@@ -43,6 +43,12 @@ ADAC_TYRE_TESTS = {
     # BRIDGESTONE BLIZZAK LM-005 | 195/65 R15 91T
     "3286341529111": TyreTest("4087e3f162ca19537f874f57e0b6b2c90b367d7d198be13440bd04dd02bcbb48",
         ('C', 'A', '71'), 2021, 3.0, "winterreifen/195-65-r15/bridgestone-blizzak-lm005-id-4562/"),
+    # BRIDGESTONE BLIZZAK LM-005 | 215/60 R16 99H
+    "3286341531114": TyreTest("5c1481182eef94e624962075cf4c114e2500f45902aabdf1eda2022c413a387c",
+        ('C', 'A', '71'), 2022, 2.7, "winterreifen/215-60-r16-h/bridgestone-blizzak-lm005-id-4668/"),
+    # TRIANGLE TW-401 WINTER X | 215/55 R17 98V
+    "6959753224369": TyreTest("9ef1fe9f5eb13c44c0b28c3aac9dbddc1430531567867c3f71b2ddf8200cb01f",
+        ('D', 'C', '72'), 2024, 4.8, "winterreifen/215-55-r17/triangle-winterx-tw401-id-4905/"),
     # CONTINENTAL WINTER CONTACT TS 870P | 225/40 R18 92V
     "4019238054354": TyreTest("cd7ff903cbf8f8977a2718cd66cd4e94d8a78ada28fa5ee90343b72b22293f5b",
         ('C', 'B', '71'), 2025, 2.5, "winterreifen/225-40-r18/continental-wintercontact-ts-870-p-id-5055/"),
@@ -55,6 +61,12 @@ ADAC_TYRE_TESTS = {
     # UNIROYAL WINTEREXPERT | 225/40 R18 92V
     "4024068001768": TyreTest("e956baf6a6892de31763ff0e7d3891448556debaf6717b41c2940316a02d677c",
         ('D', 'B', '72'), 2025, 3.0, "winterreifen/225-40-r18/uniroyal-winterexpert-id-5061/"),
+    # CONTINENTAL WINTER CONTACT TS 870 | CONTI TS870 225/45 R17 91 H
+    "4019238038323": TyreTest("941931775808c0aa3ba51c1fd823caa318f6562ba2c1f1de9311d262b576487c",
+        ('C', 'B', '70'), 2023, 2.0, "winterreifen/225-45-r17-h/continental-wintercontact-ts-870-id-4772/"),
+    # SEMPERIT SPEED-GRIP 5 | 225/45 R17 91H
+    "4024067003336": TyreTest("19ac16617a761aedea81e1b87304ef6780a92d55754f15305d143c9d1b009ce8",
+        ('D', 'B', '72'), 2023, 2.6, "winterreifen/225-45-r17-h/semperit-speed-grip-5-id-4777/"),
     # CONTINENTAL WINTER CONTACT TS 870 | 225/50 R17 98V
     "4019238038187": TyreTest("412db1eb21992b0407bdda2fab85bd8070a24f45e12150ac81f3c57345488d0c",
         ('C', 'B', '70'), 2026, 2.3, "winterreifen/225-50-r17-2026/continental-wintercontact-ts-870-id-5219/"),

@@ -134,6 +134,9 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
             # Preserve public catalogue selections and campaign attribution.
             allowed = ('artikel', 'gclid', 'gbraid', 'wbraid', 'utm_source', 'utm_medium', 'utm_campaign',
                        'utm_content', 'utm_term')
+            if request.endpoint in {'shop_frontend.felgen', 'shop_frontend.komplettraeder', 'shop_frontend.reifen'}:
+                allowed += ('wheel_make', 'wheel_vehicle', 'make', 'model', 'year', 'hsn', 'tsn',
+                            'q', 'width', 'ratio', 'diameter', 'season')
             params = [(key, request.args[key]) for key in allowed
                       if key in request.args and len(request.args[key]) <= 256]
             if request.endpoint == 'shop_frontend.reifen' and request.args.getlist('montage') == ['1']:
