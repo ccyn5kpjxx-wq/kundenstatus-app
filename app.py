@@ -3196,6 +3196,7 @@ def restrict_public_site_service():
         "oeffentliche_leistungen",
         "oeffentliche_leistung_detail",
         "oeffentliche_geschaeftspartner",
+        "oeffentlicher_autohaus_einstieg",
         "oeffentliche_portale",
         "oeffentliches_team",
         "oeffentliche_karriere",
@@ -45572,6 +45573,9 @@ def homepage_portal_links():
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
         "anfrage": link("website_anfrage", "/anfrage"),
+        "autohaus_probeauftrag": link(
+            "website_anfrage", "/anfrage?anliegen=autohaus_probeauftrag", anliegen="autohaus_probeauftrag"
+        ),
         "fahrer_demo": link("oeffentliche_kundenapp_demo", "/kunden-app/demo"),
         "partner": link("partner_login", "/partner"),
         "flotte": link("flottenportal.login", "/flotte/anmelden"),
@@ -45811,6 +45815,7 @@ def admin_bewerbungen_count():
 
 
 WEBSITE_ANLIEGEN = {
+    "autohaus_probeauftrag": "Probeauftrag für ein Autohaus",
     "lackanfrage": "Lackanfrage",
     "glasschaden": "Glasschaden",
     "reparaturanfrage": "Reparaturanfrage",
@@ -45835,6 +45840,12 @@ BREMSEN_ACHSEN = {"vorne": "Vorderachse", "hinten": "Hinterachse", "beide": "Vor
 TEILE_QUALITAETEN = {"preisbewusst": "Preisbewusst", "marke": "Markenqualität", "premium": "Premium"}
 
 WEBSITE_KURZANFRAGEN = {
+    "autohaus_probeauftrag": {
+        "label": "Probeauftrag für Ihr Autohaus",
+        "kurz": "Einen ersten Reparatur- oder Lackierauftrag besprechen",
+        "frage": "Welche Arbeiten möchten Sie anfragen?",
+        "placeholder": "z. B. Stoßfänger vorne instand setzen und lackieren",
+    },
     "reifenangebot": {"label": "Reifenangebot anfragen", "kurz": "Neue Reifen mit oder ohne Montage",
         "frage": "Weitere Hinweise", "placeholder": "z. B. bevorzugter Hersteller oder Hinweise zur Bereifung (optional)"},
     "bremsenservice": {"label": "Bremsen anfragen", "kurz": "Bremsen prüfen oder instandsetzen lassen",
@@ -46358,6 +46369,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
             kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden", "auswahl"},
             ausgewaehltes_anliegen=ausgewaehltes_anliegen,
+            partner_login_url=homepage_portal_links()["partner"] if ausgewaehltes_anliegen == "autohaus_probeauftrag" else None,
             shop_service=selected_workshop_service(formdata.get("shop_leistung"), ausgewaehltes_anliegen),
             besichtigungsarten=WEBSITE_BESICHTIGUNGSARTEN,
             today_iso=date.today().isoformat(),
@@ -46406,6 +46418,7 @@ def website_anfrage():
             else ""
         )
         name = clean_text(request.form.get("name"))[:120]
+        betrieb = " ".join(clean_text(request.form.get("betrieb")).split()) if anliegen == "autohaus_probeauftrag" else ""
         telefon = clean_text(request.form.get("telefon"))[:80]
         email = clean_text(request.form.get("email")).lower()[:200]
         fahrzeug = clean_text(request.form.get("fahrzeug"))[:160]
@@ -46468,6 +46481,8 @@ def website_anfrage():
 
         if anliegen not in WEBSITE_ANLIEGEN:
             errors.append("Bitte ein Anliegen auswählen.")
+        if anliegen == "autohaus_probeauftrag" and not 2 <= len(betrieb) <= 160:
+            errors.append("Bitte den Namen Ihres Betriebs angeben (2 bis 160 Zeichen).")
         if ist_fahrzeugcheck and besichtigungsart not in WEBSITE_BESICHTIGUNGSARTEN:
             errors.append("Bitte eine gültige Besichtigungsart auswählen.")
         if len(name) < 2:
@@ -46593,6 +46608,8 @@ def website_anfrage():
         anliegen_label = WEBSITE_ANLIEGEN[anliegen]
         besichtigung_label = WEBSITE_BESICHTIGUNGSARTEN.get(besichtigungsart, "")
         beschreibungsteile = [anliegen_label]
+        if betrieb:
+            beschreibungsteile.append(f"Betrieb: {betrieb}")
         shop_service = selected_workshop_service(request.form.get("shop_leistung"), anliegen)
         if shop_service:
             beschreibungsteile.append(f"Im Shop gewählte Leistung: {shop_service.label}")
@@ -46664,6 +46681,7 @@ def website_anfrage():
                                       + shop_offer_context['full_text'])
 
         naechste_aktion = {
+            "autohaus_probeauftrag": "Autohaus kontaktieren und Umfang, Preis und Termin für den Probeauftrag abstimmen",
             "lackanfrage": "Lackanfrage prüfen und Kunden zurückrufen",
             "glasschaden": "Glasschaden prüfen, Scheibe über FIN zuordnen und Angebot vorbereiten",
             "reparaturanfrage": "Reparaturumfang prüfen und Kunden zurückrufen",
@@ -46701,6 +46719,7 @@ def website_anfrage():
                 "reifen_angebot_request_hash": anfrage_hash,
                 "portal_data": {
                     "anliegen": anliegen,
+                    **({"betrieb": betrieb} if betrieb else {}),
                     **({'shop_anfrage': shop_offer_context} if shop_offer_context else {}),
                     "reifenangebot": reifenangebot_daten if ist_reifenangebot else {},
                     "fin": fin if anliegen == "bremsenservice" else "",
@@ -46781,7 +46800,11 @@ def website_anfrage():
         )
         session["website_anfrage_kundenlink"] = kunden_buchungs_url
         if email:
-            if ist_reifenangebot:
+            if anliegen == "autohaus_probeauftrag":
+                lead_notice(lead_id, "Ihre Anfrage zum Probeauftrag ist eingegangen", "E-Mail", email,
+                    "Vielen Dank für Ihre Anfrage. Wir melden uns bei Ihnen, um Reparaturumfang, Preis und Termin zu besprechen. "
+                    "Über Ihren persönlichen Link können Sie die Anfrage einsehen und Fotos ergänzen: " + kunden_buchungs_url)
+            elif ist_reifenangebot:
                 lead_notice(lead_id, "Ihre Reifenanfrage ist eingegangen", "E-Mail", email,
                     "Vielen Dank für Ihre Reifenanfrage. Wir prüfen die passenden Reifen und senden Ihnen innerhalb von 24 Stunden Ihr persönliches Angebot per E-Mail. "
                     "Ein Montagetermin ist noch nicht reserviert. Ihre Angaben und Unterlagen finden Sie hier: " + kunden_buchungs_url)
@@ -46830,8 +46853,8 @@ def website_anfrage():
             or not isinstance(ads_event.get("id"), str)
             or not re.fullmatch(r"lead_ads_[a-f0-9]{64}", ads_event["id"])):
         ads_event = None
-    if bestaetigt and session.get("website_anfrage_art") == "reifenangebot":
-        vorauswahl = "reifenangebot"
+    if bestaetigt and session.get("website_anfrage_art") in {"reifenangebot", "autohaus_probeauftrag"}:
+        vorauswahl = session["website_anfrage_art"]
     mechanik_vorauswahl = list(dict.fromkeys(
         value for value in request.args.getlist("mechanik_kategorie")
         if vorauswahl == "mechanikanfrage" and value in WEBSITE_MECHANIK_KATEGORIEN
@@ -47317,6 +47340,11 @@ def oeffentliche_leistung_detail(slug):
         site_indexable=public_site_is_indexable_request(),
         canonical_url=f"{PUBLIC_BASE_URL}/leistungen/{slug}" if PUBLIC_BASE_URL else "",
     )
+
+
+@app.get("/autohaeuser")
+def oeffentlicher_autohaus_einstieg():
+    return redirect(homepage_portal_links()["autohaus_probeauftrag"])
 
 
 @app.route("/geschaeftspartner")
