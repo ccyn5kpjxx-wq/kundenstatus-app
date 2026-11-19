@@ -72,7 +72,8 @@ def _boxes(rows, width, style):
     table = Table(entries, colWidths=[21, width-21], hAlign="LEFT", splitInRow=1)
     table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                               ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+                               ("TOPPADDING", (0, 0), (-1, -1), 5),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
     return table
 
 
@@ -81,19 +82,20 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     size = A4
     doc = SimpleDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
                             author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
-                            topMargin=29*mm, bottomMargin=32*mm, allowSplitting=True)
+                            bottomMargin=32*mm, allowSplitting=True)
     ink, green = HexColor("#172f25"), HexColor("#37654f")
-    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=18, leading=22, textColor=ink)
-    label = ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=10, leading=12, textColor=green,
-                           spaceBefore=7, spaceAfter=2, keepWithNext=True)
-    value = ParagraphStyle("value", fontName="Helvetica", fontSize=12, leading=15, textColor=ink)
+    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=25, leading=42, textColor=ink)
+    label = ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=green,
+                           spaceBefore=12, spaceAfter=4, keepWithNext=True)
+    checklist_label = ParagraphStyle("checklist", parent=label, spaceBefore=22)
+    value = ParagraphStyle("value", fontName="Helvetica", fontSize=13, leading=17, textColor=ink)
     note = ParagraphStyle("note", parent=value, fontSize=11, leading=15)
     service = auftrag_leistungsart(order)
     if not service and any(re.search(r"lack(?:ier)?[ _-]*auftrag", name, re.I) for name in printed + omitted):
         service = "lackierung"
     title = "Lackierauftrag" if service == "lackierung" else "Werkstattauftrag"
     vehicle = f"{sheet['fahrzeug']} · {sheet['kennzeichen']}"
-    story = [_paragraph(f"{title} {sheet['nummer']}  ·  {vehicle}", heading)]
+    story = []
     service_name = AUFTRAGSARTEN.get(service, {}).get("label", "Werkstattauftrag")
     start = _event("Arbeitsbeginn", order["start_datum"], order["start_uhrzeit"])
     end = sheet["fertig"]
@@ -111,10 +113,30 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
 
     customer = order["autohaus"] or order["kunde_name"] or ""
     identification = [customer] if customer else []
+    identification.append(vehicle)
     if sheet["externe_referenz"] and sheet["externe_referenz"] != str(sheet["nummer"]):
         identification.append("Auftragsreferenz " + sheet["externe_referenz"])
-    if identification:
-        story.append(_paragraph("   ·   ".join(identification), value))
+    # Lay out the same stack on each worksheet page. Its height follows the
+    # complete service name, including a booking with several services.
+    key_style = ParagraphStyle("field", parent=label, fontSize=12, leading=20)
+    service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=16, leading=21)
+    time_style = ParagraphStyle("time", parent=service_style, fontSize=17, leading=23)
+    fields = Table([
+        [_paragraph("Service:", key_style), _paragraph(service_name, service_style)],
+        [_paragraph(start_name, key_style), _paragraph(start_value, time_style)],
+        [_paragraph(end_name, key_style), _paragraph(end_value, time_style)],
+    ], colWidths=[46*mm, doc.width - 12 - 46*mm], hAlign="LEFT")
+    fields.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+    top = [
+        (Paragraph(f"{title} <font size='36'>{sheet['nummer']}</font>", heading), 5),
+        (fields, 8),
+        (_paragraph("   ·   ".join(identification), note), 7),
+    ]
+    header = [(item, item.wrap(doc.width - 12, size[1])[1], gap) for item, gap in top]
+    doc.topMargin = 12*mm + sum(height + gap for _, height, gap in header)
     if sheet["archiviert"] or order["angebotsphase"]:
         section("Status", "Archiviert" if sheet["archiviert"] else "Angebotsphase")
     dates = []
@@ -133,7 +155,7 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
             if row["text"].casefold() not in known:
                 rows.append(row)
                 known.add(row["text"].casefold())
-    story.append(_paragraph("Arbeiten abhaken", label))
+    story.append(_paragraph("Arbeiten abhaken", checklist_label))
     if not rows:
         story.append(_paragraph("Positionen aus der beigefügten Auftragsunterlage übernehmen." if printed
                                 else "Arbeitsumfang vor Beginn klären und hier eintragen.", note))
@@ -152,32 +174,13 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
 
     def chrome(canvas, document):
         width, height = size
-        for x, room, name, content in ((14, 62, start_name, start_value), (79, 59, end_name, end_value),
-                                        (141, 55, "Service", service_name)):
-            canvas.setFillColor(green)
-            canvas.setFont("Helvetica-Bold", 9)
-            canvas.drawString(x*mm, height-7*mm, name.upper())
-            canvas.setFillColor(ink)
-            font = "Helvetica-Bold"
-            pts = 20 if x == 14 else 16
-            while pts > 11 and canvas.stringWidth(content, font, pts) > room*mm:
-                pts -= 1
-            if canvas.stringWidth(content, font, pts) > room*mm:
-                while content and canvas.stringWidth(content + "…", font, pts) > room*mm:
-                    content = content[:-1]
-                content = content.rstrip() + "…"
-            canvas.setFont(font, pts)
-            canvas.drawString(x*mm, height-16*mm, content)
-        rack_id = "   ·   ".join(filter(None, (customer, vehicle)))
-        canvas.setFont("Helvetica", 9)
-        if canvas.stringWidth(rack_id, "Helvetica", 9) > 148*mm:
-            while rack_id and canvas.stringWidth(rack_id + "…", "Helvetica", 9) > 148*mm:
-                rack_id = rack_id[:-1]
-            rack_id = rack_id.rstrip() + "…"
-        canvas.drawString(14*mm, height-21*mm, rack_id)
-        canvas.drawRightString(width-14*mm, height-21*mm, f"Auftrag {sheet['nummer']}")
+        y = height - 8*mm
+        for item, item_height, gap in header:
+            y -= item_height
+            item.drawOn(canvas, doc.leftMargin + 6, y)
+            y -= gap
         canvas.setStrokeColor(green)
-        canvas.line(14*mm, height-24*mm, width-14*mm, height-24*mm)
+        canvas.line(doc.leftMargin + 6, y, width-doc.rightMargin - 6, y)
         canvas.setFont("Helvetica", 8)
         canvas.drawRightString(width-14*mm, 30*mm, f"Gärtner Karosserie & Lack   ·   Auftrag {sheet['nummer']}   ·   Blatt {document.page}")
         if document.page == 1:

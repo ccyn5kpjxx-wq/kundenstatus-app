@@ -2,6 +2,7 @@
 
 from contextlib import closing
 from io import BytesIO
+import json
 import unittest
 
 import fitz
@@ -37,6 +38,36 @@ class OrderPrintTest(unittest.TestCase):
                                        "autohaus", kategorie=kategorie, analyze=False)
         self.assertEqual(saved, 1)
 
+    def assert_print_hierarchy(self, page, title, number, service, start, end, identification):
+        spans = [s for block in page.get_text("dict")["blocks"] for line in block.get("lines", [])
+                 for s in line["spans"] if s["text"].strip()]
+        first_baseline = min(s["origin"][1] for s in spans)
+        first = sorted((s for s in spans if abs(s["origin"][1] - first_baseline) < 1.5),
+                       key=lambda s: s["bbox"][0])
+        title_text = " ".join(s["text"].strip() for s in first)
+        self.assertRegex(title_text, rf"(?i)^{title}\s+(?:Nr\.?\s*)?{number}$")
+        self.assertTrue(any("bold" in s["font"].lower() for s in first))
+
+        def find(text, after):
+            matches = [s for s in spans if s["origin"][1] > after + 1.5 and text.casefold() in s["text"].casefold()]
+            self.assertTrue(matches, f"{text!r} fehlt unterhalb der PDF-Zeile bei {after:.1f} pt")
+            return min(matches, key=lambda s: s["origin"][1])
+
+        work = find("Arbeiten abhaken", first_baseline)
+        service_row = find(service, first_baseline)
+        start_row = find(start[1], service_row["origin"][1])
+        end_row = find(end[1], start_row["origin"][1])
+        for day, row in ((start[0], start_row), (end[0], end_row)):
+            same_row = " ".join(s["text"] for s in spans if abs(s["origin"][1] - row["origin"][1]) < 1.5)
+            self.assertIn(day, same_row)
+        fields = [find(text, end_row["origin"][1]) for text in identification]
+        self.assertLess(max(s["origin"][1] for s in fields), work["origin"][1])
+        self.assertLess(max(s["size"] for s in fields), min(s["size"] for s in (service_row, start_row, end_row)))
+        self.assertGreater(max(s["size"] for s in first), max(s["size"] for s in (service_row, start_row, end_row)))
+
+        previous = [s["bbox"][3] for s in spans if s["origin"][1] < work["origin"][1] - 1.5]
+        self.assertGreaterEqual(work["bbox"][1] - max(previous), 9, "Vor der Checkliste fehlt eine freie Textzeile")
+
     def test_a4_cover_and_all_order_pages_exclude_other_jobs_and_invoices(self):
         self.upload("Lackauftrag9617.pdf", original_pdf("TUER HINTEN RECHTS", "LACKIERFREIGABE"))
         self.upload("Rechnung_Auftrag_9617.pdf", original_pdf("PRIVATE INVOICE"), kategorie="rechnung")
@@ -50,7 +81,8 @@ class OrderPrintTest(unittest.TestCase):
         with fitz.open(stream=result.data) as pdf:
             self.assertEqual(len(pdf), 3)
             pages = [p.get_text() for p in pdf]
-            for text in (f"Lackierauftrag {self.oid}", "TEST AB 123", "9617", "LY7W", "Tür hinten rechts"):
+            self.assertRegex(pages[0], rf"(?i)Lackierauftrag\s+(?:Nr\.?\s*)?{self.oid}\b")
+            for text in ("TEST AB 123", "9617", "LY7W", "Tür hinten rechts"):
                 self.assertIn(text, pages[0])
             self.assertAlmostEqual(pdf[0].rect.width, 595.28, places=1)
             self.assertAlmostEqual(pdf[0].rect.height, 841.89, places=1)
@@ -69,10 +101,9 @@ class OrderPrintTest(unittest.TestCase):
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertEqual(len(pdf), 1)
             page = pdf[0]
-            header = page.get_text(clip=fitz.Rect(0, 0, page.rect.width, 62))
-            for value in ("ARBEITSBEGINN", "15.11.2026", "08:00", "17.11.2026", "16:30", "Lackierauftrag"):
-                self.assertIn(value, header)
-            self.assertNotIn("14.11.2026", header)
+            self.assert_print_hierarchy(page, "Lackierauftrag", self.oid, "Lackier",
+                ("15.11.2026", "08:00"), ("17.11.2026", "16:30"),
+                (portal.get_autohaus_by_slug("kaesmann")["name"], "Audi A6", "TEST AB 123"))
             strip = fitz.Rect(0, page.rect.height - 70, page.rect.width, page.rect.height)
             self.assertEqual(page.get_text(clip=strip).strip(), f"Auftrag {self.oid}")
             text = page.get_text()
@@ -85,6 +116,22 @@ class OrderPrintTest(unittest.TestCase):
             squares = [path for path in page.get_drawings() if abs(path["rect"].width - 11) < .1
                        and abs(path["rect"].height - 11) < .1]
             self.assertEqual(len(squares), 3)
+
+    def test_tyre_order_uses_the_same_header_hierarchy_and_checklist_spacing(self):
+        order_id = portal.create_auftrag("intern", leistungsart="reifenservice", kunde_name="Tina Beispiel",
+            fahrzeug="Opel Corsa", kennzeichen="TEST EF 456", start_datum="20.11.2026", fertig_datum="20.11.2026",
+            schaden_aufnahme_json=json.dumps({"anliegen": "reifenservice", "reifen_leistungen": ["radwechsel"]}))
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET start_uhrzeit='10:15', fertig_uhrzeit='11:00' WHERE id=?", (order_id,))
+            db.commit()
+        with fitz.open(stream=self.client.get(f"/admin/auftrag/{order_id}/ausdrucken").data) as pdf:
+            self.assertEqual(len(pdf), 1)
+            page = pdf[0]
+            self.assert_print_hierarchy(page, "Werkstattauftrag", order_id, "Radwechsel",
+                                        ("20.11.2026", "10:15"), ("20.11.2026", "11:00"),
+                                        ("Tina Beispiel", "Opel Corsa", "TEST EF 456"))
+            strip = fitz.Rect(0, page.rect.height - 70, page.rect.width, page.rect.height)
+            self.assertEqual(page.get_text(clip=strip).strip(), f"Auftrag {order_id}")
 
     def test_image_and_unreadable_original_show_what_will_print(self):
         photo = BytesIO()
