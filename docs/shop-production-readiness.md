@@ -29,7 +29,7 @@ RSU confirmed on 17 November that its account test mode is **off**. Existing cre
 
 The merchant's delivery commitment is **five working days after order acceptance**, defined as Monday to Friday excluding Baden-Wuerttemberg public holidays. This is not an invented RSU ETA. Montage can be purchased with the goods; the appointment is agreed after delivery clarification. Assembly and painted body parts route to the workshop; eligible unprocessed goods can route to the customer.
 
-Multiple supplier-position/destination orders first become a persistent **nonbinding request for a fully confirmed offer**. They do not automatically authorize a card, submit partial supplier orders or form a contract. Automatic single-position checkout requires legal acceptance and an exact server quote, followed by card authorization, exact RSU acceptance, capture and contract confirmation.
+Loose buyable articles can share one checkout when every position, service, delivery and freight charge is confirmed. One card authorization covers the full server quote. RSU still receives one order per supplier position. Capture requires all positions to have been accepted at the agreed price. A partial or ambiguous supplier result goes to manual review. Inquiry-only articles remain outside the charge. Mounted packages keep their technical review before procurement. The joint purchase flow is enabled only with its matching frozen consumer terms.
 
 ## Validation evidence and limits
 
@@ -45,7 +45,7 @@ Multiple supplier-position/destination orders first become a persistent **nonbin
 1. Install the approved public/private bundle and original assets with hash checks, publication rights and scoped current-price configuration. Verify public pages, homepage links and analytics after deployment. Do not publish the old large loopback preview tree.
 2. Provision and verify the persistent ledger/marker/outbox, authenticated backup and recovery process. Confirm single-worker configuration before arming financial actors.
 3. Supply dedicated **live** Stripe credentials, endpoint signing secret and fixed HTTPS origin, plus the complete reviewed payment, delivery, consumer and mail profile. Test-key permission changes do not enable live checkout. Verify actual webhook delivery without generating a live payment and mail readiness without unsolicited customer messages.
-4. Verify the complete activation boundary: trusted buyer context, current quote, single-position/mixed-offer policy, legal acceptance, authorization expiry, exact supplier acceptance, capture and durable contract confirmation. Keep checkout off if any dependency is absent. Never use the now-live RSU order endpoint for an agent test.
+4. Verify the complete activation boundary: trusted buyer context, current quote, cart eligibility, legal acceptance, authorization expiry, exact supplier acceptance for all positions, capture and durable contract confirmation. Keep checkout off if any dependency is absent. Never use the now-live RSU order endpoint for an agent test.
 5. Preserve explicit customer invoice/return handling. PayPal is not integrated; Apple Pay/other wallet availability is not verified in the live account. Do not advertise unverified payment methods or fabricate invoice/account history.
 6. Refresh TomorrowWorks incidents/deployment claims and the exact Render workspace, service and commit before publishing. The user selected workspace **Gaertner**. Coordinate any persistent-disk restart and monitor the result. No deployment or production activation is claimed here.
 

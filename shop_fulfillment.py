@@ -14,6 +14,8 @@ revalidate(snapshot, delivery_context, destinations=tuple) returns a NEW server
 CartQuote.snapshot for only the original requests in the remaining destinations,
 including current fitment, mandatory services/fees and freight. It may not
 change the customer's frozen identities, options, destinations or mappings.
+For loose goods already purchased at the same destination, revalidate_remaining
+can quote only the pending items and recheck the complete original freight.
 delivery_address(destination, context) supplies a reviewed RSU address; customer
 delivery must be neutral. No mutable customer/account address is read here.
 
@@ -319,7 +321,8 @@ class FulfillmentJournal:
 class ShopFulfillment:
     def __init__(self, order_store, journal, payment_actions=None, rsu_transport=None, *, mode,
                  supplier_policy=None, fresh_inquiry=None, revalidate=None, delivery_address=None,
-                 enabled=False, clock=None, minimum_capture_seconds=120, review_service=None):
+                 enabled=False, clock=None, minimum_capture_seconds=120, review_service=None,
+                 revalidate_remaining=None):
         if (mode not in {'test', 'live'} or type(enabled) is not bool
                 or type(minimum_capture_seconds) is not int or not 60 <= minimum_capture_seconds <= 3600):
             raise FulfillmentError('invalid_fulfillment_configuration')
@@ -334,6 +337,7 @@ class ShopFulfillment:
         self.inquiry, self.revalidate, self.delivery_address = fresh_inquiry, revalidate, delivery_address
         self.clock, self.margin = clock or (lambda: datetime.now(timezone.utc)), minimum_capture_seconds
         self.review_service = review_service
+        self.revalidate_remaining = revalidate_remaining
 
     def __repr__(self):
         return '<ShopFulfillment mode=' + self.mode + ' enabled=' + str(self.enabled) + '>'
@@ -409,13 +413,28 @@ class ShopFulfillment:
         started = self._now()
         try:
             destinations = {child['destination'] for child in children}
-            old_lines = [v for v in snapshot['lines'] if v['destination'] in destinations]
-            old_requests = [r for r, v in zip(snapshot['request'], snapshot['lines']) if v['destination'] in destinations]
-            fresh = self.revalidate(deepcopy(snapshot), deepcopy(context), destinations=tuple(sorted(destinations)))
+            pairs = [(r, v) for r, v in zip(snapshot['request'], snapshot['lines']) if v['destination'] in destinations]
+            pending = {(child['destination'], json.loads(child['item_json'])['id']) for child in children}
+            shipped_at_destination = any((v['destination'], v['id']) not in pending for _, v in pairs)
+            loose_goods = all(not r['assembly_group'] and not any(r['services'].values()) for r in snapshot['request'])
+            partial = shipped_at_destination and callable(self.revalidate_remaining) and snapshot['version'] == 1 and loose_goods
+            old_groups = {v['id']: v for v in snapshot['shipments'] if v['id'] in destinations}
+            if partial:
+                pairs = [(r, v) for r, v in pairs if (v['destination'], v['id']) in pending]
+            old_requests = [r for r, _ in pairs]
+            old_lines = [v for _, v in pairs]
+            if partial:
+                fresh, freight_until = self.revalidate_remaining(
+                    deepcopy(old_requests), deepcopy(snapshot), deepcopy(context), deepcopy(list(old_groups.values())))
+            else:
+                fresh = self.revalidate(deepcopy(snapshot), deepcopy(context), destinations=tuple(sorted(destinations)))
             if callable(getattr(fresh, 'snapshot', None)):
                 fresh = fresh.snapshot()
             _validate_snapshot(fresh, fresh['quote_hash'], snapshot['customer_id'], self.mode)
             _delivery_context(fresh, context)
+            expires = _stamp(fresh['expires_at'])
+            if partial:
+                expires = min(expires, _stamp(freight_until))
             if (fresh['request'] != old_requests or fresh.get('vehicle_ref') != snapshot.get('vehicle_ref')
                     or not started <= _stamp(fresh['created_at']) <= self._now()
                     or not self._now() < _stamp(fresh['expires_at']) or len(fresh['lines']) != len(old_lines)):
@@ -441,11 +460,15 @@ class ShopFulfillment:
             for child in children:
                 item = json.loads(child['item_json'])
                 demand[item['id']] += item['quantity']
-            old_groups = {v['id']: v for v in snapshot['shipments'] if v['id'] in destinations}
             if set(old_groups) != {v['id'] for v in fresh['shipments']}:
                 raise ValueError()
             for group in fresh['shipments']:
                 old = old_groups[group['id']]
+                if partial:
+                    old = dict(old)
+                    for field in ('items', 'private_items'):
+                        old[field] = [item for item in old[field] if (old['id'], item['id']) in pending]
+                    old['shipment_hash'] = _hash({k: old[k] for k in ('id', 'destination', 'private_items', 'context_hash')})
                 if (any(group.get(key) != old.get(key) for key in ('id', 'destination', 'items', 'private_items', 'context_hash', 'shipment_hash'))
                         or group['gross_cent'] > old['gross_cent']):
                     raise ValueError()
@@ -474,9 +497,9 @@ class ShopFulfillment:
                 if retail > unit_limits[(identifier, child['destination'])]:
                     raise ValueError()
                 net[child['child_key']] = {key: deepcopy(result[key]) for key in ('ean', 'unit_net', 'expires_at')}
-            if self._now() >= _stamp(fresh['expires_at']) or any(self._now() >= _stamp(v['expires_at']) for v in net.values()):
+            if self._now() >= expires or any(self._now() >= _stamp(v['expires_at']) for v in net.values()):
                 raise ValueError()
-            return fresh, net
+            return expires, net
         except Exception:
             raise FulfillmentError('procurement_revalidation_failed') from None
 
@@ -640,16 +663,16 @@ class ShopFulfillment:
                 if current['state'] != 'pending' or any(v['state'] in {'claimed', 'unknown', 'rejected'} for v in latest['children']):
                     return self.status(order_id, customer_id=customer_id)
                 remaining = [v for v in latest['children'] if v['state'] == 'pending']
-                fresh, net = self._fresh_plan(snapshot, context, remaining)
+                quote_expires, net = self._fresh_plan(snapshot, context, remaining)
                 self._require_review(snapshot, binding)
                 payload = self._payload(context, child, net[child['child_key']])
                 # A slow service/stock/address read must not consume the hold's
                 # remaining capture window or refresh any observation time.
                 authorization = self._authorization(binding)
-                if self._now() >= _stamp(fresh['expires_at']) or any(self._now() >= _stamp(v['expires_at']) for v in net.values()):
+                if self._now() >= quote_expires or any(self._now() >= _stamp(v['expires_at']) for v in net.values()):
                     raise FulfillmentError('procurement_revalidation_failed')
                 authorization.update(procurement_expires_at=min(
-                    [_stamp(fresh['expires_at'])] + [_stamp(v['expires_at']) for v in net.values()]).isoformat(),
+                    [quote_expires] + [_stamp(v['expires_at']) for v in net.values()]).isoformat(),
                     minimum_capture_seconds=self.margin)
             except Exception:
                 if self.journal.reject_unordered(order_id, customer_id=customer_id, mode=self.mode, reason='procurement_revalidation_failed'):

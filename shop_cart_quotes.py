@@ -11,8 +11,9 @@ Provider contracts (only these whitelisted fields are retained):
   tyre_size (for wheel assembly). Optional standalone_rim_geometry is a trusted
   RSU proof {confirmed, product_id, identity_hash, supplier='RSU', evidence_id,
   geometry={width, diameter, offset, bolt_count, pcd, centre_bore}}. Only an
-  explicit allow_standalone_rims policy can consume it for a sole rim SKU,
+  explicit allow_standalone_rims policy can consume it for a rim sold loose,
   without services or an assembly. It never asserts vehicle approval.
+  When supplied, purchase_status must permit direct checkout.
 * retail_quote(product, procurement_quantity): confirmed, product_id,
   identity_hash, quantity, mode, currency='eur', unit_gross_cent, stock,
   observed_at, expires_at, vat_percent='19.00', procurement_confirmed=True.
@@ -258,8 +259,7 @@ class CartQuoteService:
         self.mode, self.clock = mode, clock or (lambda: datetime.now(timezone.utc))
         if manual_mixed_orders is not None and type(manual_mixed_orders) is not bool:
             raise ValueError('invalid_mixed_order_policy')
-        # RSU dispatches each SKU/destination immediately. The operator has
-        # chosen a complete manual offer before payment for mixed baskets.
+        # Callers can require a manual offer for every multi-position cart.
         self.manual_mixed_orders = mode == 'live' if manual_mixed_orders is None else manual_mixed_orders
         if require_tyre_documents is not None and type(require_tyre_documents) is not bool:
             raise ValueError('invalid_document_policy')
@@ -361,7 +361,10 @@ class CartQuoteService:
             demand[row['id']] = demand.get(row['id'], 0) + row['quantity']
             key = (row['id'], destination)
             position_demand[key] = position_demand.get(key, 0) + row['quantity']
-        if self.manual_mixed_orders and len(position_demand) > 1:
+        # The complete-wheel review still covers only complete assembled sets.
+        # Do not let a mixed set and loose goods skip that review in production.
+        has_assembly = any(row['assembly_group'] for row in rows)
+        if len(position_demand) > 1 and (self.manual_mixed_orders or self.mode == 'live' and has_assembly):
             block('mixed_cart_manual_review_required')
         if self.require_delivery_salutation and 'customer' in destinations:
             delivery = context.get('delivery') if isinstance(context, Mapping) else None
@@ -376,6 +379,8 @@ class CartQuoteService:
                     or not HASH.fullmatch(p['identity_hash'])):
                 block('catalogue_identity_unconfirmed', product_id=identifier)
                 continue
+            if 'purchase_status' in p and p['purchase_status'] != 'supplier_check_required':
+                block('product_inquiry_only', product_id=identifier)
             # Only store fields used by this boundary; arbitrary provider payloads stay private.
             p = {key: p.get(key) for key in ('id', 'name', 'category', 'identity_hash', 'fitment_required',
                  'fitment', 'new_part', 'painting_eligible', 'required_fees_confirmed', 'required_fees', 'diameter', 'tyre_size',
@@ -394,13 +399,12 @@ class CartQuoteService:
                 block('product_dimensions_unconfirmed', product_id=identifier)
             fitment_required = p['fitment_required']
             # A standalone tyre is sold by its exact operating description;
-            # the opt-in sole-rim policy likewise sells exact dimensions only.
-            # Body parts, services, mixed carts and assemblies retain the
-            # independent vehicle-bound evidence checks below.
+            # the opt-in loose-rim policy likewise sells exact dimensions only.
+            # Services or assemblies involving this rim require vehicle evidence.
             standalone = None
-            if (self.allow_standalone_rims and p['category'] in RIMS and len(position_demand) == 1
-                    and all(row['id'] == identifier and not row['assembly_group']
-                            and not any(row['services'].values()) for row in rows)):
+            if (self.allow_standalone_rims and p['category'] in RIMS
+                    and all(not row['assembly_group'] and not any(row['services'].values())
+                            for row in rows if row['id'] == identifier)):
                 standalone = _standalone_rim_geometry(p)
             if type(fitment_required) is not bool:
                 block('fitment_unconfirmed', product_id=identifier)

@@ -377,7 +377,7 @@ class ReleaseChecks(unittest.TestCase):
             self.assertTrue(dependencies)
             self.assertIs(self.portal.app.config['SHOP_MAINLAND_DELIVERY_ENABLED'], flag is True)
             service = self.portal.app.extensions['shop_production']['quotes']
-            self.assertTrue(service.manual_mixed_orders)
+            self.assertTrue(service.manual_mixed_orders)  # catalogue-only release, no checkout terms loaded
             self.assertIsNone(service.assembly_fitment(None, None, None))
             for declaration in (None, False, True):
                 context = {'delivery': deepcopy(delivery)}

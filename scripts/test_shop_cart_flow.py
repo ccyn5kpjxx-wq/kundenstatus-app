@@ -23,8 +23,8 @@ const item=(id=A,status='supplier_check_required',services={})=>({product:produc
 assert.equal(logic.cartPurchaseFlow([item()]),'checkout');
 assert.equal(logic.cartPurchaseFlow([item(A,'supplier_check_required',{mounting:true})]),'checkout');
 assert.equal(logic.cartPurchaseFlow([item(),item(A,'supplier_check_required',{runflat:true})]),'checkout');
-assert.equal(logic.cartPurchaseFlow([item(),item(A,'supplier_check_required',{mounting:true})]),'inquiry');
-assert.equal(logic.cartPurchaseFlow([item(),item(B)]),'inquiry');
+assert.equal(logic.cartPurchaseFlow([item(),item(A,'supplier_check_required',{mounting:true})]),'checkout');
+assert.equal(logic.cartPurchaseFlow([item(),item(B)]),'checkout');
 assert.equal(logic.cartSourceReady([item(),item(B)]),true);
 assert.equal(logic.cartPurchaseFlow([item(C,'inquiry_only')]),'inquiry');
 assert.equal(logic.cartOfferReady([item(C,'inquiry_only')]),true);
@@ -40,7 +40,7 @@ class Node{
 }
 function walk(node){return[node,...node.children.flatMap(walk)];}
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function boot(lines,{unbound=false,address=true,blocked=false,missing=false,deferBuyer=false,deferQuote=false,quoteFailures=0,storage=new Map(),search='',canCheckout=false,returned=null,features={}}={}){
+async function boot(lines,{unbound=false,address=true,blocked=false,missing=false,deferBuyer=false,deferQuote=false,quoteFailures=0,omitLast=false,storage=new Map(),search='',canCheckout=false,returned=null,features={}}={}){
  const nodes={};for(const key of ['close-product','product-dialog','product-detail','shop-announcement','cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note','buyer-address','address-status','delivery-fields','cart-workflow-note','cart-separate','order-status','order-summary'])nodes[key]=new Node();
  nodes['checkout-button'].hidden=true;nodes['buyer-address'].hidden=true;
  const body=new Node('body');body.dataset={api:'/shop/api/v2',page:'warenkorb',buyerEnabled:'true',quoteEnabled:'true',orderEnabled:'true',checkoutEnabled:'true',consumerEnabled:'true',cartRequestUrl:'/anfrage?anliegen=allgemein&shop_anfrage=1'};
@@ -49,7 +49,7 @@ async function boot(lines,{unbound=false,address=true,blocked=false,missing=fals
  if(!storage.has(fullKey))storage.set(fullKey,JSON.stringify(lines));
  const calls=[],drafts=[],redirects=[];let releaseBuyer,releaseQuote;
  const pendingBuyer=deferBuyer?new Promise(resolve=>releaseBuyer=resolve):null,pendingQuote=deferQuote?new Promise(resolve=>releaseQuote=resolve):null;
- const readyQuote={ready:true,currency:'eur',quote_hash:hash,total_gross_cent:10000,expires_at:expiry,lines:[{id:A,name:'SYNTHETIC Artikel',quantity:1,items_gross_cent:10000,services:[]}],shipments:[{destination:'customer',gross_cent:0}]};
+ let amount=0;
  const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:''}),querySelectorAll:()=>[],addEventListener(){}},
  localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>{storage.set(key,value);drafts.push({key,value});},removeItem:key=>storage.delete(key)},
  location:{pathname:'/shop/warenkorb/',search,assign:url=>redirects.push(url)},crypto:{randomUUID:()=>token},setTimeout(){},clearTimeout(){},setInterval(){},
@@ -60,12 +60,16 @@ async function boot(lines,{unbound=false,address=true,blocked=false,missing=fals
   else if(url.endsWith('/cart/quote')){
     if(pendingQuote)await pendingQuote;
     if(quoteFailures>0){quoteFailures--;throw Error('service_unavailable');}
-    value={quote:blocked?{...readyQuote,ready:false,total_gross_cent:null,known_subtotal_gross_cent:10000,blocked_reasons:[{code:'freight_unconfirmed'}]}:readyQuote,quote_retained:!blocked};
+    const items=JSON.parse(options.body).lines.map(({id,quantity})=>({id,name:product(id).name,quantity,items_gross_cent:10000*quantity,services:[]}));
+    if(omitLast)items.pop();
+    amount=items.reduce((sum,item)=>sum+item.items_gross_cent+821,0);
+    const readyQuote={ready:true,currency:'eur',quote_hash:hash,total_gross_cent:amount,expires_at:expiry,lines:items,shipments:items.map(()=>({destination:'customer',gross_cent:821}))};
+    value={quote:blocked?{...readyQuote,ready:false,total_gross_cent:null,known_subtotal_gross_cent:amount,blocked_reasons:[{code:'freight_unconfirmed'}]}:readyQuote,quote_retained:!blocked};
   }
   else if(url.endsWith('/consumer/terms'))value={version:'SYNTHETIC',pack_hash:'b'.repeat(64),consumer_only:true,texts:{agb:'Terms',widerruf:'Withdrawal',widerrufsformular:'Form',lieferung:'Delivery',datenschutz:'Privacy'}};
   else if(canCheckout&&url.endsWith('/consumer/acceptance'))value={accepted:true,quote_hash:hash,pack_hash:'b'.repeat(64),accepted_at:new Date().toISOString()};
-  else if(canCheckout&&url.endsWith('/orders'))value={order:{id:orderId,quote_hash:hash,amount_gross_cent:10000},payment_enabled:true};
-  else if(canCheckout&&url.endsWith('/checkout'))value={checkout:{order_id:orderId,currency:'eur',amount_gross_cent:10000,checkout_url:'https://checkout.stripe.com/c/pay/cs_test_SYNTHETIC',capture_triggered:false,supplier_order_created:false}};
+  else if(canCheckout&&url.endsWith('/orders'))value={order:{id:orderId,quote_hash:hash,amount_gross_cent:amount},payment_enabled:true};
+  else if(canCheckout&&url.endsWith('/checkout'))value={checkout:{order_id:orderId,currency:'eur',amount_gross_cent:amount,checkout_url:'https://checkout.stripe.com/c/pay/cs_test_SYNTHETIC',capture_triggered:false,supplier_order_created:false}};
   else if(returned&&url.endsWith('/orders/'+orderId))value={order:{id:orderId,mode:'test',amount_gross_cent:10000,quote_hash:hash,...returned}};
   else throw new Error('Unexpected request '+url);
   return {ok:true,text:async()=>JSON.stringify(value)};}};
@@ -77,19 +81,20 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
 (async()=>{
  const rows=[selection(A),selection(B),selection(C)];
  const main=await boot(rows),options=walk(main.nodes['cart-separate']).filter(n=>n.tagName==='BUTTON');
- assert.equal(options.length,2,'only the tyre and rim have separate checkout buttons');
+ assert.equal(options.length,1,'one checkout for all orderable items');assert.equal(options[0].textContent,'Artikel zusammen kaufen');
  options[0].listeners.click();
  assert.deepEqual(main.redirects,['/shop/warenkorb/?auswahl='+token]);assert.equal(writes(main).length,0);
  assert.deepEqual(JSON.parse(main.storage.get(fullKey)),rows,'entering separate checkout preserves the original');
  const partialArgs={storage:main.storage,search:'?auswahl='+token,canCheckout:true};
  const solo=await boot(rows,partialArgs);
- assert.equal(solo.nodes['cart-items'].children.length,1);assert.equal(solo.nodes['buyer-address'].hidden,false);
+ assert.equal(solo.nodes['cart-items'].children.length,2);assert.equal(solo.nodes['buyer-address'].hidden,false);
  assert.ok(walk(solo.nodes['cart-separate']).some(n=>n.href==='/shop/warenkorb/'));
  assert.equal(walk(solo.nodes['cart-items']).filter(n=>n.tagName==='SELECT'||n.textContent==='Entfernen').length,0);
  await press(solo);assert.equal(writes(solo).length,0,'explicitly confirm the delivery address for this separate order');
  solo.nodes['buyer-address'].elements.namedItem('delivery_salutation').value='Frau';
  await solo.nodes['buyer-address'].listeners.submit({preventDefault(){}});
- const outgoing=solo.calls.find(c=>c.url.endsWith('/cart/quote'));assert.deepEqual(JSON.parse(outgoing.options.body),{lines:[rows[0]]});
+ const outgoing=solo.calls.find(c=>c.url.endsWith('/cart/quote'));assert.deepEqual(JSON.parse(outgoing.options.body),{lines:rows.slice(0,2)});
+ assert.ok(walk(solo.nodes['quote-review']).some(n=>n.textContent===logic.money(21642)));
  assert.equal(solo.nodes['checkout-button'].disabled,true);
  const consent=walk(solo.nodes['quote-review']).filter(n=>n.type==='checkbox');assert.equal(consent.length,2);
  for(const n of consent){n.checked=true;n.listeners.change();}
@@ -102,8 +107,8 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  await boot(rows,{storage:main.storage,returned:{status:'paid',quote_hash:'f'.repeat(64)}});
  assert.deepEqual(JSON.parse(main.storage.get(fullKey)),rows,'different quote never removes the row');
  await boot(rows,{storage:main.storage,returned:{status:'paid'}});
- assert.deepEqual(JSON.parse(main.storage.get(fullKey)),rows.slice(1),'remove only purchased tyre, retain rim and inquiry-only part');
- await boot(rows,{storage:main.storage,returned:{status:'paid'}});assert.deepEqual(JSON.parse(main.storage.get(fullKey)),rows.slice(1),'repeated return is idempotent');
+ assert.deepEqual(JSON.parse(main.storage.get(fullKey)),[rows[2]],'only the inquiry-only part remains');
+ await boot(rows,{storage:main.storage,returned:{status:'paid'}});assert.deepEqual(JSON.parse(main.storage.get(fullKey)),[rows[2]],'repeated return is idempotent');
  const gone=await boot(rows,partialArgs);assert.equal(gone.nodes['request-quote'].disabled,true);assert.equal(gone.nodes['cart-items'].children.length,0);
  for(const search of ['?auswahl=','?auswahl=wrong','?auswahl='+token]){
    const f=await boot(rows,{search});assert.equal(f.nodes['request-quote'].disabled,true);assert.equal(f.nodes['buyer-address'].hidden,true);assert.deepEqual(JSON.parse(f.storage.get(fullKey)),rows);
@@ -114,16 +119,45 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  assert.equal(writes(staleSolo).length,0);assert.equal(staleSolo.nodes['request-quote'].disabled,true);
  const set=[{...selection(B),assembly_group:'pair'},{...selection(A,{mounting:true}),assembly_group:'pair'}];
  const withSet=await boot([...set,rows[2]],{features:{deferredCompleteWheelsEnabled:'true'}}),groupButtons=walk(withSet.nodes['cart-separate']).filter(n=>n.tagName==='BUTTON');
- assert.equal(groupButtons.length,1);assert.equal(groupButtons[0].textContent,'Satz separat kaufen');groupButtons[0].listeners.click();assert.deepEqual(JSON.parse(withSet.storage.get(prefix+token)),set);
+ assert.equal(groupButtons.length,1);assert.equal(groupButtons[0].textContent,'Mit Montage zur Kasse');groupButtons[0].listeners.click();assert.deepEqual(JSON.parse(withSet.storage.get(prefix+token)),set);
  const noWheelCheckout=await boot([...set,rows[2]]);assert.equal(noWheelCheckout.nodes['cart-separate'].hidden,true);
  const previews=await boot(rows,{features:{checkoutEnabled:'false'}});assert.equal(previews.nodes['cart-separate'].hidden,true);
- const mixed=await boot([selection(),selection(B)],{address:false});
- assert.equal(mixed.nodes['request-quote'].textContent,'Gesamtangebot anfragen');assert.equal(mixed.nodes['request-quote'].disabled,false);assert.equal(mixed.nodes['buyer-address'].hidden,true);
- assert.equal(walk(mixed.nodes['cart-summary']).filter(n=>n.tagName==='BUTTON').length,0,'no duplicate summary CTA');
- await press(mixed);assert.equal(writes(mixed).length,0);assert.deepEqual(mixed.redirects,['/anfrage?anliegen=allgemein&shop_anfrage=1']);
- assert.ok(mixed.nodes['cart-workflow-note'].textContent.includes('vor Bezahlung'));
- const mixedDraft=JSON.parse(mixed.drafts[0].value);assert.equal(mixedDraft.position_count,2);assert.ok(mixedDraft.full_text.includes('1 × SYNTHETIC Artikel'));assert.equal(mixedDraft.full_text.includes(A),false);
- await mixed.nodes['checkout-button'].listeners.click();assert.equal(writes(mixed).length,0);
+ const pair='set|'+B+'|'+A;
+ const pairRows=[{...selection(B,{},2),selection_pair:pair},{...selection(A,{},2),selection_pair:pair}];
+ const threePlusInquiry=[...pairRows,selection('tyre:'+'e'.repeat(24)),rows[2]];
+ const many=await boot(threePlusInquiry),manyButtons=walk(many.nodes['cart-separate']).filter(n=>n.tagName==='BUTTON');
+ assert.equal(manyButtons.length,1);manyButtons[0].listeners.click();assert.deepEqual(JSON.parse(many.storage.get(prefix+token)),threePlusInquiry.slice(0,3));
+ const duplicate=await boot([...pairRows,selection(A)]);await press(duplicate);
+ assert.deepEqual(JSON.parse(duplicate.calls.find(c=>c.url.endsWith('/cart/quote')).options.body).lines,[selection(B,{},2),selection(A,{},3)]);
+ const overLimit=await boot([...pairRows,selection(A,{},3)]);await press(overLimit);
+ assert.equal(overLimit.calls.some(c=>c.url.endsWith('/cart/quote')),false);
+ assert.ok(overLimit.nodes['quote-status'].textContent.includes('bestellbare Menge'));
+ const mixed=await boot(pairRows,{address:false,canCheckout:true});
+ assert.ok(walk(mixed.nodes['cart-items']).some(n=>n.textContent==='Anzahl je Artikel'));
+ assert.ok(walk(mixed.nodes['cart-items']).some(n=>n.textContent==='2 Reifen zur gewählten Felge'));
+ assert.equal(mixed.nodes['request-quote'].textContent,'Gemeinsam zur Kasse');assert.equal(mixed.nodes['request-quote'].disabled,false);assert.equal(mixed.nodes['buyer-address'].hidden,false);
+ assert.equal(mixed.nodes['cart-separate'].hidden,true,'no separate checkout buttons');
+ await press(mixed);assert.equal(writes(mixed).length,0);
+ await mixed.nodes['buyer-address'].listeners.submit({preventDefault(){}});
+ const mixedQuote=mixed.calls.find(c=>c.url.endsWith('/cart/quote'));
+ assert.deepEqual(JSON.parse(mixedQuote.options.body).lines,[selection(B,{},2),selection(A,{},2)],'no assembly or montage added to unmounted pair');
+ assert.ok(walk(mixed.nodes['quote-review']).some(n=>n.textContent===logic.money(41642)));
+ assert.match(mixed.nodes['checkout-note'].textContent,/Gesamtbetrag einmal/);
+ assert.doesNotMatch(mixed.nodes['checkout-note'].textContent,/montage|termin/i,'no service promised for loose wheels');
+ const tyreMounting=await boot([selection(A,{mounting:true})]);await press(tyreMounting);
+ assert.match(tyreMounting.nodes['checkout-note'].textContent,/Montagetermin/);
+ for(const n of walk(mixed.nodes['quote-review']).filter(n=>n.type==='checkbox')){n.checked=true;n.listeners.change();}
+ await mixed.nodes['checkout-button'].listeners.click();
+ assert.equal(mixed.calls.filter(c=>c.url.endsWith('/orders')).length,1);assert.equal(mixed.calls.filter(c=>c.url.endsWith('/checkout')).length,1);
+ assert.deepEqual(mixed.redirects,['https://checkout.stripe.com/c/pay/cs_test_SYNTHETIC']);
+ const editedAfterPayment=new Map(mixed.storage),changedRow={...pairRows[0],quantity:3};
+ editedAfterPayment.set(fullKey,JSON.stringify([changedRow,pairRows[1],rows[2]]));
+ await boot(pairRows,{storage:editedAfterPayment,returned:{status:'paid'}});
+ assert.deepEqual(JSON.parse(editedAfterPayment.get(fullKey)),[changedRow,rows[2]],'keep subsequent edits and remove independently completed rows');
+ mixed.storage.set(fullKey,JSON.stringify([...pairRows,rows[2]]));
+ await boot(pairRows,{storage:mixed.storage,returned:{status:'authorized'}});assert.deepEqual(JSON.parse(mixed.storage.get(fullKey)),[rows[2]]);
+ const incomplete=await boot(rows.slice(0,2),{omitLast:true});await press(incomplete);assert.equal(incomplete.nodes['checkout-button'].hidden,true);
+ assert.equal(incomplete.calls.some(c=>c.url.includes('/consumer/')),false,'missing quote line cannot become payable');
  const inquiry=await boot([selection(C)],{unbound:true,address:false});
  assert.equal(inquiry.nodes['request-quote'].disabled,false);assert.equal(inquiry.nodes['buyer-address'].hidden,true);await inquiry.nodes['buyer-address'].listeners.submit({preventDefault(){}});assert.equal(writes(inquiry).length,0);
  await press(inquiry);assert.equal(writes(inquiry).length,0);assert.equal(inquiry.redirects.length,1);assert.ok(JSON.parse(inquiry.drafts[0].value).full_text.includes('Tür Ölpflege'));
@@ -146,7 +180,7 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  assert.equal(walk(manual.nodes['quote-review']).filter(n=>n.tagName==='BUTTON').length,1);assert.equal(walk(manual.nodes['cart-summary']).filter(n=>n.tagName==='BUTTON').length,0);
  const qty=walk(manual.nodes['cart-items']).find(n=>n.tagName==='SELECT');qty.value='2';qty.listeners.change();await flush();await flush();
  assert.equal(manual.nodes['request-quote'].textContent,'Gesamtpreis prüfen');assert.equal(manual.nodes['quote-review'].children.length,0);assert.equal(manual.nodes['checkout-button'].hidden,true);assert.equal(manual.nodes['checkout-note'].textContent.includes('Prüfung erneut starten'),false);
- const removable=await boot([selection(),selection(B)]);assert.equal(removable.nodes['request-quote'].textContent,'Gesamtangebot anfragen');
+ const removable=await boot([selection(),selection(C)]);assert.equal(removable.nodes['request-quote'].textContent,'Gesamtangebot anfragen');
  walk(removable.nodes['cart-items'].children[1]).find(n=>n.textContent==='Entfernen').listeners.click();await flush();await flush();assert.equal(removable.nodes['request-quote'].textContent,'Gesamtpreis prüfen');assert.equal(removable.nodes['buyer-address'].hidden,false);assert.equal(removable.nodes['request-quote'].disabled,false);assert.equal(writes(removable).length,0);
  const stale=await boot([selection()],{deferQuote:true});const request=press(stale);walk(stale.nodes['cart-items']).find(n=>n.textContent==='Entfernen').listeners.click();await flush();stale.releaseQuote();await request;assert.equal(stale.nodes['checkout-button'].hidden,true);assert.equal(stale.calls.some(c=>c.url.endsWith('/consumer/terms')),false);
  const lateSession=await boot([selection()],{deferBuyer:true});lateSession.nodes['buyer-address'].listeners.input();lateSession.releaseBuyer();await flush();await flush();assert.equal(lateSession.nodes['request-quote'].textContent,'Zur Kasse');await press(lateSession);assert.equal(writes(lateSession).length,0);

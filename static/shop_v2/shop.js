@@ -175,19 +175,36 @@
     }
     return result.length ? result : null;
   }
+  function checkoutLines(rows) {
+    // An unmounted configurator pair and an individually added product can
+    // refer to the same supplier item. Keep the displayed cart intact.
+    const result = new Map();
+    for (const {id, quantity, services, assembly_group} of rows) {
+      const key = JSON.stringify([id, services, assembly_group]);
+      const line = result.get(key) || {id, quantity: 0, services};
+      if (assembly_group) line.assembly_group = assembly_group;
+      line.quantity += quantity;
+      if (line.quantity > maxQuantity(id)) throw new Error('combined_quantity_limit');
+      result.set(key, line);
+    }
+    return [...result.values()];
+  }
+  function quoteMatchesSelection(lines, items) {
+    const remaining = checkoutLines(items.map(item => item.selection));
+    if (!Array.isArray(lines) || lines.length !== remaining.length) return false;
+    for (const line of lines) {
+      const index = remaining.findIndex(row => line && row.id === line.id && row.quantity === line.quantity);
+      if (index < 0) return false;
+      remaining.splice(index, 1);
+    }
+    return true;
+  }
   function reviewQuoteReady(value, items, enabled) {
     const groups = enabled === true && completeWheelGroups(items);
     if (!groups || !value || value.version !== 2 || value.ready !== true || value.authorization_ready !== true ||
         value.fulfillment_ready !== false || !Array.isArray(value.blocked_reasons) || value.blocked_reasons.length ||
         !Array.isArray(value.review_requirements) || !value.review_requirements.length || value.review_requirements.length > 81 ||
-        !Array.isArray(value.lines) || value.lines.length !== items.length) return false;
-    // Bind every projected line and quantity to this exact cart, without trusting a display name.
-    const remaining = items.map(({selection}) => ({id: selection.id, quantity: selection.quantity}));
-    for (const line of value.lines) {
-      const index = remaining.findIndex(row => line && row.id === line.id && row.quantity === line.quantity);
-      if (index < 0) return false;
-      remaining.splice(index, 1);
-    }
+        !quoteMatchesSelection(value.lines, items)) return false;
     const seen = new Set();
     for (const item of value.review_requirements) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
@@ -214,20 +231,17 @@
         allowed.some(ref => typeof ref !== 'string' || !canonical.test(ref)) || new Set(allowed).size !== allowed.length) return null;
     return allowed.includes(value) ? value : null;
   }
-  function cartPurchaseFlow(items, deferredCompleteWheels = false) {
+  function cartPurchaseFlow(items, deferredCompleteWheels = false, partsEnabled = true) {
     if (!cartOfferReady(items)) return 'unavailable';
-    if (items.some(item => inquiryOnly(item.product))) return 'inquiry';
-    if (deferredCompleteWheels === true && completeWheelGroups(items)) return 'checkout';
-    const children = new Set(items.map(({selection}) => {
-      const row = normaliseCart([selection])[0], services = row.services;
-      const workshop = Boolean(row.assembly_group || services.mounting || services.painting || services.installation || services.oil_service || services.care);
-      return row.id + '|' + (workshop ? 'workshop' : 'customer');
-    }));
-    return children.size > 1 ? 'inquiry' : 'checkout';
+    if (items.some(item => inquiryOnly(item.product) || (item.product.id.startsWith('parts:') && !partsEnabled))) return 'inquiry';
+    if (items.some(item => item.selection.assembly_group)) {
+      return deferredCompleteWheels === true && completeWheelGroups(items) ? 'checkout' : 'inquiry';
+    }
+    return 'checkout';
   }
   function separatePurchases(items, mountedEnabled, partsEnabled) {
-    if (items.length < 2 || cartPurchaseFlow(items, mountedEnabled) === 'checkout') return [];
-    const choices = [], seen = new Set();
+    if (items.length < 2 || cartPurchaseFlow(items, mountedEnabled, partsEnabled) === 'checkout') return [];
+    const loose = [], mounted = [], seen = new Set();
     for (const item of items) {
       const {selection, product} = item;
       if (!cartSourceReady([item]) || !currentPrice(product, selection.quantity) ||
@@ -237,23 +251,26 @@
         if (seen.has(group)) continue;
         seen.add(group);
         const set = items.filter(other => other.selection.assembly_group === group);
-        if (mountedEnabled && completeWheelGroups(set)) choices.push(set);
-      } else choices.push([item]);
+        if (mountedEnabled && completeWheelGroups(set)) mounted.push(...set);
+      } else loose.push(item);
     }
-    return choices;
+    return [loose, mounted].filter(group => group.length);
   }
   // The URL identifies a tab-local selection. Always resolve its exact rows
   // against the current basket before quoting, ordering or removing anything.
-  function selectedCartRows(whole, snapshot) {
-    if (!Array.isArray(snapshot) || snapshot.length < 1 || snapshot.length > 2) return [];
+  function selectedCartRows(whole, snapshot, requireAll = true) {
+    if (!Array.isArray(snapshot) || !snapshot.length || snapshot.length > 40) return [];
     const wanted = normaliseCart(snapshot);
     if (wanted.length !== snapshot.length) return [];
-    const group = wanted[0].assembly_group;
-    if (group ? wanted.length !== 2 || wanted[1].assembly_group !== group || whole.filter(row => row.assembly_group === group).length !== 2
-              : wanted.length !== 1) return [];
     const keys = new Set(wanted.map(row => JSON.stringify(row)));
     const found = whole.filter(row => keys.has(JSON.stringify(row)));
-    return found.length === wanted.length ? found : [];
+    const incompleteSets = new Set();
+    for (const group of new Set(wanted.map(row => row.assembly_group).filter(Boolean))) {
+      if (found.filter(row => row.assembly_group === group).length !== 2 ||
+          whole.filter(row => row.assembly_group === group).length !== 2) incompleteSets.add(group);
+    }
+    const matched = found.filter(row => !incompleteSets.has(row.assembly_group));
+    return !requireAll || matched.length === wanted.length ? matched : [];
   }
   function cartNeedsCustomerDelivery(rows, workshopDelivery = 'collection') {
     if (!Array.isArray(rows) || !rows.length) return false;
@@ -384,6 +401,7 @@
   }
   function errorText(error) {
     const code = error && error.message;
+    if (code === 'combined_quantity_limit') return 'Für denselben Artikel wurde die bestellbare Menge überschritten. Bitte die Menge im Warenkorb anpassen.';
     if (['authorization_required', 'invalid_session', 'session_expired', 'csrf_invalid'].includes(code)) return 'Die Sitzung ist abgelaufen. Bitte diese Seite neu laden und Ihre Anschrift erneut bestätigen.';
     if (code === 'parts_vehicle_required') return 'Bitte das genaue Fahrzeug mit Motorisierung und Bauzeit auswählen und die Anschrift erneut bestätigen.';
     if (['invalid_query', 'invalid_vehicle_filter'].includes(code)) return 'Bitte die Filter prüfen. HSN und TSN gemeinsam eingeben oder Marke, Modell und Baujahr auswählen.';
@@ -1115,12 +1133,12 @@
     if (partial) {
       let message = 'Sie bestellen nur die hier angezeigten Artikel. Versand und Gesamtpreis gelten für diese Auswahl.';
       if (!cart.length) message = 'Diese Auswahl ist abgelaufen oder wurde im Warenkorb geändert. Bitte wählen Sie die gewünschten Artikel erneut.';
-      else if (cartFlow === 'unavailable' && offerSelection.length === cart.length) message = 'Diese Auswahl ist derzeit nicht einzeln bestellbar. Im vollständigen Warenkorb können Sie Ihre Auswahl prüfen.';
+      else if (cartFlow === 'unavailable' && offerSelection.length === cart.length) message = 'Diese Auswahl ist derzeit nicht bestellbar. Im vollständigen Warenkorb können Sie Ihre Auswahl prüfen.';
       if (panel.dataset.message === message) return;
       panel.dataset.message = message;
       panel.hidden = false;
       const back = el('a', 'Zum vollständigen Warenkorb', 'shop-detail-link'); back.href = root.location.pathname;
-      panel.replaceChildren(el('h2', 'Separater Einkauf'), el('p', message), back);
+      panel.replaceChildren(el('h2', 'Ihre Bestellauswahl'), el('p', message), back);
       return;
     }
     const choices = paymentCheckout && offerSelection.length === cart.length
@@ -1131,14 +1149,15 @@
     panel.dataset.choices = signature;
     panel.replaceChildren();
     if (!choices.length) return;
-    panel.append(el('h2', 'Direkt zur Kasse'), el('p', 'Wählen Sie einen Artikel oder einen montierten Satz für eine separate Bestellung. Die übrigen Positionen bleiben im Warenkorb.'));
+    panel.append(el('h2', 'Direkt zur Kasse'), el('p', choices.length > 1
+      ? 'Artikel mit technischer Satzprüfung haben einen eigenen Zahlungsablauf. Wählen Sie die gewünschte Bestellung.'
+      : 'Diese Positionen können Sie jetzt bestellen. Die übrige Auswahl bleibt im Warenkorb.'));
     for (const group of choices) {
-      const names = group.map(({product, selection}) => selection.quantity + ' × ' + product.name).join(' + ');
-      const choice = el('p', names + ' ');
-      const action = button(group.length === 2 ? 'Satz separat kaufen' : 'Artikel separat kaufen', () => startSeparateCheckout(group), 'shop-button shop-button-light');
-      action.setAttribute('aria-label', action.textContent + ': ' + names);
-      choice.append(action);
-      panel.append(choice);
+      const list = el('ul');
+      for (const {product, selection} of group) list.append(el('li', selection.quantity + ' × ' + product.name));
+      const isMounted = Boolean(group[0].selection.assembly_group);
+      const label = isMounted ? 'Mit Montage zur Kasse' : group.length > 1 ? 'Artikel zusammen kaufen' : 'Artikel kaufen';
+      panel.append(list, button(label, () => startSeparateCheckout(group)));
     }
   }
   function openOfferRequest() {
@@ -1155,9 +1174,9 @@
     const allLoaded = cart.length > 0 && offerSelection.length === cart.length;
     offerReady = allLoaded && cartOfferReady(offerSelection);
     sourceReady = offerReady && cartSourceReady(offerSelection);
-    let nextFlow = allLoaded ? cartPurchaseFlow(offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true') : 'unavailable';
-    if (partial && allLoaded && (!sourceReady || cart.some(row => row.id.startsWith('parts:') && body.dataset.partsDirectEnabled !== 'true') ||
-        (cart.some(row => row.assembly_group) && !(body.dataset.deferredCompleteWheelsEnabled === 'true' && completeWheelGroups(offerSelection))))) nextFlow = 'unavailable';
+    const partsEnabled = !paymentCheckout || body.dataset.partsDirectEnabled === 'true';
+    let nextFlow = allLoaded ? cartPurchaseFlow(offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true', partsEnabled) : 'unavailable';
+    if (partial && (!sourceReady || nextFlow !== 'checkout')) nextFlow = 'unavailable';
     if (allLoaded && nextFlow !== 'checkout' && quote) invalidateQuote();
     cartFlow = nextFlow;
     const form = byId('buyer-address'), primary = byId('request-quote'), note = byId('cart-workflow-note');
@@ -1170,9 +1189,9 @@
       byId('checkout-button').hidden = true; byId('checkout-button').disabled = true;
       if (cartFlow === 'inquiry') byId('checkout-note').textContent = 'Gesamtangebot wird vor Bezahlung bestätigt. Noch keine Bestellung oder Zahlung.';
     }
-    if (note) note.textContent = cartFlow === 'inquiry' ? 'Gesamtangebot wird vor Bezahlung bestätigt. Die Anfrage wird erst im nächsten Formular ausdrücklich gesendet.' : cartFlow === 'checkout' ? 'Nach Ihrer Anschrift sehen Sie den Gesamtpreis mit Versand und gewählten Leistungen.' : cart.length ? 'Die vollständigen Artikelinformationen werden geprüft.' : '';
+    if (note) note.textContent = cartFlow === 'inquiry' ? 'Sie können Ihre gesamte Auswahl auch als Angebot anfragen.' : cartFlow === 'checkout' ? 'Nach Ihrer Anschrift sehen Sie den Gesamtpreis mit Versand und gewählten Leistungen.' : cart.length ? 'Die vollständigen Artikelinformationen werden geprüft.' : '';
     const enterAddress = paymentCheckout && form && !addressReady && buyerSessionReady;
-    primary.textContent = cartFlow === 'inquiry' ? 'Gesamtangebot anfragen' : quoteBlocked ? 'Erneut prüfen' : enterAddress ? 'Zur Kasse' : 'Gesamtpreis prüfen';
+    primary.textContent = cartFlow === 'inquiry' ? 'Gesamtangebot anfragen' : quoteBlocked ? 'Erneut prüfen' : enterAddress ? (cart.length > 1 ? 'Gemeinsam zur Kasse' : 'Zur Kasse') : 'Gesamtpreis prüfen';
     primary.disabled = checkoutInProgress || addressSaving || quoteBusy || cartFlow === 'unavailable' ||
       (cartFlow === 'inquiry' ? !offerReady || body.dataset.cartRequestUrl !== '/anfrage?anliegen=allgemein&shop_anfrage=1' : body.dataset.quoteEnabled !== 'true' || (!addressReady && !enterAddress) || !sourceReady);
     if (!quote && !quoteBlocked && !quoteBusy) {
@@ -1192,7 +1211,7 @@
     updateCartAction(); separateChoices();
     if (!cart.length) return;
     let subtotal = 0, complete = true, subtotalExpires = Infinity, subtotalOutput = null, subtotalLabel = null, inquiryNote = null;
-    const mountedSummary = el('div'), summaryNote = el('p', 'Zuzüglich bestätigter Montage, Lackierung und Versand. Noch kein Gesamtangebot.', 'shop-muted');
+    const mountedSummary = el('div'), summaryNote = el('p', 'Versand und gewählte Leistungen werden im Gesamtpreis ausgewiesen.', 'shop-muted');
     const subtotalItems = [];
     let unavailable = false;
     function refreshSubtotal() {
@@ -1257,7 +1276,7 @@
         }
         if (partial) copy.append(el('p', 'Anzahl: ' + row.quantity, 'shop-muted'));
         else if (!wheelSet || wheelSet.rim === row) {
-          const controls = el('div', null, 'shop-cart-controls'), name = wheelSet ? 'Anzahl Kompletträder' : 'Anzahl', quantity = el('label', name);
+          const controls = el('div', null, 'shop-cart-controls'), name = wheelSet ? (row.assembly_group ? 'Anzahl Kompletträder' : 'Anzahl je Artikel') : 'Anzahl', quantity = el('label', name);
           const select = quantitySelect(row.id, row.quantity, n => {
             if (run !== cartRun || !Number.isInteger(n) || n < 1 || n > maxQuantity(row.id)) return;
             row.quantity = n;
@@ -1284,7 +1303,7 @@
             cart = next; saveCart(); renderCart();
           }, 'shop-detail-link'));
           copy.append(controls);
-        } else copy.append(el('p', row.quantity + ' Reifen im Komplettradsatz', 'shop-muted'));
+        } else copy.append(el('p', row.quantity + (row.assembly_group ? ' Reifen im Komplettradsatz' : ' Reifen zur gewählten Felge'), 'shop-muted'));
         container.append(article);
         if (pendingPrice) scheduleQuantityPrice(pendingPrice, result, 0);
       });
@@ -1403,6 +1422,7 @@
   }
   const BLOCKED = {mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.', fitment_unconfirmed: 'Fahrzeugpassung noch nicht bestätigt', rsu_mapping_unconfirmed: 'Lieferantenartikel noch nicht sicher abgeglichen', freight_unconfirmed: 'Versandkosten noch nicht bestätigt', assembly_fitment_unconfirmed: 'Rad-Reifen-Kombination noch nicht freigegeben', service_unconfirmed: 'Servicepreis noch nicht bestätigt', stock_insufficient_or_unconfirmed: 'Bestand für diese Menge noch nicht bestätigt', procurement_price_unconfirmed: 'Lieferantenpreis noch nicht bestätigt'};
   Object.assign(BLOCKED, {
+    product_inquiry_only: 'Dieser Artikel ist nur auf Anfrage erhältlich.',
     delivery_salutation_required: 'Für den Direktversand bitte eine Lieferanrede wählen oder ein persönliches Versandangebot anfragen.',
     product_documents_unconfirmed: 'Die erforderlichen Originalunterlagen für diesen Reifen sind noch nicht vollständig bestätigt.'
   });
@@ -1435,6 +1455,7 @@
   async function showQuote(result) {
     const value = result.quote, review = byId('quote-review');
     if (!value || typeof value.ready !== 'boolean' || value.currency !== 'eur' || !Array.isArray(value.lines) || !Array.isArray(value.shipments)) throw new Error('invalid_quote');
+    if (value.ready && !quoteMatchesSelection(value.lines, offerSelection)) throw new Error('invalid_quote');
     const reviewPayment = value.version === 2;
     if (reviewPayment && !reviewQuoteReady(value, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) throw new Error('invalid_quote');
     if (value.version !== undefined && value.version !== 1 && value.version !== 2) throw new Error('invalid_quote');
@@ -1450,7 +1471,11 @@
     if (value.ready === true && result.quote_retained === true && Number.isSafeInteger(value.total_gross_cent) && value.total_gross_cent > 0 && /^[a-f0-9]{64}$/.test(value.quote_hash) && Date.parse(value.expires_at) > Date.now()) {
       quote = value; retained = true; review.append(el('p', 'Gesamtpreis inkl. MwSt.', 'shop-muted'), el('p', money(value.total_gross_cent), 'shop-summary-total'));
       byId('quote-status').textContent = reviewPayment ? 'Gesamtpreis einschließlich Montage und Versand bestätigt. Die technische Prüfung steht noch aus.' : 'Artikel, Leistungen und Versand wurden für diese Auswahl geprüft.';
-      byId('checkout-note').textContent = reviewPayment ? 'Der vollständige Gesamtbetrag wird zunächst auf Ihrer Karte reserviert. Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab. Den Montagetermin vereinbaren wir nach Wareneingang.' : 'Bitte Ihre Auswahl prüfen. Montage wird mitgekauft; den Termin vereinbaren wir nach Wareneingang.';
+      const reservation = reviewPayment
+        ? 'Der vollständige Gesamtbetrag wird zunächst auf Ihrer Karte reserviert. Erst nach technischer Prüfung und vollständiger Lieferantenbestätigung buchen wir ab.'
+        : 'Wir reservieren den Gesamtbetrag einmal. Sobald alle Artikel bestätigt sind, buchen wir ihn ab.';
+      const includesMounting = offerSelection.some(item => item.selection.services.mounting === true);
+      byId('checkout-note').textContent = reservation + (includesMounting ? ' Den Montagetermin vereinbaren wir nach Wareneingang.' : '');
       if (reviewPayment) {
         review.append(el('p', byId('checkout-note').textContent, 'shop-review-note'), el('p', 'Sicher mit Karte. Apple Pay erscheint im Zahlungsfenster, wenn Ihr Gerät und Konto es unterstützen.', 'shop-muted'));
         const pending = el('ul', null, 'shop-review-requirements'), descriptions = {
@@ -1531,8 +1556,9 @@
       if (cartFlow !== 'checkout' || body.dataset.quoteEnabled !== 'true' || !addressReady || !cart.length || !sourceReady || !offerReady || quoteBusy || checkoutInProgress) return;
       invalidateQuote(); quoteBusy = true; const quoteRun = ++quoteRequestRun;
       updateCartAction(); byId('quote-status').textContent = 'Gesamtpreis und Lieferwege werden geprüft …';
-      const submittedRevision = revision, submitted = JSON.stringify({lines: cart.map(({selection_pair, ...line}) => line)});
+      const submittedRevision = revision;
       try {
+        const submitted = JSON.stringify({lines: checkoutLines(cart)});
         const result = await requestJSON('/cart/quote', {method: 'POST', body: submitted});
         if (quoteRun !== quoteRequestRun || submittedRevision !== revision || !addressReady) return;
         await showQuote(result);
@@ -1572,7 +1598,10 @@
         orderId = draft.order.id;
         if (!currentSeparateCart() || submittedRevision !== revision || quote !== frozenQuote || cartFlow !== 'checkout' || !sourceReady) throw new Error('terms_changed_new_quote_required');
         if (draft.payment_enabled !== true || draft.order.quote_hash !== hash || draft.order.amount_gross_cent !== frozenQuote.total_gross_cent) throw new Error('checkout_unavailable');
-        if (partial) root.sessionStorage.setItem(PARTIAL_KEY + orderId, JSON.stringify({hash, token: partialToken}));
+        try {
+          const record = partial ? {hash, token: partialToken} : {hash, rows: cart};
+          root.sessionStorage.setItem(PARTIAL_KEY + orderId, JSON.stringify(record));
+        } catch (_) { /* A disabled browser store must not interrupt payment. */ }
         const result = await requestJSON('/orders/' + orderId + '/checkout', {method: 'POST', body: '{}'});
         if (!result.checkout || result.checkout.order_id !== orderId || result.checkout.currency !== 'eur' || result.checkout.amount_gross_cent !== frozenQuote.total_gross_cent || !safeCheckout(result.checkout.checkout_url) || result.checkout.capture_triggered !== false || result.checkout.supplier_order_created !== false) throw new Error('checkout_unavailable');
         // Remember consent only; this is not a conversion or a payment confirmation.
@@ -1598,13 +1627,15 @@
         if (order.status === 'paid' || order.status === 'authorized') {
           try {
             const record = JSON.parse(root.sessionStorage.getItem(PARTIAL_KEY + id));
-            if (record && TOKEN.test(record.token) && /^[a-f0-9]{64}$/.test(record.hash) && record.hash === order.quote_hash) {
-              const latest = readCart(), selected = selectedCartRows(latest, JSON.parse(root.sessionStorage.getItem(PARTIAL_KEY + record.token)));
+            if (record && /^[a-f0-9]{64}$/.test(record.hash) && record.hash === order.quote_hash) {
+              const hasToken = TOKEN.test(record.token);
+              const rows = hasToken ? JSON.parse(root.sessionStorage.getItem(PARTIAL_KEY + record.token)) : record.rows;
+              const latest = readCart(), selected = selectedCartRows(latest, rows, false);
               if (selected.length) {
                 const remaining = latest.filter(row => !selected.includes(row));
                 root.localStorage.setItem(CART_KEY, JSON.stringify(remaining)); updateBasketCount(remaining);
               }
-              root.sessionStorage.removeItem(PARTIAL_KEY + record.token);
+              if (hasToken) root.sessionStorage.removeItem(PARTIAL_KEY + record.token);
               root.sessionStorage.removeItem(PARTIAL_KEY + id);
             }
           } catch (_) { /* Checkout status remains authoritative even if browser storage is unavailable. */ }

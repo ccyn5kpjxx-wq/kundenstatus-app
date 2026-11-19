@@ -108,8 +108,8 @@ class Transport:
         return result
 
 
-class SagaChecks(unittest.TestCase):
-    def setUp(self):
+class SagaFixture:
+    def setUp(self, rows=None):
         self.network = patch.object(socket, 'socket', side_effect=AssertionError('Network forbidden'))
         self.network.start()
         self.temp = tempfile.TemporaryDirectory()
@@ -127,10 +127,10 @@ class SagaChecks(unittest.TestCase):
         self.f.mapping = lambda product: {'confirmed': True, 'supplier': 'RSU', 'product_id': product['id'],
             'identity_hash': product['identity_hash'], 'supplier_article_id': ARTICLES[product['id']], 'evidence_id': 'SYNTHETIC-mapping-proof'}
         self.context = {'postcode': '74821', 'address_reference': 'SYNTHETIC_ONLY'}
-        self.rows = [line(TYRE, 4, services={'mounting': True}, group='set-1'),
+        self.rows = rows or [line(TYRE, 4, services={'mounting': True}, group='set-1'),
                      line(RIM, 4, services={'mounting': True}, group='set-1'), line(OIL, 2),
                      line(BODY, services={'painting': True, 'paint_color': 'LY7W'})]
-        self.quantities = {TYRE: 4, RIM: 4, OIL: 2, BODY: 1}
+        self.quantities = {row['id']: row['quantity'] for row in self.rows}
         quote = self.f.service_instance(clock=lambda: self.now).quote({'lines': self.rows},
             customer_id='customer-a', vehicle_ref='CAR-1', delivery_context=self.context)
         self.store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
@@ -192,6 +192,8 @@ class SagaChecks(unittest.TestCase):
     def run_saga(self):
         return self.saga.run(self.order['id'], customer_id='customer-a')
 
+
+class SagaChecks(SagaFixture, unittest.TestCase):
     def test_disabled_default_has_no_database_or_adapter_calls(self):
         calls = []
         journal = FulfillmentJournal(lambda: calls.append('db'))
@@ -511,6 +513,51 @@ class SagaChecks(unittest.TestCase):
         self.assertEqual(self.payment.actions, ['capture'])
         self.assertEqual(self.run_saga()['state'], 'captured')
         self.assertEqual(len(sent), 4)
+
+
+class CombinedPurchaseChecks(SagaFixture, unittest.TestCase):
+    def setUp(self):
+        from shop_production_payments import requote_remaining_goods
+        super().setUp(rows=[line(RIM), line(TYRE)])
+        self.saga = self.make_saga(revalidate_remaining=lambda *args: requote_remaining_goods(
+            self.f.service_instance(clock=lambda: self.now), *args))
+        self.f.stock.update({RIM: 1, TYRE: 1})
+
+    def sell_last_unit(self):
+        purchased = self.transport.calls[-1]['positions'][0]['supplier_article_id']
+        identifier = next(key for key, article in ARTICLES.items() if article == purchased)
+        self.f.stock[identifier] = 0
+
+    def test_rim_and_tyre_consuming_last_units_yield_one_full_payment(self):
+        self.transport.after_grant = self.sell_last_unit
+        self.assertEqual(self.run_saga()['state'], 'captured')
+        self.assertEqual(self.run_saga()['state'], 'captured')
+        self.assertEqual(self.payment.actions, ['capture'])
+        posts = self.transport.calls
+        self.assertEqual(len(posts), 2)
+        self.assertEqual({p['positions'][0]['supplier_article_id'] for p in posts}, {ARTICLES[TYRE], ARTICLES[RIM]})
+        self.assertEqual(len({p['reference'] for p in posts}), 2)
+        self.assertTrue(all(len(p['positions']) == 1 for p in posts))
+
+    def test_full_freight_increase_after_first_acceptance_is_checked_before_ordering_second(self):
+        original = self.f.freight
+        def after_first():
+            self.sell_last_unit()
+            self.f.freight = lambda shipment, context: {**original(shipment, context),
+                'gross_cent': 900 if len(shipment['items']) == 2 else 500}
+        self.transport.after_grant = after_first
+        self.assertEqual(self.run_saga()['state'], 'manual_review')
+        self.assertEqual(self.run_saga()['state'], 'manual_review')
+        self.assertEqual(len(self.transport.calls), 1)
+        self.assertEqual(self.payment.actions, [])
+
+    def test_uncertain_second_item_never_retries_or_captures_either_item(self):
+        self.transport.after_grant = self.sell_last_unit
+        self.transport.outcomes = ['accepted', 'timeout']
+        self.assertEqual(self.run_saga()['state'], 'manual_review')
+        self.assertEqual(self.run_saga()['state'], 'manual_review')
+        self.assertEqual(len(self.transport.calls), 2)
+        self.assertEqual(self.payment.actions, [])
 
 
 if __name__ == '__main__':

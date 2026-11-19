@@ -138,6 +138,24 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.construct_outbox.assert_not_called()
         self.portal.get_werkstatt_smtp_config.assert_not_called()
 
+    def test_joint_checkout_requires_matching_base_and_amended_terms(self):
+        from shop_combined_cart_terms import PACK_VERSION, _amend, checkout_terms
+        base = reviewed_complete_pack()
+        old_hash = reviewed_complete_profile(base)['complete_wheel_frozen_pack_hash']
+        self.assertEqual(checkout_terms(base, old_hash), (base, False))
+        old_text = base['texts']['bestellhinweis']
+        new_hash = sha256(_freeze_pack(_amend(base)).encode()).hexdigest()
+        with patch('shop_combined_cart_terms.BASE_HASH', old_hash), patch('shop_combined_cart_terms.PACK_HASH', new_hash):
+            self.assertEqual(checkout_terms(base, 'unrecognised'), (base, False))
+            updated, active = checkout_terms(base, old_hash)
+            self.assertTrue(active)
+            self.assertEqual(updated['version'], PACK_VERSION)
+            self.assertEqual(checkout_terms(updated, new_hash), (updated, True))
+            self.assertEqual(base['texts']['bestellhinweis'], old_text)
+            changed = deepcopy(base)
+            changed['texts']['datenschutz'] += ' NEW REVISION'
+            self.assertEqual(checkout_terms(changed, old_hash), (changed, False))
+
     def test_complete_wheel_review_requires_explicit_profile_and_wires_all_fences(self):
         self.adapters['complete_wheel_review_requested'] = True
         for invalid in (None, False, 'true', 1):
@@ -157,6 +175,7 @@ class ProductionPaymentChecks(unittest.TestCase):
         self.assertIs(self.adapters['workflow'].review_service, review)
         self.assertIs(self.adapters['checkout'].checkout.review_service, review)
         terms = dependencies['consumer_service'].terms()
+        self.assertTrue(self.quotes.manual_mixed_orders)
         self.assertIn('komplettraeder_zahlung', terms['texts'])
         self.assertIn('reserviert', terms['texts']['komplettraeder_zahlung'])
         self.assertIn('rad-review-v1', terms['version'])

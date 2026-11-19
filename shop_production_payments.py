@@ -7,12 +7,14 @@ after the complete reviewed release is registered.
 """
 from contextlib import closing
 from copy import deepcopy
+from functools import partial
 from hashlib import sha256
 
 from mailbox_client import Mailbox
 from mailbox_outbox import MailOutbox
 from shop_checkout import ShopCheckout
 from shop_consumer import ShopConsumer, init_consumer_schema, _freeze_pack
+from shop_combined_cart_terms import checkout_terms
 from shop_fulfillment import FulfillmentJournal, ShopFulfillment, init_fulfillment_schema
 from shop_order_receipts import ShopOrderReceipts, init_order_receipt_schema
 from shop_order_workflow import WorkflowJournal, ShopOrderWorkflow, WorkflowCheckout, init_order_workflow_schema
@@ -24,6 +26,23 @@ from reifen_rechtstexte import ANBIETER
 
 class PaymentProfileError(ValueError):
     pass
+
+
+def requote_remaining_goods(quotes, requests, snapshot, context, shipments):
+    """Refresh open goods, preserving the customer's freight cap for the whole shipment."""
+    fresh = quotes.quote({'lines': requests}, customer_id=snapshot['customer_id'],
+                         vehicle_ref=snapshot['vehicle_ref'], delivery_context=context).snapshot()
+    deadlines = []
+    for shipment in shipments:
+        freight = quotes.freight_quote(deepcopy(shipment), deepcopy(context))
+        until, error = quotes._current(freight, quotes.clock())
+        if (error or freight.get('shipment_hash') != shipment['shipment_hash']
+                or freight.get('context_hash') != shipment['context_hash']
+                or type(freight.get('gross_cent')) is not int
+                or not 0 <= freight['gross_cent'] <= shipment['gross_cent']):
+            raise PaymentProfileError('freight_unconfirmed')
+        deadlines.append(until)
+    return fresh, min(deadlines)
 
 
 class ConsumerOrderStore:
@@ -98,6 +117,7 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
     mail_service = Mailbox(portal.get_werkstatt_imap_config)
     outbox = MailOutbox(storage.connect, storage.directory / 'mail-outbox', mail_service)
     smtp_config = lambda: portal.get_werkstatt_smtp_config(include_local_hostname=False)
+    pack, combined_checkout = checkout_terms(pack, profile.get('complete_wheel_frozen_pack_hash'))
     consumer = ShopConsumer(original_store, storage.connect, mode='live', public_origin=buyer.public_origin,
         pack=pack, enabled=True, withdrawals_enabled=True, delivery_enabled=True,
         outbox=outbox, smtp_config=smtp_config, sender_address='info@auto-lackierzentrum.de')
@@ -141,7 +161,7 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
                          'mode_evidence_id': policy.mode_confirmed_evidence,
                          'acceptance_evidence_id': policy.acceptance_policy_evidence},
         fresh_inquiry=supplier_quotes.fresh_inquiry, revalidate=revalidate, delivery_address=address,
-        review_service=review)
+        review_service=review, revalidate_remaining=partial(requote_remaining_goods, quotes))
     holder['saga'] = saga
     receipts = ShopOrderReceipts(store, storage.connect, mode='live', enabled=True, delivery_enabled=True,
         sender_address='info@auto-lackierzentrum.de', outbox=outbox, smtp_config=smtp_config,
@@ -152,6 +172,7 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
     if (not wrapped.readiness()['ready'] or not receipts.readiness()['delivery_ready']
             or not payment.readiness()['ready']):
         raise PaymentProfileError('payment_workflow_unavailable')
+    quotes.manual_mixed_orders = not combined_checkout
     adapters.update(consumer=consumer, guarded_store=store, gateway=gateway, checkout=wrapped,
         fulfillment=saga, receipts=receipts, workflow=workflow, outbox=outbox, purchasing_enabled=True)
     if review is not None:

@@ -399,6 +399,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 requires_vehicle = (product['category'] in {'alloy_wheel', 'steel_wheel', 'body_part'}
                     or identifier in parts_release.get('ids', ()) and product.get('department') == 'parts')
                 return {**identities[identifier], 'name': name, '_mode': 'live',
+                        'purchase_status': product.get('purchase_status'),
                         'fitment_required': requires_vehicle,
                         'fitment': None, 'required_fees_confirmed': identifier in bindings,
                         'standalone_rim_geometry': rim_sales.get(identifier),
@@ -412,7 +413,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                             if pricebook is not None else supplier.retail_quote(product, quantity))
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
-                assembly_fitment=lambda *a: None, mode='live', allow_standalone_rims=allow_standalone_rims,
+                assembly_fitment=lambda *a: None, mode='live', manual_mixed_orders=True,
+                allow_standalone_rims=allow_standalone_rims,
                 assembly_proposal=catalogue.assembly_proposal,
                 fitment_lookup=parts_fitments.lookup if parts_fitments is not None else None)
             def sink(quote, *, customer_id, delivery_context):

@@ -434,7 +434,7 @@ class CartQuoteChecks(unittest.TestCase):
         self.f = Fixture(); self.standalone_rim(); self.f.products[RIM]['fitment_required'] = None
         self.assertIn('fitment_unconfirmed', self.codes(self.standalone_quote()))
 
-    def test_standalone_policy_never_bypasses_services_assemblies_body_parts_or_mixed_offer(self):
+    def test_standalone_policy_never_bypasses_services_assemblies_body_parts_or_explicit_manual_review(self):
         for services, group in (({'mounting': True}, ''), ({'installation': True}, ''), ({}, 'set')):
             self.f = Fixture(); self.standalone_rim()
             quote = self.standalone_quote([line(RIM, 4, services=services, group=group)])
@@ -445,11 +445,50 @@ class CartQuoteChecks(unittest.TestCase):
         self.f = Fixture(); self.standalone_rim()
         mixed = self.standalone_quote([line(RIM, 4), line(TYRE, 4)], manual_mixed_orders=True)
         self.assertIn('mixed_cart_manual_review_required', self.codes(mixed))
-        self.assertIn('fitment_unconfirmed', self.codes(mixed))
+        self.assertIn('standalone_rim_geometry', mixed.snapshot()['product_checks'][RIM])
         assembly = self.standalone_quote([line(RIM, 4, group='set'),
             line(TYRE, 4, group='set', services={'mounting': True})], assembly_fitment=None)
         self.assertIn('assembly_fitment_unconfirmed', self.codes(assembly))
         self.assertNotIn('standalone_rim_geometry', assembly.snapshot()['product_checks'][RIM])
+
+    def test_live_loose_rim_and_tyre_share_one_quote_and_pay_freight_for_both_positions(self):
+        from shop_freight import RSURetailFreight
+        self.standalone_rim()
+        self.f.products[TYRE].update(fitment_required=False, required_documents_confirmed=True)
+        for identifier in (RIM, TYRE):
+            self.f.products[identifier]['purchase_status'] = 'supplier_check_required'
+        freight = RSURetailFreight({RIM: 'pkw_rim', TYRE: 'pkw_tyre'}, mode='live', basis='net',
+            evidence_id='synthetic-shipping', checked_at=NOW.isoformat(), clock=lambda: NOW,
+            destination_eligibility=lambda destination, context: destination == 'customer')
+        def retail(product, quantity):
+            return {**self.f.retail(product, quantity), 'mode': 'live'}
+        service = self.f.service_instance(mode='live', manual_mixed_orders=False,
+            allow_standalone_rims=True, retail_quote=retail, freight_quote=freight)
+        cart = {'lines': [line(RIM), line(TYRE)]}
+        context = {'delivery': {'salutation': 'Herr'}}
+        def quote():
+            return service.quote(cart, customer_id='23', delivery_context=context)
+        result = quote().snapshot()
+        self.assertEqual(result['version'], 1)
+        self.assertTrue(result['ready'])
+        self.assertEqual(result['blocked_reasons'], [])
+        self.assertEqual(result['total_gross_cent'], 2 * 13685 + 1642)
+        self.assertEqual([s['gross_cent'] for s in result['shipments']], [1642])
+        self.assertEqual(result['shipments'][0]['items'], [{'id': RIM, 'quantity': 1}, {'id': TYRE, 'quantity': 1}])
+        self.assertEqual(result['assembly_evidence'], {})
+        self.assertIsNone(result['product_checks'][RIM]['fitment_evidence_id'])
+        self.f.products[TYRE]['purchase_status'] = 'inquiry_only'
+        self.assertIn('product_inquiry_only', self.codes(quote()))
+        self.assertIsNone(quote().public()['total_gross_cent'])
+        self.f.products[TYRE]['purchase_status'] = 'supplier_check_required'
+        self.f.stock[TYRE] = 0
+        self.assertIn('stock_insufficient_or_unconfirmed', self.codes(quote()))
+        self.f.stock[TYRE] = 1
+        self.f.products[TYRE]['required_documents_confirmed'] = False
+        self.assertIn('product_documents_unconfirmed', self.codes(quote()))
+        self.f.products[TYRE]['required_documents_confirmed'] = True
+        self.f.products[RIM]['standalone_rim_geometry'] = None
+        self.assertIn('fitment_unconfirmed', self.codes(quote()))
 
     def test_standalone_policy_keeps_supplier_price_stock_freight_and_all_required_fees(self):
         for dependency in ('rsu_mapping', 'retail_quote', 'freight_quote'):
