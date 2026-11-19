@@ -28,6 +28,7 @@ import json
 import re
 import sqlite3
 from uuid import uuid4
+from shop_tyre_pricing import tyre_unit_gross_cent
 from shop_workshop_queue import HANDLED_SCHEMA
 
 MAX_CENTS = 100_000_000
@@ -172,6 +173,11 @@ def _validate_snapshot(snapshot, expected_hash, customer_id, mode):
                 or not isinstance(requested.get('services'), Mapping)
                 or not isinstance(requested.get('assembly_group'), str)):
             raise OrderStoreError('invalid_quote_lines')
+        if 'base_unit_gross_cent' in line:
+            base = line['base_unit_gross_cent']
+            if (line.get('category') != 'tyre' or not product.startswith('tyre:')
+                    or not _amount(base) or tyre_unit_gross_cent(base) != line['unit_gross_cent']):
+                raise OrderStoreError('invalid_quote_lines')
         if product in identities and identities[product] != line['identity_hash']:
             raise OrderStoreError('quote_identity_conflict')
         identities[product] = line['identity_hash']

@@ -28,6 +28,7 @@ from shop_price_book import PublishedPriceBook
 from shop_pricebook_runtime import PriceBookRuntime
 from shop_rsu_quotes import RSUQuotePolicy, RSUQuoteProvider
 from shop_storage import ShopStorage
+from shop_tyre_pricing import cached_tyre_checkout_base
 
 
 # Reviewed 4,047-product catalogue plus fingerprint-bound tyre candidates is
@@ -342,7 +343,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             quote_lookup_authoritative=True, procurement_ids=procurement_ids,
             product_documents=bundle.get('product_documents'), standalone_rims=rim_sales,
             checkout_excluded_ids=blocked_document_ids,
-            rsu_only_prices=True, allow_published_prices=fixed_prices,
+            rsu_only_prices=True, allow_published_prices=fixed_prices, tyre_payment_costs=True,
             preferred_ids=set(seeds['records']) if fixed_prices else None,
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
@@ -409,12 +410,16 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                         'required_fees': [], 'new_part': False, 'painting_eligible': False,
                         'diameter': int(diameter) if re.fullmatch(r'[0-9]{2}', diameter) else None,
                         'tyre_size': product['size']}
-            retail_quote = (lambda product, quantity: pricebook.checkout_quote(product, quantity, supplier.retail_quote)
-                            if pricebook is not None else supplier.retail_quote(product, quantity))
+            def retail_quote(product, quantity):
+                if pricebook is not None:
+                    return pricebook.checkout_quote(product, quantity, supplier.retail_quote)
+                if product['category'] == 'tyre':
+                    return cached_tyre_checkout_base(product, quantity, supplier.retail_quote, cache.get)
+                return supplier.retail_quote(product, quantity)
             quotes = CartQuoteService(catalogue_lookup=lookup, retail_quote=retail_quote,
                 rsu_mapping=supplier.rsu_mapping, service_quote=_service_quote, freight_quote=freight,
                 assembly_fitment=lambda *a: None, mode='live', manual_mixed_orders=True,
-                allow_standalone_rims=allow_standalone_rims,
+                allow_standalone_rims=allow_standalone_rims, tyre_payment_costs=True,
                 assembly_proposal=catalogue.assembly_proposal,
                 fitment_lookup=parts_fitments.lookup if parts_fitments is not None else None)
             def sink(quote, *, customer_id, delivery_context):

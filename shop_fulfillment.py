@@ -453,15 +453,20 @@ class ShopFulfillment:
                 raise ValueError()
             demand, unit_limits = Counter(), {}
             for old, new in zip(old_lines, fresh['lines']):
+                # The original charge is fixed. Compare the merchandise price
+                # on the same basis even across a change to the selling policy.
+                # Older snapshots used the base as their selling price.
+                old_base = old.get('base_unit_gross_cent', old['unit_gross_cent'])
+                new_base = new.get('base_unit_gross_cent', new['unit_gross_cent'])
                 if (any(new.get(key) != old.get(key) for key in ('id', 'identity_hash', 'category', 'quantity', 'destination'))
-                        or new['unit_gross_cent'] > old['unit_gross_cent']):
+                        or new_base > old_base):
                     raise ValueError()
                 old_services = {v['code']: v['gross_cent'] for v in old['services']}
                 new_services = {v['code']: v['gross_cent'] for v in new['services']}
                 if set(old_services) != set(new_services) or any(new_services[k] > old_services[k] for k in old_services):
                     raise ValueError()
                 key = (old['id'], old['destination'])
-                unit_limits[key] = min(unit_limits.get(key, old['unit_gross_cent']), old['unit_gross_cent'])
+                unit_limits[key] = min(unit_limits.get(key, old_base), old_base)
             for child in children:
                 item = json.loads(child['item_json'])
                 demand[item['id']] += item['quantity']
