@@ -418,8 +418,11 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 assembly_proposal=catalogue.assembly_proposal,
                 fitment_lookup=parts_fitments.lookup if parts_fitments is not None else None)
             def sink(quote, *, customer_id, delivery_context):
-                return store.save_quote(quote.snapshot(), expected_quote_hash=quote.quote_hash,
-                    customer_id=customer_id, mode='live', delivery_context=delivery_context)
+                from shop_goods_margin import retained_goods_cost
+                snapshot = quote.snapshot()
+                return store.save_quote(snapshot, expected_quote_hash=quote.quote_hash,
+                    customer_id=customer_id, mode='live', delivery_context=delivery_context,
+                    goods_cost_net_cent=retained_goods_cost(snapshot, getattr(supplier, 'retained_inquiry', None)))
             dependencies.update(buyer_service=buyer, quote_service=quotes, quote_sink=sink, order_store=store)
             app.config.update(SHOP_BUYER_ENABLED=True, SHOP_CART_QUOTE_ENABLED=True)
             adapters.update(storage=storage, store=store, buyer=buyer, supplier_quotes=supplier, quotes=quotes)

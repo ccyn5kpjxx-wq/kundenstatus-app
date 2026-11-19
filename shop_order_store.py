@@ -271,6 +271,10 @@ def init_schema(connection):
         );
         CREATE TRIGGER IF NOT EXISTS shop_quotes_v2_immutable
         BEFORE UPDATE ON shop_quotes_v2 BEGIN SELECT RAISE(ABORT,'immutable_quote'); END;
+        CREATE TABLE IF NOT EXISTS shop_quote_goods_cost_v1 (
+            quote_hash TEXT PRIMARY KEY REFERENCES shop_quotes_v2(quote_hash),
+            cost_net_cent INTEGER NOT NULL CHECK(cost_net_cent > 0)
+        );
         CREATE TABLE IF NOT EXISTS shop_orders_v2 (
             id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, mode TEXT NOT NULL,
             idempotency_key TEXT NOT NULL UNIQUE, quote_hash TEXT NOT NULL UNIQUE,
@@ -356,7 +360,8 @@ class OrderStore:
         return {key: row[key] for key in ('id', 'customer_id', 'mode', 'quote_hash',
                 'amount_gross_cent', 'currency', 'created_at', 'quote_expires_at', 'status')}
 
-    def save_quote(self, snapshot, *, expected_quote_hash, customer_id, mode, delivery_context=None):
+    def save_quote(self, snapshot, *, expected_quote_hash, customer_id, mode, delivery_context=None,
+                   goods_cost_net_cent=None):
         encoded, start, expiry = _validate_snapshot(snapshot, expected_quote_hash, customer_id, mode)
         context_json = _delivery_context(json.loads(encoded), delivery_context)
         with self._connection(write=True) as db:
@@ -370,6 +375,9 @@ class OrderStore:
             else:
                 db.execute('INSERT INTO shop_quotes_v2 VALUES (?,?,?,?,?,?,?)',
                            (expected_quote_hash, customer_id, mode, encoded, context_json, start.isoformat(), expiry.isoformat()))
+                if type(goods_cost_net_cent) is int and goods_cost_net_cent > 0:
+                    db.execute('INSERT INTO shop_quote_goods_cost_v1 (quote_hash,cost_net_cent) VALUES (?,?)',
+                               (expected_quote_hash, goods_cost_net_cent))
         return {'quote_hash': expected_quote_hash, 'expires_at': expiry.isoformat(),
                 'total_gross_cent': json.loads(encoded)['total_gross_cent'], 'currency': 'eur'}
 

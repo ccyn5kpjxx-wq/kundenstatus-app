@@ -22,6 +22,7 @@ from flask import Flask,render_template_string
 from shop_admin import ShopAdminReader, register_shop_admin
 from shop_fulfillment import init_fulfillment_schema
 from shop_order_receipts import init_order_receipt_schema
+from shop_order_review import init_order_review_schema
 from shop_order_workflow import init_order_workflow_schema
 from shop_storage import ShopStorage
 from shop_consumer import init_consumer_schema
@@ -338,6 +339,34 @@ class ShopAdminTests(unittest.TestCase):
         self.storage.path.unlink()
         self.assertEqual(self.client.get('/admin/shop').status_code,404)
         self.assertFalse(self.storage.path.exists())
+
+    def test_appointment_requires_remaining_authorization_or_paid_order(self):
+        now=datetime.now(timezone.utc)
+        order={'id':'sho_'+'a'*32,'mode':'live','status':'authorized'}
+        related={'payment':'authorized','workflow':None,'action':None,'fulfillment':None,
+                 'appointment_day':(now+timedelta(days=5)).date().isoformat(),'appointment_time':'10:00'}
+        with closing(self.storage.connect()) as db:
+            init_order_review_schema(db)
+            tables={'shop_order_reviews_v1'}
+            def reason():
+                return ShopAdminReader._appointment_blocked_reason(db,tables,order,related)
+            self.assertIsNotNone(reason())
+            def record(expires,state='approved'):
+                db.execute('DELETE FROM shop_order_reviews_v1')
+                db.execute('''INSERT INTO shop_order_reviews_v1
+                    (order_id,customer_id,mode,binding_json,requirements_json,state,expires_at,created_at,updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)''',(order['id'],'customer','live','{}','[]',state,
+                    expires.isoformat(),now.isoformat(),now.isoformat()))
+            record(now+timedelta(hours=2))
+            self.assertIsNone(reason())
+            record(now-timedelta(minutes=1))
+            self.assertIsNotNone(reason())
+            record(now+timedelta(hours=2),'rejected')
+            self.assertIsNotNone(reason())
+            order['status']='paid'
+            self.assertIsNone(reason())
+            related['workflow']='cancelled'
+            self.assertIsNotNone(reason())
 
     def test_list_detail_frozen_gross_destinations_and_html_escape(self):
         order=self.order('<script>alert("x")</script> Synthetic oil')

@@ -8,7 +8,7 @@ existing portal's real administrator session, not office or partner access.
 """
 from collections.abc import Mapping
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 import hmac
 import json
@@ -17,17 +17,19 @@ import re
 import secrets
 import sqlite3
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, abort, current_app, has_request_context, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 from shop_order_store import OrderStore
+from shop_goods_margin import admin_goods_margins
 from shop_storage import ShopStorage
 
 ORDER=re.compile(r'sho_[a-f0-9]{32}')
 WITHDRAWAL=re.compile(r'swd_[a-f0-9]{32}')
 TABLES={'shop_orders_v2','shop_payment_attempts_v2','shop_fulfillment_v2',
         'shop_fulfillment_positions_v3','shop_order_workflow_v2','shop_order_receipts_v2','shop_withdrawals_v2',
-        'shop_order_appointment_requests_v2'}
+        'shop_order_appointment_requests_v2','shop_order_reviews_v1','shop_quote_goods_cost_v1'}
 BASE_TABLES={'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
              'shop_payment_events_v2','shop_buyer_sessions_v2'}
 BASE_TRIGGERS={'shop_quotes_v2_immutable','shop_orders_v2_immutable'}
@@ -70,6 +72,14 @@ def _date(value):
         if value.tzinfo is None or value.utcoffset() is None:raise ValueError()
         return value.strftime('%d.%m.%Y, %H:%M %z')
     except (ValueError,TypeError,AttributeError):return 'Nicht verfügbar'
+
+
+def _future_instant(value,now):
+    try:
+        instant=datetime.fromisoformat(value.replace('Z','+00:00'))
+        return instant.tzinfo is not None and instant>now
+    except (ValueError,TypeError,AttributeError):
+        return False
 
 
 class ShopAdminReader:
@@ -128,9 +138,11 @@ class ShopAdminReader:
                 result[row['order_id']][key]=row['state']
                 if key=='fulfillment':result[row['order_id']]['action']=row['action_state']
         if 'shop_order_appointment_requests_v2' in tables:
-            for row in db.execute('''SELECT order_id, strftime('%d.%m.%Y', requested_date) AS day, requested_time
+            for row in db.execute('''SELECT order_id, requested_date, strftime('%d.%m.%Y', requested_date) AS day, requested_time
                 FROM shop_order_appointment_requests_v2 WHERE order_id IN ('''+placeholders+')',ids):
                 result[row['order_id']]['appointment']=f"{row['day']}, {row['requested_time']} Uhr"
+                result[row['order_id']]['appointment_day']=row['requested_date']
+                result[row['order_id']]['appointment_time']=row['requested_time']
         if 'shop_fulfillment_positions_v3' in tables:
             for row in db.execute('''SELECT order_id,SUM(CASE WHEN state IN ('claimed','unknown') THEN 1 ELSE 0 END) AS uncertain
                 FROM shop_fulfillment_positions_v3 WHERE order_id IN ('''+placeholders+') GROUP BY order_id LIMIT 100',ids):
@@ -156,13 +168,14 @@ class ShopAdminReader:
             'payment':PAYMENT.get(related['payment'],'Noch kein Zahlungsversuch'),
             'workflow':FLOW.get(related['workflow'],'Noch nicht gestartet'),
             'appointment':related.get('appointment'),
+            'appointment_day':related.get('appointment_day'),'appointment_time':related.get('appointment_time'),
             'fulfillment':FULFILLMENT.get(related['fulfillment'],'Noch nicht gestartet'),
             'action':ACTION.get(related['action'],''),'attention':attention,
             'uncertain_positions':related['uncertain_positions'],
             'receipts':{key:MAIL.get(value,'Versandstatus unbekannt') for key,value in related['receipts'].items()},
             'invoice':'Ausstehend – keine Rechnung erstellt'}
 
-    def orders(self,*,page=1,per_page=25):
+    def orders(self,*,page=1,per_page=25,show_margin=False):
         if type(page) is not int or not 1<=page<=9999 or type(per_page) is not int or not 1<=per_page<=100:abort(400)
         with self.read() as (db,tables):
             rows=list(db.execute('''SELECT id,mode,status,amount_gross_cent,currency,created_at FROM shop_orders_v2
@@ -170,16 +183,25 @@ class ShopAdminReader:
             if any(not isinstance(row['id'],str) or not ORDER.fullmatch(row['id']) for row in rows):abort(503)
             related=self._related(db,tables,rows)
             has_next=db.execute('SELECT 1 FROM shop_orders_v2 LIMIT 1 OFFSET ?',(page*per_page,)).fetchone() is not None
-            return [self._summary(row,related[row['id']]) for row in rows],has_next
+            orders = [self._summary(row,related[row['id']]) for row in rows]
+            if show_margin is True:
+                margins = admin_goods_margins(db, tables, [row['id'] for row in rows])
+                for order in orders:
+                    order['margin'] = margins[order['id']]
+            return orders,has_next
 
-    def detail(self,order_id):
+    def detail(self,order_id,*,show_margin=False):
         if not isinstance(order_id,str) or not ORDER.fullmatch(order_id):abort(404)
         with self.read() as (db,tables):
             row=db.execute('''SELECT id,mode,status,amount_gross_cent,currency,created_at,quote_hash,
                 substr(snapshot_json,1,131073) AS snapshot_json FROM shop_orders_v2 WHERE id=? LIMIT 1''',(order_id,)).fetchone()
             if row is None:abort(404)
-            summary=self._summary(row,self._related(db,tables,[row])[order_id])
+            related=self._related(db,tables,[row])[order_id]
+            summary=self._summary(row,related)
+            if show_margin is True:
+                summary['margin'] = admin_goods_margins(db, tables, [order_id])[order_id]
             if summary['appointment']:
+                summary['appointment_blocked_reason']=self._appointment_blocked_reason(db,tables,row,related)
                 stored = db.execute('SELECT delivery_context_json FROM shop_orders_v2 WHERE id=?', (order_id,)).fetchone()
                 context = json.loads(stored['delivery_context_json'])
                 contact = context.get('contact') if isinstance(context, dict) else None
@@ -209,6 +231,45 @@ class ShopAdminReader:
             withdrawals, more = self._withdrawals(db,tables,order_id=order_id,mode=row['mode'],per_page=25)
             summary.update(withdrawals=withdrawals,more_withdrawals=more)
             return summary
+
+    @staticmethod
+    def _appointment_blocked_reason(db,tables,order,related):
+        if order['mode']!='live':
+            return 'Ein Testauftrag kann keinen Werkstatttermin belegen.'
+        if (order['status'] in {'cancelled','payment_failed'} or related['workflow']=='cancelled'
+                or related['fulfillment']=='rejected' or related['action']=='cancelled'
+                or related['payment'] in {'cancelled','failed'}):
+            return 'Für diese beendete Bestellung kann kein Termin bestätigt werden.'
+        now=datetime.now(timezone.utc)
+        try:
+            day=datetime.strptime(related['appointment_day']+' '+related['appointment_time'],'%Y-%m-%d %H:%M')
+        except (TypeError,ValueError):
+            return 'Der gespeicherte Wunschtermin ist ungültig.'
+        if day.replace(tzinfo=ZoneInfo('Europe/Berlin'))<=now:
+            return 'Der Wunschtermin liegt in der Vergangenheit.'
+        if order['status']=='paid':
+            return None
+        if order['status']!='authorized':
+            return 'Die Zahlungsbestätigung für diese Bestellung steht noch aus.'
+        # Use the deadlines saved by verified authorization/fulfillment. A GET
+        # on the order screen must never trigger a payment provider request.
+        if 'shop_order_reviews_v1' in tables:
+            proof=db.execute('SELECT state,expires_at FROM shop_order_reviews_v1 WHERE order_id=?',
+                             (order['id'],)).fetchone()
+            if proof:
+                if proof['state'] not in {'approved','pending'} or not _future_instant(proof['expires_at'],now):
+                    return 'Die Kartenreservierung oder Auftragsprüfung ist beendet.'
+                return None
+        if 'shop_fulfillment_positions_v3' in tables:
+            for proof in db.execute('SELECT authorization_json FROM shop_fulfillment_positions_v3 '
+                                    'WHERE order_id=? AND authorization_json IS NOT NULL',(order['id'],)):
+                try:
+                    authorization=json.loads(proof['authorization_json'])
+                except (ValueError,TypeError):
+                    continue
+                if isinstance(authorization,dict) and _future_instant(authorization.get('authorized_until'),now):
+                    return None
+        return 'Die Kartenreservierung ist noch nicht als gültig bestätigt.'
 
     @staticmethod
     def _withdrawal_summary(row):
@@ -328,9 +389,11 @@ def _review_projection(value,detail):
     return result
 
 
-def create_shop_admin_blueprint(*,private_data_dir=None):
+def create_shop_admin_blueprint(*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None):
     blueprint=Blueprint('shop_admin',__name__,template_folder='templates')
     blueprint.shop_admin_private_data_dir=_private_root(private_data_dir)
+    blueprint.confirm_appointment=confirm_appointment
+    blueprint.confirmed_appointments=confirmed_appointments
 
     @blueprint.before_request
     def administrator_only():
@@ -380,6 +443,18 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
         value=service.status(order_id,customer_id=owner['customer_id'])
         return _review_projection(value,detail),owner['customer_id']
 
+    def checked_form_fields():
+        if request.args or request.mimetype!='application/x-www-form-urlencoded':abort(400)
+        if request.content_length is None or not 0<request.content_length<=16384:abort(413)
+        fields=request.form
+        if any(len(fields.getlist(key))!=1 for key in fields):abort(400)
+        supplied=fields.get('csrf_token')
+        expected=session.get('csrf_token')
+        if (not isinstance(expected,str) or not CSRF.fullmatch(expected)
+                or not isinstance(supplied,str) or not CSRF.fullmatch(supplied)
+                or not hmac.compare_digest(supplied,expected)):abort(403)
+        return fields
+
     def decision_form():
         origin=current_app.config.get('SHOP_REVIEW_ADMIN_ORIGIN',current_app.config.get('SHOP_PUBLIC_ORIGIN'))
         try:
@@ -391,16 +466,22 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
         if (request.scheme!='https' or request.host_url.rstrip('/')!=origin
                 or request.headers.get('Origin')!=origin
                 or request.headers.get('Sec-Fetch-Site') not in (None,'same-origin')):abort(403)
-        if request.args or request.mimetype!='application/x-www-form-urlencoded':abort(400)
-        if request.content_length is None or not 0<request.content_length<=16384:abort(413)
-        fields=request.form
-        if any(len(fields.getlist(key))!=1 for key in fields):abort(400)
-        supplied=fields.get('csrf_token')
-        expected=session.get('csrf_token')
-        if (not isinstance(expected,str) or not CSRF.fullmatch(expected)
-                or not isinstance(supplied,str) or not CSRF.fullmatch(supplied)
-                or not hmac.compare_digest(supplied,expected)):abort(403)
-        return fields,'portal-admin-session:'+sha256(expected.encode('ascii')).hexdigest()[:32]
+        fields=checked_form_fields()
+        return fields,'portal-admin-session:'+sha256(fields['csrf_token'].encode('ascii')).hexdigest()[:32]
+
+    def attach_appointment_status(orders):
+        wishes=[row for row in orders if row['appointment']]
+        if not wishes or not callable(blueprint.confirmed_appointments):
+            return
+        try:
+            confirmed=blueprint.confirmed_appointments([row['id'] for row in wishes])
+        except Exception:
+            current_app.logger.exception('Werkstattkalender für Shoptermine nicht lesbar')
+            for row in wishes:
+                row['appointment_calendar_unavailable']=True
+            return
+        for row in wishes:
+            row['appointment_confirmed']=row['id'] in confirmed
 
     @blueprint.app_context_processor
     def staff_queue_badge():
@@ -441,14 +522,24 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
         if not re.fullmatch(r'[1-9][0-9]{0,3}',page) or not re.fullmatch(r'[1-9][0-9]{0,2}',per_page):abort(400)
         page,per_page=int(page),int(per_page)
         if per_page>100:abort(400)
-        rows,has_next=reader().orders(page=page,per_page=per_page)
+        rows,has_next=reader().orders(page=page,per_page=per_page,show_margin=session.get('admin') is True)
+        attach_appointment_status(rows)
         return render_template('shop_v2/admin_orders.html',orders=rows,detail=None,page=page,per_page=per_page,has_next=has_next)
 
     @blueprint.get('/admin/shop/<order_id>')
     def order_detail(order_id):
         if not ORDER.fullmatch(order_id):abort(404)
         if request.args:abort(400)
-        detail=reader().detail(order_id)
+        detail=reader().detail(order_id,show_margin=session.get('admin') is True)
+        return show_order_detail(detail)
+
+    def show_order_detail(detail,appointment_error=None):
+        order_id=detail['id']
+        attach_appointment_status([detail])
+        calendar_ready=(callable(blueprint.confirm_appointment) and callable(blueprint.confirmed_appointments)
+                        and not detail.get('appointment_calendar_unavailable'))
+        appointment_actionable=(calendar_ready and detail['appointment'] and not detail.get('appointment_confirmed')
+                                and not detail.get('appointment_blocked_reason'))
         review=None
         if current_app.config.get('SHOP_COMPLETE_WHEEL_CHECKOUT_ENABLED') is True:
             try:
@@ -456,8 +547,35 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
                 review,_=review_status(service,store,mode,order_id,detail)
             except Exception:
                 review={'unavailable':True}
-        token=_review_csrf_token() if review and review.get('actionable') else None
-        return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,review_csrf=token)
+        token=_review_csrf_token() if appointment_actionable or review and review.get('actionable') else None
+        return render_template('shop_v2/admin_orders.html',orders=None,detail=detail,order_review=review,
+            review_csrf=token,appointment_actionable=appointment_actionable,appointment_error=appointment_error)
+
+    @blueprint.post('/admin/shop/<order_id>/termin-bestaetigen')
+    def confirm_mounting_appointment(order_id):
+        if not ORDER.fullmatch(order_id):abort(404)
+        if request.headers.get('Origin') not in (None,request.host_url.rstrip('/')) or request.headers.get('Sec-Fetch-Site') not in (None,'same-origin'):
+            abort(403)
+        if set(checked_form_fields())!={'csrf_token'}:abort(400)
+        if not callable(blueprint.confirm_appointment) or not callable(blueprint.confirmed_appointments):abort(503)
+        detail=reader().detail(order_id,show_margin=session.get('admin') is True)
+        if not detail['appointment']:abort(409,description='Diese Bestellung enthält keinen Montageterminwunsch.')
+        attach_appointment_status([detail])
+        if detail.get('appointment_calendar_unavailable'):
+            return show_order_detail(detail,'Der Werkstattkalender ist gerade nicht erreichbar. Bitte erneut versuchen.'),503
+        if detail.get('appointment_confirmed'):
+            return redirect(url_for('shop_admin.order_detail',order_id=order_id),code=303)
+        if detail.get('appointment_blocked_reason'):
+            return show_order_detail(detail),409
+        contact=detail.get('appointment_contact') or {}
+        try:
+            blueprint.confirm_appointment(order_id,detail['appointment_day'],detail['appointment_time'],contact.get('name',''))
+        except ValueError as problem:
+            return show_order_detail(detail,str(problem)),409
+        except Exception:
+            current_app.logger.exception('Werkstatttermin zur Shopbestellung konnte nicht bestätigt werden')
+            return show_order_detail(detail,'Der Werkstattkalender ist gerade nicht erreichbar. Bitte erneut versuchen.'),503
+        return redirect(url_for('shop_admin.order_detail',order_id=order_id),code=303)
 
     @blueprint.post('/admin/shop/<order_id>/pruefung/<decision>')
     def decide_review(order_id,decision):
@@ -506,13 +624,16 @@ def create_shop_admin_blueprint(*,private_data_dir=None):
     return blueprint
 
 
-def register_shop_admin(app_or_portal,*,private_data_dir=None):
+def register_shop_admin(app_or_portal,*,private_data_dir=None,confirm_appointment=None,confirmed_appointments=None):
     app=getattr(app_or_portal,'app',app_or_portal)
     root=_private_root(private_data_dir)
     if 'shop_admin' in app.blueprints:
         blueprint=app.blueprints['shop_admin']
         if root is not None:blueprint.shop_admin_private_data_dir=root
+        if confirm_appointment is not None:blueprint.confirm_appointment=confirm_appointment
+        if confirmed_appointments is not None:blueprint.confirmed_appointments=confirmed_appointments
         return blueprint
-    blueprint=create_shop_admin_blueprint(private_data_dir=root)
+    blueprint=create_shop_admin_blueprint(private_data_dir=root,confirm_appointment=confirm_appointment,
+                                           confirmed_appointments=confirmed_appointments)
     app.register_blueprint(blueprint)
     return blueprint

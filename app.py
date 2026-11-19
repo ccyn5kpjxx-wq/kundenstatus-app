@@ -8412,6 +8412,7 @@ BACKUP_TABLES = (
     "versicherungen",
     "leads",
     "reifen_termin_slots",
+    "shop_reifen_termin_slots",
     "lead_dateien",
     "lead_mail_log",
     "lead_portal_log",
@@ -8555,6 +8556,7 @@ BACKUP_SCHEMA_FEATURES = ("kunden_termin_mail_versand", "werkstatt_assistent_v2"
 BACKUP_SCHEMA_FEATURES += (KUNDENFLOTTEN_SCHEMA_FEATURE, KUNDENFLOTTEN_ORDER_FEATURE, KUNDENFLOTTEN_PORTAL_FEATURE)
 BACKUP_SCHEMA_FEATURES += (servicezugang.SCHEMA_FEATURE, serviceprozess.SCHEMA_FEATURE, serviceerinnerungen.SCHEMA_FEATURE)
 BACKUP_SCHEMA_FEATURES += ("reifen_terminslots_v1",)
+BACKUP_SCHEMA_FEATURES += ("shop_reifentermine_v1",)
 BACKUP_SCHEMA_FEATURES += ("reifen_angebote_v1",)
 BACKUP_SCHEMA_FEATURES += (inspektionscheckliste.SCHEMA_FEATURE,)
 BACKUP_BINARY_FIELDS = {
@@ -9827,6 +9829,14 @@ def init_db():
             erstellt_am TEXT NOT NULL,
             UNIQUE (datum, uhrzeit),
             FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS shop_reifen_termin_slots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shop_order_id TEXT NOT NULL UNIQUE,
+            datum TEXT NOT NULL, uhrzeit TEXT NOT NULL,
+            kunde_name TEXT NOT NULL, bestaetigt_am TEXT NOT NULL,
+            UNIQUE (datum, uhrzeit)
         );
 
         CREATE TABLE IF NOT EXISTS lead_dateien (
@@ -38771,39 +38781,51 @@ def start_inbox_daten(postfach_items, email_items, limit=6, email_count_total=No
 
 def gebuchte_reifen_kalendereintraege(von=None, bis=None):
     """Der reservierte Werkstattslot bestimmt den Montagetermin, auch nach Auftragsübernahme."""
-    sql = """SELECT s.datum, s.uhrzeit, l.id AS lead_id, l.auftrag_id, l.portal_json,
+    sql = """WITH termine AS (
+             SELECT s.datum, s.uhrzeit, l.id AS lead_id, l.auftrag_id, NULL AS shop_order_id, l.portal_json,
                     COALESCE(NULLIF(a.kunde_name, ''), l.kunde_name) AS kunde_name,
                     COALESCE(NULLIF(a.fahrzeug, ''), l.fahrzeug) AS fahrzeug,
                     COALESCE(NULLIF(a.kennzeichen, ''), l.kennzeichen) AS kennzeichen
              FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
              LEFT JOIN auftraege a ON a.id=l.auftrag_id
-             WHERE l.status!='verloren'"""
+             WHERE l.status!='verloren'
+             UNION ALL
+             SELECT datum,uhrzeit,NULL,NULL,shop_order_id,NULL,kunde_name,'','' FROM shop_reifen_termin_slots
+             ) SELECT * FROM termine"""
     params = ()
     if von is not None and bis is not None:
-        sql += " AND s.datum BETWEEN ? AND ?"
+        sql += " WHERE datum BETWEEN ? AND ?"
         params = (von.isoformat(), bis.isoformat())
     db = get_db()
     try:
-        rows = db.execute(sql + " ORDER BY s.datum, s.uhrzeit", params).fetchall()
+        rows = db.execute(sql + " ORDER BY datum, uhrzeit", params).fetchall()
     finally:
         db.close()
     termine = []
     for row in rows:
         datum = parse_date(row["datum"])
-        details = reifen_termin_daten(dict(row))
-        if not datum or (not details and parse_schadenaufnahme_json(row["portal_json"]).get("anliegen") != "reifenservice"):
+        if not datum:
             continue
-        leistungen = ", ".join(details["leistungen"]) if details else "Reifenservice"
+        if row["shop_order_id"]:
+            leistungen = "Reifenmontage · Shopbestellung"
+        else:
+            details = reifen_termin_daten(dict(row))
+            if not details and parse_schadenaufnahme_json(row["portal_json"]).get("anliegen") != "reifenservice":
+                continue
+            leistungen = ", ".join(details["leistungen"]) if details else "Reifenservice"
         kunde = clean_text(row["kunde_name"]) or "Reifenservice"
         url = ""
         if has_request_context():
-            if row["auftrag_id"]:
+            if row["shop_order_id"]:
+                url = url_for("shop_admin.order_detail", order_id=row["shop_order_id"])
+            elif row["auftrag_id"]:
                 url = url_for("auftrag_detail", auftrag_id=row["auftrag_id"], back="kalender")
             else:
                 url = url_for("admin_lead_detail", lead_id=row["lead_id"])
         termine.append({
             "datum": datum, "datum_text": datum.strftime(DATE_FMT), "uhrzeit": row["uhrzeit"],
             "auftrag_id": row["auftrag_id"], "kategorie": "reifenservice", "kategorie_label": "Reifentermin",
+            "shop_order_id": row["shop_order_id"], "suchtext": row["shop_order_id"] or "",
             "titel": f"{row['uhrzeit']} Uhr · {kunde}",
             "notiz": " · ".join(filter(None, (row["fahrzeug"], row["kennzeichen"], leistungen))),
             "farbe": "primary", "system": True, "url": url,
@@ -46103,16 +46125,24 @@ def reifen_slot_zeiten(datum):
             if datetime.combine(tag, datetime.min.time()).replace(hour=stunde, tzinfo=ZoneInfo("Europe/Berlin")) > jetzt]
 
 
+def reservierte_reifenstunden(db, datum, ohne_lead_id=None):
+    sql = """SELECT s.uhrzeit FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
+             WHERE s.datum=? AND l.status!='verloren'"""
+    params = [datum]
+    if ohne_lead_id is not None:
+        sql += " AND s.lead_id!=?"
+        params.append(ohne_lead_id)
+    sql += " UNION ALL SELECT uhrzeit FROM shop_reifen_termin_slots WHERE datum=?"
+    return {row["uhrzeit"] for row in db.execute(sql, (*params, datum)).fetchall()}
+
+
 def freie_reifen_slots(datum):
     zeiten = reifen_slot_zeiten(datum)
     if not zeiten:
         return []
     db = get_db()
     try:
-        belegt = {row["uhrzeit"] for row in db.execute(
-            """SELECT s.uhrzeit FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
-               WHERE s.datum=? AND l.status!='verloren'""", (datum,)
-        ).fetchall()}
+        belegt = reservierte_reifenstunden(db, datum)
         if globals().get('check24_bookings'):
             belegt.update(zeit for zeit in zeiten if check24_bookings.native_slot_blocked(db, datum, zeit))
     finally:
@@ -46120,13 +46150,18 @@ def freie_reifen_slots(datum):
     return [zeit for zeit in zeiten if zeit not in belegt]
 
 
-def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
+def pruefe_freie_reifenstunde(db, datum, uhrzeit, ohne_lead_id=None):
+    """Unter dem gemeinsamen Schreiblock von Website, Shop und CHECK24 prüfen."""
     if uhrzeit not in reifen_slot_zeiten(datum):
         raise ReifenSlotBelegt("Bitte eine freie volle Stunde innerhalb unserer Öffnungszeiten auswählen.")
-    if globals().get('check24_bookings'):
-        check24_bookings.lock(db)
-        if check24_bookings.native_slot_blocked(db, datum, uhrzeit):
-            raise ReifenSlotBelegt("Diese Zeit ist bereits durch eine Montagebuchung belegt. Bitte wählen Sie einen anderen Termin.")
+    if (uhrzeit in reservierte_reifenstunden(db, datum, ohne_lead_id)
+            or check24_bookings.native_slot_blocked(db, datum, uhrzeit)):
+        raise ReifenSlotBelegt("Diese Zeit ist bereits durch eine Montagebuchung belegt. Bitte wählen Sie einen anderen Termin.")
+
+
+def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
+    check24_bookings.lock(db)
+    pruefe_freie_reifenstunde(db, datum, uhrzeit, ohne_lead_id=lead_id)
     db.execute("DELETE FROM reifen_termin_slots WHERE lead_id IN (SELECT id FROM leads WHERE status='verloren')")
     db.execute("DELETE FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),))
     result = db.execute(
@@ -46136,6 +46171,46 @@ def reserviere_reifen_slot(db, lead_id, datum, uhrzeit):
     )
     if result.rowcount != 1:
         raise ReifenSlotBelegt("Diese Uhrzeit wurde gerade gebucht. Bitte wählen Sie einen anderen freien Termin.")
+
+
+def bestaetige_shop_reifentermin(order_id, datum, uhrzeit, kundenname):
+    if not isinstance(order_id, str) or not re.fullmatch(r"sho_[a-f0-9]{32}", order_id):
+        raise ValueError("Ungültige Shopbestellung.")
+    db = get_db()
+    try:
+        check24_bookings.lock(db)
+        existing = db.execute("SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?",
+                              (order_id,)).fetchone()
+        if existing:
+            if (existing["datum"], existing["uhrzeit"]) != (datum, uhrzeit):
+                raise ValueError("Für diese Bestellung ist bereits ein anderer Termin bestätigt.")
+            db.commit()
+            return False
+        pruefe_freie_reifenstunde(db, datum, uhrzeit)
+        db.execute("""INSERT INTO shop_reifen_termin_slots (shop_order_id,datum,uhrzeit,kunde_name,bestaetigt_am)
+                      VALUES (?,?,?,?,?)""", (order_id, datum, uhrzeit, clean_text(kundenname)[:254], now_str()))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    schedule_change_backup("shop-reifentermin-bestaetigt")
+    return True
+
+
+def bestaetigte_shop_reifentermine(order_ids):
+    ids = tuple(order_ids)
+    if not ids:
+        return {}
+    db = get_db()
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        rows = db.execute(f"""SELECT shop_order_id,datum,uhrzeit,bestaetigt_am FROM shop_reifen_termin_slots
+                              WHERE shop_order_id IN ({placeholders})""", ids).fetchall()
+        return {row["shop_order_id"]: {k: row[k] for k in ("datum", "uhrzeit", "bestaetigt_am")} for row in rows}
+    finally:
+        db.close()
 
 
 @app.get("/api/reifenservice/termine")
@@ -50082,6 +50157,7 @@ def validate_backup_binary_reference_completeness(export, reference_map):
         "inspektions_checklisten",  # Historical archives predate inspection records.
         "inspektions_checkpunkte",
         "reifen_termin_slots",  # Historical backups predate online tire bookings.
+        "shop_reifen_termin_slots",
         "fahrzeugeinkauf_scan_treffer",
         # Vor Einführung der Google-Ads-Kosten gab es diese Tabelle in
         # vorhandenen Sicherungen noch nicht. Alte Pakete bleiben importierbar.
@@ -50146,6 +50222,8 @@ def validate_backup_binary_reference_completeness(export, reference_map):
             required_tables.update(office_tables)
     if "reifen_terminslots_v1" in schema_features:
         required_tables.add("reifen_termin_slots")
+    if "shop_reifentermine_v1" in schema_features:
+        required_tables.add("shop_reifen_termin_slots")
     if "kunden_termin_mail_versand" in schema_features:
         required_tables.add("kunden_termin_mail_versand")
     if "werkstatt_assistent_v2" in schema_features:
@@ -60827,7 +60905,9 @@ from shop_production import prepare_shop_runtime
 shop_runtime = register_shop_runtime(sys.modules[__name__],
                                     **prepare_shop_runtime(sys.modules[__name__]))
 from shop_admin import register_shop_admin
-register_shop_admin(app, private_data_dir=SHOP_PRIVATE_DATA_DIR)
+register_shop_admin(app, private_data_dir=SHOP_PRIVATE_DATA_DIR,
+                    confirm_appointment=bestaetige_shop_reifentermin,
+                    confirmed_appointments=bestaetigte_shop_reifentermine)
 
 def office_document_approved(key):
     item = office_documents.detail(key, admin=True)

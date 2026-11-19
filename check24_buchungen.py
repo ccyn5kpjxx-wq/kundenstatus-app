@@ -150,11 +150,9 @@ class Check24Bookings:
     def _conflict(self, db, start, end, exclude=''):
         if self.overlaps(db, start, end, exclude):
             return True
-        rows = db.execute('''SELECT s.datum,s.uhrzeit FROM reifen_termin_slots s
-            JOIN leads l ON l.id=s.lead_id WHERE l.status!='verloren' AND s.datum=?''',
-            (start.date().isoformat(),)).fetchall()
-        for row in rows:
-            existing = datetime.fromisoformat(row['datum'] + 'T' + row['uhrzeit']).replace(tzinfo=BERLIN)
+        day = start.date().isoformat()
+        for hour in self.p.reservierte_reifenstunden(db, day):
+            existing = datetime.fromisoformat(day + 'T' + hour).replace(tzinfo=BERLIN)
             if existing < end and existing + timedelta(hours=1) > start:
                 return True
         return False

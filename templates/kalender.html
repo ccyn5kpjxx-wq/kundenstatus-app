@@ -226,7 +226,7 @@
               {% if item.get('mitarbeiter_urlaub') %}
                 <a href="{{ url_for('admin_mitarbeiter') }}#mitarbeiter-{{ item['mitarbeiter_id'] }}" class="btn btn-soft btn-sm">Mitarbeiter öffnen</a>
               {% elif item.get('url') %}
-                <a href="{{ item['url'] }}" class="btn btn-soft btn-sm">{{ 'Auftrag öffnen' if item.get('auftrag_id') else 'Buchung öffnen' }}</a>
+                <a href="{{ item['url'] }}" class="btn btn-soft btn-sm">{{ 'Shopbestellung öffnen' if item.get('shop_order_id') else ('Auftrag öffnen' if item.get('auftrag_id') else 'Buchung öffnen') }}</a>
               {% else %}
                 <span class="text-muted small">automatisch</span>
               {% endif %}
