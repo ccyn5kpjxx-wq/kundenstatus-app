@@ -88,4 +88,16 @@ def register_shop_runtime(portal, *, catalogue=None, quote_service=None,
     starter = app.extensions.get('shop_production', {}).get('start_workflow')
     if app.config['SHOP_CHECKOUT_ENABLED'] and callable(starter):
         starter()
+        # Accounting has its own worker. A slow or unavailable Lexware connection
+        # must never hold up supplier confirmation or the payment workflow.
+        production = app.extensions.get('shop_production', {})
+        if production.get('purchasing_enabled') is True and production.get('store') is not None:
+            try:
+                from shop_invoice_service import ShopInvoiceService
+                from shop_lexware_invoices import LexwareShopInvoices
+                invoices = ShopInvoiceService(production['store'], LexwareShopInvoices(portal))
+                app.extensions['shop_invoice_service'] = invoices
+                invoices.start()
+            except Exception:
+                app.logger.error('Die Rechnungsautomatik für Shopaufträge konnte nicht gestartet werden.')
     return state

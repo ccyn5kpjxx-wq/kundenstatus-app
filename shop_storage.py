@@ -26,7 +26,7 @@ MAX_OUTBOX_FILE = 16 * 1024 * 1024
 MAX_OUTBOX_JOURNAL = 65536
 SHOP_RESTORE_TABLES = frozenset({'shop_quotes_v2','shop_orders_v2','shop_payment_attempts_v2',
     'shop_payment_events_v2','shop_buyer_sessions_v2','shop_fulfillment_v2',
-    'shop_order_workflow_v2','shop_withdrawals_v2',
+    'shop_order_workflow_v2','shop_withdrawals_v2','shop_lexware_invoices_v1','shop_invoice_activation_v1',
     'shop_public_pricebook_meta','shop_public_prices_v1'})
 SHOP_RESTORE_MESSAGE = ('Diese Sicherung enthält Shop-Bestellungen oder veröffentlichte Shoppreise. Portal und Shop müssen gemeinsam '
     'mit Shopdatenbank, Preisbuch, Initialisierungsdateien und Versandprotokollen kontrolliert wiederhergestellt werden. '

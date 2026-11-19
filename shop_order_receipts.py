@@ -320,12 +320,18 @@ class ShopOrderReceipts:
         with self._db() as connection:
             rows = connection.execute('SELECT kind,state FROM shop_order_receipts_v2 WHERE order_id=? AND customer_id=? AND mode=?',
                                       (order_id, customer_id, self.mode)).fetchall()
+            invoice = None
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shop_lexware_invoices_v1'").fetchone():
+                invoice = connection.execute("""SELECT j.voucher_number FROM shop_lexware_invoices_v1 j
+                    JOIN shop_orders_v2 o ON o.id=j.order_id
+                    WHERE j.order_id=? AND o.customer_id=? AND o.mode=? AND j.state='ready'""",
+                    (order_id, customer_id, self.mode)).fetchone()
         result = {'order_id': order_id, 'status': order['status'], 'mode': self.mode, 'currency': 'eur',
             'amount_gross_cent': order['amount_gross_cent'],
             'lines': [{key: line[key] for key in ('id', 'name', 'quantity', 'unit_gross_cent', 'items_gross_cent', 'services', 'destination')} for line in snapshot['lines']],
             'shipments': [{key: group[key] for key in ('destination', 'gross_cent')} for group in snapshot['shipments']],
-            'email_state': {row['kind']: row['state'] for row in rows}, 'invoice_status': 'not_issued',
-            'invoice': None, 'returns_enabled': False}
+            'email_state': {row['kind']: row['state'] for row in rows}, 'invoice_status': 'issued' if invoice else 'not_issued',
+            'invoice': {'number': invoice['voucher_number']} if invoice else None, 'returns_enabled': False}
         if (parsed_context is not None and 'workshop_delivery' in parsed_context
                 and any(group['destination'] == 'workshop' for group in snapshot['shipments'])):
             choice = parsed_context['workshop_delivery']
