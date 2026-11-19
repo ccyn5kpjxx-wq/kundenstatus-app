@@ -18,24 +18,6 @@ def _norm(value):
     return ' '.join(unicodedata.normalize('NFKC', value).split()).casefold()
 
 
-def _tyre_season(product, source):
-    """Use the exact released row's classification, never model-name guesses.
-
-    Full exports carry the season in ``group`` while older detail snapshots
-    use ``season``. Keep source geometry/fingerprints unchanged. Conflicting
-    explicit classifications cannot satisfy a season filter.
-    """
-    seasons = {'Sommerreifen': 'summer', 'Winterreifen': 'winter',
-               'Ganzjahresreifen': 'allseason', 'all_season': 'allseason',
-               'summer': 'summer', 'winter': 'winter', 'allseason': 'allseason'}
-    explicit = product.get('geometry', {}).get('season')
-    classified = seasons.get(source.get('group'))
-    if explicit:
-        canonical = seasons.get(explicit)
-        return canonical if canonical and classified in (None, canonical) else None
-    return classified
-
-
 def _sale_dimensions(proof, row):
     """Project reviewed exact-variant dimensions, never vehicle approval."""
     if (not isinstance(proof, Mapping) or proof.get('confirmed') is not True
@@ -338,7 +320,7 @@ class EnrichedPublicCatalog(PublicCatalog):
                         or pair.get('tyre_identity') != identities[tyre_id]):
                     continue
                 seen.add(tyre_id)
-                candidates.append((tyre_id, _tyre_season(tyre, self._source_rows[tyre_id])))
+                candidates.append((tyre_id, tyre['tyre_season']))
             self._candidate_tyres[identifier] = candidates
             seasons = {season for _, season in candidates}
             entry['public']['tyre_seasons'] = [season for season in ('summer', 'winter', 'allseason') if season in seasons]
@@ -536,7 +518,7 @@ class EnrichedPublicCatalog(PublicCatalog):
             return None
         rim_id, tyre_id = rim.get('id'), tyre.get('id')
         if (rim_id not in self._source_rows or tyre_id not in self._source_rows
-                or (tyre_id, _tyre_season(self._rows[tyre_id]['public'], self._source_rows[tyre_id]))
+                or (tyre_id, self._rows[tyre_id]['public'].get('tyre_season'))
                     not in self._candidate_tyres.get(rim_id, [])):
             return None
         pairs = self._pairs.get(rim_id, [])

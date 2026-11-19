@@ -65,6 +65,38 @@
 .shop-storefront .shop-muted, .shop-storefront .shop-price small, .shop-storefront .shop-card-meta, .shop-storefront .shop-specs dt,
 .shop-storefront .shop-no-image, .shop-storefront .shop-card-controls label, .shop-storefront .shop-vehicle { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .shop-storefront .shop-stock { color: #285740; }
+.shop-season-filter { flex: 0 0 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
+.shop-season-filter legend { margin-bottom: 8px; padding: 0; font-size: 14px; font-weight: 700; }
+.shop-filters label.shop-tyre-sort { flex: 1 1 218px; }
+.shop-season-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop-filters .shop-season-options label { position: relative; display: block; flex: 0 0 auto; cursor: pointer; }
+.shop-filters .shop-season-options label input {
+  position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; margin: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.shop-season-options span {
+  display: grid; place-items: center; min-height: 44px; padding: 0 16px; border-radius: 24px;
+  border: 1px solid #b3b5aa; background: #fff; color: var(--ink);
+}
+.shop-season-options label:hover span { border-color: var(--ink); }
+.shop-season-options input:checked + span { border-color: var(--ink); background: var(--ink); color: #fff; }
+.shop-season-options input:focus-visible + span { outline: 3px solid var(--accent); outline-offset: 2px; }
+.shop-test-rating { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; color: #434a45; font-size: 13px; }
+.shop-rating-stars { color: #875319; font-size: 18px; line-height: 1.2; letter-spacing: 1px; white-space: nowrap; }
+.shop-detail-copy .shop-test-rating { margin-block: 10px; }
+.shop-test-rating details { flex-basis: 100%; }
+.shop-test-rating summary { width: fit-content; cursor: pointer; text-decoration: underline; }
+.shop-test-rating details p { max-width: 48ch; }
+@media (min-width: 1180px) {
+  #catalog-filters:has(.shop-season-filter) {
+    display: grid; grid-template-columns: 1.35fr 1.1fr repeat(3,minmax(0,.9fr)) minmax(218px,1.45fr) auto;
+  }
+  #catalog-filters .shop-season-filter { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  .shop-season-options { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .shop-season-options span { padding-inline: 6px; }
+}
 .shop-storefront .tire-search-results { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 18px; }
 .shop-storefront .shop-card { padding: 15px; gap: 7px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .shop-storefront .shop-card-media, .shop-storefront .shop-detail-picture, .shop-storefront .shop-cart-item img,

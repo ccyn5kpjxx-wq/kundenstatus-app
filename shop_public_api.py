@@ -13,7 +13,7 @@ from shop_order_store import OrderStoreError, available_appointment_times
 
 PAGE_FIELDS = frozenset({'page', 'page_size', 'q', 'category', 'department',
                          'brand', 'make', 'model', 'year', 'hsn', 'tsn', 'group', 'studio', 'complete',
-                         'width', 'ratio', 'diameter'})
+                         'width', 'ratio', 'diameter', 'season', 'sort'})
 MAX_REQUEST = 16384
 MAX_RESPONSE = 1024 * 1024
 MAX_DETAIL_RESPONSE = 4 * 1024 * 1024

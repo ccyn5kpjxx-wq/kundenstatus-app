@@ -490,6 +490,35 @@ class EnrichmentChecks(unittest.TestCase):
             self.assertEqual(variant_fingerprint(catalog._source_row(row['selection_id'])), originals[row['selection_id']])
             self.assertFalse(result['items'][0]['order_enabled'])
 
+    def test_catalogue_season_filters_exact_size_before_pagination(self):
+        summer = tyre('1', 'Sommerreifen')
+        winter = tyre('2', 'winter')
+        winter_export = dict(tyre('3', None), group='Winterreifen')
+        allseason = dict(tyre('4', None), group='Ganzjahresreifen')
+        conflict = dict(tyre('5', 'summer'), group='Winterreifen')
+        other_size = dict(tyre('6', 'winter'), width='215')
+        rows = [summer, winter, winter_export, allseason, conflict, other_size]
+        app = Flask('season-filter')
+        app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
+        app.register_blueprint(create_shop_public_blueprint(catalogue=catalogue(rows)))
+        client = app.test_client()
+        path = '/shop/api/v2/products?department=tyres&width=205&ratio=55&diameter=18'
+        self.assertEqual(client.get(path).get_json()['total'], 5)
+        for season, expected in [('winter', [winter, winter_export]), ('summer', [summer]), ('allseason', [allseason])]:
+            with self.subTest(season=season):
+                ids = []
+                for page in range(1, len(expected) + 1):
+                    response = client.get(f'{path}&season={season}&page_size=1&page={page}')
+                    self.assertEqual(response.status_code, 200)
+                    result = response.get_json()
+                    self.assertEqual(result['total'], len(expected))
+                    self.assertEqual(result['has_more'], page < len(expected))
+                    self.assertEqual(result['items'][0]['tyre_season'], season)
+                    ids.append(result['items'][0]['id'])
+                self.assertCountEqual(ids, [row['selection_id'] for row in expected])
+        self.assertEqual(client.get(path + '&season=unknown').status_code, 400)
+        self.assertEqual(client.get(path + '&season=summer&season=winter').status_code, 400)
+
     def test_missing_unknown_or_conflicting_classification_never_infers_season_from_model_name(self):
         rim = wheel()
         missing = tyre('d', None)

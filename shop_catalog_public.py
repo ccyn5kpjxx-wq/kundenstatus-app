@@ -13,6 +13,7 @@ from html.parser import HTMLParser
 import json
 import re
 import unicodedata
+from shop_tyre_tests import ADAC_TYRE_TESTS
 
 MAX_PRODUCTS = 100_000
 MAX_PAGE_SIZE = 48
@@ -25,6 +26,9 @@ SOURCE_PHOTO = re.compile(r"bilder/[a-f0-9]{64}\.(?:jpg|jpeg|png|webp)")
 SPEC_LABELS = frozenset({"Farbe", "Ausführung", "Einpresstiefe", "Lochkreis", "Herstellerartikelnummer", "EAN"})
 GEOMETRY_FIELDS = ("width", "ratio", "diameter", "offset", "pcd", "bolt_count", "centre_bore",
                    "load_index", "speed_index", "season", "runflat")
+TYRE_SEASON_VALUES = {"Sommerreifen": "summer", "Winterreifen": "winter",
+                      "Ganzjahresreifen": "allseason", "all_season": "allseason",
+                      "summer": "summer", "winter": "winter", "allseason": "allseason"}
 
 
 class CatalogError(ValueError):
@@ -141,6 +145,21 @@ def _geometry(row):
             if key in row and type(row[key]) in (str, int) and _text(str(row[key]), 40)}
 
 
+def _wet_grip_rank(product):
+    grade = product.get("quality_facts", {}).get("wet_grip")
+    return grade if grade in ("A", "B", "C", "D", "E") else "Z"
+
+
+def _tyre_season(geometry, source_group):
+    """Use the exact variant's season or export group without changing its geometry/fingerprint."""
+    explicit = geometry.get("season")
+    classified = TYRE_SEASON_VALUES.get(source_group) if isinstance(source_group, str) else None
+    if explicit:
+        canonical = TYRE_SEASON_VALUES.get(explicit)
+        return canonical if classified in (None, canonical) else None
+    return classified
+
+
 def _size_filter(value, minimum, maximum):
     if value is None:
         return None
@@ -168,6 +187,29 @@ def variant_fingerprint(row):
                 "geometry": _geometry(row),
                 "specifications": _specifications(row)}
     return sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _tyre_test_rating(row, season):
+    identifiers, facts = row.get("identifiers"), row.get("quality_facts")
+    if not isinstance(identifiers, Mapping) or not isinstance(facts, Mapping):
+        return None
+    ean = identifiers.get("ean")
+    record = ADAC_TYRE_TESTS.get(ean) if isinstance(ean, str) else None
+    if record is None:
+        return None
+    season_path = {"winter": "winterreifen", "summer": "sommerreifen", "allseason": "ganzjahresreifen"}
+    label = (facts.get("fuel_efficiency"), facts.get("wet_grip"),
+             str(facts.get("external_noise_db") or facts.get("noise_db")))
+    if (record.source_path.partition("/")[0] != season_path.get(season) or label != record.label
+            or record.fingerprint != variant_fingerprint(row) or row.get("approval")):
+        return None
+    grade = record.grade
+    for ceiling, stars, verdict in ((1.5, 5, "sehr gut"), (2.5, 4, "gut"), (3.5, 3, "befriedigend"),
+                                    (4.5, 2, "ausreichend"), (5.4, 1, "mangelhaft"), (5.5, 0, "mangelhaft")):
+        if grade <= ceiling:
+            return {"source": "ADAC", "year": record.year, "grade": grade, "stars": stars, "verdict": verdict,
+                    "url": "https://www.adac.de/rund-ums-fahrzeug/ausstattung-technik-zubehoer/reifen/reifentest/"
+                           + record.source_path}
 
 
 def _quote(row, *, allow_published_prices=False):
@@ -300,6 +342,14 @@ class PublicCatalog:
                        "unit_label": _text(row.get("unit_label"), 50) or "Stück", "specifications": _specifications(row),
                        "geometry": _geometry(row),
                        "images": [], "fitment": {"status": "not_confirmed", "vehicles": [], "reports": []}}
+            if category == "tyre":
+                product["tyre_season"] = _tyre_season(product["geometry"], row.get("group"))
+                facts = row.get("quality_facts")
+                if isinstance(facts, Mapping) and facts.get("wet_grip") in ("A", "B", "C", "D", "E"):
+                    product["quality_facts"] = {"wet_grip": facts["wet_grip"]}
+                test_rating = _tyre_test_rating(row, product["tyre_season"])
+                if test_rating is not None:
+                    product["test_rating"] = test_rating
             photo = row.get("photo")
             if isinstance(photo, str) and SOURCE_PHOTO.fullmatch(photo):
                 url = _public_path(images.get(photo), {"jpg", "jpeg", "png", "webp"})
@@ -426,11 +476,17 @@ class PublicCatalog:
 
     def _page_entries(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
-             width=None, ratio=None, diameter=None, now=None):
+             width=None, ratio=None, diameter=None, season=None, sort=None, now=None):
         if not _integer(page, 1, 10_000) or not _integer(page_size, 1, MAX_PAGE_SIZE):
             raise CatalogError("invalid_pagination")
         if not isinstance(q, str) or len(q) > 100 or len(q.split()) > 12:
             raise CatalogError("invalid_search")
+        if season is not None and season not in ("summer", "winter", "allseason"):
+            raise CatalogError("invalid_filter")
+        if sort is not None and (sort not in ("rating", "wet_grip")
+                or department not in (None, "tyres") or category not in (None, "tyre")
+                or department is None and category is None):
+            raise CatalogError("invalid_sort")
         if (category is not None and (not isinstance(category, str) or category not in CATEGORIES)
                 or department is not None and (not isinstance(department, str) or department not in DEPARTMENTS)):
             raise CatalogError("invalid_category")
@@ -470,6 +526,8 @@ class PublicCatalog:
                 continue
             if brand is not None and _fold(public["brand"]) != _fold(brand.strip()):
                 continue
+            if season is not None and public.get("tyre_season") != season:
+                continue
             if (sizes['width'] is not None or sizes['ratio'] is not None) and public['category'] != 'tyre':
                 continue
             if sizes['diameter'] is not None and public['category'] not in {'tyre', 'alloy_wheel', 'steel_wheel'}:
@@ -490,7 +548,12 @@ class PublicCatalog:
             # One cache-only snapshot per matching product. Grouped/family
             # callers reuse this pass instead of rescanning every source page.
             rows.append(self._cached_entry(entry))
+        # Keep the previous retail order within ties and for all ungraded rows.
         rows.sort(key=lambda entry: self._ranked_order(entry, current))
+        if sort == "rating":
+            rows.sort(key=lambda entry: entry["public"].get("test_rating", {}).get("grade", 6))
+        elif sort == "wet_grip":
+            rows.sort(key=lambda entry: _wet_grip_rank(entry["public"]))
         return rows, current
 
     def _page_result(self, rows, current, *, page, page_size):
@@ -505,8 +568,8 @@ class PublicCatalog:
 
     def page(self, *, page=1, page_size=24, q="", category=None, department=None, brand=None,
              make=None, model=None, year=None, hsn=None, tsn=None,
-             width=None, ratio=None, diameter=None, now=None):
+             width=None, ratio=None, diameter=None, season=None, sort=None, now=None):
         rows, current = self._page_entries(page=page, page_size=page_size, q=q,
             category=category, department=department, brand=brand, make=make, model=model,
-            year=year, hsn=hsn, tsn=tsn, width=width, ratio=ratio, diameter=diameter, now=now)
+            year=year, hsn=hsn, tsn=tsn, width=width, ratio=ratio, diameter=diameter, season=season, sort=sort, now=now)
         return self._page_result(rows, current, page=page, page_size=page_size)

@@ -312,7 +312,9 @@
   function buildQuery(values, department, page) {
     const query = new URLSearchParams({page: String(Number.isInteger(page) && page > 0 ? Math.min(page, 10000) : 1), page_size: '24'});
     if (['tyres', 'wheels', 'parts', 'accessories'].includes(department)) query.set('department', department);
-    for (const field of ['q', 'brand', 'category', 'make', 'model', 'year', 'hsn', 'tsn', 'width', 'ratio', 'diameter']) {
+    if (department === 'tyres' && (values.sort === undefined || values.sort === 'rating')) query.set('sort', 'rating');
+    if (department === 'tyres' && values.sort === 'wet_grip') query.set('sort', 'wet_grip');
+    for (const field of ['q', 'brand', 'category', 'make', 'model', 'year', 'hsn', 'tsn', 'width', 'ratio', 'diameter', 'season']) {
       const value = typeof values[field] === 'string' ? values[field].trim() : '';
       if (value) query.set(field, field === 'tsn' ? value.toUpperCase() : value);
     }
@@ -655,6 +657,36 @@
     setImageSource(img, source); return img;
   }
   function validProduct(product) { return product && typeof product.id === 'string' && PRODUCT.test(product.id) && typeof product.name === 'string' && CATEGORIES.has(product.category); }
+  function appendTyreRating(parent, product, showSource = false) {
+    if (product.category !== 'tyre') return;
+    const rating = product.test_rating;
+    if (!rating || rating.source !== 'ADAC' || !Number.isInteger(rating.stars) || rating.stars < 0 ||
+        rating.stars > 5 || !Number.isFinite(rating.grade)) {
+      const wetGrip = product.quality_facts?.wet_grip;
+      const label = !showSource && /^[A-E]$/.test(wetGrip || '') ? ' · Nasshaftung ' + wetGrip : '';
+      parent.append(el('p', 'Ohne ADAC-Testnote' + label, 'shop-card-meta'));
+      return;
+    }
+    const block = el('div', null, 'shop-test-rating');
+    const stars = el('span', '★'.repeat(rating.stars) + '☆'.repeat(5 - rating.stars), 'shop-rating-stars');
+    stars.setAttribute('role', 'img');
+    stars.title = rating.stars + ' von 5 Sternen, aus der ADAC-Testnote umgerechnet';
+    stars.setAttribute('aria-label', stars.title);
+    const grade = rating.grade.toLocaleString('de-DE', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    block.append(stars, el('span', 'ADAC ' + grade + ' · ' + rating.verdict));
+    if (!showSource && /^[A-E]$/.test(product.quality_facts?.wet_grip || '')) block.append(el('span', 'Nasshaftung ' + product.quality_facts.wet_grip));
+    if (showSource) {
+      if (typeof rating.url === 'string' && rating.url.startsWith('https://www.adac.de/rund-ums-fahrzeug/ausstattung-technik-zubehoer/reifen/reifentest/')) {
+        const link = el('a', 'ADAC-Originaltest ' + rating.year + ' ↗');
+        link.href = rating.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        block.append(link);
+      }
+      const scale = el('details'), summary = el('summary', 'Wie entstehen die Sterne?');
+      scale.append(summary, el('p', 'Wir rechnen die ADAC-Gesamtnote für diese Reifenausführung in Sterne um. 5 Sterne bis Note 1,5 · 4 bis 2,5 · 3 bis 3,5 · 2 bis 4,5 · 1 bis 5,4 · 0 bei Note 5,5.'));
+      block.append(scale);
+    }
+    parent.append(block);
+  }
   function addToCart(product, quantity, services = {}) {
     if (!validProduct(product)) return;
     const candidate = normaliseCart([{id: product.id, quantity, services}]);
@@ -674,7 +706,9 @@
     media.setAttribute('aria-label', product.name + ' ansehen'); media.append(productImage(product, ''));
     node.append(media);
     const imageNote = modelPhotoNote(product); if (imageNote) node.append(el('small', imageNote, 'shop-muted'));
-    node.append(el('h3', product.name), el('p', [product.brand, product.size].filter(Boolean).join(' · '), 'shop-card-meta'));
+    const seasonLabel = {summer: 'Sommerreifen', winter: 'Winterreifen', allseason: 'Ganzjahresreifen'}[product.tyre_season];
+    node.append(el('h3', product.name), el('p', [product.brand, product.size, seasonLabel].filter(Boolean).join(' · '), 'shop-card-meta'));
+    appendTyreRating(node, product);
     let count = 1, add = null;
     const price = priceBox(product, count, {active, onUpdate: () => { if (add) { add.disabled = false; add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb'; } }}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
     if (family) {
@@ -768,6 +802,10 @@
         modelPicker.disabled = modelPicker.parentElement.hidden;
       }
       status.textContent = result.total ? result.total + ' Artikel · ' + result.items.length + ' auf dieser Seite' : 'Keine bestätigten Treffer für diese Auswahl. Bitte die Filter ändern.';
+      if (body.dataset.department === 'tyres' && page === 1 && result.total > 0 &&
+          (filters.sort || 'rating') === 'rating' && !result.items.some(item => item.test_rating)) {
+        status.textContent += ' Für diese Auswahl liegt keine passende ADAC-Testnote vor.';
+      }
       byId('page-label').textContent = 'Seite ' + page;
       byId('previous-page').disabled = page <= 1; byId('next-page').disabled = result.has_more !== true;
       schedulePagePrices(result, run, query, expectedPage);
@@ -784,6 +822,9 @@
   });
   if (byId('catalog-products')) {
     byId('catalog-filters').addEventListener('submit', event => { event.preventDefault(); filters = Object.fromEntries(new FormData(event.currentTarget)); page = 1; loadPage(); });
+    byId('catalog-filters').addEventListener('change', event => {
+      if (event.target.name === 'season' || event.target.name === 'sort') event.currentTarget.requestSubmit();
+    });
     byId('catalog-filters').addEventListener('reset', () => { filters = {}; page = 1; loadPage(); });
     if (byId('vehicle-filters')) {
       let vehicleTimer = null;
@@ -1069,6 +1110,7 @@
         gallery.append(thumbnails);
       }
       const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', product.size, 'shop-muted'));
+      appendTyreRating(copy, product, true);
       const dimensions = rimDimensions(product);
       const details = configure && isRim ? el('details', null, 'shop-rim-details') : copy;
       if (details !== copy) details.append(el('summary', 'Felgendetails, Gutachten und Einzelkauf'));

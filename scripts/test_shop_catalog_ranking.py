@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from flask import Flask
 from shop_catalog_public import CatalogError, PublicCatalog, variant_fingerprint
 from shop_catalog_enriched import EnrichedPublicCatalog
+from shop_tyre_tests import ADAC_TYRE_TESTS, TyreTest
 from shop_public_api import create_shop_public_blueprint
 from test_shop_catalog_public import NOW, wheel, part
 from test_shop_catalog_enriched import tyre, pair
@@ -57,6 +58,42 @@ class OfferRankingChecks(unittest.TestCase):
 
     def tearDown(self):
         self.network.stop()
+
+    def test_exact_test_rating_distinguishes_zero_from_unknown_across_pages(self):
+        rows = [tyre(letter) for letter in ('a', 'b', 'c')]
+        records = {}
+        for index, row in enumerate(rows):
+            ean = f'{index:013d}'
+            row.update(identifiers={'ean': ean}, quality_facts={
+                'fuel_efficiency': 'C', 'wet_grip': 'B', 'noise_db': '71'})
+            if index:
+                records[ean] = TyreTest(variant_fingerprint(row), ('C', 'B', '71'), 2025,
+                    5.5 if index == 1 else 2.4, 'sommerreifen/205-55-r18/test-id-1/')
+        with patch.dict(ADAC_TYRE_TESTS, records, clear=True):
+            c = catalog(rows)
+            results = [c.page(department='tyres', sort='rating', page_size=1, page=page)['items'][0]
+                       for page in (1, 2, 3)]
+            self.assertEqual([item['id'] for item in results], [identifier(r) for r in reversed(rows)])
+            self.assertEqual(results[0]['test_rating']['stars'], 4)
+            self.assertEqual(results[1]['test_rating']['stars'], 0)
+            self.assertNotIn('test_rating', results[2])
+            for changed in ({'speed_index': 'W'}, {'group': 'Winterreifen'}, {'approval': 'OEM'},
+                            {'quality_facts': {'wet_grip': 'B'}}, {'identifiers': {'ean': 'other'}}):
+                with self.subTest(changed=changed):
+                    edited = {**rows[1], **changed}
+                    self.assertNotIn('test_rating', catalog([edited]).get(identifier(edited)))
+
+    def test_wet_grip_sort_is_independent_of_stars_and_puts_unknown_last(self):
+        rows = [tyre(letter) for letter in ('a', 'b', 'c')]
+        rows[0]['quality_facts'] = {'wet_grip': 'unknown'}
+        rows[1]['quality_facts'] = {'wet_grip': 'D'}
+        rows[2]['quality_facts'] = {'wet_grip': 'A'}
+        c = catalog(rows)
+        results = c.page(category='tyre', sort='wet_grip')['items']
+        self.assertEqual([r['id'] for r in results], [identifier(r) for r in reversed(rows)])
+        self.assertTrue(all('test_rating' not in row for row in results))
+        with self.assertRaises(CatalogError):
+            c.page(department='wheels', sort='rating')
 
     def test_base_local_price_and_stock_rank_before_every_page_without_hiding_rows(self):
         missing = part('a', name='AAA query missing', price=None)
