@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+from flask import template_rendered
 from werkzeug.datastructures import MultiDict
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -80,6 +81,78 @@ class ReifentermineTest(unittest.TestCase):
     def login_admin(self):
         with self.client.session_transaction() as session:
             session['admin'] = True
+
+    def render_context(self, client, url):
+        rendered = {}
+
+        def capture(sender, template, context, **extra):
+            rendered.update(context)
+
+        with template_rendered.connected_to(capture, portal.app):
+            response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        return response.text, rendered
+
+    def test_reserved_slot_in_workshop_calendar_through_reschedule_takeover_and_cancel(self):
+        name, plate = 'Kalender Montagegast', 'MOS RX 820'
+        day, moved = self.day(7), self.day(10)
+        self.assertEqual(self.book({'name': name, 'kennzeichen': plate, 'wunschdatum': day}).status_code, 302)
+        lead_id = self.latest()['id']
+        self.login_admin()
+
+        def appointments():
+            page, context = self.render_context(self.client, '/admin/kalender')
+            slots = [item for tag in context['kalender_items'] for item in tag['system']
+                     if item['kategorie'] == 'reifenservice' and name in item['titel']]
+            return page, context['kalender_items'], slots
+
+        def mini_items(client, endpoint):
+            _, context = self.render_context(client, endpoint + '?tag=' + moved)
+            return context['mini_calendar']['selected_day']['items']
+
+        page, _, slots = appointments()
+        self.assertEqual([(item['datum'].isoformat(), item['uhrzeit']) for item in slots], [(day, '09:00')])
+        self.assertIn(plate, slots[0]['notiz'])
+        self.assertIn('Radwechsel', slots[0]['notiz'])
+        self.assertIn(f'/admin/leads/{lead_id}', slots[0]['url'])
+        self.assertIn('09:00 Uhr · ' + name, page)
+        update_url = f'/admin/reifenportal/{lead_id}/termin'
+        self.client.post(update_url, data={portal.CSRF_FIELD_NAME: self.csrf, 'datum': moved, 'uhrzeit': '11:00'})
+        self.client.post(f'/admin/reifenportal/{lead_id}/auftrag', data={portal.CSRF_FIELD_NAME: self.csrf})
+        order_id = portal.get_lead(lead_id)['auftrag_id']
+        self.assertTrue(order_id)
+        _, days, slots = appointments()
+        self.assertEqual([(s['datum'].isoformat(), s['uhrzeit'], s['auftrag_id']) for s in slots], [(moved, '11:00', order_id)])
+        self.assertFalse(any(e['auftrag']['id'] == order_id for tag in days for e in tag['events']))
+        self.assertIn(f'/admin/auftrag/{order_id}', slots[0]['url'])
+        self.assertEqual(self.client.get('/admin/kalender', query_string={'suche': plate}).location, slots[0]['url'])
+        month = [i for i in mini_items(self.client, '/admin/cockpit') if plate in i['subtitle'] or plate in i['title']]
+        self.assertEqual([(i['label'], i['title']) for i in month], [('Reifentermin', '11:00 Uhr · ' + name)])
+        partner = portal.app.test_client()
+        with partner.session_transaction() as session:
+            session['partner_autohaus_id'] = portal.get_autohaus_by_slug('kaesmann')['id']
+        partner_page = partner.get('/partner/kaesmann/dashboard', query_string={'tag': moved})
+        self.assertEqual(partner_page.status_code, 200)
+        self.assertNotIn(plate, partner_page.text)
+        self.assertNotIn(name, partner_page.text)
+
+        # An earlier delivery is still useful to the workshop alongside the mounting appointment.
+        db = portal.get_db()
+        try:
+            db.execute('UPDATE auftraege SET annahme_datum=?, annahme_uhrzeit=? WHERE id=?',
+                       (portal.format_date(day), '08:00', order_id))
+            db.commit()
+        finally:
+            db.close()
+        _, days, slots = appointments()
+        deliveries = [tag['datum'].isoformat() for tag in days for e in tag['events'] if e['auftrag']['id'] == order_id]
+        self.assertEqual(deliveries, [day])
+        self.assertEqual([(s['datum'].isoformat(), s['uhrzeit']) for s in slots], [(moved, '11:00')])
+        self.client.post(update_url, data={portal.CSRF_FIELD_NAME: self.csrf, 'aktion': 'stornieren'})
+        _, days, slots = appointments()
+        self.assertEqual(slots, [])
+        self.assertFalse(any(e['auftrag']['id'] == order_id for tag in days for e in tag['events']))
+        self.assertFalse(any(name in i['title'] for i in mini_items(self.client, '/admin/cockpit')))
 
     def test_form_and_entry_button(self):
         response = self.client.get('/anfrage?anliegen=reifenservice')

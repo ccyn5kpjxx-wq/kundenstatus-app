@@ -124,7 +124,7 @@
         <div class="badge-soft mb-2">Diese Woche · KW {{ kalender_woche['kw'] }}</div>
         <h4 class="mb-1">{{ kalender_woche['start_text'] }} bis {{ kalender_woche['end_text'] }}</h4>
         <div class="text-muted">
-          {{ kalender_woche['total_tasks'] }} Werkstattaufgaben · {{ kalender_woche['total_calendar_points'] }} Feiertage, Geburtstage, Urlaub oder Notizen
+          {{ kalender_woche['total_tasks'] }} Werkstattaufgaben · {{ kalender_woche['total_calendar_points'] }} weitere Kalendereinträge
         </div>
       </div>
       <span class="badge-soft">Heute {{ kalender_woche['heute_text'] }}</span>
@@ -144,7 +144,7 @@
           <div class="week-point">
             <div>
               <span class="badge text-bg-{{ point['farbe'] }} me-1">{{ point['kategorie_label'] }}</span>
-              <strong>{{ point['titel'] }}</strong>
+              {% if point.get('url') %}<a href="{{ point['url'] }}"><strong>{{ point['titel'] }}</strong></a>{% else %}<strong>{{ point['titel'] }}</strong>{% endif %}
             </div>
             {% if point['notiz'] %}<div class="text-muted small mt-1">{{ point['notiz'] }}</div>{% endif %}
           </div>
@@ -225,6 +225,8 @@
               </div>
               {% if item.get('mitarbeiter_urlaub') %}
                 <a href="{{ url_for('admin_mitarbeiter') }}#mitarbeiter-{{ item['mitarbeiter_id'] }}" class="btn btn-soft btn-sm">Mitarbeiter öffnen</a>
+              {% elif item.get('url') %}
+                <a href="{{ item['url'] }}" class="btn btn-soft btn-sm">{{ 'Auftrag öffnen' if item.get('auftrag_id') else 'Buchung öffnen' }}</a>
               {% else %}
                 <span class="text-muted small">automatisch</span>
               {% endif %}
@@ -285,7 +287,7 @@
           </div>
           {% endfor %}
         </div>
-        {% else %}
+        {% elif not day['system']|selectattr('kategorie', 'equalto', 'reifenservice')|list %}
         <div class="calendar-empty">Keine Fahrzeuge an diesem Tag.</div>
         {% endif %}
       </div>

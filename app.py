@@ -38769,11 +38769,71 @@ def start_inbox_daten(postfach_items, email_items, limit=6, email_count_total=No
     }
 
 
+def gebuchte_reifen_kalendereintraege(von=None, bis=None):
+    """Der reservierte Werkstattslot bestimmt den Montagetermin, auch nach Auftragsübernahme."""
+    sql = """SELECT s.datum, s.uhrzeit, l.id AS lead_id, l.auftrag_id, l.portal_json,
+                    COALESCE(NULLIF(a.kunde_name, ''), l.kunde_name) AS kunde_name,
+                    COALESCE(NULLIF(a.fahrzeug, ''), l.fahrzeug) AS fahrzeug,
+                    COALESCE(NULLIF(a.kennzeichen, ''), l.kennzeichen) AS kennzeichen
+             FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
+             LEFT JOIN auftraege a ON a.id=l.auftrag_id
+             WHERE l.status!='verloren'"""
+    params = ()
+    if von is not None and bis is not None:
+        sql += " AND s.datum BETWEEN ? AND ?"
+        params = (von.isoformat(), bis.isoformat())
+    db = get_db()
+    try:
+        rows = db.execute(sql + " ORDER BY s.datum, s.uhrzeit", params).fetchall()
+    finally:
+        db.close()
+    termine = []
+    for row in rows:
+        datum = parse_date(row["datum"])
+        details = reifen_termin_daten(dict(row))
+        if not datum or (not details and parse_schadenaufnahme_json(row["portal_json"]).get("anliegen") != "reifenservice"):
+            continue
+        leistungen = ", ".join(details["leistungen"]) if details else "Reifenservice"
+        kunde = clean_text(row["kunde_name"]) or "Reifenservice"
+        url = ""
+        if has_request_context():
+            if row["auftrag_id"]:
+                url = url_for("auftrag_detail", auftrag_id=row["auftrag_id"], back="kalender")
+            else:
+                url = url_for("admin_lead_detail", lead_id=row["lead_id"])
+        termine.append({
+            "datum": datum, "datum_text": datum.strftime(DATE_FMT), "uhrzeit": row["uhrzeit"],
+            "auftrag_id": row["auftrag_id"], "kategorie": "reifenservice", "kategorie_label": "Reifentermin",
+            "titel": f"{row['uhrzeit']} Uhr · {kunde}",
+            "notiz": " · ".join(filter(None, (row["fahrzeug"], row["kennzeichen"], leistungen))),
+            "farbe": "primary", "system": True, "url": url,
+        })
+    return termine
+
+
+def reifen_anlieferung_ersetzt(auftrag, datum, reifentermine_pro_auftrag):
+    aufnahme = auftrag.get("schaden_aufnahme") or {}
+    if aufnahme.get("reifen_storniert_am"):
+        return True
+    termin = reifentermine_pro_auftrag.get(auftrag.get("id"))
+    return bool(termin and termin["datum"] == datum
+                and (not auftrag.get("annahme_uhrzeit") or auftrag["annahme_uhrzeit"] == termin["uhrzeit"]))
+
+
 def kalender_daten(auftraege):
     tage = defaultdict(lambda: {"auftraege": {}, "notizen": [], "system": []})
+    reifentermine = gebuchte_reifen_kalendereintraege()
+    reifentermine_pro_auftrag = {t["auftrag_id"]: t for t in reifentermine if t["auftrag_id"]}
+    for termin in reifentermine:
+        tage[termin["datum"]]["system"].append(termin)
     for auftrag in auftraege:
+        reifentermin = reifentermine_pro_auftrag.get(auftrag["id"])
+        if reifentermin:
+            reifentermin["suchtext"] = kalender_suchtext_auftrag(auftrag, {}, {})
         for priority, (feld, label, farbe) in enumerate(EVENT_FELDER):
             event_date = auftrag.get(f"{feld}_obj")
+            if feld == "annahme_datum" and reifen_anlieferung_ersetzt(auftrag, event_date, reifentermine_pro_auftrag):
+                continue
             if event_date:
                 eintraege = tage[event_date]["auftraege"]
                 eintrag = eintraege.get(auftrag["id"])
@@ -38924,6 +38984,7 @@ def kalender_suchtext_item(item, day):
         item.get("notiz"),
         item.get("kategorie"),
         item.get("kategorie_label"),
+        item.get("suchtext"),
     ]
     return " ".join(clean_text(text).lower() for text in texte if clean_text(text))
 
@@ -38952,6 +39013,8 @@ def filter_kalender_suche(kalender_items, query):
                 continue
             if day_match or suchtext in kalender_suchtext_item(item, day):
                 system.append(item)
+                if item.get("auftrag_id"):
+                    event_ids.add(item["auftrag_id"])
         gesamt_count = len(events) + len(notizen) + len(system)
         if gesamt_count:
             visible_day = dict(day)
@@ -39075,12 +39138,25 @@ def build_mini_monatskalender(
     cal = calendar.Calendar(firstweekday=0)
     event_dates = defaultdict(list)
     event_day_items = defaultdict(list)
+    reifentermine_pro_auftrag = {}
+    if include_internal_notes:
+        for termin in gebuchte_reifen_kalendereintraege(month_start, month_end):
+            tag = termin["datum"]
+            event_dates[tag].append("Reifentermin · " + termin["titel"])
+            event_day_items[tag].append({
+                "label": termin["kategorie_label"], "farbe": termin["farbe"],
+                "title": termin["titel"], "subtitle": termin["notiz"], "url": termin["url"],
+            })
+            if termin["auftrag_id"]:
+                reifentermine_pro_auftrag[termin["auftrag_id"]] = termin
     for auftrag in auftraege or []:
         event_fields = EVENT_FELDER
         if only_arrival_events:
             event_fields = (("annahme_datum", "Anlieferung", "secondary"),)
         for feld, label, farbe in event_fields:
             event_date = auftrag.get(f"{feld}_obj")
+            if include_internal_notes and feld == "annahme_datum" and reifen_anlieferung_ersetzt(auftrag, event_date, reifentermine_pro_auftrag):
+                continue
             if event_date and month_start <= event_date <= month_end:
                 fahrzeug = clean_text(auftrag.get("fahrzeug")) or "Fahrzeug"
                 kennzeichen = clean_text(auftrag.get("kennzeichen"))
@@ -54849,9 +54925,9 @@ def kalender():
             alle_kalender_items,
             kalender_suche,
         )
-        event_count = sum(len(item["events"]) for item in kalender_items)
-        calendar_point_count = sum(len(item["notizen"]) + len(item["system"]) for item in kalender_items)
-        if event_count >= 1 and calendar_point_count == 0 and len(gefundene_auftrag_ids) == 1:
+        sonstige_punkte = any(tag["notizen"] or any(not punkt.get("auftrag_id") for punkt in tag["system"])
+                              for tag in kalender_items)
+        if len(gefundene_auftrag_ids) == 1 and not sonstige_punkte:
             return redirect(url_for("auftrag_detail", auftrag_id=next(iter(gefundene_auftrag_ids)), back="kalender"))
     else:
         kalender_items = filter_kalender_items(
