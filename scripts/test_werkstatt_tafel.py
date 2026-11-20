@@ -80,7 +80,6 @@ def main():
     team_showcase_script = (ROOT / "static" / "werkstatt_team_showcase.js").read_text(encoding="utf-8")
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Eingeplant" in html)
     tafeldesign = (ROOT / "static" / "werkstatt_tafel.css").read_text(encoding="utf-8")
-    check("Einplanen für angelegte Aufträge verfügbar", 'data-ziel="2"' in html)
     check(
         "Tafel nutzt das Teamfoto im Kopf und eigene lesbare Auftragskarten",
         "/static/werkstatt_tafel.css" in html
@@ -271,6 +270,8 @@ def main():
     )
     response = client.get(response.headers.get("Location", ""))
     detail_html = response.get_data(as_text=True)
+    check("Einplanen in der Mitarbeiteransicht verfügbar",
+          f'/werkstatt/auftrag/{werkstatt_neu_id}/status/2' in detail_html)
     check(
         "Neuer Auftrag zeigt Kundenlink, QR und Uebergabeaktionen",
         response.status_code == 200

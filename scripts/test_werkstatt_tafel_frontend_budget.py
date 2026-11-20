@@ -36,7 +36,8 @@ def render_board():
                  fahrzeug='Synthetic vehicle', kennzeichen='TEST-071', auftragsart_label='Lackierung')
     return env.get_template('werkstatt_tafel.html').render(
         session={}, server_now_iso='2026-10-29T12:00:00+01:00', stand_label='12:00', datum_label='Synthetic',
-        spalten=[dict(key='angelegt', titel='Angelegt', ziel_status=1, auftraege=[dict(order, id=70, status=1)]),
+        spalten=[dict(key='angelegt', titel='Angelegt', ziel_status=1,
+                      auftraege=[dict(order, id=70, status=1, fahrzeug='Fiat Panda', kennzeichen='TEST-070')]),
                  dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order]),
                  dict(key='in_arbeit', titel='In Arbeit', ziel_status=3, auftraege=[dict(order, id=72, status=3)]),
                  dict(key='fertig', titel='Fertig', ziel_status=4, auftraege=[])])
@@ -143,10 +144,10 @@ class BoardFrontendTests(unittest.TestCase):
         expect(cards).to_have_count(2)
         search.fill('AB XYZ 999')
         expect(cards).to_have_count(0)
-        expect(page.locator('[data-tafel-leer]:visible')).to_have_count(2)
+        expect(page.locator('[data-tafel-leer]:visible')).to_have_count(3)
         page.locator('[data-tafel-reset]').click()
         expect(search).to_be_focused()
-        expect(cards).to_have_count(2)
+        expect(cards).to_have_count(3)
         expect(page.locator('[data-tafel-leer]:visible')).to_have_count(0)
         self.assertFalse(any('XYZ' in path for _, path in state['requests']))
 
@@ -159,7 +160,7 @@ class BoardFrontendTests(unittest.TestCase):
         expect(page.locator('[data-suchkarte]:visible')).to_have_count(1)
         search.press('Escape')
         expect(search).to_have_value('')
-        expect(page.locator('[data-suchkarte]:visible')).to_have_count(2)
+        expect(page.locator('[data-suchkarte]:visible')).to_have_count(3)
         self.assertEqual(page.url, BASE + BOARD)
 
     def start_probe(self, page, state, *, advance=60001, count=1):
