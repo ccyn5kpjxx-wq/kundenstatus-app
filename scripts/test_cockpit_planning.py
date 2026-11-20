@@ -151,7 +151,7 @@ class PlanningTemplatesTest(unittest.TestCase):
 
     def test_board_distinguishes_finish_and_missing_return(self):
         column = {"key": "in_arbeit", "ziel_status": 3, "titel": "In Arbeit", "auftraege": [order()]}
-        html = self.render("werkstatt_tafel.html", spalten=[column], countdown_ziel_iso="2026-08-19T09:35:00+02:00")
+        html = self.render("werkstatt_tafel.html", spalten=[column])
         self.assertIn("Fertig bis: <strong>15.09.2026", html)
         self.assertIn("Rückbringen noch nicht vereinbart", html)
         self.assertNotIn("Guten Flug", html)

@@ -20,6 +20,12 @@
       <img src="{{ static_asset_url('logo-nav-192.webp') }}" width="192" height="128" alt="Gärtner Karosserie &amp; Lack">
       <h1>Werkstatt-Tafel</h1>
     </div>
+    {% if betriebsurlaub_start and betriebsurlaub_tage >= 0 %}
+    <div class="betriebsurlaub" data-betriebsurlaub>
+      <span>Betriebsurlaub ab <time datetime="{{ betriebsurlaub_start.isoformat() }}">{{ betriebsurlaub_start.strftime('%d.%m.%Y') }}</time></span>
+      <strong>{% if betriebsurlaub_tage == 0 %}Beginn heute{% elif betriebsurlaub_tage == 1 %}Noch 1 Tag{% else %}Noch {{ betriebsurlaub_tage }} Tage{% endif %}</strong>
+    </div>
+    {% endif %}
     <div class="wetter" data-wetter hidden>
       <div class="wetter-jetzt">
         <span class="wetter-ikon" data-w-ikon>–</span>
@@ -295,12 +301,23 @@
       const uhr = document.querySelector('[data-uhr]');
       const datum = document.querySelector('[data-datum]');
       const stand = document.querySelector('[data-stand]');
+      const urlaub = document.querySelector('[data-betriebsurlaub]');
+      const urlaubsbeginn = urlaub && Date.parse(urlaub.querySelector('time').dateTime);
+      const berlinTag = urlaub && new Intl.DateTimeFormat('sv-SE', {timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit'});
       const serverStart = uhr ? Date.parse(uhr.dataset.serverNow) : NaN;
       const browserStart = performance.now();
       const aktuelleServerzeit = () => new Date(serverStart + (performance.now() - browserStart));
       const tick = () => {
         if (!uhr || !Number.isFinite(serverStart)) return;
         const now = aktuelleServerzeit();
+        if (urlaub) {
+          // ISO-Kalendertage vergleichen, auch an Wochenenden mit Zeitumstellung.
+          const tage = (urlaubsbeginn - Date.parse(berlinTag.format(now))) / 86400000;
+          urlaub.hidden = tage < 0;
+          if (tage >= 0) {
+            urlaub.querySelector('strong').textContent = tage === 0 ? 'Beginn heute' : 'Noch ' + tage + (tage === 1 ? ' Tag' : ' Tage');
+          }
+        }
         const zeitText = now.toLocaleTimeString('de-DE', {
           hour: '2-digit',
           minute: '2-digit',

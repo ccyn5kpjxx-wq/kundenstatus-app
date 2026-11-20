@@ -56970,8 +56970,7 @@ def werkstatt_tafel():
         },
     )
     jetzt = datetime.now(ZoneInfo("Europe/Berlin"))
-    # Abflug Frankfurt -> Doha laut Reiseunterlagen: 19.08.2026, 09:35 Uhr.
-    abflug = datetime(2026, 8, 19, 9, 35, tzinfo=ZoneInfo("Europe/Berlin"))
+    betriebsurlaub_start = date(2026, 12, 18)
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
@@ -56979,7 +56978,8 @@ def werkstatt_tafel():
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
         server_now_iso=jetzt.isoformat(timespec="seconds"),
-        countdown_ziel_iso=abflug.isoformat(timespec="seconds") if abflug > jetzt else "",
+        betriebsurlaub_start=betriebsurlaub_start,
+        betriebsurlaub_tage=(betriebsurlaub_start - jetzt.date()).days,
         check24_review_count=check24_bookings.review_count() if session.get('admin') else 0,
     )
 

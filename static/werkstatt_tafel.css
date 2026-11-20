@@ -35,6 +35,8 @@ a { color: inherit; }
 .titel img { display: block; flex: none; width: 66px; height: 44px; border-radius: 4px; background: #fff; }
 .titel h1 { margin: 0; font: 700 clamp(1.45rem, 2.25vw, 2.5rem)/1.09 "Space Grotesk", "Segoe UI", sans-serif; letter-spacing: -.045em; }
 .meta { flex: none; text-align: right; font-size: .82rem; color: #d8e3e4; }
+.betriebsurlaub { display: grid; gap: .12rem; color: #d8e3e4; font-size: .82rem; }
+.betriebsurlaub strong { color: white; font-size: 1rem; }
 .uhr { color: white; font-size: 1.5rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .wetter, .wetter-jetzt, .wetter-stunden, .wetter-std { display: flex; align-items: center; }
 .wetter { gap: 1.4rem; }
@@ -148,7 +150,9 @@ footer { position: fixed; inset: auto 0 0; z-index: 2; display: flex; justify-co
   footer a { display: inline-flex; align-items: center; min-height: 44px; }
 }
 @media (max-width: 720px) {
-  .topbar { padding: .7rem .8rem; gap: .45rem; }
+  .topbar { padding: .7rem .8rem; gap: .45rem; flex-wrap: wrap; }
+  .betriebsurlaub { order: 1; flex-basis: 100%; display: flex; align-items: baseline; gap: .5rem; font-size: .75rem; }
+  .betriebsurlaub strong { font-size: .83rem; }
   .titel { gap: .58rem; }
   .titel img { width: 51px; height: 34px; }
   .wetter { display: none; }

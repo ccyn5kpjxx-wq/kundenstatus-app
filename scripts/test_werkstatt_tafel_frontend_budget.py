@@ -5,6 +5,7 @@ case uses its own short-lived loopback server. Public repository assets are
 served from memory; no external traffic, real portal, accounts or DBs.
 Requires Playwright and an installed Edge browser, like the existing UI suite.
 """
+from datetime import date, datetime
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -28,14 +29,16 @@ def url_for(endpoint, **values):
     return '/static/' + values['filename'] if endpoint == 'static' else '/synthetic/' + endpoint
 
 
-def render_board():
+def render_board(server_now='2026-10-29T12:00:00+01:00'):
     env = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True, undefined=ChainableUndefined)
     env.globals.update(url_for=url_for, static_asset_url=lambda name: '/static/' + name + '?v=synthetic',
                        csrf_token=lambda: 'synthetic', get_flashed_messages=lambda **kwargs: [])
     order = dict(id=71, status=2, leistungsart='lackierung', planung={},
                  fahrzeug='Synthetic vehicle', kennzeichen='TEST-071', auftragsart_label='Lackierung')
     return env.get_template('werkstatt_tafel.html').render(
-        session={}, server_now_iso='2026-10-29T12:00:00+01:00', stand_label='12:00', datum_label='Synthetic',
+        session={}, server_now_iso=server_now, stand_label='12:00', datum_label='Synthetic',
+        betriebsurlaub_start=date(2026, 12, 18),
+        betriebsurlaub_tage=(date(2026, 12, 18) - datetime.fromisoformat(server_now).date()).days,
         spalten=[dict(key='angelegt', titel='Angelegt', ziel_status=1,
                       auftraege=[dict(order, id=70, status=1, fahrzeug='Fiat Panda', kennzeichen='TEST-070')]),
                  dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order]),
@@ -53,7 +56,7 @@ class BoardFrontendTests(unittest.TestCase):
         cls.html = render_board()
         expect.set_options(timeout=2000)
 
-    def open_board(self, *, music=True, showcase_only=False, repeat_html=False):
+    def open_board(self, *, music=True, showcase_only=False, repeat_html=False, server_now=None):
         context = self.browser.new_context(viewport=dict(width=1280, height=900), service_workers='block')
         page = context.new_page()
         page.set_default_timeout(3000)
@@ -67,7 +70,7 @@ class BoardFrontendTests(unittest.TestCase):
             page.unroute_all(behavior='ignoreErrors')
             context.close()
         self.addCleanup(close_context)
-        html = self.html
+        html = render_board(server_now) if server_now else self.html
         if showcase_only:
             # The include also works independently of the board's inline script.
             env = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=True)
@@ -128,6 +131,27 @@ class BoardFrontendTests(unittest.TestCase):
         while not predicate() and time.monotonic() < deadline:
             page.wait_for_timeout(10)
         self.assertTrue(predicate(), 'Synthetic browser condition did not arrive')
+
+    def test_betriebsurlaub_changes_at_berlin_midnight_and_fits_mobile(self):
+        for night, before, after in (
+            ('16', 'Noch 2 Tage', 'Noch 1 Tag'),
+            ('17', 'Noch 1 Tag', 'Beginn heute'),
+            ('18', 'Beginn heute', None),
+        ):
+            with self.subTest(night=night):
+                page, _ = self.open_board(server_now='2026-12-' + night + 'T23:59:58+01:00')
+                notice = page.locator('[data-betriebsurlaub]')
+                expect(notice.locator('strong')).to_have_text(before)
+                expect(notice.locator('time')).to_have_text('18.12.2026')
+                page.set_viewport_size(dict(width=320, height=720))
+                self.assertTrue(notice.evaluate('(el) => el.offsetWidth > 0 && el.getBoundingClientRect().right <= innerWidth'))
+                page.clock.fast_forward(10_000)
+                if after:
+                    expect(notice.locator('strong')).to_have_text(after)
+                else:
+                    expect(notice).to_be_hidden()
+        page, _ = self.open_board(server_now='2026-12-19T00:00:01+01:00')
+        expect(page.locator('[data-betriebsurlaub]')).to_have_count(0)
 
     def test_search_number_plate_and_vehicle_updates_cards_and_both_counters(self):
         page, state = self.open_board()
