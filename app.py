@@ -46632,6 +46632,10 @@ def reifenauftrag_aus_buchung(lead_id, *, tafel_termin=None):
                 job = db.execute("SELECT status, archiviert FROM auftraege WHERE id=?", (lead["auftrag_id"],)).fetchone()
                 if not job or job["archiviert"] or job["status"] != 2 or lead.get("status") == "verloren":
                     raise ValueError("Diese Anfrage wurde bereits weiterbearbeitet.")
+                slot = db.execute("SELECT datum,uhrzeit FROM reifen_termin_slots WHERE lead_id=?", (lead_id,)).fetchone()
+                if not slot or tafel_termin != (slot["datum"], slot["uhrzeit"]):
+                    raise ValueError("Die reservierte Zeit wurde geändert. Bitte den aktuellen Termin prüfen.")
+            db.rollback()
             return int(lead["auftrag_id"])
         if lead.get("status") == "verloren":
             raise ValueError("Diese Buchung ist storniert. Bitte einen neuen freien Termin buchen.")
@@ -53777,20 +53781,13 @@ def admin_lead_to_auftrag(lead_id):
     return redirect(url_for("admin_lead_detail", lead_id=lead_id) + "#kundenportal")
 
 
-def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
+def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status, *, tafel_ausgangsstatus=None):
     """Setzt den Auftragsstatus inkl. Datums-Autofill, Status-Log und Benachrichtigungen.
 
     Gemeinsame Logik fuer Admin-Dashboard und Werkstatt-Tafel, damit beide Wege
     identisch wirken (gleiche Termin-Befuellung, gleiches Log, gleiche Autohaus-Mail).
     """
     auftrag_id = auftrag["id"]
-    heute = format_date(date.today().strftime("%Y-%m-%d"))
-    # Reparaturstart erst ab "In Arbeit" (3) setzen; bei Angelegt/Eingeplant bleibt die
-    # Anlieferung (Holen/Kunde bringt) das relevante Datum, kein voreiliges "Start heute".
-    start_datum = (auftrag["start_datum"] or heute) if neuer_status >= 3 else ""
-    fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
-    abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
-
     # Acquire the shared cross-worker gate before any service/order row lock.
     with portal_originals_operation_lock():
         db = get_db()
@@ -53801,6 +53798,27 @@ def fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status):
                 db.rollback()
                 db.close()
                 abort(409, description=str(exc))
+        if tafel_ausgangsstatus is not None:
+            # Gleiche Lockreihenfolge wie bei anderen Statuswechseln: Serviceprozess, dann Auftrag.
+            db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+            row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+            auftrag = dict(row) if row else {}
+            if (not auftrag or auftrag["archiviert"] or auftrag["angebotsphase"]
+                    or not werkstatt_tafel_auftrag_sichtbar(auftrag)):
+                db.rollback()
+                db.close()
+                abort(409, description="Dieser Auftrag steht nicht mehr auf der Werkstatttafel.")
+            if auftrag["status"] != tafel_ausgangsstatus:
+                db.rollback()
+                db.close()
+                if auftrag["status"] == neuer_status:
+                    return False
+                abort(409, description="Der Auftrag wurde zwischenzeitlich weiterbearbeitet.")
+        heute = format_date(date.today().strftime("%Y-%m-%d"))
+        # Reparaturstart erst ab „In Arbeit“ setzen.
+        start_datum = (auftrag["start_datum"] or heute) if neuer_status >= 3 else ""
+        fertig_datum = auftrag["fertig_datum"] or heute if neuer_status >= 4 else auftrag["fertig_datum"]
+        abholtermin = auftrag["abholtermin"] or heute if neuer_status >= 5 else auftrag["abholtermin"]
         db.execute(
             """
             UPDATE auftraege
@@ -56730,6 +56748,7 @@ def plane_tafel_auftrag_ein(auftrag, angezeigter_wunsch):
         if current["archiviert"] or current["angebotsphase"] or not werkstatt_tafel_auftrag_sichtbar(current):
             abort(409, description="Dieser Auftrag steht nicht mehr zur Einplanung bereit.")
         if current["status"] == 2:
+            db.rollback()
             return False
         if current["status"] != 1:
             abort(409, description="Der Auftrag wurde bereits weiterbearbeitet.")
@@ -57185,7 +57204,7 @@ def werkstatt_status_update(auftrag_id, neuer_status):
             flash(str(exc), "warning")
             return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
     else:
-        fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status)
+        fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status, tafel_ausgangsstatus=aktueller_status)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify({"ok": True, "status": neuer_status})
     flash(f"{kennung}: jetzt „{STATUSLISTE[neuer_status]['label']}“.", "success")

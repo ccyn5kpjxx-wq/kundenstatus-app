@@ -357,6 +357,10 @@ class ReifentermineTest(unittest.TestCase):
         self.assertEqual(self.count('auftraege'), count + 1)
         job_id = portal.get_lead(lead_id)['auftrag_id']
         self.assertEqual(portal.get_auftrag(job_id)['status'], 2)
+        # A repeat from a card displaying another hour cannot confirm the wrong time.
+        self.client.post(url, data=dict(data, uhrzeit='11:00'))
+        with self.client.session_transaction() as session:
+            self.assertIn('reservierte Zeit wurde geändert', session['_flashes'][-1][1])
         with closing(portal.get_db()) as db:
             rows = db.execute('SELECT status FROM status_log WHERE auftrag_id=? AND status=2', (job_id,)).fetchall()
             self.assertEqual(len(rows), 1)
@@ -401,6 +405,43 @@ class ReifentermineTest(unittest.TestCase):
             res = self.client.post(f'/werkstatt/auftrag/{hidden}/status/2', data=data, headers=headers)
             self.assertEqual(res.status_code, 404, flag)
             self.assertEqual(portal.get_auftrag(hidden)['status'], 1)
+
+    def test_concurrent_hall_monitors_finish_once_and_reject_conflicting_move(self):
+        self.hall_login()
+        change = portal.fuehre_auftrag_status_wechsel_aus
+        with self.client.session_transaction() as logged_in:
+            hall_session = dict(logged_in)
+        for targets in ((4, 4), (2, 4)):
+            with self.subTest(targets=targets):
+                job = portal.create_auftrag('intern', fahrzeug='Paralleltest')
+                with closing(portal.get_db()) as db:
+                    db.execute('UPDATE auftraege SET status=3 WHERE id=?', (job,))
+                    db.commit()
+                start = Barrier(2)
+                def same_initial_read(*args, **kwargs):
+                    start.wait(timeout=10)
+                    return change(*args, **kwargs)
+                def post(target):
+                    client = portal.app.test_client()
+                    with client.session_transaction() as session:
+                        session.update(hall_session)
+                    return client.post(f'/werkstatt/auftrag/{job}/status/{target}',
+                        data={portal.CSRF_FIELD_NAME:self.csrf, 'von_status':3},
+                        headers={'X-Requested-With':'fetch'}).status_code
+                with patch.object(portal, 'fuehre_auftrag_status_wechsel_aus', same_initial_read), \
+                     patch.object(portal, 'sende_autohaus_benachrichtigung_mail') as mail, \
+                     patch.object(portal, 'add_benachrichtigung') as notice, \
+                     patch.object(portal, 'endkunden_status_mail_noetig', return_value=False), \
+                     ThreadPoolExecutor(max_workers=2) as workers:
+                    results = sorted(workers.map(post, targets))
+                self.assertEqual(results, [200, 200] if targets == (4, 4) else [200, 409])
+                current = portal.get_auftrag(job)['status']
+                self.assertIn(current, targets)
+                self.assertEqual(mail.call_count, int(current == 4))
+                self.assertEqual(notice.call_count, 1)
+                with closing(portal.get_db()) as db:
+                    done = db.execute('SELECT status FROM status_log WHERE auftrag_id=? AND status IN (2,4)', (job,)).fetchall()
+                    self.assertEqual([r['status'] for r in done], [current])
 
     def test_employee_shop_wish_respects_booking_eligibility_and_shared_capacity(self):
         self.hall_login()
