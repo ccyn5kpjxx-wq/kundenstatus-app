@@ -664,7 +664,8 @@
             <button type="button" class="verschieben-knopf aktuell" disabled>{{ meta['icon'] }} {{ meta['label'] }} — aktuell</button>
           </form>
           {% else %}
-          <form method="POST" action="{{ url_for('werkstatt_status_update', auftrag_id=auftrag['id'], neuer_status=ziel) }}">
+          <form method="POST" action="{{ url_for('werkstatt_status_update', auftrag_id=auftrag['id'], neuer_status=ziel) }}"
+                {% if ziel == 4 %}onsubmit="return window.confirm('Auftrag {{ auftrag.id }} wirklich fertig melden? Dabei kann eine Kundenbenachrichtigung ausgelöst werden.')"{% endif %}>
             <input type="hidden" name="next" value="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
             <button type="submit" class="verschieben-knopf k-{{ meta['key'] }}">{{ meta['icon'] }} {{ meta['label'] }}</button>
           </form>

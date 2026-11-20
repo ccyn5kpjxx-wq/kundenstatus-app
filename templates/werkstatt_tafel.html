@@ -580,10 +580,12 @@
       <div class="spalte-kopf">
         <span class="schritt-nr">{{ loop.index }}</span>
         <h2>{{ spalte.titel }}</h2>
-        <span class="zaehler">{{ (spalte.auftraege | length) + (spalte.get('reifenbuchungen', []) | length) }}</span>
+        <span class="zaehler">{{ spalte.auftraege | length }}</span>
       </div>
       <div class="spalte-hinweis">Dringendste zuerst ↓</div>
-      {% for termin in spalte.get('reifenbuchungen', []) %}
+      {% for auftrag in spalte.auftraege %}
+      {% if auftrag.get('ist_reifenanfrage') %}
+      {% set termin = auftrag %}
       <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="false">
         <div class="karte-nummernzeile">
           <strong class="auftragsart" style="display:inline-block; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftragsarten['reifenservice']['bg'] }}; color:{{ auftragsarten['reifenservice']['farbe'] }};">Reifenservice</strong>
@@ -593,12 +595,11 @@
         </div>
         <div class="fahrzeug">{{ termin.fahrzeug or 'Reifenservice' }}</div>
         <div class="arbeit">{{ termin.kunde_name or 'Kunde noch offen' }}<br>{{ termin.leistungen|join(' · ') }}</div>
-        <div class="chips"><span class="chip">Termin: <strong>{{ termin.termin_label }}{% if termin.zeit %} Uhr{% endif %}</strong></span></div>
+        <div class="chips"><span class="chip">Terminwunsch: <strong>{{ termin.termin_label }}{% if termin.zeit %} Uhr{% endif %}</strong></span></div>
         <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
         {% if session.admin %}<a class="schnell-knopf" style="display:block; text-align:center; text-decoration:none;" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Im Büro öffnen →</a>{% endif %}
       </article>
-      {% endfor %}
-      {% for auftrag in spalte.auftraege %}
+      {% else %}
       <div class="auftragskarte">
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}{% if auftrag['leistungsart'] == 'inspektion' %}#inspektionscheckliste{% endif %}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
@@ -664,7 +665,7 @@
           {% endif %}
           {% if auftrag['status'] == 3 %}
             {% if auftrag['fertig_datum'] %}
-              <span class="chip">Fertig bis: <strong>{{ auftrag['fertig_datum'] }}</strong></span>
+              <span class="chip">Fertig bis: <strong>{{ auftrag['fertig_datum'] }}{% if auftrag.get('fertig_uhrzeit') %} · {{ auftrag['fertig_uhrzeit'] }} Uhr{% endif %}</strong></span>
             {% else %}
               <span class="chip" style="background:#fff0d7;color:#784900;">Fertigtermin fehlt</span>
             {% endif %}
@@ -672,7 +673,7 @@
           {% if auftrag['status'] >= 3 %}
             {% if auftrag['abholtermin'] %}
               <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}{% if auftrag['abhol_uhrzeit'] %} · {{ auftrag['abhol_uhrzeit'] }} Uhr{% endif %}</strong></span>
-            {% else %}
+            {% elif auftrag['status'] == 3 %}
               <span class="chip" style="background:#fff0d7;color:#784900;">{{ auftrag['abholung_label'] or 'Rückgabe' }} noch nicht vereinbart</span>
             {% endif %}
           {% endif %}
@@ -711,8 +712,9 @@
           {% if auftrag.get('tafel_etikett') %}<a href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="A5-Etikett für Auftrag {{ auftrag.id }} drucken">A5-Etikett drucken</a>{% endif %}
         </div>
       </div>
+      {% endif %}
       {% else %}
-      {% if not spalte.get('reifenbuchungen') %}<div class="leer-hinweis">Nichts in dieser Spalte.</div>{% endif %}
+      <div class="leer-hinweis">Nichts in dieser Spalte.</div>
       {% endfor %}
     </div>
     {% if not loop.last %}
@@ -940,9 +942,16 @@
       // Auftrag verschieben (gemeinsam fuer Knopf + Drag&Drop)
       const csrf = document.querySelector('meta[name="csrf-token"]').content;
       let wechselLaeuft = false;
-      const statusSetzen = async (auftragId, zielStatus) => {
+      const statusSetzen = async (auftragId, zielStatus, knopf) => {
         if (wechselLaeuft) return;
+        if (Number(zielStatus) === 4 && !window.confirm(
+          'Auftrag ' + auftragId + ' wirklich fertig melden? Dabei kann eine Kundenbenachrichtigung ausgelöst werden.'
+        )) return;
         wechselLaeuft = true;
+        if (knopf) {
+          knopf.disabled = true;
+          knopf.textContent = 'Wird verschoben …';
+        }
         try {
           const resp = await fetch(`/werkstatt/auftrag/${auftragId}/status/${zielStatus}`, {
             method: 'POST',
@@ -958,28 +967,11 @@
       };
 
       // Schnell-Knoepfe auf den Karten.
-      // "Fertig melden" (Ziel 4) loest Kunden-Mail/WhatsApp aus -> Zwei-Schritt-Bestaetigung:
-      // erster Tipp fragt nach, erst der zweite Tipp fuehrt aus (nach 4 s faellt der Knopf zurueck).
       document.querySelectorAll('[data-status-knopf]').forEach((knopf) => {
-        const originalText = knopf.textContent;
-        let bestaetigungTimer = null;
         knopf.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (knopf.dataset.ziel === '4' && knopf.dataset.bestaetigt !== '1') {
-            knopf.dataset.bestaetigt = '1';
-            knopf.textContent = 'Wirklich fertig? Nochmal tippen';
-            clearTimeout(bestaetigungTimer);
-            bestaetigungTimer = setTimeout(() => {
-              delete knopf.dataset.bestaetigt;
-              knopf.textContent = originalText;
-            }, 4000);
-            return;
-          }
-          clearTimeout(bestaetigungTimer);
-          knopf.disabled = true;
-          knopf.textContent = 'Wird verschoben …';
-          statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel);
+          statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel, knopf);
         });
       });
 

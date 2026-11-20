@@ -360,6 +360,9 @@ def main():
         )
 
         # Statuswechsel: fetch-Weg (wie Tafel-Knopf/Drag&Drop) auf "Fertig"
+        detail_html = client.get(f"/werkstatt/auftrag/{auftrag_id}").get_data(as_text=True)
+        check("Fertig-Formular im Werkstattauftrag fragt nach Bestätigung",
+              f"onsubmit=\"return window.confirm('Auftrag {auftrag_id} wirklich fertig melden?" in detail_html)
         with client.session_transaction() as session:
             csrf = session.get("csrf_token")
         response = client.post(

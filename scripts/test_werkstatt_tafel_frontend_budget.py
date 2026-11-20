@@ -36,7 +36,9 @@ def render_board():
                  fahrzeug='Synthetic vehicle', kennzeichen='TEST-071', auftragsart_label='Lackierung')
     return env.get_template('werkstatt_tafel.html').render(
         session={}, server_now_iso='2026-10-29T12:00:00+01:00', stand_label='12:00', datum_label='Synthetic',
-        spalten=[dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order])])
+        spalten=[dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order]),
+                 dict(key='in_arbeit', titel='In Arbeit', ziel_status=3, auftraege=[dict(order, id=72, status=3)]),
+                 dict(key='fertig', titel='Fertig', ziel_status=4, auftraege=[])])
 
 
 class BoardFrontendTests(unittest.TestCase):
@@ -70,7 +72,7 @@ class BoardFrontendTests(unittest.TestCase):
             env.globals['url_for'] = url_for
             html = ('<!doctype html><meta charset="utf-8"><button data-team-oeffnen>Team</button>'
                     '<link rel="stylesheet" href="/static/werkstatt_team_showcase.css">'
-                    + env.get_template('_werkstatt_team_showcase.html').render()
+                    + env.get_template('_werkstatt_team_showcase.html').render(werkstatt_oeffentlich={'name': 'Testwerkstatt'})
                     + '<script defer src="/static/werkstatt_team_showcase.js"></script>')
 
         def intercept(route):
@@ -91,6 +93,8 @@ class BoardFrontendTests(unittest.TestCase):
                         route.fulfill(body=html, content_type='text/html')
                     else:
                         route.fulfill(body='<p>Fresh synthetic board</p>', content_type='text/html')
+            elif path == '/werkstatt/auftrag/72/status/4' and req.method == 'POST':
+                route.fulfill(json={'ok': True, 'status': 4})
             elif path.startswith('/static/'):
                 asset = (ROOT / path.lstrip('/')).resolve()
                 if ROOT / 'static' not in asset.parents or not asset.is_file():
@@ -123,6 +127,35 @@ class BoardFrontendTests(unittest.TestCase):
     def start_probe(self, page, state, *, advance=60001, count=1):
         page.clock.fast_forward(advance)
         self.wait_for(page, lambda: len(state['heads']) >= count)
+
+    def test_finish_requires_confirmation_from_button_and_drag(self):
+        for method in ('button', 'drag'):
+            with self.subTest(method=method):
+                page, state = self.open_board()
+                button = page.locator('[data-status-knopf][data-auftrag="72"]')
+                card = page.locator('.karte[data-auftrag="72"]')
+                target = page.locator('[data-ziel-status="4"]')
+                post = ('POST', '/werkstatt/auftrag/72/status/4')
+                prompts = []
+                def respond(dialog):
+                    prompts.append(dialog.message)
+                    if len(prompts) == 1:
+                        dialog.dismiss()
+                    else:
+                        dialog.accept()
+                page.on('dialog', respond)
+                for confirmed in (False, True):
+                    if method == 'button':
+                        button.click()
+                    else:
+                        card.drag_to(target)
+                    if confirmed:
+                        expect(page.get_by_text('Fresh synthetic board')).to_be_visible()
+                    else:
+                        expect(button).to_be_enabled()
+                    self.assertEqual(len(prompts), 2 if confirmed else 1)
+                    self.assertIn('Auftrag 72', prompts[-1])
+                    self.assertEqual(state['requests'].count(post), int(confirmed))
 
     @staticmethod
     def visibility(page, hidden):

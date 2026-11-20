@@ -260,6 +260,12 @@ class ReifentermineTest(unittest.TestCase):
         for hour in range(7,14):
             self.assertEqual(self.book({'wunschzeit':f'{hour:02d}:00'}).status_code,302)
             leads.append(self.latest())
+        # Ein regulärer Werkstattauftrag liegt zwischen zwei Terminwünschen.
+        middle = portal.create_auftrag('intern', fahrzeug='Fahrzeug um 09:30', annahme_datum=self.day())
+        db = portal.get_db()
+        db.execute("UPDATE auftraege SET annahme_uhrzeit='09:30' WHERE id=?", (middle,))
+        db.commit()
+        db.close()
         portal.set_app_setting(portal.WERKSTATT_TAFEL_CODE_SETTING,'REIFEN-TAFEL-TEST')
         with self.client.session_transaction() as session:
             session['werkstatt_tafel']=portal.werkstatt_tafel_session_token()
@@ -274,11 +280,15 @@ class ReifentermineTest(unittest.TestCase):
             columns=render.call_args.kwargs['spalten']
             first=columns[0]
             self.assertEqual(first['key'],'angelegt')
-            projected={x['id'] for x in first['reifenbuchungen']}
+            projected={x['id'] for x in first['auftraege'] if x.get('ist_reifenanfrage')}
             self.assertTrue(all(x['id'] in projected for x in leads))
-            self.assertFalse(any(x.get('reifenbuchungen') for x in columns[1:]))
+            self.assertFalse(any(x.get('ist_reifenanfrage') for col in columns[1:] for x in col['auftraege']))
             first_column=response.text.split('class="spalte s-angelegt"',1)[1].split('class="fluss-pfeil"',1)[0]
-            self.assertIn('<span class="zaehler">'+str(len(first['auftraege'])+len(first['reifenbuchungen']))+'</span>',first_column)
+            self.assertIn('<span class="zaehler">'+str(len(first['auftraege']))+'</span>',first_column)
+            middle_pos = first_column.index(f'data-auftrag="{middle}"')
+            self.assertLess(first_column.index(f'data-reifenbuchung="{leads[2]["id"]}"'), middle_pos)
+            self.assertLess(middle_pos, first_column.index(f'data-reifenbuchung="{leads[3]["id"]}"'))
+            self.assertIn('Terminwunsch:', first_column)
             self.assertNotIn('Nichts in dieser Spalte.',first_column)
             self.assertNotIn('Neue Reifenbuchungen',response.text)
             for lead in leads:
@@ -298,6 +308,31 @@ class ReifentermineTest(unittest.TestCase):
         after={table:[tuple(row) for row in db.execute('SELECT * FROM '+table).fetchall()] for table in before}
         db.close()
         self.assertEqual(before,after)
+
+    def test_board_prioritizes_handover_for_finished_orders(self):
+        pickup_day = self.day()
+        finished = []
+        with closing(portal.get_db()) as db:
+            for transport, hour in (('standard', '15:41'), ('hol_und_bring', '15:00'),
+                                    ('standard', ''), ('hol_und_bring', None), ('standard', None)):
+                order_id = portal.create_auftrag(
+                    'intern', fahrzeug='Testfahrzeug', fertig_datum=self.day(-5),
+                    abholtermin=pickup_day if hour is not None else '', transport_art=transport, _db=db,
+                )
+                db.execute('UPDATE auftraege SET status=4, abhol_uhrzeit=? WHERE id=?', (hour or '', order_id))
+                finished.append(order_id)
+            db.commit()
+        self.login_admin()
+        _, context = self.render_context(self.client, '/werkstatt/tafel')
+        column = next(col for col in context['spalten'] if col['key'] == 'fertig')
+        plans = {a['id']: a['planung'] for a in column['auftraege'] if a['id'] in finished}
+        self.assertEqual(list(plans)[:3], [finished[1], finished[0], finished[2]])
+        self.assertIn('Rückbringung', plans[finished[1]]['hinweis'])
+        self.assertIn('15:00', plans[finished[1]]['date_text'])
+        self.assertIn('Abholung', plans[finished[0]]['hinweis'])
+        self.assertEqual(plans[finished[3]]['hinweis'], 'Rückbringung vereinbaren')
+        self.assertEqual(plans[finished[4]]['hinweis'], 'Abholung vereinbaren')
+        self.assertFalse(any('Fertig' in plan['hinweis'] for plan in plans.values()))
 
     def test_board_booking_becomes_one_scheduled_order_after_office_takeover(self):
         self.book()

@@ -17356,22 +17356,22 @@ def auftrag_planung_label(auftrag, feld):
     return feld
 
 
-def build_auftrag_planung(auftrag, reference_date=None):
+def build_auftrag_planung(auftrag, reference_date=None, *, nur_uebergabe=False):
     heute = reference_date or date.today()
     felder = (
-        ("annahme_datum", "secondary", 1),
-        ("start_datum", "primary", 2),
-        ("fertig_datum", "warning", 3),
-        ("abholtermin", "success", 4),
+        ("annahme_datum", "annahme_uhrzeit", "secondary", 1),
+        ("start_datum", "start_uhrzeit", "primary", 2),
+        ("fertig_datum", "fertig_uhrzeit", "warning", 3),
+        ("abholtermin", "abhol_uhrzeit", "success", 4),
     )
     events = []
-    for feld, farbe, priority in felder:
+    for feld, zeit_feld, farbe, priority in felder:
         event_date = auftrag.get(f"{feld}_obj")
-        if not event_date:
+        if not event_date or (nur_uebergabe and feld != "abholtermin"):
             continue
-        label = auftrag_planung_label(auftrag, feld)
+        label = auftrag["abholung_label"] if nur_uebergabe else auftrag_planung_label(auftrag, feld)
         datum_text = clean_text(auftrag.get(feld))
-        uhrzeit = clean_text(auftrag.get({"annahme_datum": "annahme_uhrzeit", "abholtermin": "abhol_uhrzeit"}.get(feld, "")))
+        uhrzeit = format_time_value(auftrag.get(zeit_feld))
         if uhrzeit:
             datum_text = f"{datum_text} · {uhrzeit} Uhr"
         events.append(
@@ -17379,6 +17379,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
                 "feld": feld,
                 "label": label,
                 "datum": event_date,
+                "uhrzeit": parse_time_value(uhrzeit),
                 "datum_text": datum_text,
                 "farbe": farbe,
                 "priority": priority,
@@ -17396,7 +17397,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
         "kunden_wunsch_annahme_datum"
     )
     kundenwunsch_datum = parse_date(kundenwunsch)
-    if kundenwunsch_datum and not auftrag.get("annahme_datum_obj"):
+    if kundenwunsch_datum and not auftrag.get("annahme_datum_obj") and not nur_uebergabe:
         kundenwunsch_text = format_date(kundenwunsch)
         events.append(
             {
@@ -17405,6 +17406,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
                     auftrag, "kunden_wunsch_annahme_datum"
                 ),
                 "datum": kundenwunsch_datum,
+                "uhrzeit": parse_time_value(auftrag["schaden_aufnahme"].get("kunden_wunsch_zeitfenster")),
                 "datum_text": kundenwunsch_text,
                 "farbe": "info",
                 "priority": 1,
@@ -17486,7 +17488,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
     else:
         sort_group = 5
         badge_farbe = "secondary"
-        hinweis = "Kein Termin gesetzt"
+        hinweis = f"{auftrag['abholung_label']} vereinbaren" if nur_uebergabe else "Kein Termin gesetzt"
         sort_days = 9999
         sort_date_ord = date.max.toordinal()
         badge = "Ohne Termin"
@@ -17516,6 +17518,7 @@ def build_auftrag_planung(auftrag, reference_date=None):
         "sort_group": sort_group,
         "sort_days": sort_days,
         "sort_date_ord": sort_date_ord,
+        "sort_uhrzeit": relevant["uhrzeit"] if relevant else "",
         "group_key": group_keys.get(sort_group, "empty"),
         "has_date_warning": date_warning,
         "is_week_relevant": is_week_relevant,
@@ -56797,6 +56800,8 @@ def werkstatt_tafel():
     ]
     from reifen_auftragsetikett import tafel_etikett_sichtbar
     for auftrag in auftraege:
+        if auftrag["status"] == 4:
+            auftrag["planung"] = build_auftrag_planung(auftrag, nur_uebergabe=True)
         auftrag["tafel_etikett"] = tafel_etikett_sichtbar(sys.modules[__name__], auftrag)
         if auftrag.get('quelle') == 'check24':
             intake = parse_schadenaufnahme_json(auftrag.get('schaden_aufnahme_json'))
@@ -56804,7 +56809,18 @@ def werkstatt_tafel():
             if start and end:
                 auftrag['check24_termin'] = f"{start[8:10]}.{start[5:7]}. · {start[11:16]}–{end[11:16]} Uhr"
     inspektionscheckliste.load_many(sys.modules[__name__], auftraege, admin=bool(session.get("admin")))
-    reifentermine = list_reifentermine()
+    for anfrage in list_reifentermine():
+        anfrage["ist_reifenanfrage"] = True
+        anfrage["status"] = 1
+        anfrage["planung"] = build_auftrag_planung({"schaden_aufnahme": {
+            "kunden_wunsch_annahme_datum": anfrage["datum_iso"],
+            "kunden_wunsch_zeitfenster": anfrage["zeit"],
+        }})
+        auftraege.append(anfrage)
+    auftraege.sort(key=lambda a: (
+        a["planung"]["sort_group"], a["planung"]["sort_date_ord"],
+        a["planung"]["sort_uhrzeit"] or "24:00",
+    ))
     spalten = (
         {
             "key": "angelegt",
@@ -56812,7 +56828,6 @@ def werkstatt_tafel():
             "icon": "📝",
             "ziel_status": 1,
             "auftraege": [a for a in auftraege if a["status"] == 1],
-            "reifenbuchungen": reifentermine,
         },
         {
             "key": "eingeplant",
@@ -56830,7 +56845,7 @@ def werkstatt_tafel():
         },
         {
             "key": "fertig",
-            "titel": "Fertig — wartet auf Abholung",
+            "titel": "Fertig — Abholung oder Rückbringung",
             "icon": "✅",
             "ziel_status": 4,
             "auftraege": [a for a in auftraege if a["status"] == 4],
@@ -56842,7 +56857,7 @@ def werkstatt_tafel():
     return render_template(
         "werkstatt_tafel.html",
         spalten=spalten,
-        anzahl=len(auftraege) + len(reifentermine),
+        anzahl=len(auftraege),
         stand_label=jetzt.strftime("%H:%M"),
         datum_label=f"{WOCHENTAGE[jetzt.weekday()]}, {jetzt.strftime(DATE_FMT)}",
         server_now_iso=jetzt.isoformat(timespec="seconds"),
