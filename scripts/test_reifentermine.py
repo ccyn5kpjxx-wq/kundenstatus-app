@@ -283,8 +283,8 @@ class ReifentermineTest(unittest.TestCase):
             projected={x['id'] for x in first['auftraege'] if x.get('ist_reifenanfrage')}
             self.assertTrue(all(x['id'] in projected for x in leads))
             self.assertFalse(any(x.get('ist_reifenanfrage') for col in columns[1:] for x in col['auftraege']))
-            first_column=response.text.split('class="spalte s-angelegt"',1)[1].split('class="fluss-pfeil"',1)[0]
-            self.assertIn('<span class="zaehler">'+str(len(first['auftraege']))+'</span>',first_column)
+            first_column=response.text.split('class="spalte s-angelegt"',1)[1].split('</section>',1)[0]
+            self.assertIn('data-tafel-anzahl="angelegt">'+str(len(first['auftraege']))+'</span>',first_column)
             middle_pos = first_column.index(f'data-auftrag="{middle}"')
             self.assertLess(first_column.index(f'data-reifenbuchung="{leads[2]["id"]}"'), middle_pos)
             self.assertLess(middle_pos, first_column.index(f'data-reifenbuchung="{leads[3]["id"]}"'))
@@ -345,7 +345,7 @@ class ReifentermineTest(unittest.TestCase):
         order_id=portal.reifenauftrag_aus_buchung(lead['id'])
         updated=self.client.get('/werkstatt/tafel')
         self.assertNotIn(marker,updated.text)
-        scheduled=updated.text.split('class="spalte s-eingeplant"',1)[1].split('class="fluss-pfeil"',1)[0]
+        scheduled=updated.text.split('class="spalte s-eingeplant"',1)[1].split('</section>',1)[0]
         self.assertEqual(len(re.findall(r'<a class="karte"[^>]*data-auftrag="'+str(order_id)+'"',scheduled)),1)
         self.assertEqual(portal.get_auftrag(order_id)['leistungsart'],'reifenservice')
 

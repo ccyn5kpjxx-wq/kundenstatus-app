@@ -10,531 +10,14 @@
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_team_showcase.css') }}">
   <script defer src="{{ url_for('static', filename='werkstatt_team_showcase.js') }}"></script>
-  <style>
-    /* Portal-Designsprache (siehe base.html) — helle Tafel im Look des Werkstatt-Cockpits */
-    :root {
-      --bg: #f3efe6;
-      --panel: #fffdf9;
-      --panel-soft: #f7f1e8;
-      --ink: #16202a;
-      --muted: #6f7a83;
-      --line: #ddd1c0;
-      --brand: #a23f2d;
-      --brand-dark: #7f2a1b;
-      --accent: #145d66;
-      --good: #1b7f53;
-      --warning: #cc8a16;
-      --danger: #d64545;
-      --secondary: #6f7a83;
-      --dark: #44505c;
-      --shadow: 0 16px 40px rgba(64, 47, 25, 0.12);
-      --radius: 22px;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background:
-        radial-gradient(circle at top left, rgba(162, 63, 45, 0.1), transparent 31%),
-        radial-gradient(circle at top right, rgba(20, 93, 102, 0.1), transparent 34%),
-        linear-gradient(180deg, rgba(247, 242, 234, 0.7) 0%, rgba(243, 239, 230, 0.84) 100%),
-        url("{{ url_for('static', filename='homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp') }}") center 38% / cover no-repeat fixed;
-      background-color: var(--bg);
-      color: var(--ink);
-      font-family: "DM Sans", sans-serif;
-      min-height: 100vh;
-    }
-
-    h1, h2, h3 { font-family: "Space Grotesk", sans-serif; letter-spacing: -0.02em; }
-
-    .topbar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: .35rem 1rem;
-      padding: clamp(.35rem, .9vw, .65rem) clamp(.6rem, 1.5vw, 1.2rem);
-      background: rgba(18, 30, 43, 0.94);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-      box-shadow: 0 12px 30px rgba(18, 30, 43, 0.18);
-      color: #fff;
-    }
-
-    .topbar .titel {
-      display: flex;
-      align-items: center;
-      gap: .8rem;
-      flex-shrink: 0;
-    }
-
-    .topbar img {
-      height: clamp(30px, 3.4vw, 42px);
-      filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.2));
-    }
-
-    .topbar h1 {
-      margin: 0;
-      font-size: clamp(1.1rem, 2.3vw, 1.7rem);
-      color: #fff;
-      white-space: nowrap;
-    }
-
-    .topbar h1 span { color: rgba(255, 255, 255, 0.6); font-weight: 500; }
-
-    .topbar .meta {
-      text-align: right;
-      color: rgba(255, 255, 255, 0.7);
-      font-size: clamp(.85rem, 1.4vw, 1rem);
-      line-height: 1.4;
-    }
-
-    .topbar .uhr {
-      color: #fff;
-      font-family: "Space Grotesk", sans-serif;
-      font-size: clamp(1.05rem, 1.9vw, 1.45rem);
-      font-weight: 700;
-    }
-
-    /* Wetter Mosbach – sitzt mittig in der dunklen Navbar */
-    .wetter {
-      display: flex;
-      align-items: center;
-      gap: clamp(.8rem, 1.8vw, 1.6rem);
-      color: rgba(255, 255, 255, 0.92);
-    }
-
-    .wetter[hidden] { display: none; }
-
-    .wetter-jetzt {
-      display: flex;
-      align-items: center;
-      gap: .55rem;
-    }
-
-    .wetter-ikon {
-      font-size: clamp(1.7rem, 3.2vw, 2.6rem);
-      line-height: 1;
-    }
-
-    .wetter-temp {
-      font-family: "Space Grotesk", sans-serif;
-      font-weight: 700;
-      font-size: clamp(1.15rem, 2.2vw, 1.7rem);
-      line-height: 1.1;
-    }
-
-    .wetter-ort {
-      font-size: clamp(.7rem, 1.2vw, .9rem);
-      color: rgba(255, 255, 255, 0.6);
-    }
-
-    .wetter-stunden {
-      display: flex;
-      gap: clamp(.4rem, 1vw, .8rem);
-    }
-
-    .wetter-std {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: .1rem;
-      padding: .3rem .6rem;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 12px;
-      min-width: 3.2em;
-    }
-
-    .wetter-std .zeit { font-size: clamp(.66rem, 1.1vw, .82rem); color: rgba(255, 255, 255, 0.6); }
-    .wetter-std .ikon { font-size: clamp(1rem, 1.8vw, 1.45rem); line-height: 1; }
-    .wetter-std .grad { font-size: clamp(.8rem, 1.3vw, 1rem); font-weight: 600; }
-    .wetter-std .regen { font-size: clamp(.6rem, 1vw, .76rem); color: #7fc7ff; white-space: nowrap; }
-
-    @media (max-width: 1180px) { .wetter-stunden { display: none; } }
-    @media (max-width: 820px) { .wetter { display: none; } }
-
-    /* Flussdiagramm: Spalten von links nach rechts, Pfeile dazwischen */
-    .board {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr);
-      gap: clamp(.3rem, .6vw, .55rem);
-      padding: clamp(.45rem, .9vw, .8rem) clamp(.5rem, 1vw, .9rem) 2rem;
-      align-items: start;
-    }
-
-    .fluss-pfeil {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-top: clamp(1.8rem, 3.5vw, 2.6rem);
-      color: var(--brand);
-      font-size: clamp(1rem, 1.8vw, 1.4rem);
-      font-weight: 700;
-      user-select: none;
-    }
-
-    @media (max-width: 980px) {
-      .board { grid-template-columns: 1fr; }
-      .fluss-pfeil { margin: 0; transform: rotate(90deg); font-size: 1.6rem; }
-    }
-
-    .spalte {
-      background: rgba(255, 253, 249, 0.95);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      -webkit-backdrop-filter: blur(10px) saturate(.82);
-      backdrop-filter: blur(10px) saturate(.82);
-      padding: clamp(.4rem, .7vw, .65rem);
-      min-height: 22vh;
-      min-width: 0;
-    }
-
-    .spalte.s-angelegt { border-top: 5px solid var(--muted); }
-    .spalte.s-eingeplant { border-top: 5px solid var(--accent); }
-    .spalte.s-geplant { border-top: 5px solid var(--accent); }
-    .spalte.s-in_arbeit { border-top: 5px solid var(--warning); }
-    .spalte.s-fertig { border-top: 5px solid var(--good); }
-
-    .spalte-kopf {
-      display: flex;
-      align-items: center;
-      gap: .6rem;
-      margin-bottom: .25rem;
-      padding: 0 .25rem;
-    }
-
-    .schritt-nr {
-      flex: 0 0 auto;
-      width: 1.7em;
-      height: 1.7em;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 999px;
-      color: #fff;
-      font-family: "Space Grotesk", sans-serif;
-      font-weight: 700;
-      font-size: clamp(.78rem, 1.1vw, .95rem);
-    }
-
-    .s-angelegt .schritt-nr { background: var(--muted); }
-    .s-eingeplant .schritt-nr { background: var(--accent); }
-    .s-geplant .schritt-nr { background: var(--accent); }
-    .s-in_arbeit .schritt-nr { background: var(--warning); }
-    .s-fertig .schritt-nr { background: var(--good); }
-
-    .spalte-kopf h2 {
-      margin: 0;
-      flex: 1;
-      font-size: clamp(.82rem, 1.2vw, 1.02rem);
-    }
-
-    .spalte-kopf .zaehler {
-      min-width: 2.2em;
-      text-align: center;
-      background: var(--panel-soft);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: .2em .55em;
-      font-weight: 700;
-      font-size: clamp(.78rem, 1.1vw, .95rem);
-    }
-
-    .spalte-hinweis {
-      color: var(--muted);
-      font-size: clamp(.75rem, 1.2vw, .9rem);
-      margin: 0 .25rem clamp(.6rem, 1vw, .9rem) 2.85em;
-    }
-
-    .karte {
-      display: block;
-      text-decoration: none;
-      color: var(--ink);
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: clamp(.4rem, .75vw, .65rem);
-      margin-bottom: clamp(.35rem, .6vw, .55rem);
-      overflow-wrap: anywhere;
-      transition: transform .12s ease, border-color .12s ease, box-shadow .12s ease;
-    }
-
-    .karte:active, .karte:hover {
-      transform: translateY(-2px);
-      border-color: var(--accent);
-      box-shadow: 0 10px 24px rgba(64, 47, 25, 0.14);
-    }
-
-    .karte.dragging { opacity: .45; }
-    .auftragskarte .karte { margin-bottom: 0; border-radius: 16px 16px 0 0; }
-    .karten-druckaktionen {
-      display: flex; flex-wrap: wrap; gap: 1px; margin-bottom: clamp(.35rem, .6vw, .55rem);
-      border: 1px solid var(--line); border-top: 0; border-radius: 0 0 16px 16px;
-      overflow: hidden; background: var(--line);
-    }
-    .karten-druckaktionen a {
-      flex: 1 1 9rem; display: grid; place-items: center; min-height: 44px; padding: .4rem;
-      color: var(--accent); background: #fff; text-align: center; font-weight: 700;
-    }
-    .karten-druckaktionen a:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
-
-    .spalte.drop-ziel {
-      border-color: var(--accent);
-      box-shadow: inset 0 0 0 2px var(--accent), var(--shadow);
-    }
-
-    .karte-nummernzeile {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: .6rem;
-      margin-bottom: .55rem;
-    }
-
-    .karte-nummernzeile .auftragsnummer {
-      margin-left: auto;
-      color: #000;
-      font-size: clamp(1.65rem, 2.4vw, 2.1rem);
-      font-weight: 900;
-      line-height: 1;
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap;
-    }
-
-    .karte-kopf {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: .6rem;
-      flex-wrap: wrap;
-      margin-bottom: .35rem;
-    }
-
-    .kennzeichen {
-      display: inline-block;
-      background: #fff;
-      color: #111;
-      font-family: "Space Grotesk", sans-serif;
-      font-weight: 700;
-      font-size: clamp(.85rem, 1.3vw, 1.1rem);
-      letter-spacing: .04em;
-      border: 1.5px solid #1d293a;
-      border-left: 10px solid #1d4ed8;
-      border-radius: 6px;
-      padding: .1em .5em;
-      white-space: nowrap;
-    }
-
-    .kennzeichen.leer {
-      color: var(--muted);
-      border-color: var(--line);
-      border-left-color: var(--line);
-      font-size: clamp(.9rem, 1.5vw, 1.15rem);
-    }
-
-    .badge {
-      display: inline-block;
-      border-radius: 999px;
-      padding: .25em .7em;
-      font-size: clamp(.78rem, 1.3vw, 1rem);
-      font-weight: 700;
-      white-space: nowrap;
-      color: #fff;
-    }
-
-    .badge.b-danger { background: var(--danger); }
-    .neu-badge { flex:0 0 auto; display:inline-flex; align-items:center; justify-content:center; min-width:1.55rem; height:1.55rem; background:var(--danger); color:#fff; border-radius:999px; font-weight:800; font-size:.95rem; padding:0 .4rem; box-shadow:0 1px 4px rgba(0,0,0,.25); }
-    .badge.b-success { background: var(--good); }
-    .badge.b-primary { background: var(--accent); }
-    .badge.b-warning { background: var(--warning); }
-    .badge.b-info { background: var(--accent); }
-    .badge.b-secondary { background: var(--secondary); }
-    .badge.b-dark { background: var(--dark); }
-
-    .fahrzeug {
-      font-weight: 700;
-      font-size: clamp(.82rem, 1.15vw, 1.02rem);
-      margin-bottom: .2rem;
-    }
-
-    .arbeit {
-      color: var(--muted);
-      font-size: clamp(.74rem, 1vw, .88rem);
-      line-height: 1.4;
-      margin-bottom: .4rem;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-
-    .karte[data-reifenbuchung] .arbeit { display: block; }
-
-    .chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: .35rem;
-    }
-
-    .chip {
-      background: var(--panel-soft);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--muted);
-      padding: .14em .5em;
-      font-size: clamp(.8rem, .95vw, .88rem);
-      white-space: nowrap;
-    }
-
-    .chip strong { color: var(--ink); font-weight: 600; }
-
-    .schnell-knopf {
-      display: block;
-      width: 100%;
-      margin-top: .4rem;
-      border: 1.5px solid var(--accent);
-      background: rgba(20, 93, 102, .07);
-      color: var(--accent);
-      border-radius: 12px;
-      padding: .4em .65em;
-      font-family: inherit;
-      font-weight: 700;
-      font-size: clamp(.74rem, 1vw, .88rem);
-      cursor: pointer;
-    }
-
-    .schnell-knopf.fertig {
-      border-color: var(--good);
-      background: rgba(27, 127, 83, .07);
-      color: var(--good);
-    }
-
-    /* Dezenter Rueckweg auf Fertig-Karten (Drag&Drop feuert auf Touch nicht) */
-    .schnell-knopf.zurueck {
-      border: 1.5px dashed var(--line);
-      background: rgba(0, 0, 0, .03);
-      color: var(--muted);
-      font-weight: 600;
-    }
-
-    .schnell-knopf:active { transform: scale(.98); }
-    .schnell-knopf:disabled { opacity: .55; cursor: wait; }
-
-    /* Produktionsschritte (Vorarbeit -> Karosserie -> Lackierung -> Finish) auf der In-Arbeit-Karte */
-    /* Touch-Ziele: keine Luecken (gap) zwischen den Knoepfen — Tipp daneben darf nicht
-       auf den umschliessenden Karten-Link durchschlagen; Abstand kommt vom Button-Padding. */
-    .prod-schritte {
-      display: flex;
-      align-items: stretch;
-      gap: 0;
-      margin-top: .5rem;
-    }
-    .prod-knopf {
-      flex: 1 1 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: .1rem;
-      min-height: 44px;
-      border: 1.4px solid rgba(0, 0, 0, .14);
-      background: rgba(0, 0, 0, .02);
-      color: var(--muted);
-      border-radius: 10px;
-      padding: .3rem .18rem;
-      font-family: inherit;
-      font-weight: 700;
-      font-size: clamp(.8rem, 1vw, .9rem);
-      line-height: 1.05;
-      cursor: pointer;
-    }
-    .prod-knopf .prod-punkt { font-size: .95em; }
-    .prod-knopf.is-erledigt { border-color: var(--good); background: rgba(27, 127, 83, .08); color: var(--good); }
-    .prod-knopf.is-aktiv { border-color: var(--accent); background: rgba(20, 93, 102, .12); color: var(--accent); }
-    .prod-knopf:active { transform: scale(.97); }
-    .prod-knopf:disabled { opacity: .55; cursor: wait; }
-    .prod-pfeil { align-self: center; color: var(--muted); font-size: .72rem; padding: 0 .1rem; pointer-events: none; }
-
-    /* Einklappbarer Schritt-Bereich: Karte bleibt schlank, Stepper erst beim Ausklappen */
-    .prod-box { margin-top: .5rem; }
-    .prod-schritte[hidden] { display: none; }
-    .prod-toggle {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: .4rem;
-      width: 100%;
-      border: 1.2px dashed rgba(0, 0, 0, .2);
-      background: rgba(0, 0, 0, .015);
-      color: var(--muted);
-      border-radius: 10px;
-      padding: .34rem .6rem;
-      font-family: inherit;
-      font-weight: 700;
-      font-size: clamp(.66rem, .9vw, .78rem);
-      cursor: pointer;
-    }
-    .prod-toggle strong { color: var(--accent); }
-    .prod-toggle .prod-chevron { transition: transform .15s ease; font-size: .82em; }
-    .prod-toggle[aria-expanded="true"] { border-style: solid; border-color: var(--accent); color: var(--accent); }
-    .prod-toggle[aria-expanded="true"] .prod-chevron { transform: rotate(180deg); }
-
-    .leer-hinweis {
-      color: var(--muted);
-      text-align: center;
-      padding: 1.6rem .5rem;
-      font-size: clamp(.9rem, 1.5vw, 1.1rem);
-    }
-
-    .toast-leiste {
-      position: fixed;
-      top: .8rem;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 50;
-      display: grid;
-      gap: .4rem;
-      max-width: min(92vw, 560px);
-    }
-
-    .toast-leiste .toast {
-      background: var(--panel);
-      border: 1.5px solid var(--good);
-      color: var(--ink);
-      border-radius: 14px;
-      padding: .6rem 1rem;
-      font-weight: 600;
-      box-shadow: var(--shadow);
-    }
-
-    .toast-leiste .toast.t-danger, .toast-leiste .toast.t-warning { border-color: var(--warning); }
-
-    footer {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      display: flex;
-      justify-content: space-between;
-      gap: 1rem;
-      padding: .4rem 1.2rem;
-      background: rgba(247, 241, 232, .95);
-      border-top: 1px solid var(--line);
-      color: var(--muted);
-      font-size: .85rem;
-    }
-
-    footer a { color: var(--muted); }
-  </style>
-  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_legacy.css') }}?v=farben-2" media="screen">
-  <link rel="stylesheet" href="{{ url_for('static', filename='werkstatt_theme.css') }}?v=farben-2" media="screen">
+  <link rel="stylesheet" href="{{ static_asset_url('werkstatt_tafel.css') }}">
+  <script defer src="{{ static_asset_url('werkstatt_tafel_suche.js') }}"></script>
 </head>
-<body class="ws-legacy ws-legacy-tafel">
-  <div class="topbar">
+<body>
+  <a class="sprunglink" href="#auftraege">Zu den Aufträgen</a>
+  <header class="topbar">
     <div class="titel">
-      <img src="{{ static_asset_url('logo-nav-192.webp') }}" width="192" height="128" style="width:auto" alt="Logo">
+      <img src="{{ static_asset_url('logo-nav-192.webp') }}" width="192" height="128" alt="Gärtner Karosserie &amp; Lack">
       <h1>Werkstatt-Tafel</h1>
     </div>
     <div class="wetter" data-wetter hidden>
@@ -547,21 +30,38 @@
       </div>
       <div class="wetter-stunden" data-w-stunden></div>
     </div>
-    <a href="{{ url_for('assistent.page') }}" title="Persönlichen Werkstatt-Assistenten öffnen" style="background:#12685f; border:1px solid #65c9b8; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; white-space:nowrap; align-self:center; text-decoration:none;">Avatar-Assistent</a>
     <div class="meta">
       <div class="uhr" data-uhr data-server-now="{{ server_now_iso }}">{{ stand_label }}</div>
       <div data-datum>{{ datum_label }}</div>
     </div>
-    <a href="{{ url_for('werkstatt_auftrag_anlegen') }}" data-auftrag-anlegen title="Fahrzeug direkt in der Werkstatt annehmen" style="background:#1b7f53; border:1px solid #55c792; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:800; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">＋ Anlegen</a>
-    <a href="{{ url_for('werkstatt_abwesenheit') }}" title="Abwesenheit / Urlaub beantragen" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🌴 Abwesenheit</a>
-    <a href="{{ url_for('werkstatt_aufgaben') }}" title="Tagesaufgaben der Werkstatt" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">📋 Aufgaben</a>
-    <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer" title="PPG LINQ DigiMatch-Messungen öffnen – Anmeldung falls erforderlich" style="background:#087fae; border:1px solid #54c0e6; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center; text-decoration:none;">🎨 PPG-Messungen</a>
-    <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten" style="background:#a23f2d; border:1px solid #df7764; color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:700; cursor:pointer; white-space:nowrap; align-self:center;">👥 Unser Team</button>
-    <button type="button" data-vollbild title="Vollbild ein/aus" style="background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22); color:#fff; border-radius:12px; padding:.55rem .95rem; font-size:clamp(.78rem,1.3vw,.95rem); font-weight:600; cursor:pointer; white-space:nowrap; align-self:center;">⛶ Vollbild</button>
-    {% if session.admin %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}
-    {% if session.admin %}<a class="ws-back" href="{{ url_for('check24.index') }}">CHECK24{% if check24_review_count %} · {{ check24_review_count }} prüfen{% endif %}</a>{% endif %}
+  </header>
+  <div class="werkzeuge">
+    <div role="search" class="tafel-suche">
+      <label class="nur-lesbar" for="tafel-suche">Auftragsnummer, Kennzeichen oder Fahrzeug suchen</label>
+      <span class="suchsymbol" aria-hidden="true"></span>
+      <input type="search" id="tafel-suche" data-tafel-suche autocomplete="off" placeholder="Nr., Kennzeichen oder Fahrzeug">
+      <button type="button" data-tafel-reset aria-label="Suche löschen und alle Aufträge anzeigen" hidden>×</button>
+    </div>
+    <span data-tafel-treffer role="status" class="suchstand"></span>
+    <nav class="aktionen" aria-label="Werkstattaktionen">
+      <a class="anlegen" href="{{ url_for('werkstatt_auftrag_anlegen') }}" data-auftrag-anlegen title="Fahrzeug direkt in der Werkstatt annehmen">＋ Anlegen</a>
+      <a href="{{ url_for('werkstatt_aufgaben') }}">Aufgaben</a>
+      <button type="button" data-team-oeffnen title="Teamvorstellung jetzt starten">Unser Team</button>
+      <details class="werkzeugmenu">
+        <summary>Weitere <span aria-hidden="true">▾</span></summary>
+        <div class="menueinhalt">
+          <button type="button" data-vollbild>Vollbild</button>
+          <a href="{{ url_for('werkstatt_abwesenheit') }}">Abwesenheit</a>
+          <a href="{{ url_for('assistent.page') }}">Avatar-Assistent</a>
+          <a href="https://emea.ppglinq.com/rapid-match" target="_blank" rel="noopener noreferrer">PPG-Messungen</a>
+          {% if session.admin %}
+          <a href="/admin/cockpit">Werkstatt-Cockpit</a>
+          <a href="{{ url_for('check24.index') }}">CHECK24{% if check24_review_count %} · {{ check24_review_count }} prüfen{% endif %}</a>
+          {% endif %}
+        </div>
+      </details>
+    </nav>
   </div>
-
   {% include '_werkstatt_team_showcase.html' %}
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -574,21 +74,25 @@
     {% endif %}
   {% endwith %}
 
-  <div class="board">
+  {% set phasen = {'angelegt': 'Angelegt', 'eingeplant': 'Eingeplant', 'in_arbeit': 'In Arbeit', 'fertig': 'Fertig'} %}
+  <nav class="phasenwahl" aria-label="Direkt zum Auftragsstatus">
     {% for spalte in spalten %}
-    <div class="spalte s-{{ spalte.key }}" data-ziel-status="{{ spalte.ziel_status }}">
+    <a href="#phase-{{ spalte.key }}" class="s-{{ spalte.key }}">{{ phasen.get(spalte.key, spalte.titel) }} <span data-tafel-anzahl="{{ spalte.key }}">{{ spalte.auftraege|length }}</span></a>
+    {% endfor %}
+  </nav>
+  <main class="board" id="auftraege" tabindex="-1" aria-label="Werkstattaufträge">
+    {% for spalte in spalten %}
+    <section class="spalte s-{{ spalte.key }}" id="phase-{{ spalte.key }}" tabindex="-1" data-tafel-spalte="{{ spalte.key }}" data-ziel-status="{{ spalte.ziel_status }}" aria-labelledby="titel-{{ spalte.key }}">
       <div class="spalte-kopf">
-        <span class="schritt-nr">{{ loop.index }}</span>
-        <h2>{{ spalte.titel }}</h2>
-        <span class="zaehler">{{ spalte.auftraege | length }}</span>
+        <h2 id="titel-{{ spalte.key }}">{{ phasen.get(spalte.key, spalte.titel) }}</h2>
+        <span class="zaehler" data-tafel-anzahl="{{ spalte.key }}">{{ spalte.auftraege|length }}</span>
       </div>
-      <div class="spalte-hinweis">Dringendste zuerst ↓</div>
       {% for auftrag in spalte.auftraege %}
       {% if auftrag.get('ist_reifenanfrage') %}
       {% set termin = auftrag %}
-      <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="false">
+      <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="false" data-suchkarte data-suchnummer="" data-suchkennzeichen="{{ termin.kennzeichen or '' }}" data-suchfahrzeug="{{ termin.fahrzeug or '' }}">
         <div class="karte-nummernzeile">
-          <strong class="auftragsart" style="display:inline-block; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftragsarten['reifenservice']['bg'] }}; color:{{ auftragsarten['reifenservice']['farbe'] }};">Reifenservice</strong>
+          <strong class="auftragsart" style="--art-bg: {{ auftragsarten['reifenservice']['bg'] }}; --art-farbe: {{ auftragsarten['reifenservice']['farbe'] }};">Reifenservice</strong>
         </div>
         <div class="karte-kopf">
           {% if termin.kennzeichen %}<span class="kennzeichen">{{ termin.kennzeichen }}</span>{% else %}<span class="kennzeichen leer">ohne Kennzeichen</span>{% endif %}
@@ -596,20 +100,21 @@
         <div class="fahrzeug">{{ termin.fahrzeug or 'Reifenservice' }}</div>
         <div class="arbeit">{{ termin.kunde_name or 'Kunde noch offen' }}<br>{{ termin.leistungen|join(' · ') }}</div>
         <div class="chips"><span class="chip">Terminwunsch: <strong>{{ termin.termin_label }}{% if termin.zeit %} Uhr{% endif %}</strong></span></div>
-        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
+        <div class="buero-hinweis">Wird vom Büro geprüft &amp; eingeplant</div>
         {% if session.admin %}<a class="schnell-knopf" style="display:block; text-align:center; text-decoration:none;" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Im Büro öffnen →</a>{% endif %}
       </article>
       {% else %}
-      <div class="auftragskarte">
+      <article class="auftragskarte" data-suchkarte data-suchnummer="{{ auftrag.id }}" data-suchkennzeichen="{{ auftrag.kennzeichen or '' }}" data-suchfahrzeug="{{ auftrag.fahrzeug or '' }}">
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}{% if auftrag['leistungsart'] == 'inspektion' %}#inspektionscheckliste{% endif %}"
          draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-nummernzeile">
-          <strong class="auftragsart" style="display:inline-block; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</strong>
+          <strong class="auftragsnummer" aria-label="Auftragsnummer {{ auftrag['id'] }}"><span aria-hidden="true">#</span>{{ auftrag['id'] }}</strong>
+          <strong class="auftragsart" style="--art-bg: {{ auftrag['auftragsart_bg'] }}; --art-farbe: {{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</strong>
           {% if auftrag['werkstatt_neu'] %}
             <span class="neu-badge" title="Neu vom Autohaus eingeplant">Neu</span>
           {% endif %}
-          <strong class="auftragsnummer" aria-label="Auftragsnummer {{ auftrag['id'] }}">{{ auftrag['id'] }}</strong>
         </div>
+        <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
         <div class="karte-kopf">
           {% if auftrag['kennzeichen'] %}
             <span class="kennzeichen">{{ auftrag['kennzeichen'] }}</span>
@@ -622,9 +127,8 @@
             </span>
           {% endif %}
         </div>
-        <div class="fahrzeug">{{ auftrag['fahrzeug'] }}</div>
         {% if auftrag.get('check24_termin') %}
-        <div data-check24-termin style="margin:.5rem 0;padding:.55rem .65rem;border-radius:9px;background:#e4f3f1;color:#145d66;font-weight:800;">
+        <div data-check24-termin class="montagezeit">
           {% if auftrag.get('annahme_uhrzeit') %}<div>Anlieferung: {{ auftrag['annahme_datum'] }} · {{ auftrag['annahme_uhrzeit'] }} Uhr</div>{% endif %}
           <div>Montage: {{ auftrag['check24_termin'] }}</div>
         </div>
@@ -660,26 +164,31 @@
           {% if auftrag['versicherung_id'] %}
             <span class="chip">🛡️ {{ auftrag['schadenart_label'] or 'Versicherung' }} · {{ auftrag['schaden_station_label'] }}</span>
           {% endif %}
-          {% if auftrag['status'] <= 2 and auftrag['annahme_datum'] %}
+          {% if auftrag['status'] <= 2 and auftrag['annahme_datum'] and not (auftrag.get('check24_termin') and auftrag.get('annahme_uhrzeit')) %}
             <span class="chip">{{ auftrag['annahme_label'] }}: <strong>{{ auftrag['annahme_datum'] }}{% if auftrag.get('annahme_uhrzeit') %} · {{ auftrag['annahme_uhrzeit'] }} Uhr{% endif %}</strong></span>
+          {% endif %}
+          {% if auftrag['status'] in (2, 3) and auftrag.get('start_datum') and not auftrag.get('check24_termin') %}
+            <span class="chip">Arbeitsbeginn: <strong>{{ auftrag['start_datum'] }}{% if auftrag.get('start_uhrzeit') %} · {{ auftrag['start_uhrzeit'] }} Uhr{% endif %}</strong></span>
           {% endif %}
           {% if auftrag['status'] == 3 %}
             {% if auftrag['fertig_datum'] %}
               <span class="chip">Fertig bis: <strong>{{ auftrag['fertig_datum'] }}{% if auftrag.get('fertig_uhrzeit') %} · {{ auftrag['fertig_uhrzeit'] }} Uhr{% endif %}</strong></span>
             {% else %}
-              <span class="chip" style="background:#fff0d7;color:#784900;">Fertigtermin fehlt</span>
+              <span class="chip hinweis">Fertigtermin fehlt</span>
             {% endif %}
           {% endif %}
           {% if auftrag['status'] >= 3 %}
             {% if auftrag['abholtermin'] %}
               <span class="chip">{{ auftrag['abholung_label'] }}: <strong>{{ auftrag['abholtermin'] }}{% if auftrag['abhol_uhrzeit'] %} · {{ auftrag['abhol_uhrzeit'] }} Uhr{% endif %}</strong></span>
             {% elif auftrag['status'] == 3 %}
-              <span class="chip" style="background:#fff0d7;color:#784900;">{{ auftrag['abholung_label'] or 'Rückgabe' }} noch nicht vereinbart</span>
+              <span class="chip hinweis">{{ auftrag['abholung_label'] or 'Rückgabe' }} noch nicht vereinbart</span>
             {% endif %}
           {% endif %}
         </div>
+      </a>
+      <div class="karten-aktionen">
         {% if auftrag['status'] == 1 %}
-        <div class="buero-hinweis" style="margin-top:.6rem; padding:.5rem .7rem; border-radius:10px; background:rgba(0,0,0,.05); color:#6f7a83; font-size:.85rem; font-weight:600; text-align:center;">🔒 Wird vom Büro geprüft &amp; eingeplant</div>
+        <div class="buero-hinweis">Wird vom Büro geprüft &amp; eingeplant</div>
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
@@ -706,30 +215,40 @@
         {% elif auftrag['status'] == 4 %}
         <button type="button" class="schnell-knopf zurueck" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">↩ Zurück in Arbeit</button>
         {% endif %}
-      </a>
+      </div>
         <div class="karten-druckaktionen">
           <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="Auftrag {{ auftrag.id }} ausdrucken">Auftrag ausdrucken</a>
           {% if auftrag.get('tafel_etikett') %}<a href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="A5-Etikett für Auftrag {{ auftrag.id }} drucken">A5-Etikett drucken</a>{% endif %}
         </div>
-      </div>
+      </article>
       {% endif %}
       {% else %}
       <div class="leer-hinweis">Nichts in dieser Spalte.</div>
       {% endfor %}
-    </div>
-    {% if not loop.last %}
-    <div class="fluss-pfeil" aria-hidden="true">➜</div>
-    {% endif %}
+      {% if spalte.auftraege %}<div class="leer-hinweis" data-tafel-leer hidden>Kein passender Auftrag.</div>{% endif %}
+    </section>
     {% endfor %}
-  </div>
+  </main>
 
   <footer>
-    <span>Aufträge wandern von links nach rechts · Aktualisiert sich automatisch jede Minute · Stand <span data-stand>{{ stand_label }}</span> Uhr · <span data-wake-status>Bildschirm wird wach gehalten</span></span>
+    <span>Aktualisierung jede Minute · Stand <span data-stand>{{ stand_label }}</span> Uhr · <span data-wake-status>Bildschirm wird wach gehalten</span></span>
     <a href="{{ url_for('werkstatt_logout') }}">Abmelden</a>
   </footer>
 
   <script>
     (() => {
+      const menu = document.querySelector('.werkzeugmenu');
+      document.addEventListener('click', (event) => {
+        if (menu.open && (!menu.contains(event.target) || event.target.closest('.menueinhalt a, .menueinhalt button'))) {
+          menu.open = false;
+        }
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && menu.open) {
+          menu.open = false;
+          menu.querySelector('summary').focus();
+        }
+      });
       // Bildschirm wach halten, solange die Werkstatt-Tafel sichtbar ist.
       let wakeLock = null;
       const wakeStatus = document.querySelector('[data-wake-status]');
@@ -879,7 +398,7 @@
         document.addEventListener(ev, reloadVerschieben, { passive: true, capture: true });
       });
       const panelOffen = () => !!document.querySelector('[data-prod-toggle][aria-expanded="true"]')
-        || !!document.querySelector('[data-team-showcase]:not([hidden])');
+        || !!document.querySelector('[data-team-showcase]:not([hidden]), .werkzeugmenu[open]');
       const reloadErlaubt = () => document.visibilityState === 'visible'
         && !dragAktiv && !panelOffen() && Date.now() >= reloadAb;
       const probeAbbrechen = () => {
@@ -998,7 +517,7 @@
       });
 
       // Produktionsschritt auf der Karte weiterschalten (Vorarbeit -> Karosserie -> Lackierung -> Finish).
-      // Aendert nur die Anzeige-Stufe, NICHT den Spalten-Status. Karte ist ein <a> -> stopPropagation.
+      // Aendert nur die Anzeige-Stufe, NICHT den Spalten-Status.
       let prodLaeuft = false;
       document.querySelectorAll('[data-prod-knopf]').forEach((knopf) => {
         knopf.addEventListener('click', async (e) => {

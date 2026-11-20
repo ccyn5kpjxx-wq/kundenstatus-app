@@ -78,17 +78,17 @@ def main():
     html = response.get_data(as_text=True)
     team_showcase_template = (ROOT / "templates" / "_werkstatt_team_showcase.html").read_text(encoding="utf-8")
     team_showcase_script = (ROOT / "static" / "werkstatt_team_showcase.js").read_text(encoding="utf-8")
-    check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Geplant" in html)
+    check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Eingeplant" in html)
+    tafeldesign = (ROOT / "static" / "werkstatt_tafel.css").read_text(encoding="utf-8")
     check(
-        "Tafel nutzt das Teamfoto als dezenten, lesbaren Hintergrund",
-        "/static/homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp" in html
-        and "linear-gradient(180deg, rgba(247, 242, 234, 0.7)" in html
-        and "background: rgba(255, 253, 249, 0.95)" in html
-        and "backdrop-filter: blur(10px)" in html,
+        "Tafel nutzt das Teamfoto im Kopf und eigene lesbare Auftragskarten",
+        "/static/werkstatt_tafel.css" in html
+        and 'team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp' in tafeldesign
+        and 'class="spalte-kopf"' in html,
     )
     check(
         "Tafel-Kopf verlinkt PPG-Messungen als Uebergang",
-        "🎨 PPG-Messungen" in html
+        "PPG-Messungen" in html
         and 'href="https://emea.ppglinq.com/rapid-match"' in html
         and 'target="_blank"' in html
         and 'rel="noopener noreferrer"' in html
@@ -96,7 +96,7 @@ def main():
     )
     check(
         "Tafel zeigt die automatische Teamvorstellung mit Musik",
-        "👥 Unser Team" in html
+        "Unser Team" in html
         and 'data-team-intervall="300000"' in html
         and 'data-team-slide-dauer="4000"' in html
         and 'data-team-dauer="1800"' in html

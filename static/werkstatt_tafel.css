@@ -1,0 +1,174 @@
+/* Mitarbeitertafel: Hallenmonitor und mobile Auftragsbearbeitung */
+:root {
+  color-scheme: light;
+  --ink: #182b32;
+  --muted: #51636b;
+  --line: #cdd7d6;
+  --paper: #fff;
+  --canvas: #edf1ef;
+  --accent: #124e56;
+  --brand: #a33124;
+  --focus: #0b66bd;
+  font-family: "DM Sans", "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--ink); }
+button, input, summary { font: inherit; }
+[hidden] { display: none !important; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.sprunglink { position: absolute; left: 1rem; top: 0; z-index: 10; padding: .8rem; background: white; transform: translateY(-110%); }
+.sprunglink:focus { transform: none; }
+.nur-lesbar { position: absolute; width: 1px; height: 1px; margin: -1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; }
+
+.topbar {
+  display: flex; align-items: center; gap: clamp(1rem, 3vw, 3rem);
+  padding: .85rem clamp(1rem, 2vw, 2rem);
+  color: #fff;
+  background-color: #172e35;
+  background-image: linear-gradient(94deg, #172c33 16%, rgba(23,44,51,.89) 45%, rgba(20,40,47,.91) 81%, #172c33),
+    url("homepage/optimized/homepage/team-daniel-hannes-abdul-v2.png-w1448-a217ce7d6290.webp");
+  background-position: center, 55% 43%;
+  background-size: cover, cover;
+}
+.titel { display: flex; align-items: center; gap: clamp(.7rem, 1.5vw, 1.5rem); margin-right: auto; min-width: 0; }
+.titel img { display: block; flex: none; width: 66px; height: 44px; border-radius: 4px; background: #fff; }
+.titel h1 { margin: 0; font: 700 clamp(1.45rem, 2.25vw, 2.5rem)/1.09 "Space Grotesk", "Segoe UI", sans-serif; letter-spacing: -.045em; }
+.meta { flex: none; text-align: right; font-size: .82rem; color: #d8e3e4; }
+.uhr { color: white; font-size: 1.5rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.wetter, .wetter-jetzt, .wetter-stunden, .wetter-std { display: flex; align-items: center; }
+.wetter { gap: 1.4rem; }
+.wetter-jetzt, .wetter-stunden { gap: .65rem; }
+.wetter-ikon { font-size: 1.6rem; }
+.wetter-temp { font-weight: 700; }
+.wetter-ort, .wetter-std { font-size: .75rem; color: #e2ebeb; }
+.wetter-std { border-left: 1px solid #60757a; padding-left: .7rem; gap: .25rem; }
+.wetter-std .regen { color: #c5e7f5; }
+
+.werkzeuge { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .8rem; padding: .55rem clamp(1rem, 2vw, 2rem); background: #fff; border-bottom: 1px solid var(--line); }
+.tafel-suche { display: flex; align-items: center; gap: .72rem; width: min(26rem, 40%); min-height: 44px; padding: 0 .65rem 0 1rem; border: 1px solid #b9c6c6; background: #fafcfb; border-radius: .55rem; }
+.tafel-suche:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
+.tafel-suche input { flex: 1; width: 0; min-width: 0; line-height: 1.5; padding: .52rem 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 1rem; }
+.tafel-suche input::placeholder { color: #596b73; }
+.tafel-suche input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.tafel-suche button { border: 0; background: transparent; color: var(--accent); min-height: 44px; min-width: 44px; padding: 0; font-size: 1.45rem; cursor: pointer; }
+.suchsymbol { display: block; position: relative; width: 14px; height: 14px; flex: none; margin: -.15rem .1rem 0 0; border: 2px solid #567078; border-radius: 50%; }
+.suchsymbol::after { content: ""; position: absolute; width: 7px; height: 2px; right: -6px; bottom: -3px; background: #567078; transform: rotate(45deg); }
+.suchstand { font-size: .85rem; color: var(--muted); }
+.suchstand:empty { display: none; }
+.aktionen { display: flex; gap: .45rem; align-items: center; margin-left: auto; }
+.aktionen > a, .aktionen > button, .werkzeugmenu summary, .menueinhalt :is(a,button) {
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem; min-height: 44px;
+  border: 1px solid var(--line); border-radius: .5rem; padding: .55rem .95rem;
+  white-space: nowrap; color: var(--ink); background: #fff; font-weight: 650; line-height: 1.2; text-decoration: none; cursor: pointer;
+}
+.aktionen .anlegen { background: var(--brand); border-color: var(--brand); color: white; }
+.aktionen :is(a,button,summary):hover { border-color: #778a8c; background: #f0f5f3; color: var(--ink); }
+.aktionen .anlegen:hover { background: #82271d; color: white; }
+.werkzeugmenu { position: relative; }
+.werkzeugmenu summary { list-style: none; }
+.werkzeugmenu summary::-webkit-details-marker { display: none; }
+.werkzeugmenu[open] summary { background: #e9efec; }
+.menueinhalt { position: absolute; z-index: 12; right: 0; top: calc(100% + .28rem); display: grid; padding: .3rem; width: max-content; min-width: 13rem; background: #fff; border: 1px solid var(--line); border-radius: .65rem; box-shadow: 0 8px 28px #162b3526; }
+.menueinhalt :is(a,button) { justify-content: flex-start; border-color: transparent; }
+.phasenwahl { display: none; }
+.board { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); align-items: start; gap: clamp(.55rem, 1.1vw, 1.3rem); padding: 1.1rem clamp(.75rem, 1.5vw, 1.8rem) 3rem; }
+.s-angelegt { --phase: #647481; --hell: #e0e6e9; }
+.s-eingeplant { --phase: #177389; --hell: #d6e9ed; }
+.s-in_arbeit { --phase: #a66014; --hell: #f4dfbd; }
+.s-fertig { --phase: #258063; --hell: #cfe8db; }
+.spalte { min-width: 0; scroll-margin-top: .75rem; padding: 0 .48rem .48rem; border: 1px solid #ced8d5; border-radius: .85rem; background: #e4eae7; }
+.spalte.drop-ziel { outline: 3px solid var(--accent); outline-offset: -2px; background: #d8e9e4; }
+.spalte-kopf { display: flex; align-items: center; gap: .55rem; border-top: 3px solid var(--phase); margin: -1px .34rem 0; padding: .82rem .08rem; }
+.spalte-kopf h2 { margin: 0; font: 700 clamp(1.04rem, 1.45vw, 1.45rem)/1.2 "Space Grotesk", sans-serif; letter-spacing: -.025em; }
+.zaehler { margin-left: auto; padding: .15rem .55rem; background: var(--hell); color: #23353c; border-radius: 5px; font-size: .87rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.auftragskarte, article.karte { border: 1px solid #becbc7; border-radius: .65rem; background: #fff; box-shadow: 0 1px 2px #172e3510; }
+.spalte > :is(.auftragskarte,article.karte) + :is(.auftragskarte,article.karte) { margin-top: .6rem; }
+.karte { display: block; color: var(--ink); text-decoration: none; padding: clamp(.7rem, .95vw, 1.05rem); overflow-wrap: anywhere; }
+.auftragskarte .karte { border-radius: .65rem .65rem 0 0; }
+.auftragskarte .karte:hover { background: #f7faf8; }
+.karte.dragging { opacity: .5; }
+.karte-nummernzeile, .karte-kopf, .chips { display: flex; align-items: center; flex-wrap: wrap; gap: .42rem .5rem; }
+.karte-nummernzeile { margin-bottom: .45rem; }
+.auftragsnummer { margin-right: auto; font: 700 clamp(1.8rem, 2.2vw, 2.45rem)/1 "Space Grotesk","Segoe UI",sans-serif; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.auftragsnummer span { margin-right: .04em; color: #6c7e80; font-size: .65em; }
+.auftragsart, .neu-badge { padding: .22rem .5rem; border-radius: .32rem; color: var(--art-farbe,#28444b); background: var(--art-bg,#e3edf0); font-size: .78rem; font-weight: 700; }
+.neu-badge { color: #7b3023; background: #f6dfd7; }
+.fahrzeug { margin-bottom: .42rem; font-size: clamp(1rem,1.12vw,1.18rem); font-weight: 700; line-height: 1.25; }
+.karte-kopf { margin-bottom: .6rem; }
+.kennzeichen { padding: .12rem .38rem; border: 1px solid #758991; border-left: .28rem solid #365e98; border-radius: 3px; font-size: .91rem; color: #203039; background: #fff; font-weight: 700; letter-spacing: .035em; }
+.kennzeichen.leer { padding-left: 0; border-color: transparent; border-left-width: 0; color: var(--muted); font-weight: 400; font-size: .8rem; }
+.badge { padding: .23rem .5rem; border-radius: .34rem; font-size: .86rem; line-height: 1.25; font-weight: 700; color: #214f58; background: #dff0f1; }
+.b-danger { background: #f9deda; color: #81291e; }
+.b-warning { background: #ffebc7; color: #70410a; }
+.b-secondary, .b-dark { color: #465961; background: #e9eef0; }
+.b-success { color: #1b5b44; background: #dcefe2; }
+.arbeit { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: .4rem 0; font-size: .9rem; line-height: 1.45; color: #40535b; }
+.karte[data-reifenbuchung] .arbeit { display: block; }
+.montagezeit { margin: .55rem 0; padding: .5rem .6rem; border-left: 3px solid #307987; background: #eaf4f4; font-size: .9rem; line-height: 1.5; font-weight: 650; }
+.chips { margin-top: .45rem; gap: .25rem .5rem; }
+.chip { color: var(--muted); font-size: .82rem; line-height: 1.4; }
+.chip strong { color: #283f46; }
+.chip.hinweis { color: #784808; background: #fff1d7; padding: .15rem .35rem; border-radius: 3px; }
+.karten-aktionen { padding: 0 clamp(.7rem,.95vw,1.05rem) .55rem; }
+.buero-hinweis { color: var(--muted); border-top: 1px solid #e1e9e6; padding-top: .45rem; font-size: .78rem; }
+.schnell-knopf, .prod-toggle, .prod-knopf { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; padding: .48rem .6rem; border: 1px solid #a9c2c3; border-radius: .42rem; background: #eaf4f4; color: #164f56; line-height: 1.2; font-family: inherit; font-size: .89rem; font-weight: 650; cursor: pointer; }
+.schnell-knopf.fertig { color: #19543c; background: #e8f3ec; border-color: #a8c9b4; }
+.schnell-knopf.zurueck { background: #fff; border-color: var(--line); color: var(--muted); }
+.schnell-knopf:hover, .prod-toggle:hover, .prod-knopf:hover { filter: brightness(.95); }
+:is(.schnell-knopf, .prod-knopf):disabled { opacity: .55; cursor: wait; }
+.prod-box { margin-bottom: .38rem; }
+.prod-toggle { justify-content: space-between; background: #fff8ed; border-color: #ddc5a0; color: #634519; }
+.prod-toggle[aria-expanded="true"] .prod-chevron { transform: rotate(180deg); }
+.prod-schritte { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .25rem; margin-top: .25rem; }
+.prod-knopf { font-size: .81rem; gap: .3em; background: #fff; color: var(--ink); border-color: var(--line); overflow-wrap: anywhere; }
+.prod-knopf.is-erledigt { background: #e8f3ec; color: #19543c; }
+.prod-knopf.is-aktiv { color: #fff; background: #185563; border-color: #185563; }
+.prod-pfeil { display: none; }
+.karten-druckaktionen { display: flex; flex-wrap: wrap; border-top: 1px solid #dce4e1; }
+.karten-druckaktionen a { display: flex; align-items: center; justify-content: center; flex: 1 1 5.4rem; min-height: 44px; padding: .37rem .3rem; color: #35565d; font-size: .82rem; font-weight: 650; text-align: center; text-underline-offset: .15rem; }
+.karten-druckaktionen a + a { border-left: 1px solid #dce4e1; }
+.leer-hinweis { text-align: center; color: var(--muted); padding: 1.1rem .5rem; font-size: .9rem; }
+.toast-leiste { position: fixed; z-index: 30; top: 1rem; left: 50%; transform: translateX(-50%); display: grid; gap: .4rem; max-width: 90vw; }
+.toast-leiste .toast { background: #fff; color: var(--ink); border: 2px solid #4e886b; border-radius: .5rem; padding: .65rem .85rem; box-shadow: 0 3px 12px #142d322b; }
+.toast-leiste :is(.t-danger, .t-warning) { border-color: #a66014; }
+footer { position: fixed; inset: auto 0 0; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .28rem 1.2rem; color: #455a60; background: #fafcfb; border-top: 1px solid var(--line); font-size: .78rem; }
+
+@media (max-width: 1370px) {
+  .wetter-stunden { display: none; }
+}
+@media (max-width: 1050px) {
+  .board { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .phasenwahl { display: flex; position: sticky; top: 0; z-index: 3; gap: .35rem; flex-wrap: wrap; padding: .45rem .8rem; background: #f5f8f6; border-bottom: 1px solid var(--line); }
+  .phasenwahl a { display: flex; align-items: center; justify-content: center; gap: .4rem; flex: 1; min-height: 44px; padding: .25rem .15rem; border: 1px solid #c8d3cf; border-bottom: 3px solid var(--phase); border-radius: .35rem; background: #fff; color: var(--ink); font-size: .9rem; font-weight: 650; text-decoration: none; }
+  .phasenwahl span { color: var(--muted); font-size: .77rem; }
+  .phasenwahl a:hover { background: var(--hell); }
+  .spalte { scroll-margin-top: 4rem; }
+  footer { position: static; }
+  footer a { display: inline-flex; align-items: center; min-height: 44px; }
+}
+@media (max-width: 720px) {
+  .topbar { padding: .7rem .8rem; gap: .45rem; }
+  .titel { gap: .58rem; }
+  .titel img { width: 51px; height: 34px; }
+  .wetter { display: none; }
+  .meta { font-size: .7rem; }
+  .uhr { font-size: 1.04rem; }
+  .werkzeuge { padding: .55rem .8rem; gap: .4rem; }
+  .tafel-suche { width: 100%; }
+  .aktionen { width: 100%; margin-left: 0; gap: .28rem; }
+  .aktionen > :is(a,button), .werkzeugmenu { flex: 1; }
+  .aktionen > :is(a,button), .werkzeugmenu summary { padding: .45rem .22rem; font-size: .83rem; }
+  .phasenwahl { gap: .23rem; padding: .36rem .6rem; }
+  .phasenwahl a { font-size: .78rem; gap: .17rem; }
+  .board { grid-template-columns: minmax(0,1fr); padding: .65rem .6rem 1rem; gap: 1.2rem; }
+}
+@media (max-width: 370px) {
+  .titel img { width: 42px; height: 28px; }
+  .titel h1 { font-size: 1.22rem; }
+  .meta { font-size: .64rem; }
+  .aktionen { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; }
+}

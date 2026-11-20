@@ -51,7 +51,7 @@ class BoardFrontendTests(unittest.TestCase):
         cls.html = render_board()
         expect.set_options(timeout=2000)
 
-    def open_board(self, *, music=True, showcase_only=False):
+    def open_board(self, *, music=True, showcase_only=False, repeat_html=False):
         context = self.browser.new_context(viewport=dict(width=1280, height=900), service_workers='block')
         page = context.new_page()
         page.set_default_timeout(3000)
@@ -89,7 +89,7 @@ class BoardFrontendTests(unittest.TestCase):
                     state['heads'].append(route)
                 else:
                     state['gets'] += 1
-                    if state['gets'] == 1:
+                    if state['gets'] == 1 or repeat_html:
                         route.fulfill(body=html, content_type='text/html')
                     else:
                         route.fulfill(body='<p>Fresh synthetic board</p>', content_type='text/html')
@@ -123,6 +123,40 @@ class BoardFrontendTests(unittest.TestCase):
         while not predicate() and time.monotonic() < deadline:
             page.wait_for_timeout(10)
         self.assertTrue(predicate(), 'Synthetic browser condition did not arrive')
+
+    def test_search_number_plate_and_vehicle_updates_cards_and_both_counters(self):
+        page, state = self.open_board()
+        search = page.locator('[data-tafel-suche]')
+        cards = page.locator('[data-suchkarte]:visible')
+        search.fill('#72')
+        expect(cards).to_have_count(1)
+        expect(cards).to_have_attribute('data-suchnummer', '72')
+        self.assertEqual(page.locator('[data-tafel-anzahl="eingeplant"]').all_text_contents(), ['0', '0'])
+        expect(page.locator('[data-tafel-treffer]')).to_have_text('1 Treffer')
+        search.fill('test 071')
+        expect(cards).to_have_count(2)
+        search.fill('synthetic vehicle')
+        expect(cards).to_have_count(2)
+        search.fill('AB XYZ 999')
+        expect(cards).to_have_count(0)
+        expect(page.locator('[data-tafel-leer]:visible')).to_have_count(2)
+        page.locator('[data-tafel-reset]').click()
+        expect(search).to_be_focused()
+        expect(cards).to_have_count(2)
+        expect(page.locator('[data-tafel-leer]:visible')).to_have_count(0)
+        self.assertFalse(any('XYZ' in path for _, path in state['requests']))
+
+    def test_filter_survives_refresh_and_escape_clears_it(self):
+        page, _ = self.open_board(repeat_html=True)
+        search = page.locator('[data-tafel-suche]')
+        search.fill('72')
+        page.reload()
+        expect(search).to_have_value('72')
+        expect(page.locator('[data-suchkarte]:visible')).to_have_count(1)
+        search.press('Escape')
+        expect(search).to_have_value('')
+        expect(page.locator('[data-suchkarte]:visible')).to_have_count(2)
+        self.assertEqual(page.url, BASE + BOARD)
 
     def start_probe(self, page, state, *, advance=60001, count=1):
         page.clock.fast_forward(advance)
