@@ -294,7 +294,8 @@ class ReifentermineTest(unittest.TestCase):
             for lead in leads:
                 cards=re.findall(r'<article class="karte"[^>]*data-reifenbuchung="'+str(lead['id'])+r'".*?</article>',first_column,re.S)
                 self.assertEqual(len(cards),1)
-                self.assertIn('draggable="false"',cards[0])
+                self.assertIn('draggable="true"',cards[0])
+                self.assertIn('data-reifen-einplanen',cards[0])
                 self.assertIn('Reifenservice',cards[0])
                 self.assertIn(lead['portal_data']['kunden_wunsch_zeitfenster'],cards[0])
                 self.assertNotIn('data-auftrag=',cards[0])
@@ -333,6 +334,107 @@ class ReifentermineTest(unittest.TestCase):
         self.assertEqual(plans[finished[3]]['hinweis'], 'Rückbringung vereinbaren')
         self.assertEqual(plans[finished[4]]['hinweis'], 'Abholung vereinbaren')
         self.assertFalse(any('Fertig' in plan['hinweis'] for plan in plans.values()))
+
+    def hall_login(self):
+        portal.set_app_setting(portal.WERKSTATT_TAFEL_CODE_SETTING, 'TERMINE-TEST')
+        with self.client.session_transaction() as session:
+            session['werkstatt_tafel'] = portal.werkstatt_tafel_session_token()
+            self.assertFalse(session.get('admin'))
+
+    def test_employee_can_accept_only_the_visible_reserved_hour_once(self):
+        self.assertEqual(self.book().status_code, 302)
+        lead_id = self.latest()['id']
+        url = f'/werkstatt/reifentermin/{lead_id}/einplanen'
+        data = {portal.CSRF_FIELD_NAME: self.csrf, 'datum': self.day(), 'uhrzeit': '09:00'}
+        count = self.count('auftraege')
+        self.assertEqual(self.client.post(url, data=data).status_code, 302)
+        self.hall_login()
+        self.assertEqual(self.client.post(url, data={'datum': self.day(), 'uhrzeit': '09:00'}).status_code, 400)
+        self.assertEqual(self.client.post(url, data=dict(data, uhrzeit='10:00')).status_code, 303)
+        self.assertEqual(self.count('auftraege'), count)
+        for _ in range(2):
+            self.assertEqual(self.client.post(url, data=data).status_code, 303)
+        self.assertEqual(self.count('auftraege'), count + 1)
+        job_id = portal.get_lead(lead_id)['auftrag_id']
+        self.assertEqual(portal.get_auftrag(job_id)['status'], 2)
+        with closing(portal.get_db()) as db:
+            rows = db.execute('SELECT status FROM status_log WHERE auftrag_id=? AND status=2', (job_id,)).fetchall()
+            self.assertEqual(len(rows), 1)
+        self.assertNotIn(f'data-reifenbuchung="{lead_id}"', self.client.get('/werkstatt/tafel').text)
+        # Historical unreserved wishes are shown but cannot create calendar entries or jobs.
+        self.assertEqual(self.book({'wunschzeit':'10:00'}).status_code, 302)
+        unreserved = self.latest()['id']
+        with closing(portal.get_db()) as db:
+            db.execute('DELETE FROM reifen_termin_slots WHERE lead_id=?', (unreserved,))
+            db.commit()
+        source = self.client.get('/werkstatt/tafel').text
+        card = source.split(f'data-reifenbuchung="{unreserved}"', 1)[1].split('</article>', 1)[0]
+        self.assertIn('draggable="false"', card)
+        self.assertNotIn('data-reifen-einplanen', card)
+        self.client.post(f'/werkstatt/reifentermin/{unreserved}/einplanen', data=dict(data, uhrzeit='10:00'))
+        self.assertEqual(self.count('auftraege'), count + 1)
+
+    def test_employee_plans_only_visible_created_order_and_stale_post_never_downgrades(self):
+        self.hall_login()
+        data = {portal.CSRF_FIELD_NAME: self.csrf, 'von_status': 1}
+        headers = {'X-Requested-With':'fetch'}
+        order = portal.create_auftrag('intern', fahrzeug='Plantest', annahme_datum=self.day())
+        url = f'/werkstatt/auftrag/{order}/status/2'
+        before = portal.get_auftrag(order)
+        self.assertIn(url, self.client.get(f'/werkstatt/auftrag/{order}').text)
+        for _ in range(2):
+            self.assertEqual(self.client.post(url, data=data, headers=headers).status_code, 200)
+        after = portal.get_auftrag(order)
+        self.assertEqual(after['status'], 2)
+        self.assertEqual((before['start_datum'], before['annahme_datum']), (after['start_datum'], after['annahme_datum']))
+        with closing(portal.get_db()) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM status_log WHERE auftrag_id=? AND status=2', (order,)).fetchone()[0], 1)
+            db.execute('UPDATE auftraege SET status=3 WHERE id=?', (order,))
+            db.commit()
+        self.assertEqual(self.client.post(url, data=data, headers=headers).status_code, 409)
+        self.assertEqual(portal.get_auftrag(order)['status'], 3)
+        for flag in ('angebotsphase', 'archiviert', 'versicherung_id'):
+            hidden = portal.create_auftrag('intern', fahrzeug='Nicht freigegeben')
+            with closing(portal.get_db()) as db:
+                db.execute(f'UPDATE auftraege SET {flag}=1 WHERE id=?', (hidden,))
+                db.commit()
+            res = self.client.post(f'/werkstatt/auftrag/{hidden}/status/2', data=data, headers=headers)
+            self.assertEqual(res.status_code, 404, flag)
+            self.assertEqual(portal.get_auftrag(hidden)['status'], 1)
+
+    def test_employee_shop_wish_respects_booking_eligibility_and_shared_capacity(self):
+        self.hall_login()
+        order_id = 'sho_' + 'f' * 32
+        day, hour = self.day(15), '10:00'
+        order = portal.create_auftrag('shop', fahrzeug='Shopmontage', schaden_aufnahme_json=json.dumps({
+            'shop_order_id': order_id, 'shop_montagewunsch': {'date':day, 'time':hour}
+        }))
+        with closing(portal.get_db()) as db:
+            db.execute('INSERT INTO shop_montageauftraege (shop_order_id,auftrag_id) VALUES (?,?)', (order_id, order))
+            db.commit()
+        self.assertEqual(self.book({'wunschdatum': day, 'wunschzeit': hour}).status_code, 302)
+        lead = self.latest()
+        url = f'/werkstatt/auftrag/{order}/status/2'
+        def plan(displayed_time=hour):
+            return self.client.post(url, data={portal.CSRF_FIELD_NAME:self.csrf, 'von_status':1, 'datum':day, 'uhrzeit':displayed_time},
+                                    headers={'X-Requested-With':'fetch'})
+        with patch('shop_admin.shop_admin_reader') as reader:
+            check = reader.return_value.appointment_for_scheduling
+            self.assertEqual(plan('11:00').status_code, 409)
+            check.assert_not_called()
+            for values in ((day, hour, 'Zahlung noch offen'), (day, '11:00', None), (day, hour, None)):
+                check.return_value = values
+                self.assertEqual(plan().status_code, 409)
+                self.assertEqual(portal.get_auftrag(order)['status'], 1)
+            with closing(portal.get_db()) as db:
+                db.execute('DELETE FROM reifen_termin_slots WHERE lead_id=?', (lead['id'],))
+                db.commit()
+            for _ in range(2):
+                self.assertEqual(plan().status_code, 200)
+        with closing(portal.get_db()) as db:
+            slots = db.execute('SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?', (order_id,)).fetchall()
+        self.assertEqual([tuple(row) for row in slots], [(day, hour)])
+        self.assertEqual(portal.get_auftrag(order)['status'], 2)
 
     def test_board_booking_becomes_one_scheduled_order_after_office_takeover(self):
         self.book()

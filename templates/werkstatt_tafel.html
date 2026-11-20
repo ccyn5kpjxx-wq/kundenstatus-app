@@ -90,7 +90,7 @@
       {% for auftrag in spalte.auftraege %}
       {% if auftrag.get('ist_reifenanfrage') %}
       {% set termin = auftrag %}
-      <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="false" data-suchkarte data-suchnummer="" data-suchkennzeichen="{{ termin.kennzeichen or '' }}" data-suchfahrzeug="{{ termin.fahrzeug or '' }}">
+      <article class="karte" data-reifenbuchung="{{ termin.id }}" draggable="{{ 'true' if termin.reserviert else 'false' }}" data-suchkarte data-suchnummer="" data-suchkennzeichen="{{ termin.kennzeichen or '' }}" data-suchfahrzeug="{{ termin.fahrzeug or '' }}">
         <div class="karte-nummernzeile">
           <strong class="auftragsart" style="--art-bg: {{ auftragsarten['reifenservice']['bg'] }}; --art-farbe: {{ auftragsarten['reifenservice']['farbe'] }};">Reifenservice</strong>
         </div>
@@ -100,13 +100,21 @@
         <div class="fahrzeug">{{ termin.fahrzeug or 'Reifenservice' }}</div>
         <div class="arbeit">{{ termin.kunde_name or 'Kunde noch offen' }}<br>{{ termin.leistungen|join(' · ') }}</div>
         <div class="chips"><span class="chip">Terminwunsch: <strong>{{ termin.termin_label }}{% if termin.zeit %} Uhr{% endif %}</strong></span></div>
-        <div class="buero-hinweis">Wird vom Büro geprüft &amp; eingeplant</div>
+        {% if termin.reserviert %}
+        <form method="post" action="{{ url_for('werkstatt_reifentermin_einplanen', lead_id=termin.id) }}" data-reifen-einplanen>
+          <input type="hidden" name="datum" value="{{ termin.datum_iso }}">
+          <input type="hidden" name="uhrzeit" value="{{ termin.zeit }}">
+          <button class="schnell-knopf" type="submit">Termin einplanen →</button>
+        </form>
+        {% else %}
+        <div class="buero-hinweis">Termin im Reifenportal abstimmen</div>
+        {% endif %}
         {% if session.admin %}<a class="schnell-knopf" style="display:block; text-align:center; text-decoration:none;" href="{{ url_for('admin_lead_detail', lead_id=termin.id) }}#kundenportal">Im Büro öffnen →</a>{% endif %}
       </article>
       {% else %}
       <article class="auftragskarte" data-suchkarte data-suchnummer="{{ auftrag.id }}" data-suchkennzeichen="{{ auftrag.kennzeichen or '' }}" data-suchfahrzeug="{{ auftrag.fahrzeug or '' }}">
       <a class="karte" href="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}{% if auftrag['leistungsart'] == 'inspektion' %}#inspektionscheckliste{% endif %}"
-         draggable="{{ 'false' if auftrag['status'] == 1 else 'true' }}" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
+         draggable="true" data-auftrag="{{ auftrag['id'] }}" data-status="{{ auftrag['status'] }}">
         <div class="karte-nummernzeile">
           <strong class="auftragsnummer" aria-label="Auftragsnummer {{ auftrag['id'] }}"><span aria-hidden="true">#</span>{{ auftrag['id'] }}</strong>
           <strong class="auftragsart" style="--art-bg: {{ auftrag['auftragsart_bg'] }}; --art-farbe: {{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</strong>
@@ -188,7 +196,11 @@
       </a>
       <div class="karten-aktionen">
         {% if auftrag['status'] == 1 %}
-        <div class="buero-hinweis">Wird vom Büro geprüft &amp; eingeplant</div>
+        {% set wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch') %}
+        <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag.id }}" data-ziel="2"
+                {% if wunsch %}data-datum="{{ wunsch.date }}" data-uhrzeit="{{ wunsch.time }}"{% endif %}>
+          {% if wunsch %}Montage {{ wunsch.date }} · {{ wunsch.time }} Uhr einplanen{% else %}Einplanen →{% endif %}
+        </button>
         {% elif auftrag['status'] == 2 %}
         <button type="button" class="schnell-knopf" data-status-knopf data-auftrag="{{ auftrag['id'] }}" data-ziel="3">🔧 In Arbeit nehmen →</button>
         {% elif auftrag['status'] == 3 %}
@@ -461,12 +473,17 @@
       // Auftrag verschieben (gemeinsam fuer Knopf + Drag&Drop)
       const csrf = document.querySelector('meta[name="csrf-token"]').content;
       let wechselLaeuft = false;
-      const statusSetzen = async (auftragId, zielStatus, knopf) => {
+      const statusSetzen = async (auftragId, zielStatus, ausgangsstatus, knopf) => {
         if (wechselLaeuft) return;
         if (Number(zielStatus) === 4 && !window.confirm(
           'Auftrag ' + auftragId + ' wirklich fertig melden? Dabei kann eine Kundenbenachrichtigung ausgelöst werden.'
         )) return;
         wechselLaeuft = true;
+        const daten = new URLSearchParams({von_status: ausgangsstatus});
+        if (knopf?.dataset.datum && knopf.dataset.uhrzeit) {
+          daten.set('datum', knopf.dataset.datum);
+          daten.set('uhrzeit', knopf.dataset.uhrzeit);
+        }
         if (knopf) {
           knopf.disabled = true;
           knopf.textContent = 'Wird verschoben …';
@@ -475,12 +492,16 @@
           const resp = await fetch(`/werkstatt/auftrag/${auftragId}/status/${zielStatus}`, {
             method: 'POST',
             headers: { 'X-CSRF-Token': csrf, 'X-Requested-With': 'fetch' },
+            body: daten,
           });
-          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          if (!resp.ok) {
+            const problem = await resp.json().catch(() => ({}));
+            throw new Error(problem.hinweis || 'Auftrag konnte nicht verschoben werden. Bitte den aktuellen Stand prüfen.');
+          }
           window.location.reload();
         } catch (fehler) {
           wechselLaeuft = false;
-          alert('Verschieben hat nicht geklappt. Die Tafel wird neu geladen.');
+          alert(fehler.message);
           window.location.reload();
         }
       };
@@ -490,7 +511,8 @@
         knopf.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel, knopf);
+          const karte = knopf.closest('.auftragskarte').querySelector('.karte[data-status]');
+          statusSetzen(knopf.dataset.auftrag, knopf.dataset.ziel, karte.dataset.status, knopf);
         });
       });
 
@@ -547,14 +569,11 @@
       });
 
       // Drag & Drop zwischen den Spalten (Desktop / Maus)
-      document.querySelectorAll('.karte[data-auftrag][draggable="true"]').forEach((karte) => {
+      document.querySelectorAll('.karte[draggable="true"]').forEach((karte) => {
         karte.addEventListener('dragstart', (e) => {
           dragAktiv = true;
           karte.classList.add('dragging');
-          e.dataTransfer.setData('text/plain', JSON.stringify({
-            id: karte.dataset.auftrag,
-            status: karte.dataset.status,
-          }));
+          e.dataTransfer.setData('text/plain', karte.dataset.auftrag || karte.dataset.reifenbuchung);
           e.dataTransfer.effectAllowed = 'move';
         });
         karte.addEventListener('dragend', () => {
@@ -567,9 +586,10 @@
       document.querySelectorAll('.spalte').forEach((spalte) => {
         const ziel = parseInt(spalte.dataset.zielStatus, 10);
         if (!ziel) return;
-        if (ziel === 1) return; // "Angelegt" gibt nur das Buero frei - kein Drop-Ziel
+        if (ziel === 1) return;
         spalte.addEventListener('dragover', (e) => {
-          if (!dragAktiv) return;
+          const karte = document.querySelector('.karte.dragging');
+          if (!dragAktiv || !karte || ((karte.dataset.reifenbuchung || karte.dataset.status === '1') && ziel !== 2)) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           spalte.classList.add('drop-ziel');
@@ -578,13 +598,17 @@
         spalte.addEventListener('drop', (e) => {
           e.preventDefault();
           spalte.classList.remove('drop-ziel');
-          let daten = null;
-          try { daten = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (fehler) { return; }
-          if (!daten || !daten.id) return;
-          const aktuell = parseInt(daten.status, 10);
+          const karte = document.querySelector('.karte.dragging');
+          if (!dragAktiv || !karte) return;
+          if (karte.dataset.reifenbuchung) {
+            if (ziel === 2) karte.querySelector('[data-reifen-einplanen]')?.requestSubmit();
+            return;
+          }
+          const aktuell = parseInt(karte.dataset.status, 10);
           if (aktuell === ziel) return;
-          if (ziel === 2 && aktuell <= 2) return; // schon in der Spalte "Geplant"
-          statusSetzen(daten.id, ziel);
+          if (aktuell === 1 && ziel !== 2) return;
+          const knopf = karte.closest('.auftragskarte').querySelector(`[data-status-knopf][data-ziel="${ziel}"]`);
+          statusSetzen(karte.dataset.auftrag, ziel, aktuell, knopf);
         });
       });
     })();

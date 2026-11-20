@@ -36,7 +36,8 @@ def render_board():
                  fahrzeug='Synthetic vehicle', kennzeichen='TEST-071', auftragsart_label='Lackierung')
     return env.get_template('werkstatt_tafel.html').render(
         session={}, server_now_iso='2026-10-29T12:00:00+01:00', stand_label='12:00', datum_label='Synthetic',
-        spalten=[dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order]),
+        spalten=[dict(key='angelegt', titel='Angelegt', ziel_status=1, auftraege=[dict(order, id=70, status=1)]),
+                 dict(key='eingeplant', titel='Eingeplant', ziel_status=2, auftraege=[order]),
                  dict(key='in_arbeit', titel='In Arbeit', ziel_status=3, auftraege=[dict(order, id=72, status=3)]),
                  dict(key='fertig', titel='Fertig', ziel_status=4, auftraege=[])])
 
@@ -95,6 +96,9 @@ class BoardFrontendTests(unittest.TestCase):
                         route.fulfill(body='<p>Fresh synthetic board</p>', content_type='text/html')
             elif path == '/werkstatt/auftrag/72/status/4' and req.method == 'POST':
                 route.fulfill(json={'ok': True, 'status': 4})
+            elif path == '/werkstatt/auftrag/70/status/2' and req.method == 'POST':
+                state['plan_body'] = req.post_data
+                route.fulfill(json={'ok': True, 'status': 2})
             elif path.startswith('/static/'):
                 asset = (ROOT / path.lstrip('/')).resolve()
                 if ROOT / 'static' not in asset.parents or not asset.is_file():
@@ -161,6 +165,17 @@ class BoardFrontendTests(unittest.TestCase):
     def start_probe(self, page, state, *, advance=60001, count=1):
         page.clock.fast_forward(advance)
         self.wait_for(page, lambda: len(state['heads']) >= count)
+
+    def test_plan_via_button_and_drag_preserves_source_status(self):
+        for method in ('button', 'drag'):
+            with self.subTest(method=method):
+                page, state = self.open_board()
+                if method == 'button':
+                    page.locator('[data-status-knopf][data-auftrag="70"][data-ziel="2"]').click()
+                else:
+                    page.locator('.karte[data-auftrag="70"]').drag_to(page.locator('[data-ziel-status="2"]'))
+                expect(page.get_by_text('Fresh synthetic board')).to_be_visible()
+                self.assertEqual(state['plan_body'], 'von_status=1')
 
     def test_finish_requires_confirmation_from_button_and_drag(self):
         for method in ('button', 'drag'):

@@ -80,6 +80,7 @@ def main():
     team_showcase_script = (ROOT / "static" / "werkstatt_team_showcase.js").read_text(encoding="utf-8")
     check("Tafel laedt mit Spalten", response.status_code == 200 and "In Arbeit" in html and "Eingeplant" in html)
     tafeldesign = (ROOT / "static" / "werkstatt_tafel.css").read_text(encoding="utf-8")
+    check("Einplanen für angelegte Aufträge verfügbar", 'data-ziel="2"' in html)
     check(
         "Tafel nutzt das Teamfoto im Kopf und eigene lesbare Auftragskarten",
         "/static/werkstatt_tafel.css" in html
@@ -303,7 +304,7 @@ def main():
         data=csrf_data(client),
     )
     check(
-        "Werkstatt-Annahme bleibt bis zur Büroprüfung gesperrt",
+        "Werkstatt-Annahme kann die Einplanung nicht überspringen",
         response.status_code == 400 and portal.get_auftrag(werkstatt_neu_id)["status"] == 1,
     )
 

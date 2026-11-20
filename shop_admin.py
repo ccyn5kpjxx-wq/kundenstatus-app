@@ -276,6 +276,20 @@ class ShopAdminReader:
                     order['margin'] = margins[order['id']]
             return orders,has_next
 
+    def appointment_for_scheduling(self, order_id):
+        """Read the mounting wish and the same eligibility used by the office."""
+        if not isinstance(order_id, str) or not ORDER.fullmatch(order_id):
+            abort(404)
+        with self.read() as (db, tables):
+            order = db.execute('SELECT id, mode, status FROM shop_orders_v2 WHERE id=?', (order_id,)).fetchone()
+            if order is None:
+                abort(404)
+            related = self._related(db, tables, [order])[order_id]
+            if not related.get('appointment'):
+                return None, None, 'Zu dieser Bestellung ist kein Montagetermin hinterlegt.'
+            return (related['appointment_day'], related['appointment_time'],
+                    self._appointment_blocked_reason(db, tables, order, related))
+
     def detail(self,order_id,*,show_margin=False):
         if not isinstance(order_id,str) or not ORDER.fullmatch(order_id):abort(404)
         with self.read() as (db,tables):

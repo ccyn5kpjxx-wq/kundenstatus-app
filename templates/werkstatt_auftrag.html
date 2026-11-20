@@ -648,16 +648,11 @@
       </div>
       {% endif %}
 
-      {% if auftrag['status'] == 1 %}
-      <div class="panel">
-        <h2>Auftrag verschieben</h2>
-        <div class="fluss-hinweis">🔒 Dieser Auftrag wird zuerst vom Büro geprüft und eingeplant. Danach kannst du ihn hier auf „In Arbeit" und „Fertig" setzen.</div>
-      </div>
-      {% elif auftrag['status'] < 5 %}
+      {% if tafel_auftragsdruck and auftrag['status'] < 5 %}
       <div class="panel">
         <h2>Auftrag verschieben</h2>
         <div class="verschieben-leiste">
-          {% for ziel in erlaubte_status %}
+          {% for ziel in erlaubte_status if auftrag.status != 1 or ziel == 2 %}
           {% set meta = statusliste[ziel] %}
           {% if auftrag['status'] == ziel %}
           <form>
@@ -667,12 +662,22 @@
           <form method="POST" action="{{ url_for('werkstatt_status_update', auftrag_id=auftrag['id'], neuer_status=ziel) }}"
                 {% if ziel == 4 %}onsubmit="return window.confirm('Auftrag {{ auftrag.id }} wirklich fertig melden? Dabei kann eine Kundenbenachrichtigung ausgelöst werden.')"{% endif %}>
             <input type="hidden" name="next" value="{{ url_for('werkstatt_auftrag', auftrag_id=auftrag['id']) }}">
-            <button type="submit" class="verschieben-knopf k-{{ meta['key'] }}">{{ meta['icon'] }} {{ meta['label'] }}</button>
+            <input type="hidden" name="von_status" value="{{ auftrag.status }}">
+            {% set wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch') if auftrag.status == 1 else none %}
+            {% if wunsch %}
+              <input type="hidden" name="datum" value="{{ wunsch.date }}">
+              <input type="hidden" name="uhrzeit" value="{{ wunsch.time }}">
+            {% endif %}
+            <button type="submit" class="verschieben-knopf k-{{ meta['key'] }}">
+              {% if wunsch %}Montage {{ wunsch.date }} · {{ wunsch.time }} Uhr einplanen
+              {% elif auftrag.status == 1 %}Einplanen
+              {% else %}{{ meta['icon'] }} {{ meta['label'] }}{% endif %}
+            </button>
           </form>
           {% endif %}
           {% endfor %}
         </div>
-        <div class="fluss-hinweis">Der Auftrag wandert auf der Tafel von links nach rechts: Geplant → In Arbeit → Fertig.</div>
+        <div class="fluss-hinweis">Auf der Tafel folgt auf „Angelegt“ zuerst „Eingeplant“, dann „In Arbeit“ und „Fertig“.</div>
       </div>
       {% endif %}
 

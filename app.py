@@ -46408,33 +46408,39 @@ def erstelle_shop_montageauftrag(order, snapshot, context):
     return auftrag_id
 
 
+def buche_shop_reifentermin(db, order_id, datum, uhrzeit, kundenname):
+    """Gemeinsame Kalenderbuchung unter dem bereits gehaltenen Reifenstunden-Lock."""
+    existing = db.execute("SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?",
+                          (order_id,)).fetchone()
+    if existing:
+        if (existing["datum"], existing["uhrzeit"]) != (datum, uhrzeit):
+            raise ValueError("Für diese Bestellung ist bereits ein anderer Termin bestätigt.")
+        return False
+    pruefe_freie_reifenstunde(db, datum, uhrzeit)
+    db.execute("""INSERT INTO shop_reifen_termin_slots (shop_order_id,datum,uhrzeit,kunde_name,bestaetigt_am)
+                  VALUES (?,?,?,?,?)""", (order_id, datum, uhrzeit, clean_text(kundenname)[:254], now_str()))
+    job = db.execute("SELECT auftrag_id FROM shop_montageauftraege WHERE shop_order_id=?", (order_id,)).fetchone()
+    if job:
+        plane_shop_montageauftrag(db, job["auftrag_id"], datum, uhrzeit)
+    return True
+
+
 def bestaetige_shop_reifentermin(order_id, datum, uhrzeit, kundenname):
     if not isinstance(order_id, str) or not re.fullmatch(r"sho_[a-f0-9]{32}", order_id):
         raise ValueError("Ungültige Shopbestellung.")
     db = get_db()
     try:
         check24_bookings.lock(db)
-        existing = db.execute("SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?",
-                              (order_id,)).fetchone()
-        if existing:
-            if (existing["datum"], existing["uhrzeit"]) != (datum, uhrzeit):
-                raise ValueError("Für diese Bestellung ist bereits ein anderer Termin bestätigt.")
-            db.commit()
-            return False
-        pruefe_freie_reifenstunde(db, datum, uhrzeit)
-        db.execute("""INSERT INTO shop_reifen_termin_slots (shop_order_id,datum,uhrzeit,kunde_name,bestaetigt_am)
-                      VALUES (?,?,?,?,?)""", (order_id, datum, uhrzeit, clean_text(kundenname)[:254], now_str()))
-        job = db.execute("SELECT auftrag_id FROM shop_montageauftraege WHERE shop_order_id=?", (order_id,)).fetchone()
-        if job:
-            plane_shop_montageauftrag(db, job["auftrag_id"], datum, uhrzeit)
+        neu = buche_shop_reifentermin(db, order_id, datum, uhrzeit, kundenname)
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
-    schedule_change_backup("shop-reifentermin-bestaetigt")
-    return True
+    if neu:
+        schedule_change_backup("shop-reifentermin-bestaetigt")
+    return neu
 
 
 def bestaetigte_shop_reifentermine(order_ids):
@@ -46519,10 +46525,11 @@ def list_reifentermine():
     db = get_db()
     try:
         rows = db.execute(
-            """SELECT id, kunde_name, kontakt_telefon, kunde_email, fahrzeug, kennzeichen,
-                      status, portal_json, erstellt_am
-               FROM leads WHERE website=? AND quelle=? AND herkunft_typ=?
-                 AND status NOT IN (?, ?) AND COALESCE(auftrag_id, 0)=0""",
+            """SELECT l.id, l.kunde_name, l.kontakt_telefon, l.kunde_email, l.fahrzeug, l.kennzeichen,
+                      l.status, l.portal_json, l.erstellt_am, s.datum AS slot_datum, s.uhrzeit AS slot_zeit
+               FROM leads l LEFT JOIN reifen_termin_slots s ON s.lead_id=l.id
+               WHERE l.website=? AND l.quelle=? AND l.herkunft_typ=?
+                 AND l.status NOT IN (?, ?) AND COALESCE(l.auftrag_id, 0)=0""",
             ("auto-lackierzentrum", "website", "website_formular", "gewonnen", "verloren"),
         ).fetchall()
     finally:
@@ -46532,6 +46539,8 @@ def list_reifentermine():
         lead = dict(row)
         details = reifen_termin_daten(lead)
         if details:
+            details["reserviert"] = bool(lead["slot_datum"] and lead["slot_datum"] == details["datum_iso"]
+                                         and lead["slot_zeit"] == details["zeit"])
             termine.append({key: lead[key] for key in (
                 "id", "kunde_name", "kontakt_telefon", "kunde_email", "fahrzeug", "kennzeichen", "status"
             )} | details)
@@ -46599,7 +46608,7 @@ def admin_reifen_widerrufe():
 
 
 @portal_originals_locked
-def reifenauftrag_aus_buchung(lead_id):
+def reifenauftrag_aus_buchung(lead_id, *, tafel_termin=None):
     """Claim the existing reservation and create exactly one scheduled order."""
     db = get_db()
     try:
@@ -46609,16 +46618,30 @@ def reifenauftrag_aus_buchung(lead_id):
             raise ValueError("Reifenbuchung nicht gefunden.")
         service_process.assert_can_accept(db, lead_id=int(lead_id))
         lead = dict(row)
+        if tafel_termin is not None and (
+            (lead.get("website"), lead.get("quelle"), lead.get("herkunft_typ"))
+            != ("auto-lackierzentrum", "website", "website_formular")
+            or not reifen_termin_daten(lead)
+        ):
+            abort(404)
         intake = json.loads(lead.get("portal_json") or "{}")
         if not isinstance(intake, dict) or intake.get("anliegen") != "reifenservice":
             raise ValueError("Dieser Vorgang ist keine Reifenbuchung.")
         if lead.get("auftrag_id"):
+            if tafel_termin is not None:
+                job = db.execute("SELECT status, archiviert FROM auftraege WHERE id=?", (lead["auftrag_id"],)).fetchone()
+                if not job or job["archiviert"] or job["status"] != 2 or lead.get("status") == "verloren":
+                    raise ValueError("Diese Anfrage wurde bereits weiterbearbeitet.")
             return int(lead["auftrag_id"])
         if lead.get("status") == "verloren":
             raise ValueError("Diese Buchung ist storniert. Bitte einen neuen freien Termin buchen.")
+        if lead.get("status") == "gewonnen" and tafel_termin is not None:
+            raise ValueError("Diese Anfrage ist bereits abgeschlossen.")
         hold = db.execute("SELECT datum,uhrzeit FROM reifen_termin_slots WHERE lead_id=?", (int(lead_id),)).fetchone()
         if not hold or parse_date(intake.get("kunden_wunsch_annahme_datum")) != parse_date(hold["datum"]) or clean_text(intake.get("kunden_wunsch_zeitfenster")) != hold["uhrzeit"]:
             raise ValueError("Bitte zuerst im Reifenportal einen freien Termin reservieren.")
+        if tafel_termin is not None and tafel_termin != (hold["datum"], hold["uhrzeit"]):
+            raise ValueError("Die reservierte Zeit wurde geändert. Bitte den aktuellen Termin prüfen.")
         intake["reifen_buchung_id"] = int(lead_id)
         intake["kunden_wunsch_bestaetigt_am"] = now_str()
         order_id = create_auftrag(
@@ -56637,7 +56660,7 @@ def versicherung_datei(slug, datei_id):
 # Admins sehen die Tafel ohne extra Anmeldung.
 
 
-WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)  # Tafel: nur Eingeplant(2)->In Arbeit(3)->Fertig(4); Angelegt(1)/Zurueckgegeben(5) nur Buero
+WERKSTATT_TAFEL_ERLAUBTE_STATUS = (2, 3, 4)
 
 
 def werkstatt_tafel_auftrag_sichtbar(auftrag):
@@ -56675,6 +56698,82 @@ def werkstatt_tafel_guard():
     if werkstatt_tafel_session_ok():
         return None
     return redirect(url_for("werkstatt_login"))
+
+
+def plane_tafel_auftrag_ein(auftrag, angezeigter_wunsch):
+    """Einplanung ohne Rückstufung, doppelte Buchung oder Änderung bestehender Arbeitsdaten."""
+    auftrag_id = auftrag["id"]
+    intake = parse_schadenaufnahme_json(auftrag.get("schaden_aufnahme_json"))
+    wish = intake.get("shop_montagewunsch") if auftrag["quelle"] == "shop" else None
+    if wish or any(angezeigter_wunsch):
+        from shop_admin import shop_admin_reader
+        order_id = intake.get("shop_order_id")
+        if not isinstance(wish, dict) or (wish.get("date"), wish.get("time")) != angezeigter_wunsch:
+            raise ValueError("Der Montagewunsch wurde geändert. Bitte den aktuellen Termin prüfen.")
+        if not isinstance(order_id, str) or "shop_admin" not in app.blueprints:
+            raise ValueError("Zu diesem Montagetermin fehlt eine gültige Shopbestellung.")
+        datum, uhrzeit, grund = shop_admin_reader().appointment_for_scheduling(order_id)
+        if grund:
+            raise ValueError(grund)
+        if (datum, uhrzeit) != (wish.get("date"), wish.get("time")):
+            raise ValueError("Der Montagewunsch wurde geändert. Bitte die Bestellung prüfen.")
+
+    db = get_db()
+    try:
+        if wish:
+            check24_bookings.lock(db)
+        db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+        row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+        if not row:
+            abort(404)
+        current = dict(row)
+        if current["archiviert"] or current["angebotsphase"] or not werkstatt_tafel_auftrag_sichtbar(current):
+            abort(409, description="Dieser Auftrag steht nicht mehr zur Einplanung bereit.")
+        if current["status"] == 2:
+            return False
+        if current["status"] != 1:
+            abort(409, description="Der Auftrag wurde bereits weiterbearbeitet.")
+        if current["quelle"] == "shop":
+            aktuell = parse_schadenaufnahme_json(current.get("schaden_aufnahme_json"))
+            if (aktuell.get("shop_montagewunsch"), aktuell.get("shop_order_id")) != (wish, intake.get("shop_order_id")):
+                raise ValueError("Der Montagewunsch wurde geändert. Bitte die Bestellung prüfen.")
+        if wish:
+            link = db.execute("SELECT shop_order_id FROM shop_montageauftraege WHERE auftrag_id=?",
+                              (auftrag_id,)).fetchone()
+            if not link or link["shop_order_id"] != order_id:
+                raise ValueError("Zu diesem Montagetermin fehlt die zugehörige Shopbestellung.")
+            if not buche_shop_reifentermin(db, order_id, datum, uhrzeit, current["kunde_name"]):
+                plane_shop_montageauftrag(db, auftrag_id, datum, uhrzeit)
+        else:
+            jetzt = now_str()
+            db.execute("UPDATE auftraege SET status=2, produktion_schritt='', geaendert_am=? WHERE id=?", (jetzt, auftrag_id))
+            db.execute("INSERT INTO status_log (auftrag_id,status,zeitstempel) VALUES (?,2,?)", (auftrag_id, jetzt))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    add_benachrichtigung(auftrag_id, "Status geändert", "Die Werkstatt hat den Auftrag eingeplant.")
+    schedule_change_backup("werkstatttafel-einplanung")
+    return True
+
+
+@app.post("/werkstatt/reifentermin/<int:lead_id>/einplanen")
+def werkstatt_reifentermin_einplanen(lead_id):
+    guard = werkstatt_tafel_guard()
+    if guard:
+        return guard
+    try:
+        auftrag_id = reifenauftrag_aus_buchung(lead_id, tafel_termin=(
+            clean_text(request.form.get("datum")), clean_text(request.form.get("uhrzeit")),
+        ))
+    except (TypeError, ValueError) as exc:
+        flash(str(exc), "warning")
+    else:
+        schedule_change_backup("reifenauftrag-uebernommen")
+        flash(f"Reifentermin eingeplant · Auftrag {auftrag_id}.", "success")
+    return redirect(url_for("werkstatt_tafel"), code=303)
 
 
 def inspektionscheckliste_ziel(auftrag_id, *, admin=False):
@@ -57047,8 +57146,6 @@ def werkstatt_auftrag_fotos(auftrag_id):
 
 @app.route("/werkstatt/auftrag/<int:auftrag_id>/status/<int:neuer_status>", methods=["POST"])
 def werkstatt_status_update(auftrag_id, neuer_status):
-    # Mitarbeiter verschieben Auftraege selbst: Eingeplant (2) -> In Arbeit (3) -> Fertig (4).
-    # "Angelegt" und "Zurueckgegeben" bleiben dem Buero/Admin vorbehalten.
     guard = werkstatt_tafel_guard()
     if guard:
         return guard
@@ -57058,15 +57155,17 @@ def werkstatt_status_update(auftrag_id, neuer_status):
     if not auftrag or auftrag.get("archiviert"):
         abort(404)
     aktueller_status = int(auftrag.get("status") or 1)
-    if aktueller_status == 1:
-        # "Angelegt" ist die Wareneingangs-/Pruefstufe des Bueros. Erst nach dessen
-        # Freigabe wandert der Auftrag nach "Eingeplant" (1 -> 2). Die Werkstatt-Tafel
-        # darf diesen Schritt nicht ausloesen.
-        abort(400)
     if aktueller_status >= 5:
         # Zurueckgegebene Auftraege darf nur das Buero/Admin wieder anfassen —
         # sonst koennte ein veralteter Bildschirm einen abgeschlossenen Auftrag reaktivieren.
         abort(409)
+    if auftrag.get("angebotsphase") or not werkstatt_tafel_auftrag_sichtbar(auftrag):
+        abort(404)
+    von = request.form.get("von_status", type=int)
+    if von is not None and aktueller_status not in (von, neuer_status):
+        abort(409, description="Der Auftrag wurde zwischenzeitlich weiterbearbeitet.")
+    if aktueller_status == 1 and neuer_status != 2:
+        abort(400, description="Diesen Auftrag zuerst einplanen.")
     kennung = auftrag.get("kennzeichen") or auftrag.get("fahrzeug") or f"Auftrag {auftrag_id}"
     ziel = clean_text(request.form.get("next"))
     if aktueller_status == neuer_status:
@@ -57076,7 +57175,17 @@ def werkstatt_status_update(auftrag_id, neuer_status):
             return jsonify({"ok": True, "status": neuer_status, "unveraendert": True})
         flash(f"{kennung} ist bereits „{STATUSLISTE[neuer_status]['label']}“.", "info")
         return redirect(ziel if ziel.startswith("/werkstatt") else url_for("werkstatt_tafel"))
-    fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status)
+    if aktueller_status == 1:
+        try:
+            plane_tafel_auftrag_ein(auftrag, (clean_text(request.form.get("datum")),
+                                             clean_text(request.form.get("uhrzeit"))))
+        except ValueError as exc:
+            if request.headers.get("X-Requested-With") == "fetch":
+                return jsonify(ok=False, hinweis=str(exc)), 409
+            flash(str(exc), "warning")
+            return redirect(url_for("werkstatt_auftrag", auftrag_id=auftrag_id))
+    else:
+        fuehre_auftrag_status_wechsel_aus(auftrag, neuer_status)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify({"ok": True, "status": neuer_status})
     flash(f"{kennung}: jetzt „{STATUSLISTE[neuer_status]['label']}“.", "success")
