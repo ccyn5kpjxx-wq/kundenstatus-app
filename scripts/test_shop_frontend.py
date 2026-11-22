@@ -461,6 +461,9 @@ assert.equal(logic.displayPrice(pricedInquiry,4,now).unit,12000);
 assert.equal(logic.displayPrice(pricedInquiry,4,now).total,48000);
 assert.equal(logic.displayPrice(pricedInquiry,4,now).stockCurrent,false);
 assert.equal(logic.displayPrice(pricedInquiry,4,now).displayOnly,true);
+const dailyReadOnly={...pricedInquiry,price:{...pricedInquiry.price,review_at:'2026-11-16T12:00:00Z'}};
+assert.equal(logic.displayPrice(dailyReadOnly,4,now).total,48000);
+assert.equal(logic.currentPrice(dailyReadOnly,4,now),null);
 assert.equal(logic.currentPrice(pricedInquiry,4,now),null);
 assert.equal(logic.quotedPrice(pricedInquiry,4,now),null);
 const inquiryRows=[{product:pricedInquiry,selection:{id,quantity:4,services:{}}}];
@@ -480,6 +483,9 @@ assert.equal(logic.displayPrice({...product,purchase_status:'inquiry_only'},4,no
 const partnerId='parts:'+'c'.repeat(24), partnerInquiry={...pricedInquiry,id:partnerId,category:'body_part',department:'parts',
  price:{...pricedInquiry.price,kind:'partner_inquiry_pricebook',source:'ALZURA',stock_current:false}};
 const partnerBefore=JSON.stringify(partnerInquiry);
+const dailyPartner={...partnerInquiry,price:{...partnerInquiry.price,review_at:dailyReadOnly.price.review_at}};
+assert.equal(logic.displayPrice(dailyPartner,4,now).total,48000);
+assert.equal(logic.currentPrice(dailyPartner,4,now),null);
 assert.equal(logic.displayPrice(partnerInquiry,4,now).total,48000);
 assert.equal(logic.displayPrice(partnerInquiry,4,now).stockCurrent,false);
 assert.equal(logic.currentPrice(partnerInquiry,4,now),null);

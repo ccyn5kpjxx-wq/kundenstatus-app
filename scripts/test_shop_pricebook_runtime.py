@@ -1,4 +1,4 @@
-"""Bounded five-day refresh scheduling, synthetic books/providers only."""
+"""Bounded daily refresh scheduling, synthetic books/providers only."""
 from pathlib import Path
 import sys
 import threading
@@ -43,6 +43,37 @@ class PriceBookRuntimeChecks(unittest.TestCase):
         runtime = PriceBookRuntime(book, products, approved_ids=frozenset(products), provider=provider,
                                    max_reads_per_hour=budget, monotonic=lambda: mono[0])
         return runtime, book, provider, mono, products
+
+    def test_daily_file_is_polled_by_worker_once_a_minute_and_failure_allows_rsu_fallback(self):
+        _, book, provider, mono, products = self.fixture()
+        importer = Mock(side_effect=[ValueError('synthetic private error'), None])
+        runtime = PriceBookRuntime(book, products, approved_ids=set(products), provider=provider,
+                                   daily_import=importer, monotonic=lambda: mono[0])
+        runtime.start(background=False)
+        self.assertEqual(runtime.status()['price_refresh_days'], 1)
+        self.assertTrue(runtime.refresh_for_checkout(next(iter(products))))
+        importer.assert_not_called()
+        with self.assertLogs('shop_pricebook_runtime', level='WARNING') as messages:
+            runtime._import_if_due()
+        self.assertNotIn('synthetic private error', ''.join(messages.output))
+        mono[0] += 3
+        self.assertTrue(runtime.run_once())
+        runtime._import_if_due()
+        self.assertEqual(importer.call_count, 1)
+        mono[0] += 57
+        runtime._import_if_due()
+        self.assertEqual(importer.call_count, 2)
+
+    def test_active_catalogue_size_can_be_reviewed_in_one_day_with_checkout_reserve(self):
+        runtime, book, provider, mono, products = self.fixture(count=4098)
+        runtime.start(background=False)
+        # 288 background slots per hour leave twelve of the hourly 300 for checkout.
+        for _ in range(len(products)):
+            self.assertTrue(runtime.run_once())
+            mono[0] += 12.5
+        self.assertLess(mono[0], 86400)
+        self.assertFalse(book.due)
+        self.assertEqual(provider.retail_quote.call_count, len(products))
 
     def test_construction_and_page_hints_never_call_supplier_and_refresh_uses_quantity_one_only(self):
         runtime, book, provider, mono, products = self.fixture()

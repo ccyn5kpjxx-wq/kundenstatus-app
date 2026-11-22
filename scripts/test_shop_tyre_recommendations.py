@@ -24,7 +24,7 @@ def tyre(number=1, unit=1000, *, brand='Synthetic Brand', model=None, size=('225
             'price': {'kind': 'merchant_pricebook', 'source': 'RSU', 'currency': 'EUR', 'vat_percent': '19.00',
                       'observed_at': (NOW - timedelta(days=1)).isoformat(),
                       'expires_at': (NOW + timedelta(days=6)).isoformat(),
-                      'review_at': (NOW + timedelta(days=4)).isoformat(),
+                      'review_at': NOW.isoformat(),
                       'stock_observed_at': (NOW - timedelta(days=1)).isoformat(),
                       'stock_expires_at': (NOW - timedelta(days=1) + timedelta(minutes=15)).isoformat(),
                       'stock_reported': stock, 'stock_current': False,
@@ -151,7 +151,7 @@ class RecommendationChecks(unittest.TestCase):
             self.assertEqual(self.choose([row])['items'], [])
 
     def test_review_and_stock_observations_are_original_bounded_not_rebased(self):
-        for change in ({'review_at': None}, {'review_at': NOW.isoformat()},
+        for change in ({'review_at': None}, {'review_at': (NOW + timedelta(days=1)).isoformat()},
                        {'stock_observed_at': (NOW+timedelta(seconds=1)).isoformat()},
                        {'stock_expires_at': NOW.isoformat()}, {'stock_observed_at': 'not a date'}):
             row = tyre(); row['price'].update(change)

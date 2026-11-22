@@ -2,7 +2,7 @@
 from collections.abc import Mapping
 from datetime import timedelta
 
-from shop_catalog_public import _stamp
+from shop_catalog_public import PUBLISHED_REVIEW_INTERVALS, _stamp
 
 
 def published_wheel_tier(product, quantity, now):
@@ -21,7 +21,7 @@ def published_wheel_tier(product, quantity, now):
             return None
         review = _stamp(price.get('review_at'))
         stock_observed, stock_expires = _stamp(price.get('stock_observed_at')), _stamp(price.get('stock_expires_at'))
-        if (review != observed + timedelta(days=5) or not observed <= stock_observed <= now
+        if (review - observed not in PUBLISHED_REVIEW_INTERVALS or not observed <= stock_observed <= now
                 or not stock_observed < stock_expires <= stock_observed + timedelta(minutes=15)):
             return None
     except ValueError:

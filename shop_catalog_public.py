@@ -20,6 +20,7 @@ MAX_PRODUCTS = 100_000
 MAX_PAGE_SIZE = 48
 MAX_QUOTE_AGE = timedelta(minutes=15)
 MAX_PUBLISHED_PRICE_AGE = timedelta(days=7)
+PUBLISHED_REVIEW_INTERVALS = (timedelta(days=1), timedelta(days=5))  # Includes historical and display-only records.
 CATEGORIES = frozenset({"tyre", "alloy_wheel", "steel_wheel", "body_part", "oil", "care", "accessory"})
 DEPARTMENTS = frozenset({"tyres", "wheels", "parts", "accessories"})
 PUBLIC_ID = re.compile(r"(tyre|alloy_wheel|steel_wheel|parts):[a-f0-9]{24}")
@@ -297,7 +298,7 @@ def _quote(row, *, allow_published_prices=False):
         try:
             review_at = _stamp(source.get('review_at'))
             stock_observed, stock_expires = _stamp(source.get('stock_observed_at')), _stamp(source.get('stock_expires_at'))
-            if (review_at != observed + timedelta(days=5)
+            if (review_at - observed not in PUBLISHED_REVIEW_INTERVALS
                     or not observed <= stock_observed < stock_expires <= stock_observed + MAX_QUOTE_AGE):
                 return None
         except CatalogError:

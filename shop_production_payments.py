@@ -155,7 +155,7 @@ def prepare_production_payments(portal, adapters, profile, *, pack, supplier_con
         rejection_policy_evidence='RSU-written-20261106-production404', enabled=True, live_armed=True)
     transport = RSUOrderTransport(supplier_config, policy=policy,
         authorize=lambda envelope: holder['saga'].authorize_submission(envelope))
-    # The five-day price book already binds every quantity to the same base.
+    # The published price book binds every quantity to the same base.
     # Only pre-policy quotes from a shop without that book need their original adapter.
     legacy_retail_quote = (supplier_quotes.retail_quote if adapters.get('published_prices') is None
                            and getattr(quotes, 'tyre_payment_costs', False) else None)

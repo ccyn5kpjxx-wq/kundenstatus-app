@@ -1,4 +1,4 @@
-"""Five-day merchant publication, restart recovery and fresh-cost boundaries."""
+"""Daily merchant publication, restart recovery and fresh-cost boundaries."""
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -112,7 +112,7 @@ class PriceBookChecks(unittest.TestCase):
         self.assertEqual(restored.seed({self.id: self.seed()}, evidence_id='a' * 64), 0)
         self.assertEqual(restored.get(self.id)['prices_by_quantity']['4']['items_gross_cent'], 64000)
         self.assertEqual(restored.get(self.id)['stock_reported'], 7)
-        self.assertEqual(restored.get(self.id)['review_at'], (self.time[0] + timedelta(days=5)).isoformat())
+        self.assertEqual(restored.get(self.id)['review_at'], (self.time[0] + timedelta(days=1)).isoformat())
         self.path.unlink()
         with self.assertRaises(PriceBookError):
             book.snapshot()
@@ -126,19 +126,19 @@ class PriceBookChecks(unittest.TestCase):
         with self.assertRaises(PriceBookError):
             book.snapshot()
 
-    def test_seed_is_uniform_five_days_and_stock_does_not_become_five_day_fresh(self):
+    def test_seed_is_reviewed_daily_and_stock_has_its_own_expiry(self):
         book = self.ready()
-        self.time[0] += timedelta(days=3)
+        self.time[0] += timedelta(hours=23, minutes=59)
         price = book.get(self.id)
         self.assertEqual(price['kind'], 'merchant_pricebook')
         self.assertFalse(price['stock_current'])
         self.assertEqual(price['expires_at'], (NOW + timedelta(days=7)).isoformat())
-        self.assertEqual(price['review_at'], (NOW + timedelta(days=5)).isoformat())
+        self.assertEqual(price['review_at'], (NOW + timedelta(days=1)).isoformat())
         self.assertEqual(price['prices_by_quantity']['4']['items_gross_cent'], 60000)
         self.assertNotIn('evidence_id', price)
         self.assertEqual(book.due_ids(), [])
         self.assertFalse(book.review_due(self.id))
-        self.time[0] = NOW + timedelta(days=5)
+        self.time[0] = NOW + timedelta(days=1)
         self.assertIsNotNone(book.get(self.id))
         self.assertEqual(book.due_ids(), [self.id])
         self.assertTrue(book.review_due(self.id))
@@ -157,13 +157,57 @@ class PriceBookChecks(unittest.TestCase):
 
     def test_background_quote_within_window_changes_stock_not_merchant_amount_or_expiry(self):
         book = self.ready()
-        self.time[0] += timedelta(days=2)
+        self.time[0] += timedelta(hours=2)
         book.publish_uniform(self.product, self.fresh(unit_gross_cent=18000, stock=7))
         price = book.get(self.id)
         self.assertEqual(price['prices_by_quantity']['1']['unit_gross_cent'], 15000)
         self.assertEqual(price['expires_at'], (NOW + timedelta(days=7)).isoformat())
         self.assertEqual(price['stock_reported'], 7)
         self.assertTrue(price['stock_current'])
+
+    def test_legacy_rows_become_due_after_one_day_and_lower_price_is_published(self):
+        self.ready()
+        self.time[0] += timedelta(days=1, minutes=1)
+        book = self.book().provision()
+        self.assertEqual(book.get(self.id)['observed_at'], NOW.isoformat())
+        self.assertEqual(book.due_ids(), [self.id])
+        book.publish_uniform(self.product, self.fresh(unit_gross_cent=14000))
+        self.assertEqual(book.get(self.id)['prices_by_quantity']['4']['items_gross_cent'], 56000)
+        self.assertFalse(book.review_due(self.id))
+
+    def test_day_boundary_preserves_a_newer_stock_observation(self):
+        book = self.ready()
+        self.time[0] += timedelta(hours=23, minutes=58)
+        price_quote = self.fresh(unit_gross_cent=15300, stock=9)
+        self.time[0] += timedelta(minutes=1)
+        newer_stock_at = self.time[0].isoformat()
+        book.publish_uniform(self.product, self.fresh(unit_gross_cent=15300, stock=2))
+        self.time[0] += timedelta(minutes=1)
+        book.publish_uniform(self.product, price_quote)
+        price = book.get(self.id)
+        self.assertEqual(price['prices_by_quantity']['1']['unit_gross_cent'], 15300)
+        self.assertEqual((price['stock_reported'], price['stock_observed_at']), (2, newer_stock_at))
+
+    def test_early_increase_needs_single_unit_and_exact_quantity_confirmation(self):
+        book = self.ready()
+        self.time[0] += timedelta(hours=1)
+        def quote(q, unit, stock=12):
+            return book.checkout_quote(self.product, q, lambda *args: self.fresh(q, unit_gross_cent=unit, stock=stock),
+                                       report_price_change=True)
+        self.assertFalse(book.review_due(self.id))
+        self.assertEqual(quote(4, 16000)['reason'], 'published_price_review_required')
+        self.assertTrue(book.review_due(self.id))
+        with self.assertRaises(PriceBookError):
+            book.publish_uniform(self.product, self.fresh(4, unit_gross_cent=16000))
+        self.assertEqual(book.get(self.id)['prices_by_quantity']['1']['unit_gross_cent'], 15000)
+        book.publish_uniform(self.product, self.fresh(1, unit_gross_cent=16000))
+        self.assertFalse(book.review_due(self.id))
+        self.assertEqual(quote(4, 16000)['unit_gross_cent'], 16000)
+        self.assertIsNone(quote(4, 16000, stock=3))
+        # A quantity-only premium never changes the merchant unit or loops while
+        # the just-confirmed Q1 observation is valid.
+        self.assertEqual(quote(4, 16500)['reason'], 'published_price_review_required')
+        self.assertFalse(book.review_due(self.id))
 
     def test_atomic_seed_rejects_alzura_wrong_identity_and_future_initial_observations(self):
         book = self.book().provision(create=True)
@@ -184,7 +228,7 @@ class PriceBookChecks(unittest.TestCase):
         self.assertEqual(book.seed({self.id: self.seed()}, evidence_id='a' * 64), 0)
         self.assertEqual(book.get(self.id)['prices_by_quantity']['1']['unit_gross_cent'], 17000)
 
-    def test_checkout_fresh_exact_quantity_keeps_pinned_price_and_blocks_cost_increase(self):
+    def test_checkout_fresh_exact_quantity_keeps_pinned_price_until_increase_verified(self):
         book = self.ready()
         self.time[0] += timedelta(days=2)
         provider = Mock(return_value=self.fresh(quantity=4))

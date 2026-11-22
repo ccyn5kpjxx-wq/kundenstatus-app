@@ -42,7 +42,8 @@
         p.kind === 'partner_inquiry_pricebook' && p.source === 'ALZURA' && product.department === 'parts' &&
         typeof product.id === 'string' && product.id.startsWith('parts:') && ['body_part', 'accessory'].includes(product.category))) return null;
     const observed = Date.parse(p.observed_at), reviewed = Date.parse(p.review_at), stockObserved = Date.parse(p.stock_observed_at), stockExpires = Date.parse(p.stock_expires_at);
-    if (![observed, reviewed, stockObserved, stockExpires].every(Number.isFinite) || reviewed !== observed + 432000000 ||
+    const reviewInterval = reviewed - observed;
+    if (![observed, reviewed, stockObserved, stockExpires].every(Number.isFinite) || ![86400000, 432000000].includes(reviewInterval) ||
         stockObserved < observed || stockObserved > now || stockObserved >= stockExpires || stockExpires - stockObserved > 900000) return null;
     const price = projectedPrice(product, quantity, now);
     // Retained retail information only. No current stock, quote, procurement

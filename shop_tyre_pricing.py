@@ -1,4 +1,4 @@
-"""Customer-facing tyre pricing. Supplier quotes and the five-day book retain base prices."""
+"""Customer-facing tyre pricing. Supplier quotes and the daily book retain base prices."""
 from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal, ROUND_CEILING

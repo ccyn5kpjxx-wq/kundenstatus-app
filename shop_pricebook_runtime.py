@@ -1,4 +1,4 @@
-"""Bounded background refresh of the merchant's persistent five-day prices.
+"""Bounded background refresh of the merchant's persistent daily prices.
 
 Catalogue reads never contact a supplier. Each refresh reads one exact RSU
 article at quantity one; the merchant then publishes one unit price for all
@@ -8,6 +8,7 @@ from collections import deque
 from collections.abc import Mapping
 from copy import deepcopy
 import math
+import logging
 import threading
 import time
 
@@ -20,11 +21,12 @@ MAX_CHECKOUT_QUEUE = 40
 class PriceBookRuntime:
     def __init__(self, book, products, *, approved_ids, provider,
                  max_reads_per_hour=300, spacing_seconds=2.1,
-                 failure_backoff_seconds=3600, monotonic=None):
+                 failure_backoff_seconds=3600, monotonic=None, daily_import=None):
         if (not isinstance(products, Mapping) or not isinstance(approved_ids, (set, frozenset))
                 or not approved_ids <= products.keys() or len(approved_ids) > 100000
                 or any(not isinstance(pid, str) or not ID.fullmatch(pid) for pid in approved_ids)
                 or not callable(getattr(provider, 'retail_quote', None))
+                or daily_import is not None and not callable(daily_import)
                 or any(not callable(getattr(book, name, None)) for name in ('get', 'review_due', 'due_ids', 'publish_uniform'))
                 or type(max_reads_per_hour) is not int or not 1 <= max_reads_per_hour <= 300
                 or type(spacing_seconds) not in (int, float) or not 2 <= spacing_seconds <= 3600
@@ -42,6 +44,7 @@ class PriceBookRuntime:
         self._next_read, self._last_mono, self._cursor = 0., None, ''
         self._running, self._clock_bad, self._inflight = False, False, None
         self._thread = None
+        self._daily_import, self._next_import = daily_import, 0.
 
     def _time(self):
         value = self._monotonic()
@@ -91,7 +94,7 @@ class PriceBookRuntime:
             self._time()
             self._running = True
             if background:
-                self._thread = threading.Thread(target=self._worker, name='shop-five-day-prices', daemon=True)
+                self._thread = threading.Thread(target=self._worker, name='shop-daily-prices', daemon=True)
                 self._thread.start()
             return True
 
@@ -196,6 +199,7 @@ class PriceBookRuntime:
                 if not self._running or self._clock_bad:
                     return
             try:
+                self._import_if_due()
                 worked = self.run_once()
             except Exception:
                 worked = False
@@ -208,10 +212,23 @@ class PriceBookRuntime:
                         delay = min(delay, max(.01, self._next_read - self._time()))
                     self._condition.wait(timeout=delay)
 
+    def _import_if_due(self):
+        """Only the single background worker applies new local supplier files."""
+        if self._daily_import is None:
+            return
+        now = self._monotonic()
+        if now < self._next_import:
+            return
+        self._next_import = now + 60
+        try:
+            self._daily_import()
+        except Exception:
+            logging.getLogger(__name__).warning('Daily RSU price file could not be applied')
+
     def status(self):
         with self._condition:
             self._time()
             return {'running': self._running and not self._clock_bad, 'queued': len(self._checkout_queue),
                     'inflight': int(self._inflight is not None), 'entries': len(self._products),
                     'reserved_reads_in_period': len(self._attempts), 'read_limit': self._budget,
-                    'price_refresh_days': 5}
+                    'price_refresh_days': 1}

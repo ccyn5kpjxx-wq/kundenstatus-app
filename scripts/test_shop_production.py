@@ -306,6 +306,15 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(calls,[])
 
     def test_checkout_refreshes_due_four_tyre_price_and_requires_new_quantity_confirmation(self):
+        self.check_four_tyre_review(timedelta(days=1, minutes=1), 6629, 6765)
+
+    def test_checkout_verifies_same_day_increase_against_q1_and_requested_quantity(self):
+        self.check_four_tyre_review(timedelta(hours=1), 6629, 6765)
+
+    def test_checkout_applies_daily_decrease_before_first_confirmed_total(self):
+        self.check_four_tyre_review(timedelta(days=1, minutes=1), 6029, 6154)
+
+    def check_four_tyre_review(self, price_age, base_unit, customer_unit):
         from test_shop_documents import IMAGE_ASSET, LABEL, PDF_ASSET, SHEET
 
         identifier = 'tyre:' + 'a' * 24
@@ -315,7 +324,7 @@ class ReleaseChecks(unittest.TestCase):
         resources = {IMAGE_ASSET: {'url': LABEL}, PDF_ASSET: {'url': SHEET}}
         paths = {asset: '/shop/documents/' + asset for asset in resources}
         seed = {'source': 'RSU', 'identity_hash': identity, 'stock_reported': 20, 'unit_gross_cent': 6624,
-                'observed_at': (datetime.now(timezone.utc) - timedelta(days=5, minutes=45)).isoformat()}
+                'observed_at': (datetime.now(timezone.utc) - price_age).isoformat()}
         self.bundle.update(products=[tyre], rsu_bindings={identifier: {'synthetic': True}},
             shipping_classes={identifier: 'pkw_tyre'}, delivery_postcodes=['74821'],
             documents={'resources': resources, 'approved_assets': list(resources)},
@@ -328,7 +337,7 @@ class ReleaseChecks(unittest.TestCase):
             rsu_config=write_json(self.root / 'rsu-private.json', {}))
         self.install()
         calls = []
-        supplier = self.synthetic_provider('RSU', calls, 6629)
+        supplier = self.synthetic_provider('RSU', calls, base_unit)
         supplier.rsu_mapping = lambda p: {'confirmed': True, 'product_id': p['id'], 'identity_hash': identity,
             'supplier': 'RSU', 'supplier_article_id': '123', 'evidence_id': 'synthetic-mapping'}
         with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
@@ -343,10 +352,10 @@ class ReleaseChecks(unittest.TestCase):
             offer = cart.quote(lines, customer_id='synthetic-buyer', delivery_context=delivery).public()
         self.assertEqual([quantity for _, quantity in calls], [4, 1, 4])
         self.assertTrue(offer['ready'], offer['blocked_reasons'])
-        self.assertEqual(offer['lines'][0]['unit_gross_cent'], 6765)
+        self.assertEqual(offer['lines'][0]['unit_gross_cent'], customer_unit)
         self.assertEqual(offer['shipments'][0]['gross_cent'], 0)
-        self.assertEqual(offer['total_gross_cent'], 27060)
-        self.assertEqual(catalog.get(identifier)['price']['prices_by_quantity']['4']['items_gross_cent'], 27060)
+        self.assertEqual(offer['total_gross_cent'], 4 * customer_unit)
+        self.assertEqual(catalog.get(identifier)['price']['prices_by_quantity']['4']['items_gross_cent'], 4 * customer_unit)
         self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
 
     def test_standalone_rim_policy_requires_private_literal_approval_and_reviewed_dimensions(self):

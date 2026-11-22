@@ -2,7 +2,7 @@
 
 Construction is inert. Provisioning and seeding are explicit private-server
 operations. Display reads never call a provider. Supplier quotes keep their
-15-minute validity. Merchant units are reviewed every five days and retained
+15-minute validity. Merchant units are reviewed daily and retained
 for at most seven days so a bounded refresh batch does not blank the catalogue.
 """
 from collections.abc import Mapping
@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 
-REVIEW_INTERVAL = timedelta(days=5)
+REVIEW_INTERVAL = timedelta(days=1)
 PRICE_TTL = timedelta(days=7)  # Keep the offer during the bounded refresh batch.
 SUPPLIER_TTL = timedelta(minutes=15)
 IDENTIFIER = re.compile(r'(?:tyre|alloy_wheel|steel_wheel|parts):[a-f0-9]{24}')
@@ -66,6 +66,8 @@ class PublishedPriceBook:
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.ready = False
         self._entries = {}
+        self._requested_reviews = set()
+        self._discrepancy_checked_until = {}
         self._last_now = None
         self._lock = threading.RLock()
 
@@ -289,25 +291,40 @@ class PublishedPriceBook:
             return inserted
 
     def publish_uniform(self, product, fresh_q1_quote):
-        """Five-day merchant unit for all quantities; stock stays separate."""
+        """Publish one verified unit for all quantities; stock stays separate."""
         with self._lock:
             identity = self._identity(product)
             _require(identity is not None, 'invalid_identity')
             now = self._now()
             value = self._validated(identity['id'], fresh_q1_quote, seed=False, now=now)
+            identifier = identity['id']
+            requested = identifier in self._requested_reviews
             evidence = sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
             with self._connect() as db:
-                old = db.execute('SELECT * FROM shop_public_prices_v1 WHERE product_id=?', (identity['id'],)).fetchone()
-                if old and old['identity_hash'] == identity['identity_hash'] and now < _stamp(old['published_at']) + REVIEW_INTERVAL:
+                old = db.execute('SELECT * FROM shop_public_prices_v1 WHERE product_id=?', (identifier,)).fetchone()
+                same_variant = old and old['identity_hash'] == identity['identity_hash']
+                # An in-flight or cached supplier observation must not replace
+                # a more recent price (including one published from the export).
+                if same_variant and (_stamp(value['published_at']) <= _stamp(old['published_at'])
+                                     or not requested and now < _stamp(old['published_at']) + REVIEW_INTERVAL):
                     if _stamp(value['stock_observed_at']) >= _stamp(old['stock_observed_at']):
                         db.execute('UPDATE shop_public_prices_v1 SET stock=?,stock_observed_at=?,stock_expires_at=? WHERE product_id=?',
                                    (value['stock'], value['stock_observed_at'], value['stock_expires_at'], identity['id']))
                 else:
                     if old:
+                        if same_variant and _stamp(old['stock_observed_at']) > _stamp(value['stock_observed_at']):
+                            for field in ('stock', 'stock_observed_at', 'stock_expires_at'):
+                                value[field] = old[field]
                         db.execute('DELETE FROM shop_public_prices_v1 WHERE product_id=?', (identity['id'],))
                     self._insert(db, value, evidence)
                 saved = dict(db.execute('SELECT * FROM shop_public_prices_v1 WHERE product_id=?', (identity['id'],)).fetchone())
             self._entries[identity['id']] = saved
+            if requested:
+                self._requested_reviews.discard(identifier)
+                # A quantity-specific increase may coexist with an unchanged
+                # Q1 price. Don't spend the hourly budget rechecking the same
+                # evidence while that exact supplier observation is cached.
+                self._discrepancy_checked_until[identifier] = _stamp(fresh_q1_quote['expires_at'])
             return True
 
     def due_ids(self):
@@ -316,17 +333,17 @@ class PublishedPriceBook:
             now = self._now()
             rows = self._entries
             return [identifier for identifier, identity in sorted(self.products.items())
-                    if identifier not in rows or rows[identifier]['identity_hash'] != identity['identity_hash']
+                    if identifier in self._requested_reviews or identifier not in rows or rows[identifier]['identity_hash'] != identity['identity_hash']
                     or now >= _stamp(rows[identifier]['published_at']) + REVIEW_INTERVAL]
 
     def review_due(self, identifier):
-        """Checkout can refresh an existing price for this exact variant after five days."""
+        """A published variant is due daily or after a verified supplier increase."""
         with self._lock:
             _require(self.ready, 'pricebook_unavailable')
             row = self._entries.get(identifier)
             identity = self.products.get(identifier)
             return bool(row and identity and row['identity_hash'] == identity['identity_hash']
-                        and self._now() >= _stamp(row['published_at']) + REVIEW_INTERVAL)
+                        and (identifier in self._requested_reviews or self._now() >= _stamp(row['published_at']) + REVIEW_INTERVAL))
 
     def get(self, identifier):
         if not isinstance(identifier, str) or identifier not in self.products:
@@ -380,6 +397,12 @@ class PublishedPriceBook:
                     or not now < _stamp(published['expires_at'])):
                 return None
             if current['unit_gross_cent'] > unit:
+                if report_price_change:
+                    with self._lock:
+                        identifier = identity['id']
+                        until = self._discrepancy_checked_until.get(identifier)
+                        if until is None or now >= until:
+                            self._requested_reviews.add(identifier)
                 return {'confirmed': False, 'reason': 'published_price_review_required'} if report_price_change else None
             return {**current, 'unit_gross_cent': unit,
                     'expires_at': min(expiry, _stamp(published['expires_at'])).isoformat()}

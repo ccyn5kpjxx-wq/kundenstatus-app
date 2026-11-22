@@ -62,9 +62,10 @@ class TyrePricingTests(unittest.TestCase):
         self.check_catalogue_and_quote(catalogue, lambda product,qty:book.checkout_quote(product, qty, self.current),
                                       dict.fromkeys((1, 2, 4), self.fixed))
         self.assertEqual(book.get(TYRE)['prices_by_quantity']['1']['unit_gross_cent'], self.fixed)
+        self.assertEqual(book.due_ids(), [])
         self.clock += timedelta(days=4)
         self.assertEqual(catalogue.page(department='tyres')['items'][0]['price']['prices_by_quantity']['1']['unit_gross_cent'], 7040)
-        self.assertEqual(book.due_ids(), [])
+        self.assertEqual(book.due_ids(), [TYRE])
 
     def test_cache_preserves_quantity_tiers_and_only_offers_supported_quantities(self):
         original = deepcopy(self.raw)

@@ -176,6 +176,7 @@ class EnrichedPublicCatalog(PublicCatalog):
         procurement = frozenset(procurement_ids or ())
         self._rsu_only_prices, self._procurement_ids = rsu_only_prices, procurement
         self._inquiry_quotes = {identifier: value['price'] for identifier, value in display_prices.items()}
+        self.partner_inquiry_price_lookup = None
         if (checkout_excluded_ids is not None and
                 (not isinstance(checkout_excluded_ids, (set, frozenset))
                  or not checkout_excluded_ids <= self._rows.keys())):
@@ -344,7 +345,10 @@ class EnrichedPublicCatalog(PublicCatalog):
     def _cached_entry(self, entry):
         identifier = entry['public']['id']
         if identifier in self._inquiry_quotes:
-            return {**entry, 'quote': deepcopy(self._inquiry_quotes[identifier])}
+            quote = self._inquiry_quotes[identifier]
+            if self.partner_inquiry_price_lookup is not None:
+                quote = self.partner_inquiry_price_lookup(identifier, quote)
+            return {**entry, 'quote': deepcopy(quote)}
         # An unbound article is outside this merchant's RSU offer, regardless
         # of an imported quote or a stale/misconfigured display cache. Do not
         # even consult that cache for an article we cannot procure.

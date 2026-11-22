@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import base64
 import re
+import sqlite3
 
 from flask import g, has_request_context
 
@@ -285,7 +286,14 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             pricebook = PublishedPriceBook(data / 'shop-pricebook' / 'prices.sqlite3',
                 products=identities, approved_ids=procurement_ids, mode='live').provision(create=True)
             pricebook.seed(seeds['records'], evidence_id=seeds['evidence_id'])
-            cache = PriceBookRuntime(pricebook, identities, approved_ids=procurement_ids, provider=supplier)
+            from shop_rsu_daily_import import DailyPriceImport
+            daily_import = DailyPriceImport(pricebook, root, descriptor['bundle']['sha256'], supplier)
+            try:
+                daily_import()
+            except (OSError, ValueError, sqlite3.Error):
+                app.logger.warning('RSU-Tagesimport konnte nicht übernommen werden; vorhandenes Preisbuch aktiv.')
+            cache = PriceBookRuntime(pricebook, identities, approved_ids=procurement_ids,
+                                     provider=supplier, daily_import=daily_import)
         else:
             cache = HybridPriceCache(identities, released_ids=released_ids, procurement_ids=procurement_ids,
                                      rsu_cache=rsu_cache, market_cache=None)
@@ -353,6 +361,9 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
             recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight)
+        if partner_record is not None:
+            from shop_parts_daily_prices import attach_daily_partner_prices
+            attach_daily_partner_prices(catalogue, root, partner_record, partner_source.ids)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
@@ -418,11 +429,11 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             def retail_quote(product, quantity):
                 if pricebook is not None:
                     quote = pricebook.checkout_quote(product, quantity, supplier.retail_quote, report_price_change=True)
-                    if (quote and quote.get('confirmed')) or not pricebook.review_due(product['id']):
+                    if not pricebook.review_due(product['id']):
                         return quote
                     # Only the first due item may wait for a scheduled read in this request.
                     wait_seconds = 0
-                    if has_request_context() and not g.get('shop_price_review_waited'):
+                    if not (quote and quote.get('confirmed')) and has_request_context() and not g.get('shop_price_review_waited'):
                         g.shop_price_review_waited = True
                         wait_seconds = 3
                     if (cache.refresh_for_checkout(product['id'], wait_seconds=wait_seconds)
