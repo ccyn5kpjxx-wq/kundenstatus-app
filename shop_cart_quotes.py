@@ -441,6 +441,8 @@ class CartQuoteService:
                 price = call(self.retail_quote, p, position_count)
                 until, error = self._current(price, now)
                 if error:
+                    if error == 'confirmation_missing' and price and price.get('reason') == 'published_price_review_required':
+                        error = 'published_price_review_required'
                     block(error, product_id=identifier, destination=destination, dependency='retail_quote')
                 elif (price.get('product_id') != identifier or price.get('identity_hash') != p['identity_hash']
                         or type(price.get('quantity')) is not int or price['quantity'] != position_count):
@@ -515,7 +517,7 @@ class CartQuoteService:
             assembly_owner[group] = owner
 
         priced_lines, shipments = [], {}
-        known, known_any = 0, False
+        known = 0
         for index, row in enumerate(rows):
             destination = destinations[index]
             p, price = products.get(row['id']), prices.get((row['id'], destination))
@@ -532,7 +534,6 @@ class CartQuoteService:
                 item['tyre_size'] = p['tyre_size'].strip()
             if item['items_gross_cent'] is not None:
                 known += item['items_gross_cent']
-                known_any = True
             requests = []
             group = row['assembly_group']
             if options['mounting'] and not group:
@@ -573,7 +574,6 @@ class CartQuoteService:
                 else:
                     shorten(until)
                     known += response['gross_cent']
-                    known_any = True
                     item['services'].append({'code': code, 'gross_cent': response['gross_cent']})
             priced_lines.append(item)
             shipment = shipments.setdefault(destination, {'id': destination, 'destination': destination, 'items': [], 'private_items': [], 'gross_cent': None})
@@ -600,7 +600,6 @@ class CartQuoteService:
                 shorten(until)
                 shipment['gross_cent'] = response['gross_cent']
                 known += response['gross_cent']
-                known_any = True
         tick()
         if expiry <= now:
             block('quote_expired')
@@ -626,7 +625,8 @@ class CartQuoteService:
                     reasons.remove(reason)
         value = {'version': 1, 'mode': self.mode, 'currency': 'eur', 'vat_percent': '19.00', 'customer_id': str(customer_id).strip(),
                  'vehicle_ref': vehicle_ref, 'request': rows, 'created_at': now.isoformat(), 'expires_at': expiry.isoformat(),
-                 'ready': not reasons, 'known_subtotal_gross_cent': known if known_any else None, 'total_gross_cent': known if not reasons else None,
+                 # Zero-cost services or freight can be confirmed before any goods are priced.
+                 'ready': not reasons, 'known_subtotal_gross_cent': known or None, 'total_gross_cent': known if not reasons else None,
                  'blocked_reasons': reasons, 'lines': priced_lines, 'shipments': list(shipments.values()),
                  'assembly_evidence': valid_groups,
                  'product_checks': {key: {'fitment_evidence_id': value['fitment'].get('evidence_id') if key not in standalone_rims and isinstance(value['fitment'], Mapping) and _text(value['fitment'].get('evidence_id')) else None,

@@ -319,6 +319,15 @@ class PublishedPriceBook:
                     if identifier not in rows or rows[identifier]['identity_hash'] != identity['identity_hash']
                     or now >= _stamp(rows[identifier]['published_at']) + REVIEW_INTERVAL]
 
+    def review_due(self, identifier):
+        """Checkout can refresh an existing price for this exact variant after five days."""
+        with self._lock:
+            _require(self.ready, 'pricebook_unavailable')
+            row = self._entries.get(identifier)
+            identity = self.products.get(identifier)
+            return bool(row and identity and row['identity_hash'] == identity['identity_hash']
+                        and self._now() >= _stamp(row['published_at']) + REVIEW_INTERVAL)
+
     def get(self, identifier):
         if not isinstance(identifier, str) or identifier not in self.products:
             return None
@@ -339,7 +348,7 @@ class PublishedPriceBook:
                     'prices_by_quantity': {str(q): {'quantity': q, 'unit_gross_cent': row['unit_gross_cent'],
                         'items_gross_cent': q * row['unit_gross_cent'], 'vat_percent': '19.00'} for q in range(1, maximum + 1)}}
 
-    def checkout_quote(self, product, quantity, fresh_quote):
+    def checkout_quote(self, product, quantity, fresh_quote, *, report_price_change=False):
         """Fresh procurement check; fixed merchant amount, never repricing."""
         identity = self._identity(product)
         if not identity or type(quantity) is not int or not 1 <= quantity <= (4 if identity['category'] in WHEELS else 20):
@@ -352,8 +361,10 @@ class PublishedPriceBook:
             _require(self.path.is_file() and self._marker_exists(), 'pricebook_unavailable')
             current = fresh_quote(product, quantity)
             with self._lock:
+                # A scheduled review can publish a different price during the supplier read.
+                published = self.get(identity['id'])
                 now = self._now()
-            if (not isinstance(current, Mapping) or current.get('confirmed') is not True
+            if (published is None or not isinstance(current, Mapping) or current.get('confirmed') is not True
                     or current.get('procurement_confirmed') is not True
                     or current.get('source', 'RSU') != 'RSU'
                     or current.get('product_id') != identity['id'] or current.get('identity_hash') != identity['identity_hash']
@@ -365,9 +376,11 @@ class PublishedPriceBook:
             observed, expiry = _stamp(current.get('observed_at')), _stamp(current.get('expires_at'))
             unit = published['prices_by_quantity'][str(quantity)]['unit_gross_cent']
             if (not observed <= now < expiry or not timedelta(0) < expiry - observed <= SUPPLIER_TTL
-                    or type(current.get('unit_gross_cent')) is not int or not 0 < current['unit_gross_cent'] <= unit
+                    or type(current.get('unit_gross_cent')) is not int or not 0 < current['unit_gross_cent'] <= 10_000_000
                     or not now < _stamp(published['expires_at'])):
                 return None
+            if current['unit_gross_cent'] > unit:
+                return {'confirmed': False, 'reason': 'published_price_review_required'} if report_price_change else None
             return {**current, 'unit_gross_cent': unit,
                     'expires_at': min(expiry, _stamp(published['expires_at'])).isoformat()}
         except Exception:

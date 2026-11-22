@@ -20,7 +20,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/wheel-hero.css') }}">
   {% endif %}
   {% if page_key in ['warenkorb', 'order_status'] %}<script src="{{ url_for('static', filename='shop_v2/appointment.js') }}" defer></script>{% endif %}
-  <script src="{{ url_for('static', filename='shop_v2/shop.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261122-preispruefung') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/rim-families.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}

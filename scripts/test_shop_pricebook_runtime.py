@@ -12,11 +12,15 @@ from shop_pricebook_runtime import PriceBookRuntime
 class Book:
     def __init__(self, identifiers, *, success=True):
         self.due = set(identifiers)
+        self.published = set(identifiers)
         self.success = success
         self.publications = []
 
     def due_ids(self):
         return sorted(self.due)
+
+    def review_due(self, identifier):
+        return identifier in self.published and identifier in self.due
 
     def get(self, identifier):
         return {'id': identifier} if identifier not in self.due else None
@@ -106,6 +110,89 @@ class PriceBookRuntimeChecks(unittest.TestCase):
             release.set()
             worker.join(3)
         self.assertFalse(worker.is_alive())
+        self.assertEqual(provider.retail_quote.call_count, 1)
+
+    def test_checkout_reviews_only_the_exact_due_published_identifier(self):
+        runtime, book, provider, _, products = self.fixture()
+        fresh, unpublished, requested = sorted(products)
+        book.due.remove(fresh)
+        book.published.remove(unpublished)
+        self.assertFalse(runtime.refresh_for_checkout(requested))
+        runtime.start(background=False)
+        for identifier in (fresh, unpublished, None, 'not-a-product'):
+            self.assertFalse(runtime.refresh_for_checkout(identifier))
+        provider.retail_quote.assert_not_called()
+        self.assertTrue(runtime.refresh_for_checkout(requested))
+        provider.retail_quote.assert_called_once_with(products[requested], 1)
+        self.assertFalse(runtime.refresh_for_checkout(requested))
+        self.assertEqual(runtime.status()['reserved_reads_in_period'], 1)
+
+    def test_checkout_prioritizes_one_slot_after_spacing_and_shares_failure_backoff(self):
+        runtime, book, provider, mono, products = self.fixture()
+        first, second, requested = sorted(products)
+        runtime.start(background=False)
+        self.assertTrue(runtime.run_once())
+        for _ in range(5):
+            self.assertFalse(runtime.refresh_for_checkout(requested))
+        self.assertEqual(runtime.status()['queued'], 1)
+        self.assertFalse(runtime.run_once())
+        book.success = False
+        mono[0] = 3
+        self.assertTrue(runtime.run_once())
+        self.assertEqual([call.args[0]['id'] for call in provider.retail_quote.call_args_list], [first, requested])
+        self.assertEqual(runtime.status()['queued'], 0)
+        mono[0] = 6
+        self.assertFalse(runtime.refresh_for_checkout(requested))
+        self.assertTrue(runtime.run_once())
+        self.assertEqual(provider.retail_quote.call_args.args[0]['id'], second)
+        mono[0] = 3603
+        book.success = True
+        self.assertTrue(runtime.refresh_for_checkout(requested))
+
+    def test_hourly_limit_includes_checkout_with_room_reserved_from_background(self):
+        runtime, book, provider, mono, products = self.fixture(count=302)
+        runtime.start(background=False)
+        for _ in range(288):
+            self.assertTrue(runtime.run_once())
+            mono[0] += 3
+        self.assertFalse(runtime.run_once())
+        remaining = sorted(book.due)
+        queued = remaining[-1]
+        for requested in remaining[:12]:
+            self.assertTrue(runtime.refresh_for_checkout(requested))
+            mono[0] += 3
+        self.assertFalse(runtime.refresh_for_checkout(queued))
+        self.assertFalse(runtime.run_once())
+        self.assertEqual(provider.retail_quote.call_count, 300)
+        mono[0] = 3600
+        self.assertTrue(runtime.run_once())
+        self.assertEqual(provider.retail_quote.call_args.args[0]['id'], queued)
+
+    def test_checkout_joins_inflight_review_without_a_second_read(self):
+        runtime, book, provider, mono, products = self.fixture(count=1)
+        identifier = next(iter(products))
+        entered, release = threading.Event(), threading.Event()
+        def fetch(*args):
+            entered.set()
+            release.wait(2)
+            return {'synthetic': True}
+        provider.retail_quote.side_effect = fetch
+        runtime.start(background=False)
+        worker = threading.Thread(target=runtime.run_once)
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertFalse(runtime.refresh_for_checkout(identifier, wait_seconds=.01))
+            self.assertEqual(runtime.status()['queued'], 0)
+            joined = threading.Timer(.1, release.set)
+            joined.start()
+            try:
+                self.assertTrue(runtime.refresh_for_checkout(identifier, wait_seconds=1))
+            finally:
+                joined.join()
+        finally:
+            release.set()
+            worker.join()
         self.assertEqual(provider.retail_quote.call_count, 1)
 
 

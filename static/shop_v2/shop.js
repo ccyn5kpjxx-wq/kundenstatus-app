@@ -467,6 +467,12 @@
   const partial = partialToken !== null;
   const cartSteps = byId('cart-steps');
   let cartStep = 1, editingAddress = false, confirmedAddressText = '';
+  let pricesAtSelection = [];
+  function cartDisplayPrices() {
+    return offerSelection.map(({product, selection}) => ({
+      id: selection.id, quantity: selection.quantity, total: displayPrice(product, selection.quantity)?.total
+    }));
+  }
   function updateStepControls() {
     if (!cartSteps) return;
     const busy = checkoutInProgress || addressSaving || quoteBusy;
@@ -492,6 +498,7 @@
   }
   function showCartStep(step, focus = true) {
     if (!cartSteps) return;
+    if (cartStep === 1 && step > 1) pricesAtSelection = cartDisplayPrices();
     cartStep = step;
     document.querySelectorAll('[data-cart-panel]').forEach(panel => {
       panel.hidden = Number(panel.dataset.cartPanel) !== step;
@@ -1904,12 +1911,37 @@
     }
     return payload;
   }
-  const BLOCKED = {mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.', fitment_unconfirmed: 'Fahrzeugpassung noch nicht bestätigt', rsu_mapping_unconfirmed: 'Lieferantenartikel noch nicht sicher abgeglichen', freight_unconfirmed: 'Versandkosten noch nicht bestätigt', assembly_fitment_unconfirmed: 'Rad-Reifen-Kombination noch nicht freigegeben', service_unconfirmed: 'Servicepreis noch nicht bestätigt', stock_insufficient_or_unconfirmed: 'Bestand für diese Menge noch nicht bestätigt', procurement_price_unconfirmed: 'Lieferantenpreis noch nicht bestätigt'};
-  Object.assign(BLOCKED, {
+  const BLOCKED = {
+    mixed_cart_manual_review_required: 'Für gemischte Warenkörbe bestätigen wir vor der Zahlung das vollständige Gesamtangebot.',
+    fitment_unconfirmed: 'Die Fahrzeugpassung ist noch offen.',
+    rsu_mapping_unconfirmed: 'Die Zuordnung zum Lieferantenartikel ist noch offen.',
+    freight_unconfirmed: 'Die Versandkosten sind noch offen.',
+    assembly_fitment_unconfirmed: 'Die Freigabe für diese Rad-Reifen-Kombination steht noch aus.',
+    assembly_mounting_unconfirmed: 'Die Montage dieser Rad-Reifen-Kombination muss noch bestätigt werden.',
+    stock_insufficient_or_unconfirmed: 'Der Lieferant hat den Bestand für die gewünschte Menge nicht bestätigt.',
+    procurement_price_unconfirmed: 'Der Lieferant hat den Einkaufspreis noch nicht bestätigt.',
+    published_price_review_required: 'Der Lieferantenpreis hat sich geändert. Bitte prüfen Sie den Gesamtpreis erneut.',
+    price_amount_unconfirmed: 'Für die gewählte Menge fehlt ein bestätigter Artikelpreis.',
+    price_identity_unconfirmed: 'Der Preis ließ sich diesem Artikel und der gewählten Menge nicht eindeutig zuordnen.',
+    catalogue_identity_unconfirmed: 'Ein Artikel konnte im Katalog nicht eindeutig zugeordnet werden.',
+    product_dimensions_unconfirmed: 'Die genauen Maße des Artikels müssen noch bestätigt werden.',
+    required_fees_unconfirmed: 'Die erforderlichen Zusatzkosten für diesen Artikel sind noch offen.',
+    duplicate_procurement_identity: 'Zwei Positionen verweisen auf denselben Lieferantenartikel. Wir prüfen die Zuordnung.',
+    service_not_applicable: 'Die gewählte Leistung ist für diesen Artikel nicht verfügbar.',
+    mounting_required_for_options: 'Bitte wählen Sie für die Montageoptionen auch die Montage aus.',
+    quote_expired: 'Die Preisbestätigung ist abgelaufen. Bitte prüfen Sie den Gesamtpreis erneut.',
+    total_exceeds_limit: 'Der Betrag dieser Auswahl liegt über der Grenze für eine Onlinebestellung.',
     product_inquiry_only: 'Dieser Artikel ist nur auf Anfrage erhältlich.',
     delivery_salutation_required: 'Für den Direktversand bitte eine Lieferanrede wählen oder ein persönliches Versandangebot anfragen.',
     product_documents_unconfirmed: 'Die erforderlichen Originalunterlagen für diesen Reifen sind noch nicht vollständig bestätigt.'
-  });
+  };
+  function quoteBlockReason(item) {
+    if (BLOCKED[item.code]) return BLOCKED[item.code];
+    if (item.dependency === 'retail_quote') return 'Für die gewählte Menge fehlt die aktuelle Preis- und Bestandsbestätigung des Lieferanten.';
+    if (item.dependency === 'freight') return BLOCKED.freight_unconfirmed;
+    if (item.service || item.code === 'service_unconfirmed' || item.code === 'service_quote_unconfirmed') return 'Der Preis für die gewählte Leistung ist noch offen.';
+    return 'Die Prüfung konnte nicht abgeschlossen werden. Bitte prüfen Sie den Gesamtpreis erneut.';
+  }
   async function consumerTerms(frozenQuote) {
     const checkout = byId('checkout-button'); checkout.hidden = true; checkout.disabled = true; consumerState = null;
     if (body.dataset.consumerEnabled !== 'true') { byId('checkout-note').textContent = 'Der Abschluss ist noch nicht freigeschaltet. Vertragsunterlagen und Kundenbestätigung müssen zuerst verfügbar sein.'; return; }
@@ -1946,23 +1978,44 @@
     checkout.hidden = !(body.dataset.orderEnabled === 'true' && body.dataset.checkoutEnabled === 'true'); changed();
     checkout.textContent = frozenQuote.version === 2 ? 'Gesamtbetrag online reservieren' : 'Gesamtpreis bezahlen';
   }
-  async function showQuote(result) {
+  async function showQuote(result, previousPrices) {
     const value = result.quote, review = byId('quote-review');
     if (!value || typeof value.ready !== 'boolean' || value.currency !== 'eur' || !Array.isArray(value.lines) || !Array.isArray(value.shipments)) throw new Error('invalid_quote');
     if (value.ready && !quoteMatchesSelection(value.lines, offerSelection)) throw new Error('invalid_quote');
     const reviewPayment = value.version === 2;
     if (reviewPayment && !reviewQuoteReady(value, offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true')) throw new Error('invalid_quote');
     if (value.version !== undefined && value.version !== 1 && value.version !== 2) throw new Error('invalid_quote');
+    const confirmed = value.ready && result.quote_retained === true && Number.isSafeInteger(value.total_gross_cent) &&
+      value.total_gross_cent > 0 && /^[a-f0-9]{64}$/.test(value.quote_hash) && Date.parse(value.expires_at) > Date.now();
     review.replaceChildren();
     const lines = el('dl');
     for (const line of value.lines) {
-      lines.append(el('dt', line.quantity + ' × ' + line.name), el('dd', money(line.items_gross_cent)));
+      let amount = money(line.items_gross_cent);
+      if (!value.ready && (!Number.isSafeInteger(line.items_gross_cent) || line.items_gross_cent <= 0)) {
+        const item = offerSelection.find(entry => entry.product?.id === line.id);
+        const cataloguePrice = item && displayPrice(item.product, line.quantity);
+        amount = cataloguePrice ? 'Katalogpreis: ' + money(cataloguePrice.total) : 'Artikelpreis noch offen';
+      }
+      const lineAmount = el('dd', amount);
+      const candidates = previousPrices.filter(price => price.id === line.id);
+      if (confirmed && candidates.length === 1 && candidates[0].quantity === line.quantity &&
+          Number.isSafeInteger(candidates[0].total) && Number.isSafeInteger(line.items_gross_cent) &&
+          line.items_gross_cent > 0 && candidates[0].total !== line.items_gross_cent) {
+        lineAmount.append(el('br'), el('small', 'Preis aktualisiert · zuvor ' + money(candidates[0].total) + ' für ' + line.quantity + ' Stück', 'shop-muted'));
+      }
+      lines.append(el('dt', line.quantity + ' × ' + line.name), lineAmount);
       for (const service of line.services || []) lines.append(el('dt', ({mounting: 'Montage', painting: 'Lackierung', oil_service: 'Ölservice', installation: 'Einbau', care: 'Aufbereitung'})[service.code] || 'Erforderliches Zubehör'), el('dd', money(service.gross_cent)));
     }
     const reshipment = confirmedWorkshopDelivery === 'customer_reshipment';
-    for (const shipment of value.shipments) lines.append(el('dt', shipment.destination === 'workshop' ? reshipment ? 'Versand zur Werkstatt und anschließend zum Kunden' : 'Versand zur Werkstatt · Abholung' : 'Direktversand zum Kunden'), el('dd', money(shipment.gross_cent)));
+    for (const shipment of value.shipments) {
+      const destination = shipment.destination === 'workshop' ? reshipment ? 'Versand zur Werkstatt und anschließend zum Kunden' : 'Versand zur Werkstatt · Abholung' : 'Direktversand zum Kunden';
+      let freight = 'Versandkosten noch offen';
+      if (shipment.gross_cent === 0) freight = 'Versandkostenfrei';
+      else if (Number.isSafeInteger(shipment.gross_cent) && shipment.gross_cent > 0) freight = money(shipment.gross_cent);
+      lines.append(el('dt', destination), el('dd', freight));
+    }
     review.append(lines);
-    if (value.ready === true && result.quote_retained === true && Number.isSafeInteger(value.total_gross_cent) && value.total_gross_cent > 0 && /^[a-f0-9]{64}$/.test(value.quote_hash) && Date.parse(value.expires_at) > Date.now()) {
+    if (confirmed) {
       quote = value; retained = true; review.append(el('p', 'Gesamtpreis inkl. MwSt.', 'shop-muted'), el('p', money(value.total_gross_cent), 'shop-summary-total'));
       byId('quote-status').textContent = reviewPayment ? 'Gesamtpreis einschließlich Montage und Versand bestätigt. Die technische Prüfung steht noch aus.' : 'Artikel, Leistungen und Versand wurden für diese Auswahl geprüft.';
       const reservation = reviewPayment
@@ -1983,10 +2036,13 @@
       await consumerTerms(value);
     } else {
       invalidateQuote(); quoteBlocked = true; review.append(lines);
-      if (Number.isSafeInteger(value.known_subtotal_gross_cent) && value.known_subtotal_gross_cent >= 0) review.append(el('p', 'Bekannte Zwischensumme · noch kein Gesamtangebot', 'shop-muted'), el('p', money(value.known_subtotal_gross_cent), 'shop-summary-total'));
-      review.append(el('p', 'Ein verbindlicher Gesamtpreis ist noch nicht möglich.', 'shop-review-note'));
+      if (Number.isSafeInteger(value.known_subtotal_gross_cent) && value.known_subtotal_gross_cent > 0 &&
+          value.lines.some(line => Number.isSafeInteger(line.items_gross_cent) && line.items_gross_cent > 0)) {
+        review.append(el('p', 'Bekannte Zwischensumme · noch kein Gesamtangebot', 'shop-muted'), el('p', money(value.known_subtotal_gross_cent), 'shop-summary-total'));
+      }
+      review.append(el('p', 'Gesamtpreis noch offen', 'shop-review-note'));
       const list = el('ul', null, 'shop-errors'), reasons = new Set();
-      for (const item of value.blocked_reasons || []) reasons.add(BLOCKED[item.code] || 'Ein Preis-, Service- oder Lieferdetail muss noch bestätigt werden.');
+      for (const item of value.blocked_reasons || []) reasons.add(quoteBlockReason(item));
       for (const reason of reasons) list.append(el('li', reason)); review.append(list);
       const mixed = (value.blocked_reasons || []).some(item => item.code === 'mixed_cart_manual_review_required');
       offerButton(review, mixed ? 'Gemischten Warenkorb als Gesamtangebot anfragen' : 'Auswahl als persönliches Angebot anfragen');
@@ -2091,9 +2147,10 @@
       const submittedRevision = revision;
       try {
         const submitted = JSON.stringify({lines: checkoutLines(cart)});
+        const previousPrices = cartSteps ? pricesAtSelection : cartDisplayPrices();
         const result = await requestJSON('/cart/quote', {method: 'POST', body: submitted});
         if (quoteRun !== quoteRequestRun || submittedRevision !== revision || !addressReady) return;
-        await showQuote(result);
+        await showQuote(result, previousPrices);
       }
       catch (error) {
         if (quoteRun !== quoteRequestRun || submittedRevision !== revision) return;

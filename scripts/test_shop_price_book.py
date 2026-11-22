@@ -137,9 +137,12 @@ class PriceBookChecks(unittest.TestCase):
         self.assertEqual(price['prices_by_quantity']['4']['items_gross_cent'], 60000)
         self.assertNotIn('evidence_id', price)
         self.assertEqual(book.due_ids(), [])
+        self.assertFalse(book.review_due(self.id))
         self.time[0] = NOW + timedelta(days=5)
         self.assertIsNotNone(book.get(self.id))
         self.assertEqual(book.due_ids(), [self.id])
+        self.assertTrue(book.review_due(self.id))
+        self.assertFalse(book.review_due('tyre:' + 'f' * 24))
         self.time[0] = NOW + timedelta(days=7)
         self.assertIsNone(book.get(self.id))
 
@@ -195,6 +198,19 @@ class PriceBookChecks(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.assertIsNone(book.checkout_quote(self.product, 4, lambda *args: self.fresh(quantity=4, **changes)))
         self.assertEqual(book.get(self.id)['prices_by_quantity']['4']['unit_gross_cent'], 15000)
+        self.assertEqual(book.checkout_quote(self.product, 4, lambda *args: self.fresh(quantity=4, unit_gross_cent=15001),
+                                              report_price_change=True),
+                         {'confirmed': False, 'reason': 'published_price_review_required'})
+        self.assertIsNone(book.checkout_quote(self.product, 4, lambda *args: self.fresh(quantity=4, stock=1),
+                                              report_price_change=True))
+
+    def test_checkout_uses_price_published_while_fetching_stock(self):
+        book = self.ready()
+        self.time[0] += timedelta(days=5)
+        def fresh_after_publication(product, quantity):
+            book.publish_uniform(product, self.fresh(unit_gross_cent=15005))
+            return self.fresh(quantity=quantity, unit_gross_cent=15005)
+        self.assertEqual(book.checkout_quote(self.product, 4, fresh_after_publication)['unit_gross_cent'], 15005)
 
     def test_mode_identity_and_corrupt_or_foreign_store_are_not_silently_adopted(self):
         self.ready()

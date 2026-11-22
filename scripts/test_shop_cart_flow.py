@@ -40,8 +40,12 @@ class Node{
 }
 function walk(node){return[node,...node.children.flatMap(walk)];}
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
-async function boot(lines,{unbound=false,address=true,blocked=false,missing=false,deferBuyer=false,deferQuote=false,quoteFailures=0,omitLast=false,storage=new Map(),search='',canCheckout=false,returned=null,features={}}={}){
+async function boot(lines,{unbound=false,address=true,blocked=false,missing=false,missingCataloguePrice=false,tyreQuoteUnit=10000,steps=false,deferBuyer=false,deferQuote=false,quoteFailures=0,omitLast=false,storage=new Map(),search='',canCheckout=false,returned=null,features={}}={}){
  const nodes={};for(const key of ['close-product','product-dialog','product-detail','shop-announcement','cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note','buyer-address','address-status','delivery-fields','cart-workflow-note','cart-separate','order-status','order-summary'])nodes[key]=new Node();
+ if(steps){
+   for(const key of ['cart-steps','saved-address-choice','cart-step-title','use-saved-address','cart-review-address','retry-quote'])nodes[key]=new Node();
+   nodes['cart-steps'].querySelectorAll=()=>[];
+ }
  nodes['checkout-button'].hidden=true;nodes['buyer-address'].hidden=true;
  const body=new Node('body');body.dataset={api:'/shop/api/v2',page:'warenkorb',buyerEnabled:'true',quoteEnabled:'true',orderEnabled:'true',checkoutEnabled:'true',consumerEnabled:'true',cartRequestUrl:'/anfrage?anliegen=allgemein&shop_anfrage=1'};
  Object.assign(body.dataset,features);
@@ -55,16 +59,16 @@ async function boot(lines,{unbound=false,address=true,blocked=false,missing=fals
  location:{pathname:'/shop/warenkorb/',search,assign:url=>redirects.push(url)},crypto:{randomUUID:()=>token},setTimeout(){},clearTimeout(){},setInterval(){},
  fetch:async(url,options)=>{calls.push({url,options});let value;
   if(url.endsWith('/buyer/session')){if(pendingBuyer)await pendingBuyer;value={guest:true,address_ready:address,csrf_token:'SYNTHETIC_TOKEN_12345678901234567890',expires_at:expiry};}
-  else if(url.includes('/products/')){const id=decodeURIComponent(url.split('/products/')[1].split('?')[0]),p=product(id,unbound||id===C?'inquiry_only':'supplier_check_required');if(id===B)p.sale_dimensions={width:'8',diameter:'18',offset:'40',bolt_count:'5',pcd:'112',centre_bore:'70'};value={item:missing?null:p,prices_refreshing:false};}
+  else if(url.includes('/products/')){const id=decodeURIComponent(url.split('/products/')[1].split('?')[0]),p=product(id,unbound||id===C?'inquiry_only':'supplier_check_required');if(missingCataloguePrice)delete p.price;if(id===B)p.sale_dimensions={width:'8',diameter:'18',offset:'40',bolt_count:'5',pcd:'112',centre_bore:'70'};value={item:missing?null:p,prices_refreshing:false};}
   else if(url.endsWith('/buyer/address'))value={address_ready:true,csrf_token:'SYNTHETIC_TOKEN_12345678901234567890'};
   else if(url.endsWith('/cart/quote')){
     if(pendingQuote)await pendingQuote;
     if(quoteFailures>0){quoteFailures--;throw Error('service_unavailable');}
-    const items=JSON.parse(options.body).lines.map(({id,quantity})=>({id,name:product(id).name,quantity,items_gross_cent:10000*quantity,services:[]}));
+    const items=JSON.parse(options.body).lines.map(({id,quantity})=>({id,name:product(id).name,quantity,items_gross_cent:(id===A?tyreQuoteUnit:10000)*quantity,services:[]}));
     if(omitLast)items.pop();
     amount=items.reduce((sum,item)=>sum+item.items_gross_cent+821,0);
     const readyQuote={ready:true,currency:'eur',quote_hash:hash,total_gross_cent:amount,expires_at:expiry,lines:items,shipments:items.map(()=>({destination:'customer',gross_cent:821}))};
-    value={quote:blocked?{...readyQuote,ready:false,total_gross_cent:null,known_subtotal_gross_cent:amount,blocked_reasons:[{code:'freight_unconfirmed'}]}:readyQuote,quote_retained:!blocked};
+    value={quote:blocked?{...readyQuote,ready:false,total_gross_cent:null,known_subtotal_gross_cent:amount,blocked_reasons:[{code:'freight_unconfirmed'}],...blocked}:readyQuote,quote_retained:!blocked};
   }
   else if(url.endsWith('/consumer/terms'))value={version:'SYNTHETIC',pack_hash:'b'.repeat(64),consumer_only:true,texts:{agb:'Terms',widerruf:'Withdrawal',widerrufsformular:'Form',lieferung:'Delivery',datenschutz:'Privacy'}};
   else if(canCheckout&&url.endsWith('/consumer/acceptance'))value={accepted:true,quote_hash:hash,pack_hash:'b'.repeat(64),accepted_at:new Date().toISOString()};
@@ -127,8 +131,9 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  const threePlusInquiry=[...pairRows,selection('tyre:'+'e'.repeat(24)),rows[2]];
  const many=await boot(threePlusInquiry),manyButtons=walk(many.nodes['cart-separate']).filter(n=>n.tagName==='BUTTON');
  assert.equal(manyButtons.length,1);manyButtons[0].listeners.click();assert.deepEqual(JSON.parse(many.storage.get(prefix+token)),threePlusInquiry.slice(0,3));
- const duplicate=await boot([...pairRows,selection(A)]);await press(duplicate);
+ const duplicate=await boot([...pairRows,selection(A)],{tyreQuoteUnit:10005});await press(duplicate);
  assert.deepEqual(JSON.parse(duplicate.calls.find(c=>c.url.endsWith('/cart/quote')).options.body).lines,[selection(B,{},2),selection(A,{},3)]);
+ assert.ok(!walk(duplicate.nodes['quote-review']).some(n=>n.textContent.includes('Preis aktualisiert')),'merged quantity was never displayed as a single line');
  const overLimit=await boot([...pairRows,selection(A,{},3)]);await press(overLimit);
  assert.equal(overLimit.calls.some(c=>c.url.endsWith('/cart/quote')),false);
  assert.ok(overLimit.nodes['quote-status'].textContent.includes('bestellbare Menge'));
@@ -174,10 +179,42 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  assert.equal(retry.nodes['request-quote'].textContent,'Erneut prüfen');assert.equal(retry.nodes['request-quote'].disabled,false);assert.ok(retry.nodes['quote-status'].textContent);
  await press(retry);assert.equal(retry.nodes['checkout-button'].hidden,false);assert.equal(retry.calls.filter(c=>c.url.endsWith('/buyer/address')).length,1);
  const direct=await boot([selection()]);assert.equal(direct.nodes['request-quote'].textContent,'Gesamtpreis prüfen');assert.equal(direct.nodes['buyer-address'].hidden,false);await press(direct);
+ assert.ok(!walk(direct.nodes['quote-review']).some(n=>n.textContent.includes('Preis aktualisiert')));
+ const changedPrice=await boot([selection(A,{},4)],{steps:true,tyreQuoteUnit:10005});
+ await press(changedPrice);
+ await changedPrice.nodes['use-saved-address'].listeners.click();
+ const reviewed=walk(changedPrice.nodes['quote-review']);
+ const newAmount=reviewed.find(n=>n.tagName==='DD'&&n.textContent===logic.money(40020));
+ assert.ok(newAmount);
+ assert.ok(newAmount.children.some(n=>n.textContent==='Preis aktualisiert · zuvor '+logic.money(40000)+' für 4 Stück'));
+ assert.ok(reviewed.some(n=>n.textContent===logic.money(40841)),'total uses confirmed amount including freight');
+ assert.equal(changedPrice.nodes['checkout-button'].hidden,false);
+ assert.equal(changedPrice.nodes['checkout-button'].disabled,true,'new total still requires normal consent');
  assert.equal(direct.calls.filter(c=>c.url.endsWith('/cart/quote')).length,1);assert.equal(direct.nodes['checkout-button'].hidden,false);assert.equal(direct.nodes['checkout-button'].disabled,true);
  await direct.nodes['checkout-button'].listeners.click();assert.equal(direct.calls.some(c=>c.url.endsWith('/orders')||c.url.endsWith('/checkout')||c.url.endsWith('/consumer/acceptance')),false);
  const manual=await boot([selection()],{blocked:true});await press(manual);assert.equal(manual.nodes['request-quote'].textContent,'Erneut prüfen');assert.ok(manual.nodes['quote-status'].textContent.includes('Noch keine Zahlung'));assert.equal(manual.nodes['checkout-button'].hidden,true);
  assert.equal(walk(manual.nodes['quote-review']).filter(n=>n.tagName==='BUTTON').length,1);assert.equal(walk(manual.nodes['cart-summary']).filter(n=>n.tagName==='BUTTON').length,0);
+ const missingConfirmation = {lines:[{id:A,name:'GOODRIDE SW608',quantity:4,items_gross_cent:null,services:[]}],
+   shipments:[{destination:'customer',gross_cent:0}],known_subtotal_gross_cent:0,
+   blocked_reasons:[{code:'confirmation_missing',dependency:'retail_quote',product_id:A}]};
+ const pending = await boot([selection(A,{},4)],{blocked:missingConfirmation});
+ await press(pending);
+ const pendingText = walk(pending.nodes['quote-review']).map(node=>node.textContent);
+ assert.ok(pendingText.includes('4 × GOODRIDE SW608'));
+ assert.ok(pendingText.includes('Katalogpreis: '+logic.money(40000)));
+ assert.ok(pendingText.includes('Versandkostenfrei'));
+ assert.ok(pendingText.includes('Gesamtpreis noch offen'));
+ assert.ok(pendingText.some(text=>text.includes('Preis- und Bestandsbestätigung')));
+ assert.ok(!pendingText.includes(logic.money(0)));
+ assert.equal(pending.nodes['checkout-button'].hidden,true);
+ const neitherPrice = await boot([selection(A,{},4)],{missingCataloguePrice:true,
+   blocked:{...missingConfirmation,shipments:[{destination:'customer',gross_cent:null}],known_subtotal_gross_cent:null}});
+ await press(neitherPrice);
+ const neitherText = walk(neitherPrice.nodes['quote-review']).map(node=>node.textContent);
+ assert.ok(neitherText.includes('Artikelpreis noch offen'));
+ assert.ok(neitherText.includes('Versandkosten noch offen'));
+ assert.ok(!neitherText.includes('Versandkostenfrei'));
+ assert.ok(!neitherText.includes(logic.money(0)));
  const qty=walk(manual.nodes['cart-items']).find(n=>n.tagName==='SELECT');qty.value='2';qty.listeners.change();await flush();await flush();
  assert.equal(manual.nodes['request-quote'].textContent,'Gesamtpreis prüfen');assert.equal(manual.nodes['quote-review'].children.length,0);assert.equal(manual.nodes['checkout-button'].hidden,true);assert.equal(manual.nodes['checkout-note'].textContent.includes('Prüfung erneut starten'),false);
  const removable=await boot([selection(),selection(C)]);assert.equal(removable.nodes['request-quote'].textContent,'Gesamtangebot anfragen');

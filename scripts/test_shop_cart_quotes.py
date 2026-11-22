@@ -337,6 +337,19 @@ class CartQuoteChecks(unittest.TestCase):
         self.assertEqual(q.public()['total_gross_cent'],6843)
         self.assertEqual(q.public()['shipments'][0]['gross_cent'],0)
 
+    def test_unpriced_tyres_only_show_a_positive_known_subtotal(self):
+        for freight_cent, expected_subtotal in ((0, None), (500, 500)):
+            with self.subTest(freight_cent=freight_cent):
+                def freight(group, context):
+                    return {**self.f.freight(group, context), 'gross_cent': freight_cent}
+
+                quote = self.f.quote([line(TYRE, 4)], retail_quote=None, freight_quote=freight).public()
+                self.assertIsNone(quote['lines'][0]['items_gross_cent'])
+                self.assertEqual(quote['shipments'][0]['gross_cent'], freight_cent)
+                self.assertEqual(quote['known_subtotal_gross_cent'], expected_subtotal)
+                self.assertIsNone(quote['total_gross_cent'])
+                self.assertFalse(quote['ready'])
+
     def test_freight_is_bound_to_address_and_exact_shipping_group(self):
         for key in ('context_hash','shipment_hash'):
             def wrong(group,context):

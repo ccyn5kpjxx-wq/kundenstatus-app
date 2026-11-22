@@ -14,6 +14,8 @@ from pathlib import Path
 import base64
 import re
 
+from flask import g, has_request_context
+
 from shop_catalog_enriched import EnrichedPublicCatalog
 from shop_catalog_public import variant_fingerprint
 from shop_cart_quotes import CartQuoteService
@@ -415,7 +417,18 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                         'tyre_size': product['size']}
             def retail_quote(product, quantity):
                 if pricebook is not None:
-                    return pricebook.checkout_quote(product, quantity, supplier.retail_quote)
+                    quote = pricebook.checkout_quote(product, quantity, supplier.retail_quote, report_price_change=True)
+                    if (quote and quote.get('confirmed')) or not pricebook.review_due(product['id']):
+                        return quote
+                    # Only the first due item may wait for a scheduled read in this request.
+                    wait_seconds = 0
+                    if has_request_context() and not g.get('shop_price_review_waited'):
+                        g.shop_price_review_waited = True
+                        wait_seconds = 3
+                    if (cache.refresh_for_checkout(product['id'], wait_seconds=wait_seconds)
+                            or not pricebook.review_due(product['id'])):
+                        quote = pricebook.checkout_quote(product, quantity, supplier.retail_quote, report_price_change=True)
+                    return quote
                 if product['category'] == 'tyre':
                     return cached_tyre_checkout_base(product, quantity, supplier.retail_quote, cache.get)
                 return supplier.retail_quote(product, quantity)

@@ -305,6 +305,50 @@ class ReleaseChecks(unittest.TestCase):
         self.assertEqual(restarted['catalogue'].get(identifier)['price'],price)
         self.assertEqual(calls,[])
 
+    def test_checkout_refreshes_due_four_tyre_price_and_requires_new_quantity_confirmation(self):
+        from test_shop_documents import IMAGE_ASSET, LABEL, PDF_ASSET, SHEET
+
+        identifier = 'tyre:' + 'a' * 24
+        tyre = wheel(selection_id=identifier, category='tyre', name='GOODRIDE SW608',
+                     size='225/50 R16 96V', width='225', ratio='50', diameter='16', quote_public=None)
+        identity = variant_fingerprint(tyre)
+        resources = {IMAGE_ASSET: {'url': LABEL}, PDF_ASSET: {'url': SHEET}}
+        paths = {asset: '/shop/documents/' + asset for asset in resources}
+        seed = {'source': 'RSU', 'identity_hash': identity, 'stock_reported': 20, 'unit_gross_cent': 6624,
+                'observed_at': (datetime.now(timezone.utc) - timedelta(days=5, minutes=45)).isoformat()}
+        self.bundle.update(products=[tyre], rsu_bindings={identifier: {'synthetic': True}},
+            shipping_classes={identifier: 'pkw_tyre'}, delivery_postcodes=['74821'],
+            documents={'resources': resources, 'approved_assets': list(resources)},
+            product_documents={identifier: {'identity_hash': identity, 'eprel_id': '123456',
+                'tyre_label_url': paths[IMAGE_ASSET], 'tyre_sheet_url': paths[PDF_ASSET]}},
+            rsu_price_seeds={'schema_version': 1, 'evidence_id': 'e' * 64, 'records': {identifier: seed}})
+        self.bundle['publication'].update(released_ids=[identifier], document_urls=paths)
+        self.descriptor.update(buyer_and_quotes_enabled=True, initial_storage_creation=True,
+            rsu_reads_approved=True, fixed_pricebook_enabled=True,
+            rsu_config=write_json(self.root / 'rsu-private.json', {}))
+        self.install()
+        calls = []
+        supplier = self.synthetic_provider('RSU', calls, 6629)
+        supplier.rsu_mapping = lambda p: {'confirmed': True, 'product_id': p['id'], 'identity_hash': identity,
+            'supplier': 'RSU', 'supplier_article_id': '123', 'evidence_id': 'synthetic-mapping'}
+        with patch('shop_production.RSUQuoteProvider.from_config', return_value=supplier):
+            catalog = self.prepare()['catalogue']
+        cart = self.portal.app.extensions['shop_production']['quotes']
+        lines = {'lines': [{'id': identifier, 'quantity': 4}]}
+        delivery = {'delivery': {'salutation': 'Firma', 'recipient': 'Testfirma', 'street': 'Testweg 1',
+                                 'country': 'DE', 'postcode': '74821', 'city': 'Mosbach'}}
+        old_offer = catalog.get(identifier)['price']['prices_by_quantity']['4']
+        self.assertEqual(old_offer['items_gross_cent'], 27040)
+        with self.portal.app.test_request_context():
+            offer = cart.quote(lines, customer_id='synthetic-buyer', delivery_context=delivery).public()
+        self.assertEqual([quantity for _, quantity in calls], [4, 1, 4])
+        self.assertTrue(offer['ready'], offer['blocked_reasons'])
+        self.assertEqual(offer['lines'][0]['unit_gross_cent'], 6765)
+        self.assertEqual(offer['shipments'][0]['gross_cent'], 0)
+        self.assertEqual(offer['total_gross_cent'], 27060)
+        self.assertEqual(catalog.get(identifier)['price']['prices_by_quantity']['4']['items_gross_cent'], 27060)
+        self.assertFalse(self.portal.app.config['SHOP_CHECKOUT_ENABLED'])
+
     def test_standalone_rim_policy_requires_private_literal_approval_and_reviewed_dimensions(self):
         identifier = self.released['selection_id']
         identity = variant_fingerprint(self.released)
