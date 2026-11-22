@@ -59,7 +59,13 @@ async function boot(lines,{unbound=false,address=true,blocked=false,missing=fals
  location:{pathname:'/shop/warenkorb/',search,assign:url=>redirects.push(url)},crypto:{randomUUID:()=>token},setTimeout(){},clearTimeout(){},setInterval(){},
  fetch:async(url,options)=>{calls.push({url,options});let value;
   if(url.endsWith('/buyer/session')){if(pendingBuyer)await pendingBuyer;value={guest:true,address_ready:address,csrf_token:'SYNTHETIC_TOKEN_12345678901234567890',expires_at:expiry};}
-  else if(url.includes('/products/')){const id=decodeURIComponent(url.split('/products/')[1].split('?')[0]),p=product(id,unbound||id===C?'inquiry_only':'supplier_check_required');if(missingCataloguePrice)delete p.price;if(id===B)p.sale_dimensions={width:'8',diameter:'18',offset:'40',bolt_count:'5',pcd:'112',centre_bore:'70'};value={item:missing?null:p,prices_refreshing:false};}
+  else if(url.includes('/products/')){
+    const id=decodeURIComponent(url.split('/products/')[1].split('?')[0]);
+    const p=product(id,unbound||id===C?'inquiry_only':'supplier_check_required');
+    if(missingCataloguePrice)Object.assign(p,{price:null,price_status:'update_required',order_enabled:false});
+    if(id===B)p.sale_dimensions={width:'8',diameter:'18',offset:'40',bolt_count:'5',pcd:'112',centre_bore:'70'};
+    value={item:missing?null:p,prices_refreshing:false};
+  }
   else if(url.endsWith('/buyer/address'))value={address_ready:true,csrf_token:'SYNTHETIC_TOKEN_12345678901234567890'};
   else if(url.endsWith('/cart/quote')){
     if(pendingQuote)await pendingQuote;
@@ -215,6 +221,39 @@ const writes=f=>f.calls.filter(c=>c.options.body!=null),press=f=>f.nodes['reques
  assert.ok(neitherText.includes('Versandkosten noch offen'));
  assert.ok(!neitherText.includes('Versandkostenfrei'));
  assert.ok(!neitherText.includes(logic.money(0)));
+ // An unpublished catalogue price can recover before the first quote. The
+ // exact selected quantity and the server's result decide the checkout step.
+ for (const id of [A, B]) {
+   for (const quantity of [1, 2, 3, 4]) {
+     const lines = [selection(id, {}, quantity)];
+     const unresolved = {
+       lines: [{id, name: product(id).name, quantity, items_gross_cent: null, services: []}],
+       shipments: [{destination: 'customer', gross_cent: 0}], known_subtotal_gross_cent: 0,
+       blocked_reasons: [{code: 'confirmation_missing', dependency: 'retail_quote', product_id: id}]
+     };
+     for (const blocked of [unresolved, false]) {
+       const page = await boot(lines, {steps: true, missingCataloguePrice: true, blocked});
+       await press(page);
+       await page.nodes['use-saved-address'].listeners.click();
+       const review = walk(page.nodes['quote-review']).map(node => node.textContent);
+       const requests = writes(page);
+       assert.deepEqual(requests.map(call => call.url), ['/shop/api/v2/cart/quote']);
+       assert.deepEqual(JSON.parse(requests[0].options.body).lines, lines);
+       assert.ok(!review.includes(logic.money(0)));
+       const checkout = page.nodes['checkout-button'];
+       if (blocked) {
+         assert.ok(review.includes('Artikelpreis noch offen'));
+         assert.ok(review.includes('Gesamtpreis noch offen'));
+         assert.equal(checkout.hidden, true);
+       } else {
+         assert.ok(review.includes(logic.money(quantity * 10000 + 821)));
+         assert.ok(!review.includes('Gesamtpreis noch offen'));
+         assert.equal(checkout.hidden, false);
+         assert.equal(checkout.disabled, true, 'customer consent is still required');
+       }
+     }
+   }
+ }
  const qty=walk(manual.nodes['cart-items']).find(n=>n.tagName==='SELECT');qty.value='2';qty.listeners.change();await flush();await flush();
  assert.equal(manual.nodes['request-quote'].textContent,'Gesamtpreis prüfen');assert.equal(manual.nodes['quote-review'].children.length,0);assert.equal(manual.nodes['checkout-button'].hidden,true);assert.equal(manual.nodes['checkout-note'].textContent.includes('Prüfung erneut starten'),false);
  const removable=await boot([selection(),selection(C)]);assert.equal(removable.nodes['request-quote'].textContent,'Gesamtangebot anfragen');
