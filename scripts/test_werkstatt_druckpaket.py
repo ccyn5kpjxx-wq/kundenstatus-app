@@ -7,6 +7,7 @@ import unittest
 
 import fitz
 from PIL import Image
+from reportlab.lib.pagesizes import A4, landscape
 from werkzeug.datastructures import FileStorage
 
 import smoke_test
@@ -30,9 +31,10 @@ def quarter_cut_lines(page):
 
 
 def original_pdf(*pages):
+    width, height = landscape(A4)
     with fitz.open() as doc:
         for text in pages:
-            doc.new_page().insert_text((40, 50), text)
+            doc.new_page(width=width, height=height).insert_text((40, 50), text)
         return doc.tobytes()
 
 
@@ -51,6 +53,12 @@ class OrderPrintTest(unittest.TestCase):
         saved, _ = portal.save_uploads(order or self.oid, [FileStorage(stream=BytesIO(raw), filename=name)],
                                        "autohaus", kategorie=kategorie, analyze=False)
         self.assertEqual(saved, 1)
+
+    def assert_landscape_package(self, pdf):
+        for page in pdf:
+            with self.subTest(printed_page=page.number + 1):
+                self.assertAlmostEqual(page.rect.width, 841.89, delta=.5)
+                self.assertAlmostEqual(page.rect.height, 595.28, delta=.5)
 
     def assert_first_page_tearoff(self, page, number):
         self.assertEqual(len(quarter_cut_lines(page)), 1, "Schnittlinie bei 75 % der A4-Höhe erwartet")
@@ -112,8 +120,7 @@ class OrderPrintTest(unittest.TestCase):
             self.assertRegex(pages[0], rf"(?i)Lackierauftrag\s+(?:Nr\.?\s*)?{self.oid}\b")
             for text in ("TEST AB 123", "9617", "LY7W", "Tür hinten rechts"):
                 self.assertIn(text, pages[0])
-            self.assertAlmostEqual(pdf[0].rect.width, 595.28, places=1)
-            self.assertAlmostEqual(pdf[0].rect.height, 841.89, places=1)
+            self.assert_landscape_package(pdf)
             self.assertIn("TUER HINTEN RECHTS", pages[1])
             self.assertIn("LACKIERFREIGABE", pages[2])
             with fitz.open(stream=original) as source:
@@ -131,6 +138,7 @@ class OrderPrintTest(unittest.TestCase):
             db.commit()
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertEqual(len(pdf), 1)
+            self.assert_landscape_package(pdf)
             page = pdf[0]
             self.assert_print_hierarchy(page, "Lackierauftrag", self.oid, "Lackier",
                 ("15.11.2026", "08:00"), ("17.11.2026", "16:30"),
@@ -156,6 +164,7 @@ class OrderPrintTest(unittest.TestCase):
             db.commit()
         with fitz.open(stream=self.client.get(f"/admin/auftrag/{order_id}/ausdrucken").data) as pdf:
             self.assertEqual(len(pdf), 1)
+            self.assert_landscape_package(pdf)
             page = pdf[0]
             self.assert_print_hierarchy(page, "Werkstattauftrag", order_id, "Radwechsel",
                                         ("20.11.2026", "10:15"), ("20.11.2026", "11:00"),
@@ -169,30 +178,46 @@ class OrderPrintTest(unittest.TestCase):
         self.upload("Lackauftrag_defekt.pdf", b"%PDF-unreadable")
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertEqual(len(pdf), 2)
-            self.assertTrue(pdf[1].get_images())
-            self.assertLess(pdf[1].rect.width, pdf[1].rect.height)
+            self.assert_landscape_package(pdf)
+            images = pdf[1].get_image_info()
+            self.assertEqual(len(images), 1)
+            image_box = fitz.Rect(images[0]["bbox"])
+            self.assertTrue(pdf[1].rect.contains(image_box))
+            self.assertAlmostEqual(image_box.width / image_box.height, 500 / 330, places=3)
             self.assertIn("Lackauftrag_defekt.pdf", pdf[0].get_text())
             self.assertIn("Fehlende Druckseiten", pdf[0].get_text())
 
-    def test_wide_and_rotated_originals_print_in_portrait_without_losing_edges(self):
+    def test_mixed_and_rotated_originals_stay_upright_and_complete(self):
         with fitz.open() as attachment:
-            page = attachment.new_page(width=842, height=595)
-            page.insert_text((12, 20), "LINKS OBEN")
-            page.insert_text((723, 572), "RECHTS UNTEN")
-            page = attachment.new_page(width=595, height=842)
-            page.insert_text((14, 24), "GEDREHTES BLATT")
-            page.set_rotation(90)
+            for width, height, rotation in ((842, 595, 0), (595, 842, 0),
+                                            (595, 842, 90), (842, 595, 90)):
+                page = attachment.new_page(width=width, height=height)
+                page.set_rotation(rotation)
+                # Write upright at opposite edges in the orientation of the displayed original.
+                for x, y, label in ((12, 20, "LINKS OBEN"),
+                                    (page.rect.width - 112, page.rect.height - 12, "RECHTS UNTEN")):
+                    point = fitz.Point(x, y) * page.derotation_matrix
+                    page.insert_text(point, label, rotate=rotation)
             self.upload("Lackauftrag.pdf", attachment.tobytes())
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
-            self.assertEqual(len(pdf), 3)
-            for page in pdf:
-                self.assertAlmostEqual(page.rect.width, 595.28, places=1)
-                self.assertAlmostEqual(page.rect.height, 841.89, places=1)
-            for page, text in ((pdf[1], "LINKS OBEN"), (pdf[1], "RECHTS UNTEN"),
-                               (pdf[2], "GEDREHTES BLATT")):
-                hits = page.search_for(text)
-                self.assertEqual(len(hits), 1)
-                self.assertTrue(page.rect.contains(hits[0]))
+            self.assertEqual(len(pdf), 5)
+            self.assert_landscape_package(pdf)
+            for index in range(1, len(pdf)):
+                page = pdf[index]
+                for label in ("LINKS OBEN", "RECHTS UNTEN"):
+                    with self.subTest(original_page=index, label=label):
+                        hits = page.search_for(label, quads=True)
+                        self.assertEqual(len(hits), 1)
+                        quad = hits[0] * page.rotation_matrix
+                        self.assertTrue(page.rect.contains(quad.rect))
+                        self.assertGreater(quad.ur.x, quad.ul.x)
+                        self.assertAlmostEqual(quad.ur.y, quad.ul.y, delta=.2)
+                        if label == "LINKS OBEN":
+                            self.assertLess(quad.rect.x1, page.rect.width / 2)
+                            self.assertLess(quad.rect.y1, page.rect.height / 4)
+                        else:
+                            self.assertGreater(quad.rect.x0, page.rect.width / 2)
+                            self.assertGreater(quad.rect.y0, page.rect.height * .75)
 
     def test_permissions_archives_and_orders_without_upload(self):
         partner = portal.app.test_client()
@@ -206,6 +231,7 @@ class OrderPrintTest(unittest.TestCase):
             sess["werkstatt_tafel"] = portal.werkstatt_tafel_session_token()
         with fitz.open(stream=hall.get(self.halle).data) as pdf:
             self.assertEqual(len(pdf), 1)
+            self.assert_landscape_package(pdf)
         with closing(portal.get_db()) as db:
             db.execute("UPDATE auftraege SET archiviert=1 WHERE id=?", (self.oid,))
             db.commit()
@@ -219,6 +245,7 @@ class OrderPrintTest(unittest.TestCase):
             db.commit()
         with fitz.open(stream=self.client.get(self.admin).data) as pdf:
             self.assertGreater(len(pdf), 1)
+            self.assert_landscape_package(pdf)
             self.assert_first_page_tearoff(pdf[0], self.oid)
             continuation = [pdf[index] for index in range(1, len(pdf))]
             for page in continuation:

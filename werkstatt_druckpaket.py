@@ -8,7 +8,7 @@ import fitz
 from PIL import Image, ImageOps
 from reportlab.lib.colors import HexColor
 from reportlab.graphics.shapes import Drawing, Rect
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase.pdfmetrics import getAscentDescent
@@ -19,6 +19,9 @@ from reifen_auftragsetikett import reifenetikett
 from werkstatt_auftrag_ausdruck import _FIELDS, _event, _sheet_data, _work_text
 from werkstatt_druck_checkliste import checklist_rows
 from werkstatt_druckquellen import druckquellen, lade_druckquelle
+
+
+_PAGE_SIZE = landscape(A4)
 
 
 def _order(portal, order_id, tafel):
@@ -80,16 +83,16 @@ def _boxes(rows, width, style):
 
 def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     stream = BytesIO()
-    size = A4
+    size = _PAGE_SIZE
     doc = BaseDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
                           author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
                           allowSplitting=True)
-    cut = size[1] / 4  # PDF coordinates start at the bottom of the portrait page.
+    cut = size[1] / 4  # The bottom quarter of the first sheet is the tear-off.
     ink, green = HexColor("#172f25"), HexColor("#37654f")
-    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=25, leading=42, textColor=ink)
+    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=25, leading=40, textColor=ink)
     label = ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=green,
-                           spaceBefore=12, spaceAfter=4, keepWithNext=True)
-    checklist_label = ParagraphStyle("checklist", parent=label, spaceBefore=22)
+                           spaceBefore=8, spaceAfter=3, keepWithNext=True)
+    checklist_label = ParagraphStyle("checklist", parent=label, spaceBefore=17)
     value = ParagraphStyle("value", fontName="Helvetica", fontSize=13, leading=17, textColor=ink)
     note = ParagraphStyle("note", parent=value, fontSize=11, leading=15)
     service = auftrag_leistungsart(order)
@@ -120,9 +123,9 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
         identification.append("Auftragsreferenz " + sheet["externe_referenz"])
     # Lay out the same stack on each worksheet page. Its height follows the
     # complete service name, including a booking with several services.
-    key_style = ParagraphStyle("field", parent=label, fontSize=12, leading=20)
-    service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=16, leading=21)
-    time_style = ParagraphStyle("time", parent=service_style, fontSize=17, leading=23)
+    key_style = ParagraphStyle("field", parent=label, fontSize=12, leading=17)
+    service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=16, leading=19)
+    time_style = ParagraphStyle("time", parent=service_style, fontSize=17, leading=20)
     fields = Table([
         [_paragraph("Service:", key_style), _paragraph(service_name, service_style)],
         [_paragraph(start_name, key_style), _paragraph(start_value, time_style)],
@@ -130,12 +133,12 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     ], colWidths=[46*mm, doc.width - 12 - 46*mm], hAlign="LEFT")
     fields.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                                ("TOPPADDING", (0, 0), (-1, -1), 3),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+                                ("TOPPADDING", (0, 0), (-1, -1), 1),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
     top = [
-        (Paragraph(f"{title} <font size='36'>{sheet['nummer']}</font>", heading), 5),
-        (fields, 8),
-        (_paragraph("   ·   ".join(identification), note), 7),
+        (Paragraph(f"{title} <font size='36'>{sheet['nummer']}</font>", heading), 3),
+        (fields, 5),
+        (_paragraph("   ·   ".join(identification), note), 5),
     ]
     header = [(item, item.wrap(doc.width - 12, size[1])[1], gap) for item, gap in top]
     doc.topMargin = 12*mm + sum(height + gap for _, height, gap in header)
@@ -223,24 +226,28 @@ def _image_pages(raw):
             white.paste(rgba, mask=rgba.getchannel("A"))
             jpeg = BytesIO()
             white.save(jpeg, "JPEG", quality=90)
-            width, height = A4
+            width, height = _PAGE_SIZE
             page = pages.new_page(width=width, height=height)
             page.insert_image(fitz.Rect(12, 12, width-12, height-12), stream=jpeg.getvalue())
         return pages.tobytes()
 
 
-def _append_portrait_pages(attachments, original):
-    """Keep A4 originals at full size; fit other paper sizes onto upright A4."""
+def _append_landscape_pages(attachments, original):
+    """Place each original upright on landscape A4 without cropping."""
+    width, height = _PAGE_SIZE
+    # Normalize before copying: PyMuPDF caches source objects as soon as printing begins.
+    for page in original:
+        if page.rotation:
+            page.remove_rotation()
     for index, page in enumerate(original):
-        if abs(page.rect.width - A4[0]) < 1 and abs(page.rect.height - A4[1]) < 1:
+        if abs(page.rect.width - width) < 1 and abs(page.rect.height - height) < 1:
             attachments.insert_pdf(original, from_page=index, to_page=index, links=False,
                                    annots=False, widgets=False, final=index == len(original) - 1)
         else:
-            target = attachments.new_page(width=A4[0], height=A4[1])
+            target = attachments.new_page(width=width, height=height)
             if page.get_contents():
-                page.remove_rotation()
                 margin = 5*mm
-                frame = fitz.Rect(margin, margin, A4[0] - margin, A4[1] - margin)
+                frame = fitz.Rect(margin, margin, width - margin, height - margin)
                 target.show_pdf_page(frame, original, index, keep_proportion=True)
 
 
@@ -267,7 +274,7 @@ def druckpaket(portal, order_id, *, tafel=False):
                     if original.needs_pass or not original.page_count:
                         raise ValueError("PDF gesperrt oder leer")
                     original.bake()
-                    _append_portrait_pages(attachments, original)
+                    _append_landscape_pages(attachments, original)
                 printed.append(source["original_name"])
             except (OSError, ValueError, RuntimeError, fitz.mupdf.FzErrorBase, Image.DecompressionBombError):
                 if attachments.page_count > start:
