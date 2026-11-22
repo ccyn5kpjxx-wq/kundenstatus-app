@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shop_partner_native import alzura_readonly_catalog as api
 from shop_partner_native.shop_parts_provider import normalize_wearparts
-from shop_parts_daily_prices import FORMAT, MAX_BYTES, POINTER, asset, projections, require, scope, validate
+from shop_parts_daily_prices import FORMAT, MAX_BYTES, POINTER, RSU_POINTER, asset, projections, require, scope, validate
 from shop_parts_inquiry import NAME
 from shop_parts_release import _stamp, decode, read
 from stage_rsu_daily_prices import atomic, exclusive_stage
@@ -26,13 +26,16 @@ def digest(raw):
     return sha256(raw).hexdigest()
 
 
-def root_data(root):
+def root_data(root, source='ALZURA'):
     descriptor = decode(read(root / 'current.json', 2 * 1024 * 1024))
-    record = descriptor['parts_partner_inquiry_prices']
-    require(descriptor.get('parts_partner_inquiry_prices_approved') is True
+    require(source in ('RSU', 'ALZURA'), 'invalid_inquiry_source')
+    key = 'parts_inquiry_prices' if source == 'RSU' else 'parts_partner_inquiry_prices'
+    record = descriptor[key]
+    require(descriptor.get(key + '_approved') is True
             and NAME.fullmatch(record['path'])
             and record['base_bundle_sha256'] == descriptor['bundle']['sha256'], 'partner_release_not_approved')
     manifest, prices = scope(root, record)
+    require(all(p['source'] == source for p in prices.values()), 'inquiry_record_source_mismatch')
     return record, manifest, prices
 
 
@@ -142,7 +145,9 @@ def build(args):
 
 def stage(args):
     root = args.release_root
-    record, _, prices = root_data(root)
+    source = getattr(args, 'source', 'ALZURA')
+    record, manifest, prices = root_data(root, source)
+    proofs = manifest['identity_proofs'] if source == 'RSU' else None
     if args.stdin_b64:
         encoded = sys.stdin.buffer.read(2 * MAX_BYTES + 1)
         require(len(encoded) <= 2 * MAX_BYTES, 'partner_batch_too_large')
@@ -152,21 +157,22 @@ def stage(args):
     h = digest(raw)
     require(h == args.sha256, 'partner_transfer_hash_mismatch')
     now = datetime.now(timezone.utc)
-    observed, stamps, rows = validate(raw, record, prices, now=now, fresh=True)
+    observed, stamps, rows = validate(raw, record, prices, now=now, fresh=True, rsu_proofs=proofs)
     projections(prices, stamps, rows)
     if not args.dry_run:
         with exclusive_stage(root):
-            record, _, prices = root_data(root)
-            validate(raw, record, prices, now=now, fresh=True)
-            pointer = root / POINTER
+            record, manifest, prices = root_data(root, source)
+            proofs = manifest['identity_proofs'] if source == 'RSU' else None
+            validate(raw, record, prices, now=now, fresh=True, rsu_proofs=proofs)
+            pointer = root / (RSU_POINTER if source == 'RSU' else POINTER)
             require(not pointer.is_symlink(), 'unsafe_partner_pointer')
             if pointer.exists():
                 previous = decode(read(pointer, 256))['sha256']
-                prior = read(asset(root, previous), MAX_BYTES)
+                prior = read(asset(root, previous, source), MAX_BYTES)
                 require(digest(prior) == previous, 'invalid_previous_partner_batch')
-                previous_time, _, _ = validate(prior, record, prices, now=now)
+                previous_time, _, _ = validate(prior, record, prices, now=now, rsu_proofs=proofs)
                 require(previous == h or observed > previous_time, 'older_or_conflicting_partner_batch')
-            target = asset(root, h)
+            target = asset(root, h, source)
             require(not target.is_symlink(), 'unsafe_partner_target')
             if not target.exists() or digest(read(target, MAX_BYTES)) != h:
                 atomic(target, raw)
@@ -191,6 +197,7 @@ if __name__ == '__main__':
             cmd.add_argument('--output', type=Path, required=True)
         if name == 'stage':
             cmd.add_argument('--sha256', required=True)
+            cmd.add_argument('--source', choices=('ALZURA','RSU'), default='ALZURA')
             cmd.add_argument('--dry-run', action='store_true')
             source = cmd.add_mutually_exclusive_group(required=True)
             source.add_argument('--file', type=Path)

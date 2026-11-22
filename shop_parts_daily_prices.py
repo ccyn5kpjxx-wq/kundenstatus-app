@@ -1,4 +1,4 @@
-"""Daily material prices for the exact ALZURA inquiry-only release.
+"""Daily material prices for the exact ALZURA and RSU inquiry-only releases.
 
 The collection client runs outside this server. Only a checked, bounded price
 batch is installed on the private disk. No credentials or supplier actions
@@ -12,12 +12,14 @@ import threading
 import time
 
 from shop_cart_quotes import retail_unit_gross_cent
-from shop_parts_inquiry import HASH, ID
+from shop_parts_inquiry import HASH, ID, _projection as rsu_projection
 from shop_parts_partner_inquiry import _projection
 from shop_parts_release import _stamp, decode, read
 
 FORMAT = 'alzura-inquiry-wearparts-daily-v1'
 POINTER = 'alzura-inquiry-daily.pointer.json'
+RSU_FORMAT = 'rsu-inquiry-display-q1-daily-v1'
+RSU_POINTER = 'rsu-inquiry-display-daily.pointer.json'
 MAX_BYTES = 1024 * 1024
 
 
@@ -26,9 +28,10 @@ def require(condition, reason):
         raise ValueError(reason)
 
 
-def asset(root, digest):
+def asset(root, digest, source='ALZURA'):
     require(isinstance(digest, str) and HASH.fullmatch(digest), 'invalid_partner_batch_digest')
-    return root / ('alzura-inquiry-daily-' + digest + '.json')
+    prefix = 'rsu-inquiry-display-daily-' if source == 'RSU' else 'alzura-inquiry-daily-'
+    return root / (prefix + digest + '.json')
 
 
 def scope(root, record):
@@ -41,23 +44,42 @@ def scope(root, record):
     return manifest, prices
 
 
-def validate(raw, record, prices, *, now, fresh=False):
+def validate(raw, record, prices, *, now, fresh=False, rsu_proofs=None):
     require(0 < len(raw) <= MAX_BYTES, 'invalid_partner_batch_size')
     data = decode(raw)
-    require(isinstance(data, dict) and set(data) == {
-        'format', 'bundle_sha256', 'manifest_sha256', 'sources', 'rows'
-    } and data['format'] == FORMAT and data['bundle_sha256'] == record['base_bundle_sha256']
-        and data['manifest_sha256'] == record['sha256'], 'partner_release_mismatch')
-    sources, rows = data['sources'], data['rows']
-    require(isinstance(sources, list) and 1 <= len(sources) <= 30 and isinstance(rows, dict)
-            and set(rows) == set(prices), 'partner_coverage_mismatch')
-    stamps, indexed = [], set()
-    for source in sources:
-        require(isinstance(source, list) and len(source) == 4 and all(
-            isinstance(d, str) and HASH.fullmatch(d) for d in source[:3])
-            and source[0] not in indexed, 'invalid_partner_source')
-        indexed.add(source[0])
-        stamps.append(_stamp(source[3]))
+    require(isinstance(data, dict) and data.get('bundle_sha256') == record['base_bundle_sha256']
+            and data.get('manifest_sha256') == record['sha256'], 'partner_release_mismatch')
+    if rsu_proofs is None:
+        require(set(data) == {'format', 'bundle_sha256', 'manifest_sha256', 'sources', 'rows'}
+                and data['format'] == FORMAT, 'invalid_alzura_format')
+        sources, rows = data['sources'], data['rows']
+        require(isinstance(sources, list) and 1 <= len(sources) <= 30 and isinstance(rows, dict)
+                and set(rows) == set(prices), 'partner_coverage_mismatch')
+        stamps, indexed = [], set()
+        for source in sources:
+            require(isinstance(source, list) and len(source) == 4 and all(
+                isinstance(d, str) and HASH.fullmatch(d) for d in source[:3])
+                and source[0] not in indexed, 'invalid_partner_source')
+            indexed.add(source[0])
+            stamps.append(_stamp(source[3]))
+    else:
+        require(set(data) == {'format', 'bundle_sha256', 'manifest_sha256', 'receipts'}
+                and data['format'] == RSU_FORMAT and isinstance(data['receipts'], dict)
+                and set(data['receipts']) == set(rsu_proofs) == set(prices), 'invalid_rsu_scope')
+        stamps, rows = [], {}
+        for pid, receipt in data['receipts'].items():
+            proof = rsu_proofs[pid]
+            require(isinstance(receipt, dict) and receipt.get('article_id') == proof['mapping']['evidence']['rsu']['article_id']
+                    and receipt.get('ean') == proof['expected_ean'] and type(receipt.get('quantity')) is int
+                    and receipt['quantity'] == 1, 'rsu_receipt_identity_mismatch')
+            fields = {'status', 'article_id', 'ean', 'quantity', 'observed_at'}
+            if receipt.get('status') == 'confirmed':
+                require(set(receipt) == fields | {'unit_net_cent', 'stock'}, 'invalid_rsu_receipt')
+                rows[pid] = [len(stamps), receipt['unit_net_cent'], receipt['stock']]
+            else:
+                require(set(receipt) == fields and receipt['status'] == 'unavailable', 'invalid_rsu_receipt')
+                rows[pid] = None
+            stamps.append(_stamp(receipt['observed_at']))
     require(max(stamps) <= now and max(stamps) - min(stamps) <= timedelta(hours=1)
             and (not fresh or now < min(stamps) + timedelta(days=1)), 'invalid_partner_observation')
     for item in rows.values():
@@ -79,15 +101,17 @@ def projections(prices, stamps, rows):
         stamp = stamps[index]
         # Both permitted categories use the merchant's same material rate.
         gross = retail_unit_gross_cent(Decimal(net_cent) / 100, 'accessory')
-        quote = _projection(prices[pid]['identity_hash'], gross, stamp, stock)['price']
+        project = rsu_projection if prices[pid]['source'] == 'RSU' else _projection
+        quote = project(prices[pid]['identity_hash'], gross, stamp, stock)['price']
         quote['review_at'] = (stamp + timedelta(days=1)).isoformat()
         values[pid] = quote
     return values
 
 
 class DailyPartnerPrices:
-    def __init__(self, root, record, prices, *, clock=None, monotonic=time.monotonic):
+    def __init__(self, root, record, prices, *, rsu_proofs=None, clock=None, monotonic=time.monotonic):
         self.root, self.record, self.prices = root, record, prices
+        self.rsu_proofs = rsu_proofs
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.monotonic = monotonic
         self.next_read, self.digest, self.observation = 0, None, None
@@ -97,18 +121,18 @@ class DailyPartnerPrices:
     def refresh(self):
         # The pointer changes atomically. Preserve the last verified generation
         # on missing, corrupted or conflicting input. Its original expiry holds.
-        pointer = self.root / POINTER
+        pointer = self.root / (RSU_POINTER if self.rsu_proofs is not None else POINTER)
         if not pointer.exists():
             return
         value = decode(read(pointer, 256))
         require(isinstance(value, dict) and set(value) == {'sha256'}, 'invalid_partner_pointer')
         digest = value['sha256']
-        target = asset(self.root, digest)
+        target = asset(self.root, digest, 'RSU' if self.rsu_proofs is not None else 'ALZURA')
         if self.digest == digest:
             return
         raw = read(target, MAX_BYTES)
         require(sha256(raw).hexdigest() == digest, 'partner_batch_hash_mismatch')
-        observed, stamps, rows = validate(raw, self.record, self.prices, now=self.clock())
+        observed, stamps, rows = validate(raw, self.record, self.prices, now=self.clock(), rsu_proofs=self.rsu_proofs)
         require(self.observation is None or observed > self.observation, 'older_partner_batch')
         values = projections(self.prices, stamps, rows)
         self.projected, self.observation, self.digest = values, observed, digest
@@ -130,7 +154,9 @@ class DailyPartnerPrices:
         return self.projected.get(pid, previous)
 
 
-def attach_daily_partner_prices(catalogue, root, record, approved_ids):
-    _, prices = scope(Path(root), record)
-    require(set(prices) == set(approved_ids), 'invalid_partner_scope')
-    catalogue.partner_inquiry_price_lookup = DailyPartnerPrices(Path(root), record, prices).lookup
+def attach_daily_partner_prices(catalogue, root, record, approved_ids, source='ALZURA'):
+    manifest, prices = scope(Path(root), record)
+    require(set(prices) == set(approved_ids) and source in ('RSU', 'ALZURA')
+            and all(p['source'] == source for p in prices.values()), 'invalid_partner_scope')
+    proofs = manifest['identity_proofs'] if source == 'RSU' else None
+    catalogue.daily_inquiry_price_lookups[source] = DailyPartnerPrices(Path(root), record, prices, rsu_proofs=proofs).lookup

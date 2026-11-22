@@ -361,8 +361,11 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
             recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight)
-        if partner_record is not None:
+        if partner_record is not None or inquiry_record is not None:
             from shop_parts_daily_prices import attach_daily_partner_prices
+        if inquiry_record is not None:
+            attach_daily_partner_prices(catalogue, root, inquiry_record, inquiry_source.ids, 'RSU')
+        if partner_record is not None:
             attach_daily_partner_prices(catalogue, root, partner_record, partner_source.ids)
         media_manifest = bundle['media']
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),

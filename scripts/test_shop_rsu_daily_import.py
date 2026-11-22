@@ -111,6 +111,7 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(self.book._entries[self.ids[1]]["evidence_id"],"2"*64)
         self.put(offers=[[71383,20],None,None])
         self.assertEqual(self.importer()["price_change_needs_q1"],1)
+        self.assertIn(self.ids[0], self.book._requested_reviews)
 
     def test_builder_holds_spike_without_independent_q1_and_uses_exact_confirmed_q1(self):
         from scripts.stage_rsu_daily_prices import build
