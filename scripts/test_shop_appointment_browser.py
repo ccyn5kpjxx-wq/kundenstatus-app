@@ -55,6 +55,8 @@ class AppointmentBrowser(unittest.TestCase):
         product = {
             "id": product_id, "category": "tyre", "department": "tyres", "size": "205/55 R16",
             "name": "Testreifen", "brand": "Testmarke", "images": [], "purchase_status": "supplier_check_required",
+            "mounting_unit_gross_cent": {"mounting": 2250, "runflat": 500, "disposal": 400},
+            "pickup_freight": {"quantity": 1, "gross_cent": 0},
             "price_status": "current", "price": {"currency": "EUR", "vat_percent": "19.00",
                 "observed_at": now.isoformat(), "expires_at": expiry, "stock_reported": 8,
                 "prices_by_quantity": {str(i): {"quantity": i, "items_gross_cent": 5000*i, "unit_gross_cent": 5000}
@@ -129,8 +131,16 @@ class AppointmentBrowser(unittest.TestCase):
             page.goto("http://localhost/shop/reifen/?montage=1")
             page.get_by_role("button", name="Nein danke").click()
             self.assertTrue(page.locator("#catalog-mounting").is_checked())
+            expect(page.locator("#catalog-products .shop-summary-total").first).to_have_text("72,50 €")
             page.get_by_role("button", name="Artikel ansehen").first.click()
             self.assertTrue(page.locator("#product-dialog [name=mounting]").is_checked())
+            expect(page.locator("#product-dialog .shop-summary-total")).to_have_text("72,50 €")
+            quantity = page.locator("#product-dialog select.shop-quantity")
+            quantity.select_option("4")
+            expect(page.locator("#product-dialog .shop-summary-total")).to_have_text("290,00 €")
+            expect(page.locator("#product-dialog")).to_contain_text("zzgl. Versand")
+            page.locator("#product-dialog [name=mounting]").uncheck()
+            expect(page.locator("#product-dialog .shop-summary-total:visible")).to_have_count(0)
             page.locator("#close-product").click()
             page.get_by_role("button", name="In den Warenkorb").first.click()
             self.assertEqual(page.evaluate("JSON.parse(localStorage.getItem('gaertner-shop-v2-selection'))[0].services"), {"mounting": True})
@@ -145,6 +155,7 @@ class AppointmentBrowser(unittest.TestCase):
                 self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
 
             assert_step(1)
+            expect(page.locator("#cart-summary .shop-summary-total:visible")).to_have_text("72,50 €")
             page.locator("#request-quote").click()
             assert_step(2)
             panel = page.locator("#cart-appointment")

@@ -1,8 +1,8 @@
 """Bounded background refresh of the merchant's persistent daily prices.
 
-Catalogue reads never contact a supplier. Each refresh reads one exact RSU
-article at quantity one; the merchant then publishes one unit price for all
-permitted quantities. Checkout still checks the actual requested quantity.
+Ordinary browsing uses local prices. An explicit check of a stale shortage
+shares the limited refresh budget with background reads. Each refresh reads
+one exact RSU variant at quantity one. Checkout verifies the requested quantity.
 """
 from collections import deque
 from collections.abc import Mapping
@@ -60,7 +60,7 @@ class PriceBookRuntime:
     def get(self, product_id):
         return self.book.get(product_id) if isinstance(product_id, str) and product_id in self._products else None
 
-    def warmup(self, product_ids, *, quantities=(1, 4)):
+    def warmup(self, product_ids, *, quantities=(1, 4), recheck_stock=False):
         if (not isinstance(product_ids, (list, tuple)) or len(product_ids) > 24
                 or any(not isinstance(pid, str) or not ID.fullmatch(pid) for pid in product_ids)
                 or not isinstance(quantities, tuple) or not 1 <= len(quantities) <= 20
@@ -71,6 +71,11 @@ class PriceBookRuntime:
             product = self._products.get(pid)
             if product and any(q > (4 if product['category'] in WHEELS else 20) for q in quantities):
                 raise PriceCacheError('invalid_page_request')
+        if recheck_stock:
+            if len(product_ids) != 1 or len(quantities) != 1:
+                raise PriceCacheError('invalid_page_request')
+            self._refresh_short_stock(product_ids[0], quantities[0])
+            return False
         with self._condition:
             if not self._running or self._clock_bad:
                 return False
@@ -82,6 +87,26 @@ class PriceBookRuntime:
             if ready:
                 self._condition.notify_all()
             return ready
+
+    def _refresh_short_stock(self, identifier, quantity):
+        """A customer may refresh an old shortage using one free catalogue slot."""
+        product = self._products.get(identifier)
+        if not product or product['category'] not in WHEELS:
+            return
+        with self._condition:
+            if not self._running or self._clock_bad:
+                return
+            now = self._time()
+            if (self._inflight or self._checkout_queue or now < self._next_read
+                    or len(self._attempts) >= self._budget - self._checkout_reserve
+                    or self._backoffs.get(identifier, 0) > now):
+                return
+            quote = self.book.get(identifier)
+            if (not quote or quote.get('stock_current') is not False
+                    or type(quote.get('stock_reported')) is not int or quote['stock_reported'] >= quantity):
+                return
+            self._reserve(identifier, now)
+        self._publish_reserved(identifier)
 
     def start(self, *, background=True):
         if type(background) is not bool:

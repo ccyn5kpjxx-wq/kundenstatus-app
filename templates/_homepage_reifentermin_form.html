@@ -1,4 +1,5 @@
 {% set hauptleistungen = ('radwechsel', 'montage') %}
+{% set hauptauswahl = hauptleistungen|select('in', reifen_auswahl)|list %}
 {% set weitere_gewaehlt = reifen_auswahl|reject('in', hauptleistungen)|list %}
 <form class="form-card tire-booking-form" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data">
   {{ csrf_field()|safe }}
@@ -8,7 +9,6 @@
   <div class="honeypot" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
   {% if shop_service %}
     <input type="hidden" name="shop_leistung" value="{{ formdata.get('shop_leistung', '') }}">
-    <p class="hint">Im Shop gewählt · <strong>{{ shop_service.label }}</strong></p>
   {% endif %}
   {% if formdata.get('service_context') %}
     <input type="hidden" name="service_context" value="{{ formdata.get('service_context') }}">
@@ -19,19 +19,20 @@
   {% endif %}
 
   <fieldset class="booking-section">
-    <legend>Welche Arbeiten wünschen Sie?</legend>
+    <legend>Was bringen Sie mit?</legend>
     <div class="choice-grid booking-primary-services">
       {% for key in hauptleistungen %}
         <label class="choice booking-service">
-          <input type="checkbox" name="reifen_leistung" value="{{ key }}"{% if key in reifen_auswahl %} checked{% endif %}>
+          <input type="radio" name="reifen_leistung" value="{{ key }}"{% if hauptauswahl == [key] %} checked{% endif %}>
           <span class="booking-service-copy"><strong>{{ reifen_leistungen[key] }}</strong>
-            <small>{{ 'Ihre Reifen sind bereits auf Felgen.' if key == 'radwechsel' else 'Wir ziehen Reifen auf Ihre Felgen auf.' }}</small>
+            <small>{{ 'Meine Reifen sind bereits auf Felgen montiert.' if key == 'radwechsel' else 'Ich bringe lose Reifen mit. Die Werkstatt zieht sie auf meine Felgen auf.' }}</small>
           </span>
         </label>
       {% endfor %}
     </div>
     <details class="booking-more-services"{% if weitere_gewaehlt %} open{% endif %}>
       <summary>Weitere Leistungen</summary>
+      <label class="choice"><input type="radio" name="reifen_leistung" value=""{% if weitere_gewaehlt and not hauptauswahl %} checked{% endif %}><span>Nur weitere Leistungen</span></label>
       <div class="choice-grid">
         {% for key, label in reifen_leistungen.items() if key not in hauptleistungen %}
           <label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}"{% if key in reifen_auswahl %} checked{% endif %}><span>{{ label }}</span></label>

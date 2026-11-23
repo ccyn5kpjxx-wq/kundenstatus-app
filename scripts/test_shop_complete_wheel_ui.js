@@ -55,13 +55,15 @@ assert.equal(logic.vehicleReference('  Audi A3 2016  '),'Audi A3 2016');assert.e
 for(const bad of [null,7,'x'.repeat(201),'Audi\nA3','Audi\u007fA3'])assert.equal(logic.vehicleReference(bad),null);
 
 class Node {
+ contains(target){return this===target||this.children.some(child=>child instanceof Node&&child.contains(target));}
+ get childElementCount(){return this.children.filter(child=>child instanceof Node).length;}
  constructor(tag='div'){this.tagName=tag.toUpperCase();this.children=[];this.fields={};this.listeners={};this.dataset={};this.textContent='';this.value='';this.type='text';this.checked=false;this.hidden=false;this.disabled=false;this.isConnected=true;this.classList={toggle(){}};this.elements={namedItem:key=>this.fields[key]||null};}
  append(...nodes){this.children.push(...nodes);}replaceChildren(...nodes){this.children=[...nodes];}addEventListener(key,fn){this.listeners[key]=fn;}
  setAttribute(key,value){this[key]=value;}removeAttribute(key){delete this[key];}scrollIntoView(){}replaceWith(){}showModal(){}close(){}
 }
 const walk=node=>[node,...node.children.flatMap(child=>typeof child==='object'?walk(child):[])];
 const flush=async()=>{await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve));};
-async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='SYNTHETIC Audi A3 2016',quoteValue=quote(),missingTerms=false,waitQuote=false,partsEnabled=false}={}){
+async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='SYNTHETIC Audi A3 2016',quoteValue=quote(),missingTerms=false,waitQuote=false,partsEnabled=false,stockFixture}={}){
  const nodes={};for(const key of ['close-product','product-dialog','product-detail','shop-announcement','cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note','buyer-address','address-status','delivery-fields','cart-workflow-note','complete-wheel-vehicle'])nodes[key]=new Node();
  const form=nodes['buyer-address'];for(const key of ['name','email','recipient','street','postcode','city','workshop_delivery','different_delivery','vehicle_ref'])form.fields[key]=new Node('input');
  form.fields.workshop_delivery.value='collection';form.fields.different_delivery.type='checkbox';form.fields.vehicle_ref.value='';
@@ -77,7 +79,17 @@ async function boot({enabled=true,rows=selected(),missing=false,storedVehicle='S
      const q=Number(new URL(url,'https://synthetic.test').searchParams.get('quantity'));
      value={rim_id:RIM,tyre_id:TYRE,quantity:q,currency:'EUR',goods_gross_cent:20000*q,mounting_gross_cent:2250*q,freight_gross_cent:0,total_gross_cent:22250*q};
    }
-   else if(url.includes('/products/'))value={item:url.includes(encodeURIComponent(RIM))||url.includes(RIM)?rim():tyre(),prices_refreshing:false};
+   else if(url.includes('/stock-alternatives?'))value={product_id:RIM,quantity:4,items:[]};
+   else if(url.includes('/products/')){
+     const p=url.includes(encodeURIComponent(RIM))||url.includes(RIM)?rim():tyre();
+     if(p.id===TYRE){
+       const quantity=Number(new URL(url,'https://shop.invalid').searchParams.get('quantity'));
+       p.mounting_unit_gross_cent={mounting:2250,runflat:500,disposal:400};
+       p.pickup_freight={quantity,gross_cent:quantity===1?821:0};
+     }
+     if(stockFixture && p.id===RIM)stockFixture(p,url);
+     value={item:p,prices_refreshing:false};
+   }
    else if(url.endsWith('/buyer/address')){const payload=JSON.parse(options.body);value={...session(),...(Object.hasOwn(payload,'vehicle_ref')?{vehicle_ref:payload.vehicle_ref}:{})};}
    else if(url.endsWith('/cart/quote')){if(pending)await pending;value={quote:quoteValue,quote_retained:true};}
    else if(url.endsWith('/consumer/terms'))value={version:'SYNTHETIC 2',consumer_only:true,pack_hash:PACK,texts:{agb:'SYNTHETIC AGB',widerruf:'SYNTHETIC W',widerrufsformular:'SYNTHETIC WF',lieferung:'SYNTHETIC L',datenschutz:'SYNTHETIC D',...(missingTerms?{}:{komplettraeder_zahlung:'SYNTHETIC reservation terms'})}};
@@ -96,7 +108,41 @@ async function statusPage(status, technical, workshop, preference){
  vm.runInNewContext(source,{window:win,URL,URLSearchParams,Intl,Date,console});await flush();return{nodes,calls};
 }
 (async()=>{
+ for(const [quantity,expected] of [[1,13071],[4,49000]]){
+   const single=await boot({rows:[{id:TYRE,quantity,services:{mounting:true}}]});
+   const summary=walk(single.nodes['cart-summary']);
+   assert.ok(summary.some(n=>n.className==='shop-summary-total'&&n.textContent===logic.money(expected)));
+   assert.ok(summary.some(n=>n.textContent.includes('inkl. Montage und Versand zur Werkstatt')));
+   assert.equal(single.calls.some(call=>call.url.endsWith('/buyer/address')||call.url.endsWith('/cart/quote')),false);
+ }
+ const mixed=await boot({rows:[{id:RIM,quantity:1,services:{}},{id:TYRE,quantity:1,services:{mounting:true,disposal:true}}]});
+ assert.ok(walk(mixed.nodes['cart-summary']).some(n=>n.className==='shop-summary-total'&&n.textContent===logic.money(22650)));
+ assert.ok(walk(mixed.nodes['cart-summary']).some(n=>n.textContent.includes('zzgl. Versand')));
  const f=await boot();assert.equal(f.nodes['buyer-address'].hidden,false);assert.equal(f.form.fields.vehicle_ref.required,true);assert.equal(f.form.fields.vehicle_ref.value,'SYNTHETIC Audi A3 2016');
+ let stockFresh=false;
+ const stockCart=await boot({stockFixture:(p,url)=>{
+   if(url.includes('recheck_stock=1'))stockFresh=true;
+   const seen=Date.now()-(stockFresh?1000:3600000);
+   Object.assign(p.price,{source:'RSU',kind:'merchant_pricebook',stock_reported:3,
+     observed_at:new Date(seen).toISOString(),stock_observed_at:new Date(seen).toISOString(),stock_expires_at:new Date(seen+900000).toISOString()});
+ }});
+ assert.match(stockCart.nodes['cart-workflow-note'].textContent,/Zuletzt gemeldet: 3 Stück.*Gewünscht: 4 Stück/);
+ assert.equal(stockCart.nodes['request-quote'].disabled,true,'Resolve a reported shortage before asking for an address');
+ const checkStock=walk(stockCart.nodes['cart-items']).find(n=>n.textContent==='Bestand für 4 Stück prüfen');
+ assert.ok(checkStock);
+ const alternatives=walk(stockCart.nodes['cart-items']).find(n=>n.textContent==='Alternativen in gleicher Größe ansehen');
+ assert.ok(alternatives);
+ await alternatives.listeners.click();await flush();
+ assert.ok(stockCart.calls.some(c=>c.url.includes('/stock-alternatives?quantity=4')));
+ await checkStock.listeners.click();await flush();
+ assert.match(stockCart.nodes['cart-workflow-note'].textContent,/Gemeldeter Bestand: 3 Stück.*Gewünscht: 4 Stück/);
+ assert.equal(stockCart.nodes['request-quote'].disabled,true);
+ assert.equal(stockCart.calls.filter(c=>c.url.endsWith('/buyer/address')||c.url.endsWith('/cart/quote')).length,0);
+ const smaller=await boot({rows:selected().map(row=>({...row,quantity:3})),stockFixture:p=>{p.price.stock_reported=3;}});
+ assert.equal(smaller.nodes['request-quote'].disabled,false);
+ const sameIdSplit=[{product:rim(),selection:{id:RIM,quantity:2,services:{}}},{product:rim(),selection:{id:RIM,quantity:2,services:{mounting:true}}}];
+ for(const entry of sameIdSplit)entry.product.price.stock_reported=3;
+ assert.equal(logic.cartStockIssues(sameIdSplit)[0].quantity,4);
  const wheelWithPartsFeature=await boot({partsEnabled:true});assert.equal(wheelWithPartsFeature.form.fields.vehicle_ref.required,true);assert.equal(wheelWithPartsFeature.form.fields.parts_vehicle_ref.required,false);assert.equal(wheelWithPartsFeature.nodes['parts-vehicle-choice'].hidden,true);await wheelWithPartsFeature.submit();assert.equal(JSON.parse(wheelWithPartsFeature.calls.filter(c=>c.url.endsWith('/buyer/address')).at(-1).options.body).vehicle_ref,'SYNTHETIC Audi A3 2016','parts feature preserves complete-wheel freeform context');
  assert.equal(f.nodes['request-quote'].disabled,false);await f.request();
  const rendered=walk(f.nodes['quote-review']);assert.ok(rendered.some(n=>n.textContent==='890,00 €'));assert.ok(f.nodes['checkout-note'].textContent.includes('zunächst auf Ihrer Karte reserviert'));

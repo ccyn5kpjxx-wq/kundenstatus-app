@@ -45,7 +45,12 @@ class ReifenterminDirektTest(TestCase):
         self.assertIn('value="pruefung" checked', form)
         self.assertIn('name="shop_leistung" value="reifencheck"', form)
         main_service = self.booking_form(self.client.get(self.url + "&shop_leistung=reifenmontage"))
-        self.assertIn('value="montage" checked', main_service)
+        self.assertIn('type="radio" name="reifen_leistung" value="montage" checked', main_service)
+        self.assertNotIn('value="radwechsel" checked', main_service)
+        wheel_change = self.booking_form(self.client.get(self.url + "&shop_leistung=raederwechsel"))
+        self.assertIn('type="radio" name="reifen_leistung" value="radwechsel" checked', wheel_change)
+        self.assertNotIn('value="montage" checked', wheel_change)
+        self.assertIn('type="checkbox" name="reifen_leistung" value="einlagerung"', wheel_change)
         self.assertIn('<details class="booking-more-services">', main_service)
 
     def test_existing_fragment_exposes_order_path_before_workshop_form(self):

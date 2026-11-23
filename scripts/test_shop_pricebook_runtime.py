@@ -33,6 +33,26 @@ class Book:
 
 
 class PriceBookRuntimeChecks(unittest.TestCase):
+    def test_manual_old_shortage_uses_one_shared_slot_without_consuming_checkout_reserve(self):
+        runtime, book, provider, mono, products = self.fixture()
+        pid = next(iter(products))
+        runtime.start(background=False)
+        public = {'stock_current': False, 'stock_reported': 3}
+        book.get = Mock(return_value=public)
+        runtime.warmup([pid], quantities=(3,), recheck_stock=True)
+        self.assertEqual(provider.retail_quote.call_count, 0)
+        runtime.warmup([pid], quantities=(4,), recheck_stock=True)
+        provider.retail_quote.assert_called_once_with(products[pid], 1)
+        runtime.warmup([pid], quantities=(4,), recheck_stock=True)
+        self.assertEqual(provider.retail_quote.call_count, 1)
+        mono[0] += 60
+        public['stock_current'] = True
+        runtime.warmup([pid], quantities=(4,), recheck_stock=True)
+        public['stock_current'] = False
+        runtime._attempts.extend([mono[0]] * (runtime._budget - runtime._checkout_reserve))
+        runtime.warmup([pid], quantities=(4,), recheck_stock=True)
+        self.assertEqual(provider.retail_quote.call_count, 1)
+
     def fixture(self, count=3, *, success=True, budget=300):
         products = {'tyre:' + f'{i:024x}': {'id': 'tyre:' + f'{i:024x}', 'identity_hash': 'a' * 64,
                                           'category': 'tyre'} for i in range(count)}

@@ -45,7 +45,8 @@ class SetPreviewChecks(unittest.TestCase):
             'compatible_pairs': {RIM: [pair(self.rim, self.tyre)]},
             'procurement_ids': {RIM, TYRE}, 'rsu_only_prices': True,
             'quote_lookup_authoritative': True, 'allow_published_prices': True, 'quote_lookup': self.book.get,
-            'wheel_pickup_freight': self.fees.workshop_collection_gross_cent, **overrides})
+            'wheel_pickup_freight': self.fees.workshop_collection_gross_cent,
+            'tyre_pickup_freight': self.fees.tyre_collection_gross_cent, **overrides})
         app = Flask('wheel-preview')
         app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
         def forbidden(*args, **kwargs):
@@ -101,6 +102,22 @@ class SetPreviewChecks(unittest.TestCase):
         self.assertIsNone(result['freight_gross_cent'])
         self.assertIsNone(result['total_gross_cent'])
         self.assertEqual(result['mounting_gross_cent'], 10000)
+
+    def test_single_tyre_tariff_and_pickup_match_checkout_before_address(self):
+        cat = self.client()
+        url = '/shop/api/v2/products/' + TYRE
+        for q in range(1, 5):
+            with self.subTest(quantity=q):
+                item = cat.get(url, query_string={'quantity': q}).get_json()['item']
+                self.assertEqual(item['pickup_freight'], {'quantity': q, 'gross_cent': 821 if q == 1 else 0})
+                amount = item['mounting_unit_gross_cent']['mounting'] * q
+                actual = _service_quote('mounting', {'id': TYRE, 'category': 'tyre', 'diameter': 18,
+                    'identity_hash': 'a' * 64}, q, {})
+                self.assertEqual(amount, actual['gross_cent'])
+        self.assertNotIn('pickup_freight', self.client(tyre_pickup_freight=None).get(url + '?quantity=2').get_json()['item'])
+        self.assertNotIn('pickup_freight', self.client(procurement_ids={RIM}).get(url + '?quantity=2').get_json()['item'])
+        self.tyre['diameter'] = '21'
+        self.assertNotIn('mounting_unit_gross_cent', self.client().get(url + '?quantity=4').get_json()['item'])
 
     def test_mismatched_or_missing_diameters_do_not_quote_a_mounted_total(self):
         for diameter in ('17', ''):

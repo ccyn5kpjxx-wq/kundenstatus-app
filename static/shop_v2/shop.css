@@ -44,3 +44,10 @@ body{margin:0}button,a,input,select{touch-action:manipulation}button{cursor:poin
 .shop-tyre-fitment-source { display: grid; justify-items: start; gap: .4rem; margin-block: .85rem; }
 #wheel-vehicle-field { min-width: 0; }
 #wheel-vehicle { width: 100%; max-width: 100%; }
+.shop-stock-controls,
+.shop-stock-controls [aria-live] { display: grid; justify-items: start; gap: .35rem; }
+.shop-stock-controls [aria-live]:empty { display: none; }
+.shop-stock-controls button { min-height: 32px; text-align: start; }
+@media (pointer: coarse) {
+  .shop-stock-controls button { min-height: 44px; }
+}

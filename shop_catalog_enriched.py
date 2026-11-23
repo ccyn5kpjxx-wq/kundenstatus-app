@@ -159,13 +159,15 @@ class EnrichedPublicCatalog(PublicCatalog):
                  procurement_ids=None, product_documents=None, standalone_rims=None,
                  released_rim_report_resources=None, rsu_only_prices=False, preferred_ids=None, shipping_ready_ids=None,
                  checkout_excluded_ids=None, parts_notices=None, inquiry_prices=None,
-                 recommendation_ladder=False, recommendation_document_ids=None, wheel_pickup_freight=None, **kwargs):
+                 recommendation_ladder=False, recommendation_document_ids=None, wheel_pickup_freight=None,
+                 tyre_pickup_freight=None, **kwargs):
         if type(rsu_only_prices) is not bool:
             raise CatalogError('invalid_price_policy')
         if type(recommendation_ladder) is not bool:
             raise CatalogError('invalid_recommendation_policy')
         self._recommendation_ladder = recommendation_ladder
         self._wheel_pickup_freight = wheel_pickup_freight
+        self._tyre_pickup_freight = tyre_pickup_freight
         rows = deepcopy(list(products))
         notices = validated_parts_notices(rows, kwargs.get('released_ids'), parts_notices)
         display_prices = validated_inquiry_prices(rows, kwargs.get('released_ids'), procurement_ids, inquiry_prices)
@@ -341,6 +343,56 @@ class EnrichedPublicCatalog(PublicCatalog):
 
         self._wheel_index = WheelVehicleIndex(self._rows, self._source_rows, identities, documented_pairs,
             released_rim_report_resources or {})
+        self._stock_peers = {}
+        for entry in self._rows.values():
+            product = entry['public']
+            if product['id'] not in self._shipping_ready_ids or product.get('purchase_status') != 'supplier_check_required':
+                continue
+            if product['category'] == 'tyre' and not all(product.get('product_documents', {}).get(field)
+                                                         for field in ('tyre_label_url', 'tyre_sheet_url')):
+                continue
+            key = self._stock_peer_key(product)
+            if key:
+                self._stock_peers.setdefault(key, []).append(product['id'])
+
+    @staticmethod
+    def _stock_peer_key(product):
+        category = product['category']
+        if category in ('alloy_wheel', 'steel_wheel'):
+            # Only exact released sale dimensions, including ET, hub and bolt pattern.
+            dimensions = product.get('sale_dimensions')
+            return (category, tuple(sorted(dimensions.items()))) if dimensions else None
+        if category != 'tyre' or not product.get('tyre_season') or not consistent_tyre_size(product):
+            return None
+        geometry = product['geometry']
+        if not geometry.get('load_index') or not geometry.get('speed_index'):
+            return None
+        return (category, product['tyre_season'], _norm(product['size']), geometry['load_index'],
+                geometry['speed_index'], geometry.get('runflat', ''))
+
+    def stock_alternatives(self, identifier, quantity, **filters):
+        if type(quantity) is not int or not 1 <= quantity <= 4:
+            raise CatalogError('invalid_quantity')
+        self._validate_scope_fields(filters)
+        source = self.get(identifier, **filters)
+        if source is None:
+            return None
+        selection = self._wheel_selection(filters, department=source['department'])
+        current, choices = self._now(None), []
+        for candidate in self._stock_peers.get(self._stock_peer_key(source), ()):
+            if candidate == identifier:
+                continue
+            entry = self._rows[candidate]
+            if selection:
+                entry = self._wheel_index.project(entry, selection)
+            if entry is None:
+                continue
+            product = self._project(self._cached_entry(entry), current, detail=False)
+            tier = published_wheel_tier(product, quantity, current)
+            if tier is not None:
+                choices.append((not product['price']['stock_current'], tier['unit_gross_cent'], candidate, product))
+        choices.sort(key=lambda choice: choice[:3])
+        return {'product_id': identifier, 'quantity': quantity, 'items': [choice[3] for choice in choices[:3]]}
 
     def _cached_entry(self, entry):
         identifier = entry['public']['id']
@@ -386,6 +438,13 @@ class EnrichedPublicCatalog(PublicCatalog):
 
     def _project(self, entry, now, *, detail=True):
         product = super()._project(entry, now, detail=detail)
+        if product['category'] == 'tyre':
+            diameter = product['geometry'].get('diameter', '')
+            if re.fullmatch(r'[0-9]{2}', diameter):
+                tariff = {code: tyre_service_gross_cent(code, int(diameter), 1, {})
+                          for code in ('mounting', 'runflat', 'disposal')}
+                if all(value is not None for value in tariff.values()):
+                    product['mounting_unit_gross_cent'] = tariff
         if product['id'] in self._inquiry_quotes:
             product.update(purchase_status='inquiry_only', order_enabled=False, price_label='')
             if product['price'] is not None:
@@ -393,6 +452,11 @@ class EnrichedPublicCatalog(PublicCatalog):
         elif self._rsu_only_prices and product['id'] not in self._procurement_ids:
             product.update(price=None, price_status='not_offered', price_label='')
         return product
+
+    def tyre_collection_freight(self, product_id, quantity):
+        if product_id in self._procurement_ids and callable(self._tyre_pickup_freight):
+            return self._tyre_pickup_freight(product_id, quantity)
+        return None
 
     def _wheel_selection(self, filters, *, query='', department=None):
         options = {key: filters.pop(key) for key in ('wheel_make', 'wheel_vehicle', 'wheel_query') if key in filters}

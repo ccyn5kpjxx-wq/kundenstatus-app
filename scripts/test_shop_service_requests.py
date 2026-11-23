@@ -80,7 +80,7 @@ class ServiceRequestLinkChecks(unittest.TestCase):
         function.decorator_list = []
         denied = Mock(side_effect=AssertionError('GET must not reserve, save or notify'))
         rendered = Mock(return_value=('SYNTHETIC FORM', 200))
-        namespace = {'request': request, 'session': session,
+        namespace = {'request': request, 'session': session, 're': re,
             'clean_text': lambda value: str(value or '').strip(),
             'WEBSITE_ANLIEGEN': {'reifenservice': 'Reifenservice', 'allgemein': 'Allgemein'},
             'WEBSITE_BESICHTIGUNGSARTEN': {'werkstatt': 'Werkstatt'},
@@ -123,7 +123,7 @@ class ServiceRequestLinkChecks(unittest.TestCase):
                     'karosserie': 'reparaturanfrage', 'dellen': 'dellenreparatur',
                     'autoglas': 'glasschaden', 'mechanik': 'mechanikanfrage', 'softlack': 'lackanfrage'}
         self.assertCountEqual(targets, [
-            f'/anfrage?anliegen={intent}&shop_leistung={key}#kurzanfrage'
+            f'/anfrage?anliegen={intent}&shop_leistung={key}#{"terminbuchung" if intent == "reifenservice" else "kurzanfrage"}'
             for key, intent in expected.items()])
         self.handler.assert_not_called()
 

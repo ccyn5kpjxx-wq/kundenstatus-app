@@ -324,6 +324,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             evidence_id='RSU-20261117-net-shipping-one-position', checked_at='2026-11-17T10:28:00+00:00',
             destination_eligibility=delivery_eligibility)
         wheel_pickup_freight = freight.workshop_collection_gross_cent
+        tyre_pickup_freight = freight.tyre_collection_gross_cent
         shipping_ready = set(freight.classes) & procurement_ids
         if parts_release:
             if supplier is None:
@@ -360,7 +361,8 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             preferred_ids=set(seeds['records']) if fixed_prices else None,
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
-            recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight)
+            recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight,
+            tyre_pickup_freight=tyre_pickup_freight)
         if partner_record is not None or inquiry_record is not None:
             from shop_parts_daily_prices import attach_daily_partner_prices
         if inquiry_record is not None:

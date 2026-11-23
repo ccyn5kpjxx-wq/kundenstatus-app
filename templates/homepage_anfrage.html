@@ -171,8 +171,8 @@
         <h1>Ihr Reifentermin</h1>
         <nav class="booking-paths" aria-label="Reifenservice auswählen">
           <a class="booking-path" href="#terminbuchung" aria-current="page">
-            <strong>Werkstatttermin buchen</strong>
-            <span>Ich habe schon Reifen oder Räder.</span>
+            <strong>Termin mit eigenen Rädern buchen</strong>
+            <span>Für vorhandene Kompletträder oder mitgebrachte lose Reifen.</span>
           </a>
           {% if formdata.get('service_context') or not (config.SHOP_FRONTEND_ENABLED and config.SHOP_ORDER_DRAFT_ENABLED and config.SHOP_CHECKOUT_ENABLED) %}
           <a class="booking-path" href="{{ url_for('website_anfrage', anliegen='reifenangebot', service_context=formdata.get('service_context') or None) }}#kurzanfrage">
@@ -554,7 +554,7 @@
       if (!datum || !zeit || !hinweis) return;
       const leistungen = [...document.querySelectorAll('.tire-booking-form [name="reifen_leistung"]')];
       const pruefeLeistung = () => leistungen[0].setCustomValidity(
-        leistungen.some(feld => feld.checked) ? '' : 'Bitte wählen Sie mindestens eine Leistung.'
+        leistungen.some(feld => feld.checked && feld.value) ? '' : 'Bitte wählen Sie mindestens eine Leistung.'
       );
       leistungen.forEach(feld => feld.addEventListener('change', pruefeLeistung));
       pruefeLeistung();

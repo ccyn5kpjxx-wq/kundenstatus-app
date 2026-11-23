@@ -46950,6 +46950,8 @@ def website_anfrage():
                 errors.append("Bitte Ihre Telefonnummer für Rückfragen zu Ihrer Buchung angeben.")
             if any(value not in WEBSITE_REIFEN_LEISTUNGEN for value in reifen_leistungen):
                 errors.append("Bitte nur gültige Reifenleistungen auswählen.")
+            elif "radwechsel" in reifen_leistungen and "montage" in reifen_leistungen:
+                errors.append("Bitte entweder Radwechsel für montierte Räder oder Reifenmontage für lose Reifen wählen.")
             elif not reifen_leistungen:
                 errors.append("Bitte mindestens eine Reifenleistung auswählen.")
             if not wunschdatum:
@@ -47036,7 +47038,7 @@ def website_anfrage():
         if betrieb:
             beschreibungsteile.append(f"Betrieb: {betrieb}")
         shop_service = selected_workshop_service(request.form.get("shop_leistung"), anliegen)
-        if shop_service:
+        if shop_service and (anliegen != "reifenservice" or shop_service.option in reifen_leistungen):
             beschreibungsteile.append(f"Im Shop gewählte Leistung: {shop_service.label}")
         if ist_reifenangebot:
             beschreibungsteile.append(reifenangebot_summary(reifenangebot_daten))

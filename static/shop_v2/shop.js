@@ -55,6 +55,51 @@
     return price && (!price.stockCurrent || price.stock >= quantity) ? price : null;
   }
   const selectionPrice = (product, quantity) => currentPrice(product, quantity);
+  function mountingCost(product, quantity, services = {}) {
+    const tariff = product?.mounting_unit_gross_cent;
+    if (product?.category !== 'tyre' || !tariff || !Number.isInteger(quantity) || quantity < 1 || quantity > 4) return null;
+    const codes = ['mounting', ...['runflat', 'disposal'].filter(code => services[code] === true)];
+    if (!codes.every(code => Number.isSafeInteger(tariff[code]) && tariff[code] >= 0)) return null;
+    return quantity * codes.reduce((sum, code) => sum + tariff[code], 0);
+  }
+  function pickupFreight(product, quantity) {
+    const value = product?.pickup_freight;
+    return value?.quantity === quantity && Number.isSafeInteger(value.gross_cent) && value.gross_cent >= 0 ? value.gross_cent : null;
+  }
+  function wheelStock(product, quantity, now = Date.now()) {
+    if (!product || !['tyre', 'alloy_wheel', 'steel_wheel'].includes(product.category) ||
+        product.purchase_status !== 'supplier_check_required' || !Number.isInteger(quantity) || quantity < 1) return null;
+    const price = quotedPrice(product, Math.min(quantity, 4), now) || quotedPrice(product, 1, now);
+    if (!price) return null;
+    const observedAt = Date.parse(product.price.stock_observed_at || product.price.observed_at);
+    if (!Number.isFinite(observedAt) || observedAt > now) return null;
+    return {available: price.stock, short: price.stock < quantity, current: price.stockCurrent, observedAt};
+  }
+  function cartStockIssues(items) {
+    const quantities = new Map();
+    for (const {product, selection} of items) {
+      if (!product || product.id !== selection.id) continue;
+      const item = quantities.get(product.id) || {product, quantity: 0};
+      item.quantity += selection.quantity;
+      quantities.set(product.id, item);
+    }
+    return [...quantities.values()].flatMap(item => {
+      const stock = wheelStock(item.product, item.quantity);
+      return stock?.short ? [{...item, stock}] : [];
+    });
+  }
+  function selectedWheelQuantity(product, additional) {
+    return cart.reduce((total, row) => total + (row.id === product.id ? row.quantity : 0), additional);
+  }
+  function shortCurrentStock(product, requested) {
+    const stock = wheelStock(product, requested);
+    return stock?.current && stock.short ? stock : null;
+  }
+  function stockMessage(stock, quantity) {
+    const when = new Intl.DateTimeFormat('de-DE', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Berlin'}).format(stock.observedAt);
+    return (stock.current ? 'Gemeldeter Bestand' : 'Zuletzt gemeldet') + ': ' + stock.available + ' Stück (Stand ' + when + ' Uhr).' +
+      (stock.short ? ' Gewünscht: ' + quantity + ' Stück. ' + (stock.current ? 'Bitte Menge verringern oder Alternative wählen.' : 'Bitte Bestand prüfen oder Menge anpassen.') : ' Verfügbarkeit wird an der Kasse bestätigt.');
+  }
   function rimDimensions(product) {
     if (!product || !['alloy_wheel', 'steel_wheel'].includes(product.category)) return [];
     // This projection is supplied only after the server verifies the exact
@@ -362,6 +407,7 @@
   }
   const logic = {currentPrice, quotedPrice, displayPrice, inquiryOnly, rimDimensions, modelPhotoNote, qualityFacts, normaliseCart, removeCartLine, cartOfferReady, cartSourceReady, cartPurchaseFlow, completeWheelGroups, reviewQuoteReady, vehicleReference, cartNeedsPartsVehicle, partsVehicleReference, cartNeedsCustomerDelivery, deliveryAddressSignature, buildOfferRequest, buildQuery, vehicleQuery, safeMedia, safeCheckout, money};
   if (typeof module !== 'undefined' && module.exports) module.exports = logic;
+  Object.assign(logic, {wheelStock, cartStockIssues});
   if (!root.document) return;
   const document = root.document, body = document.body, api = body.dataset.api;
   if (body.dataset.transfer) {
@@ -583,6 +629,9 @@
   }
   function updatePrice(node, product, quantity) {
     const price = displayPrice(product, quantity), inquiry = inquiryOnly(product);
+    const state = priceNodes.get(node);
+    const requested = state?.stockQuantity ? state.stockQuantity() : quantity;
+    const stock = wheelStock(product, requested);
     node.replaceChildren();
     if (inquiry) {
       if (price) {
@@ -593,13 +642,69 @@
       node.append(el('small', 'Nur auf Anfrage. Preis und Lieferbarkeit bestätigen wir im Angebot. Keine direkte Bestellung oder Zahlung.'));
       appendTyreDocuments(node, product); return;
     }
-    if (!price) { node.append(el('strong', 'Preis wird aktualisiert'), el('small', 'Preis oder Verfügbarkeit für diese Menge noch nicht bestätigt.')); appendTyreDocuments(node, product); return; }
+    if (!price) { node.append(el('strong', 'Preis wird aktualisiert'), el('small', 'Preis oder Verfügbarkeit für diese Menge noch nicht bestätigt.')); if (stock?.short) appendWheelStock(node, product, requested, stock); appendTyreDocuments(node, product); return; }
     node.append(el('strong', money(price.unit)), el('small', 'pro ' + (product.unit_label || 'Stück') + ' · inkl. 19 % MwSt.'));
     if (quantity > 1) node.append(el('small', quantity + ' Stück: ' + money(price.total)));
     if (product.price.base_price_unit === 'L' && Number.isSafeInteger(product.price.base_price_gross_cent)) node.append(el('small', money(product.price.base_price_gross_cent) + ' / Liter'));
-    node.append(el('small', !price.stockCurrent ? 'Bestand wird vor der Zahlung geprüft' : price.stock === 0 ? 'Derzeit nicht verfügbar' : price.stock < quantity ? 'Nur ' + price.stock + ' Stück gemeldet · gewünschte Menge nicht verfügbar' : price.stock + ' Stück gemeldet', 'shop-stock'));
+    if (stock && (stock.short || stock.available < 4)) appendWheelStock(node, product, requested, stock);
+    else node.append(el('small', !price.stockCurrent ? 'Bestand wird vor der Zahlung geprüft' : price.stock === 0 ? 'Derzeit nicht verfügbar' : price.stock < quantity ? 'Nur ' + price.stock + ' Stück gemeldet · gewünschte Menge nicht verfügbar' : price.stock + ' Stück gemeldet', 'shop-stock'));
     node.append(el('small', 'Versand und optionale Leistungen im Gesamtpreis.'));
     appendTyreDocuments(node, product);
+  }
+  function appendWheelStock(node, product, quantity, stock) {
+    const state = priceNodes.get(node), vehicle = state?.vehicle || {};
+    // A price refresh may finish while the customer opens the alternatives.
+    // Preserve those controls while the observed shortage is the same.
+    const key = [quantity, stock.available, stock.current, stock.observedAt].join('/');
+    if (state?.stockControls?.key === key) {
+      node.append(state.stockControls.panel);
+      return;
+    }
+    const panel = el('div', null, 'shop-stock-controls');
+    if (state) state.stockControls = {key, panel};
+    node.append(panel);
+    const stockNote = el('small', stockMessage(stock, quantity), stock.short ? 'shop-stock shop-notice' : 'shop-stock');
+    panel.append(stockNote);
+    if (!stock.short) return;
+    if (!stock.current && quantity <= 4) {
+      const check = button('Bestand für ' + quantity + ' Stück prüfen', async () => {
+        check.disabled = true;
+        const params = new URLSearchParams({...vehicle, quantity: String(quantity), recheck_stock: '1'});
+        try {
+          const result = await requestJSON('/products/' + encodeURIComponent(product.id) + '?' + params);
+          if (!node.contains(check)) return;
+          if (wheelStock(result.item, quantity)?.current && copyPrice(product, result.item)) {
+            priceChanged(node, state); state.afterStockCheck?.(); return;
+          }
+        } catch (_) { /* Keep the dated observation visible. */ }
+        if (node.contains(check)) { check.disabled = false; stockNote.textContent = stockMessage(stock, quantity) + ' Eine neue Bestätigung liegt noch nicht vor.'; }
+      }, 'shop-detail-link');
+      panel.append(check);
+    }
+    if (quantity > 4) return;
+    const results = el('div');
+    const alternatives = button('Alternativen in gleicher Größe ansehen', async () => {
+      alternatives.disabled = true;
+      results.textContent = 'Alternativen werden gesucht …';
+      try {
+        const params = new URLSearchParams({...vehicle, quantity: String(quantity)});
+        const data = await requestJSON('/products/' + encodeURIComponent(product.id) + '/stock-alternatives?' + params);
+        if (data.product_id !== product.id || data.quantity !== quantity || !Array.isArray(data.items)) throw new Error();
+        results.replaceChildren();
+        for (const item of data.items.slice(0, 3)) {
+          const match = wheelStock(item, quantity), value = currentPrice(item, quantity);
+          if (!validProduct(item) || !match || match.short || !value) continue;
+          const label = item.name + ' · ' + money(value.unit) + ' pro Stück';
+          results.append(partial ? el('strong', label) : button(label, () => openProduct(item.id, body.dataset.page === 'komplettraeder', vehicle, quantity), 'shop-detail-link'),
+            el('small', stockMessage(match, quantity)));
+        }
+        if (partial && results.childElementCount) {
+          const fullCart = el('a', 'Im vollständigen Warenkorb bearbeiten'); fullCart.href = '/shop/warenkorb/'; results.append(fullCart);
+        }
+        results.append(el('small', results.childElementCount ? 'Gleiche Maße. Ausführung und Fahrzeugpassung im Artikel prüfen.' : 'Derzeit keine bepreiste Alternative in gleicher Größe mit ausreichendem gemeldetem Bestand.'));
+      } catch (_) { results.textContent = 'Alternativen konnten gerade nicht geladen werden.'; alternatives.disabled = false; }
+    }, 'shop-detail-link');
+    results.setAttribute('aria-live', 'polite'); panel.append(alternatives, results);
   }
   function appendTyreDocuments(node, product) {
     if (product.category !== 'tyre') return;
@@ -623,8 +728,9 @@
     box.append(links); node.append(box);
   }
   function priceBox(product, quantity, options = {}) {
-    const box = el('div', null, 'shop-price'); updatePrice(box, product, quantity);
-    priceNodes.set(box, {product, quantity, generation: 0, timer: null, pendingRefresh: null, ...options}); return box;
+    const box = el('div', null, 'shop-price');
+    priceNodes.set(box, {product, quantity, generation: 0, timer: null, pendingRefresh: null, ...options});
+    updatePrice(box, product, quantity); return box;
   }
   function visibleDocument() { return document.visibilityState !== 'hidden'; }
   const priceRetryDelay = retries => Math.min(20000, 1200 * (2 ** retries)) + Math.floor(Math.random() * 400);
@@ -637,6 +743,10 @@
     // service/quantity selection, image, fitment or controls are replaced.
     target.price_status = incoming.price_status;
     target.price = incoming.price;
+    if (incoming.category === 'tyre') {
+      target.mounting_unit_gross_cent = incoming.mounting_unit_gross_cent;
+      target.pickup_freight = incoming.pickup_freight;
+    }
     if (['inquiry_only', 'supplier_check_required'].includes(incoming.purchase_status)) target.purchase_status = incoming.purchase_status;
     return true;
   }
@@ -752,11 +862,15 @@
     const candidate = normaliseCart([{id: product.id, quantity, services}]);
     if (!candidate.length) { notice('Bitte Ihre Auswahl und den Farbcode prüfen.'); return; }
     const row = candidate[0];
+    const wanted = selectedWheelQuantity(product, quantity), stock = shortCurrentStock(product, wanted);
+    if (stock) { notice(product.name + ' · ' + stockMessage(stock, wanted)); return; }
     const existing = cart.find(item => item.id === row.id && JSON.stringify(item.services) === JSON.stringify(row.services) && !item.assembly_group && !item.selection_pair);
-    if (existing) existing.quantity = Math.min(maxQuantity(row.id), existing.quantity + quantity);
+    if (existing && existing.quantity + quantity > maxQuantity(row.id)) { notice('Die gewählte Menge ist bereits teilweise im Warenkorb. Bitte die Gesamtmenge dort anpassen.'); return; }
+    if (existing) existing.quantity += quantity;
     else if (cart.length < 40) cart.push(row);
     else { notice('Maximal 40 Positionen möglich. Bitte die Auswahl im Warenkorb prüfen.'); return; }
     saveCart(); notice(product.name + (inquiryOnly(product) ? ' ist zur lokalen Anfrage hinzugefügt.' : ' ist im Warenkorb.'));
+    if (body.dataset.page === 'warenkorb') renderCart();
   }
   function card(product, active, vehicle = {}) {
     const family = ['alloy_wheel', 'steel_wheel'].includes(product.category) && Number.isSafeInteger(product.family?.variant_count) && product.family.variant_count > 1;
@@ -780,7 +894,13 @@
     }
     appendTyreRating(node, product);
     let count = 1, add = null;
-    const price = priceBox(product, count, {active, vehicle: context, onUpdate: () => { if (add) { add.disabled = false; add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb'; } }}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
+    const tyreTotal = product.category === 'tyre' && mountingEntry ? el('div') : null;
+    function updateMounting() {
+      if (!tyreTotal) return;
+      tyreTotal.hidden = !mountingEntry.checked || inquiryOnly(product);
+      if (!tyreTotal.hidden) showTyreTotal(tyreTotal, product, count, {mounting: true}, true);
+    }
+    const price = priceBox(product, count, {active, vehicle: context, stockQuantity: () => selectedWheelQuantity(product, count), onUpdate: () => { updateMounting(); if (add) { add.disabled = Boolean(shortCurrentStock(product, selectedWheelQuantity(product, count))); add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb'; } }}), controls = el('div', null, 'shop-card-controls'), label = el('label', 'Anzahl');
     if (family) {
       node.append(el('p', product.family.variant_count + ' Ausführungen' + (Array.isArray(product.family.diameters) ? ' · ' + product.family.diameters.slice(0, 15).join(' / ') + ' Zoll' : ''), 'shop-card-meta'));
       node.append(el('p', 'Preis der gezeigten Ausführung', 'shop-card-meta'));
@@ -791,12 +911,14 @@
     } else {
       label.append(quantitySelect(product.id, count, value => { count = value; changePriceQuantity(price, value); }));
       add = button(inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : 'In den Warenkorb', () => addToCart(product, count, product.category === 'tyre' && mountingEntry?.checked ? {mounting: true} : {}));
+      add.disabled = Boolean(shortCurrentStock(product, selectedWheelQuantity(product, count)));
       controls.append(label, add);
     }
     if (product.department === 'parts') node.append(el('p', 'Lieferzeit wird bestätigt', 'shop-card-meta'));
     node.append(price, controls);
+    if (tyreTotal) { updateMounting(); node.append(tyreTotal); }
     if (!configure && (!scoped || family)) node.append(button(family ? 'Felge ansehen' : 'Artikel ansehen', view, 'shop-detail-link'));
-    return {node, price, product};
+    return {node, price, product, updateMounting};
   }
   let page = 1, sequence = 0, filters = {}, vehicleFilters = {}, pageTimer = null, pendingPageRefresh = null;
   function updateWheelPicker(result, context) {
@@ -819,6 +941,7 @@
     byId('wheel-vehicle-field').hidden = select.disabled;
   }
   const visibleCards = new Map();
+  mountingEntry?.addEventListener('change', () => visibleCards.forEach(card => card.updateMounting()));
   function pendingPagePrices() {
     return [...visibleCards.values()].some(({price}) => {
       const state = priceNodes.get(price);
@@ -1169,7 +1292,9 @@
       else next.push(row);
     }
     if (next.length > 40) return false;
-    cart = next; saveCart(); notice('Felgen und Reifen sind gemeinsam im Warenkorb.'); return true;
+    cart = next; saveCart(); notice('Felgen und Reifen sind gemeinsam im Warenkorb.');
+    if (body.dataset.page === 'warenkorb') renderCart();
+    return true;
   }
   function bundlePanel(rim, getQuantity, active, configure, vehicle) {
     const panel = el('section', null, 'shop-bundle-panel'), heading = el('h2', 'Felge + Reifen. Ihre Wahl.');
@@ -1247,9 +1372,10 @@
       size.value = result.selected_size || ''; sizeLabel.hidden = !result.available_sizes.length && !result.selected_size;
       return true;
     }
-    let serial = 0, selected = null, scope = 'blocked';
+    let serial = 0, selected = null, scope = 'blocked', checkingSelection = false;
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.name = 'bundle_mounting';
-    mountingLabel.append(mounting, el('span', 'Mit Montage bei uns in Mosbach'));
+    const mountingText = el('span', 'Mit Montage bei uns in Mosbach');
+    mountingLabel.append(mounting, mountingText);
     const feedback = el('div', null, 'shop-cart-feedback');
     feedback.setAttribute('role', 'status'); feedback.setAttribute('aria-live', 'polite'); feedback.setAttribute('aria-atomic', 'true');
     function clearFeedback() { feedback.replaceChildren(); delete feedback.dataset.kind; }
@@ -1264,12 +1390,16 @@
     }
     const summary = el('div', null, 'shop-bundle-summary'), add = button('Felgen + Reifen in den Warenkorb', () => {
       clearFeedback();
-      if (!selected || !active()) return;
+      if (!selected || checkingSelection || !active()) return;
       const quantity = getQuantity();
       if ((!inquiryOnly(rim) && !selectionPrice(rim, quantity)) || (!inquiryOnly(selected) && !selectionPrice(selected, quantity))) {
         updateSummary(); showFeedback('error', 'Noch nicht hinzugefügt', 'Bitte die aktuellen Preise und die gewünschte Anzahl prüfen.'); return;
       }
       const group = 'set|' + rim.id + '|' + selected.id;
+      for (const product of [rim, selected]) {
+        const wanted = selectedWheelQuantity(product, quantity), stock = shortCurrentStock(product, wanted);
+        if (stock) { showFeedback('error', 'Menge nicht verfügbar', product.name + ' · ' + stockMessage(stock, wanted)); return; }
+      }
       const lines = [{id: rim.id, quantity, services: {}}, {id: selected.id, quantity, services: mounting.checked ? {mounting: true} : {}}];
       for (const line of lines) line[mounting.checked ? 'assembly_group' : 'selection_pair'] = group;
       if (!addLines(lines)) {
@@ -1283,16 +1413,24 @@
     function updateSummary() {
       summary.replaceChildren();
       const quantity = getQuantity(), rimPrice = selectionPrice(rim, quantity), tyrePrice = selected && selectionPrice(selected, quantity), inquiry = inquiryOnly(rim) || inquiryOnly(selected);
-      add.disabled = !selected || (!inquiryOnly(rim) && !rimPrice) || (!inquiryOnly(selected) && !tyrePrice);
+      mountingText.textContent = selected ? mountingChoiceLabel(selected, quantity) : 'Mit Montage bei uns in Mosbach';
+      add.disabled = checkingSelection || !selected || (!inquiryOnly(rim) && !rimPrice) || (!inquiryOnly(selected) && !tyrePrice);
       if (!selected) return;
       summary.append(el('p', quantity + ' × Felge + ' + quantity + ' × ' + selected.name + ' · ' + selected.size, 'shop-muted'));
+      for (const product of [rim, selected]) {
+        const wanted = selectedWheelQuantity(product, quantity), stock = wheelStock(product, wanted);
+        if (stock?.short) {
+          summary.append(el('p', product.name + ' · ' + stockMessage(stock, wanted), 'shop-notice'));
+          if (stock.current) add.disabled = true;
+        }
+      }
       appendTyreRating(summary, selected);
       if (inquiry) summary.append(el('p', 'Diese Kombination wird als Gesamtangebot angefragt. Noch keine Bestellung oder Zahlung.', 'shop-inquiry-note'));
       if (rimPrice && tyrePrice && mounting.checked && !inquiry) {
         const output = el('div');
         summary.append(output);
         showMountedTotal(output, rimPrice.total + tyrePrice.total, [{rim, tyre: selected, quantity, services: {mounting: true}, vehicle}], true);
-      } else if (rimPrice && tyrePrice) summary.append(el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
+      } else if (rimPrice && tyrePrice) summary.append(el('p', 'Warenwert · zzgl. Versand', 'shop-muted'), el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
       else if (!inquiry) summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
       summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Ihren Montagetermin können Sie im Warenkorb anfragen. Wir bestätigen ihn nach Lieferklärung.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
@@ -1303,12 +1441,16 @@
       if (!seasons.some(([value]) => value === season.value)) return;
       clearFeedback();
       if (configure) search.hidden = true;
-      const run = ++serial, quantity = getQuantity(), requestedSize = size.value; selected = null; clearChoices(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true; size.disabled = true;
+      const run = ++serial, quantity = getQuantity(), requestedSize = size.value;
+      checkingSelection = true;
+      if (!previousTyre || selected?.id !== previousTyre) selected = null;
+      clearChoices(); updateSummary(); status.textContent = 'Reifenvorschläge werden geprüft …'; search.disabled = true; size.disabled = true;
       try {
         const query = new URLSearchParams({quantity: String(quantity), season: season.value, ...vehicle});
         if (exactSize(requestedSize)) query.set('tyre_size', requestedSize);
         const result = await requestJSON('/products/' + encodeURIComponent(rim.id) + '/compatible-tyres?' + query);
         if (run !== serial || !active()) return;
+        selected = null;
         if (result.rim_id !== rim.id || !Array.isArray(result.items) || result.items.length > 5 || !['approved', 'rim_width_candidate', 'blocked'].includes(result.scope)) throw new Error('invalid_recommendations');
         if (exactSize(requestedSize) && result.selected_size !== requestedSize) throw new Error('changed_recommendation_size');
         const comparison = setSizes(result);
@@ -1348,11 +1490,12 @@
         }
       } catch (_) {
         if (run === serial && active()) {
+          selected = null;
           status.textContent = 'Die passenden Reifen sind gerade nicht sicher abrufbar. Bitte später erneut versuchen; es wurde nichts hinzugefügt.';
           if (configure) { search.hidden = false; search.textContent = 'Reifenauswahl erneut laden'; }
         }
       }
-      finally { if (run === serial && active()) { search.disabled = false; size.disabled = false; } }
+      finally { if (run === serial && active()) { checkingSelection = false; search.disabled = false; size.disabled = false; updateSummary(); } }
     }
     const search = button('Passende Reifen zu dieser Felge suchen', searchTyres);
     search.hidden = Boolean(configure);
@@ -1368,6 +1511,26 @@
     return {node: panel, search: searchTyres, quantityChanged: () => configure ? searchTyres(selected?.id) : clear(), priceChanged: updateSummary};
   }
   const setPriceRequests = new Map();
+  function renderMountedPrice(target, goods, mounting, freight) {
+    const details = el('dl', null, 'shop-cost-lines');
+    const knownMounting = Number.isSafeInteger(mounting), knownFreight = Number.isSafeInteger(freight);
+    details.append(el('dt', 'Warenwert'), el('dd', money(goods)), el('dt', 'Montage'),
+      el('dd', knownMounting ? money(mounting) : 'Preis wird bestätigt'), el('dt', 'Versand'),
+      el('dd', knownFreight ? money(freight) : 'Nach Wahl der Lieferung'));
+    target.replaceChildren(details);
+    if (Number.isSafeInteger(goods) && knownMounting) {
+      target.append(el('p', knownFreight ? 'Gesamtpreis inkl. Montage und Versand zur Werkstatt' : 'Zwischensumme inkl. Montage · zzgl. Versand', 'shop-muted'),
+        el('strong', money(goods + mounting + (knownFreight ? freight : 0)), 'shop-summary-total'));
+    } else target.append(el('p', 'Gesamtpreis noch offen', 'shop-muted'));
+  }
+  function showTyreTotal(target, product, quantity, services, pickup) {
+    const price = selectionPrice(product, quantity);
+    renderMountedPrice(target, price?.total, mountingCost(product, quantity, services), pickup ? pickupFreight(product, quantity) : null);
+  }
+  function mountingChoiceLabel(product, quantity, services = {}) {
+    const amount = mountingCost(product, quantity, services);
+    return 'Mit Montage in Mosbach' + (amount === null ? ' · Preis wird bestätigt' : ' · +' + money(amount) + ' für ' + quantity + ' Reifen');
+  }
   async function readSetPrice({rim, tyre, services, quantity, vehicle = {}}) {
     const query = new URLSearchParams({tyre_id: tyre.id, quantity: String(quantity), ...vehicle});
     for (const extra of ['runflat', 'disposal']) if (services[extra] === true) query.set(extra, '1');
@@ -1389,26 +1552,22 @@
     return value;
   }
   async function showMountedTotal(target, goods, sets, pickupPrice) {
-    // Each render owns its nodes. A late reply cannot change a newer quantity or delivery choice.
-    const details = el('dl', null, 'shop-cost-lines'), mount = el('dd', 'Wird geprüft'), freight = el('dd', 'Wird geprüft');
-    const label = el('p', 'Ware inkl. Montage', 'shop-muted'), total = el('strong', 'Wird geprüft', 'shop-summary-total');
-    details.append(el('dt', 'Warenwert'), el('dd', money(goods)), el('dt', 'Montage'), mount, el('dt', 'Versand'), freight);
-    target.replaceChildren(details, label, total);
+    const view = el('div');
+    target.replaceChildren(view);
+    const costs = sets.map(set => mountingCost(set.tyre, set.quantity, set.services));
+    renderMountedPrice(view, goods, costs.every(Number.isSafeInteger) ? costs.reduce((sum, amount) => sum + amount, 0) : null, null);
     const prices = await Promise.all(sets.map(readSetPrice));
-    if (prices.some(value => !value)) { mount.textContent = 'Im Gesamtangebot'; freight.textContent = 'Im Gesamtangebot'; total.textContent = 'Gesamtpreis wird geprüft'; return; }
+    if (prices.some(value => !value)) return;
     const mounting = prices.reduce((sum, value) => sum + value.mounting_gross_cent, 0);
-    mount.textContent = money(mounting);
     const confirmed = pickupPrice && prices.length === 1 && Number.isSafeInteger(prices[0].total_gross_cent);
-    freight.textContent = confirmed ? money(prices[0].freight_gross_cent) : 'Wird für die Lieferung bestätigt';
-    label.textContent = confirmed ? 'Gesamtpreis inkl. Montage und Versand zur Werkstatt' : 'Zwischensumme inkl. Montage · zzgl. Versand';
-    total.textContent = money(confirmed ? prices[0].total_gross_cent : goods + mounting);
+    renderMountedPrice(view, goods, mounting, confirmed ? prices[0].freight_gross_cent : null);
   }
-  async function openProduct(id, configure = false, vehicle = {}) {
+  async function openProduct(id, configure = false, vehicle = {}, initialQuantity = 1) {
     const run = ++detailSequence;
     const dialog = byId('product-dialog'), content = byId('product-detail');
     content.replaceChildren(el('p', 'Artikel wird geladen …')); if (!dialog.open) dialog.showModal();
     try {
-      const query = new URLSearchParams({quantity: '1', ...vehicle});
+      const query = new URLSearchParams({quantity: String(initialQuantity), ...vehicle});
       const result = await requestJSON('/products/' + encodeURIComponent(id) + '?' + query), product = result.item;
       if (run !== detailSequence || !dialog.open) return;
       if (!validProduct(product) || product.id !== id) throw new Error('invalid_product');
@@ -1438,13 +1597,21 @@
         details.append(el('h3', 'Genaue Felgenausführung'), specification,
           el('p', 'Felgen ohne Montage. Die Fahrzeugpassung wird damit nicht bestätigt.', 'shop-muted'));
       }
-      let count = 1, bundle = null, add = null;
-      const price = priceBox(product, count, {vehicle, active: () => run === detailSequence && dialog.open, onUpdate: () => { if (add) { add.disabled = false; add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb'; } bundle?.priceChanged(); }}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
+      let count = initialQuantity, bundle = null, add = null, refreshMounting = null;
+      const price = priceBox(product, count, {vehicle, stockQuantity: () => selectedWheelQuantity(product, count), active: () => run === detailSequence && dialog.open, onUpdate: () => { if (add) { add.disabled = Boolean(shortCurrentStock(product, selectedWheelQuantity(product, count))); add.textContent = inquiryOnly(product) ? 'Zur Anfrage hinzufügen' : isRim ? 'Nur Felge in den Warenkorb' : 'In den Warenkorb'; } refreshMounting?.(); bundle?.priceChanged(); }}), form = el('form', null, 'shop-options'); form.addEventListener('submit', e => e.preventDefault());
       const quantityLabel = configure ? 'Anzahl Kompletträder' : 'Anzahl';
       const quantity = el('label', quantityLabel); quantity.append(quantitySelect(id, count, n => { count = n; changePriceQuantity(price, n); bundle?.quantityChanged(); }, quantityLabel)); form.append(quantity);
       if (product.category === 'tyre') {
-        checkbox('Montage bei uns in Mosbach dazu wählen', 'mounting', form).checked = Boolean(mountingEntry?.checked);
-        form.append(el('small', 'Ihren Montagetermin können Sie im Warenkorb anfragen. Den Servicepreis sehen Sie im geprüften Gesamtangebot.', 'shop-muted'));
+        const label = el('label', null, 'shop-checkbox'), checkbox = el('input'), title = el('span'), total = el('div');
+        checkbox.type = 'checkbox'; checkbox.name = 'mounting'; checkbox.checked = Boolean(mountingEntry?.checked);
+        label.append(checkbox, title); form.append(label, total);
+        refreshMounting = () => {
+          title.textContent = mountingChoiceLabel(product, count);
+          total.hidden = !checkbox.checked || inquiryOnly(product);
+          if (!total.hidden) showTyreTotal(total, product, count, {mounting: true}, true);
+        };
+        checkbox.addEventListener('change', refreshMounting); refreshMounting();
+        form.append(el('small', 'Bei Abholung in Mosbach bestätigen wir Ihren Wunschtermin nach Lieferklärung.', 'shop-muted'));
       }
       if (product.category === 'body_part') {
         const painting = checkbox('Wunschlackierung dazu wählen', 'painting', form), color = el('input');
@@ -1464,6 +1631,7 @@
         const care = form.elements.namedItem('care'); if (care && care.value) services.care = care.value;
         addToCart(product, count, services);
       });
+      add.disabled = Boolean(shortCurrentStock(product, selectedWheelQuantity(product, count)));
       copy.append(price, form);
       if (product.wheel_fitment_scope === 'report_size_inquiry' || (isRim && Object.keys(vehicle).length &&
           (!reviewedRimVehicles(product).length || !(vehicle.wheel_vehicle || vehicle.model || vehicle.hsn)))) {
@@ -1521,10 +1689,29 @@
     if (!target || !target.id.startsWith('tyre:')) return;
     const dialog = el('dialog', null, 'shop-mounting-dialog'), form = el('form');
     const mountingLabel = el('label', null, 'shop-checkbox'), mounting = el('input'); mounting.type = 'checkbox'; mounting.checked = Boolean(target.services.mounting || target.assembly_group); mounting.disabled = Boolean(target.assembly_group);
-    mountingLabel.append(mounting, el('span', 'Montage bei uns in Mosbach auswählen. Der Servicepreis wird im Gesamtangebot geprüft.'));
+    const tyre = offerSelection.find(item => item.selection === target)?.product;
+    if (!tyre) return;
+    mountingLabel.append(mounting, el('span', mountingChoiceLabel(tyre, target.quantity, target.services)));
+    const selectionTotal = el('div');
+    function updateTotal() {
+      const pair = wheelSetFor(cart, target);
+      const rim = pair && offerSelection.find(item => item.selection === pair.rim)?.product;
+      const tyrePrice = selectionPrice(tyre, target.quantity), rimPrice = rim && selectionPrice(rim, target.quantity);
+      const pickup = (byId('buyer-address')?.elements.namedItem('workshop_delivery')?.value || 'collection') === 'collection';
+      if (inquiryOnly(tyre) || rim && inquiryOnly(rim) || !tyrePrice || pair && !rimPrice) {
+        selectionTotal.textContent = 'Gesamtpreis noch offen'; return;
+      }
+      const goods = tyrePrice.total + (rimPrice?.total || 0);
+      if (!mounting.checked) {
+        selectionTotal.replaceChildren(el('p', 'Warenwert · zzgl. Versand', 'shop-muted'), el('strong', money(goods), 'shop-summary-total'));
+      } else if (rim) {
+        showMountedTotal(selectionTotal, goods, [{rim, tyre, quantity: target.quantity, services: target.services}], pickup);
+      } else showTyreTotal(selectionTotal, tyre, target.quantity, target.services, pickup);
+    }
+    mounting.addEventListener('change', updateTotal); updateTotal();
     const status = el('p', '', 'shop-muted'); status.setAttribute('role', 'status');
     const submit = el('button', 'Montageauswahl übernehmen', 'shop-button'); submit.type = 'submit';
-    form.append(mountingLabel, submit, status);
+    form.append(mountingLabel, selectionTotal, submit, status);
     form.addEventListener('submit', async event => {
       event.preventDefault();
       if (checkoutInProgress || !cart.includes(target)) { status.textContent = 'Die Auswahl hat sich geändert. Bitte den Dialog erneut öffnen.'; return; }
@@ -1653,6 +1840,11 @@
     sourceReady = offerReady && cartSourceReady(offerSelection);
     const partsEnabled = !paymentCheckout || body.dataset.partsDirectEnabled === 'true';
     let nextFlow = allLoaded ? cartPurchaseFlow(offerSelection, body.dataset.deferredCompleteWheelsEnabled === 'true', partsEnabled) : 'unavailable';
+    const shortages = allLoaded ? cartStockIssues(offerSelection) : [];
+    const confirmedShort = shortages.some(issue => issue.stock.current);
+    if (shortages.length && offerSelection.every(item => !inquiryOnly(item.product))) {
+      nextFlow = 'unavailable'; sourceReady = false;
+    }
     if (partial && (!sourceReady || nextFlow !== 'checkout')) nextFlow = 'unavailable';
     if (allLoaded && nextFlow !== 'checkout' && quote) invalidateQuote();
     cartFlow = nextFlow;
@@ -1671,6 +1863,7 @@
       if (cartFlow === 'inquiry') byId('checkout-note').textContent = 'Gesamtangebot wird vor Bezahlung bestätigt. Noch keine Bestellung oder Zahlung.';
     }
     if (note) note.textContent = cartFlow === 'inquiry' ? 'Sie können Ihre gesamte Auswahl auch als Angebot anfragen.' : cartFlow === 'checkout' ? 'Nach Ihrer Anschrift sehen Sie den Gesamtpreis mit Versand und gewählten Leistungen.' : cart.length ? 'Die vollständigen Artikelinformationen werden geprüft.' : '';
+    if (note && shortages.length) note.textContent = shortages.map(issue => issue.product.name + ' · ' + stockMessage(issue.stock, issue.quantity)).join(' ');
     const enterAddress = form && (cartSteps || paymentCheckout) && !addressReady && buyerSessionReady;
     primary.textContent = cartFlow === 'inquiry' ? 'Gesamtangebot anfragen' : quoteBlocked ? 'Erneut prüfen' : enterAddress ? (cart.length > 1 ? 'Gemeinsam zur Kasse' : 'Zur Kasse') : 'Gesamtpreis prüfen';
     primary.disabled = checkoutInProgress || addressSaving || quoteBusy || cartFlow === 'unavailable' ||
@@ -1685,6 +1878,9 @@
         cartFlow === 'unavailable' ? (cart.length ? 'Bitte die Artikelinformationen laden lassen oder nicht zuordenbare Artikel entfernen.' : '') :
         body.dataset.quoteEnabled !== 'true' ? 'Der verbindliche Gesamtpreis ist noch nicht freigeschaltet.' :
         !addressReady ? 'Bitte zuerst Ihre Rechnungs- und Lieferanschrift bestätigen.' : '';
+      if (shortages.length && cartFlow === 'unavailable') byId('quote-status').textContent = confirmedShort
+        ? 'Bitte passen Sie die Stückzahl im Warenkorb an oder wählen Sie eine Alternative.'
+        : 'Bitte prüfen Sie zuerst den Bestand beim Artikel oder passen Sie die Stückzahl an.';
     }
   }
   function offerButton(target, label = 'Warenkorb als Gesamtangebot anfragen') {
@@ -1707,7 +1903,16 @@
     function refreshSubtotal() {
       if (run !== cartRun || !subtotalOutput) return;
       let value = 0, until = Infinity, ready = !unavailable;
-      for (const item of subtotalItems) {
+      // Checkout prices each supplier article at the combined quantity for its destination.
+      const destinations = new Map();
+      for (const {product, selection} of offerSelection) {
+        if (!product) continue;
+        const workshop = selection.assembly_group || Object.values(selection.services).some(Boolean);
+        const key = product.id + (workshop ? '/workshop' : '/customer');
+        const item = destinations.get(key) || {product, quantity: 0};
+        item.quantity += selection.quantity; destinations.set(key, item);
+      }
+      for (const item of destinations.values()) {
         const current = selectionPrice(item.product, item.quantity);
         if (!current) ready = false;
         else { value += current.total; until = Math.min(until, current.expires); }
@@ -1720,16 +1925,25 @@
       if (ready) subtotalOutput.dataset.subtotalExpires = String(until);
       else delete subtotalOutput.dataset.subtotalExpires;
       const sets = ready && !inquiry ? completeWheelGroups(offerSelection) : null;
-      mountedSummary.hidden = !sets;
-      subtotalOutput.hidden = Boolean(sets); subtotalLabel.hidden = Boolean(sets); summaryNote.hidden = Boolean(sets);
+      const mounted = offerSelection.filter(item => item.selection.services.mounting);
+      const mountingOnly = ready && !inquiry && mounted.length > 0 && offerSelection.every(item =>
+        Object.keys(item.selection.services).every(code => ['mounting', 'runflat', 'disposal'].includes(code)));
+      const showServices = Boolean(sets || mountingOnly);
+      mountedSummary.hidden = !showServices;
+      subtotalOutput.hidden = showServices; subtotalLabel.hidden = showServices; summaryNote.hidden = showServices;
+      const delivery = byId('buyer-address')?.elements.namedItem('workshop_delivery')?.value || 'collection';
       if (sets) {
         const prices = sets.map(set => {
           const members = offerSelection.filter(item => item.selection.assembly_group === set.group);
           const tyre = members.find(item => item.product.id === set.tyreId);
           return {rim: members.find(item => item.product.id === set.rimId).product, tyre: tyre.product, quantity: set.quantity, services: tyre.selection.services};
         });
-        const delivery = byId('buyer-address')?.elements.namedItem('workshop_delivery')?.value || 'collection';
         showMountedTotal(mountedSummary, value, prices, delivery === 'collection');
+      } else if (mountingOnly) {
+        const costs = mounted.map(({product, selection}) => mountingCost(product, selection.quantity, selection.services));
+        const single = offerSelection.length === 1 && !mounted[0].selection.assembly_group && delivery === 'collection';
+        const freight = single ? pickupFreight(mounted[0].product, mounted[0].selection.quantity) : null;
+        renderMountedPrice(mountedSummary, value, costs.every(Number.isSafeInteger) ? costs.reduce((sum, amount) => sum + amount, 0) : null, freight);
       }
     }
     // At most 40 exact public details, in batches of four; never fetch the feed.
@@ -1744,7 +1958,8 @@
         let pendingPrice = null;
         if (!validProduct(product) || product.id !== row.id) { complete = false; unavailable = true; copy.append(el('h3', 'Artikel nicht mehr verfügbar'), el('p', 'Bitte aus der Auswahl entfernen.', 'shop-muted')); article.append(el('div'), copy); }
         else {
-          const price = priceBox(product, row.quantity, {active: () => run === cartRun, onUpdate: refreshSubtotal});
+          const price = priceBox(product, row.quantity, {active: () => run === cartRun, onUpdate: refreshSubtotal, afterStockCheck: renderCart,
+            stockQuantity: () => selectedWheelQuantity(product, 0)});
           pendingPrice = price;
           article.append(productImage(product, '')); copy.append(el('h3', product.name), el('p', product.size, 'shop-muted'));
           appendTyreRating(copy, product);
@@ -1977,7 +2192,7 @@
     }
     byId('quote-review').append(section);
     checkout.hidden = !(body.dataset.orderEnabled === 'true' && body.dataset.checkoutEnabled === 'true'); changed();
-    checkout.textContent = frozenQuote.version === 2 ? 'Gesamtbetrag online reservieren' : 'Gesamtpreis bezahlen';
+    checkout.textContent = 'Gesamtbetrag online reservieren';
   }
   async function showQuote(result, previousPrices) {
     const value = result.quote, review = byId('quote-review');

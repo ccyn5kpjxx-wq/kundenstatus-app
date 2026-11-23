@@ -24,8 +24,8 @@ class WorkshopService(NamedTuple):
 
 
 WORKSHOP_SERVICES = {
-    'reifenmontage': WorkshopService('Reifenmontage', 'Reifen aufziehen, auswuchten und am Fahrzeug montieren.', 'reifenservice', 'montage'),
-    'raederwechsel': WorkshopService('Räderwechsel', 'Vorhandene Kompletträder wechseln, Sichtkontrolle und Luftdruck prüfen.', 'reifenservice', 'radwechsel'),
+    'reifenmontage': WorkshopService('Reifenmontage', 'Sie bringen lose Reifen mit. Wir ziehen sie auf Ihre Felgen auf, wuchten sie aus und montieren die Räder am Fahrzeug.', 'reifenservice', 'montage'),
+    'raederwechsel': WorkshopService('Räderwechsel', 'Ihre Reifen sind bereits auf Felgen. Wir wechseln die kompletten Räder und prüfen Zustand und Luftdruck.', 'reifenservice', 'radwechsel'),
     'reifencheck': WorkshopService('Reifencheck', 'Profil, Zustand und Luftdruck kontrollieren lassen.', 'reifenservice', 'pruefung'),
     'oelservice': WorkshopService('Ölwechsel / Ölservice', 'Herstellerfreigabe, Füllmenge und Ölfilter passend zum Fahrzeug prüfen.', 'mechanikanfrage', 'oelwechsel'),
     'lackierarbeiten': WorkshopService('Lackierarbeiten', 'Neuteile in Wunschfarbe, Teil- und Komplettlackierung oder Spot-Repair.', 'lackanfrage'),

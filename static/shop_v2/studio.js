@@ -8,9 +8,9 @@
   'use strict';
   const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
   const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
-  function loadStudioImage(win, url, active = () => true) {
+  function loadStudioImage(win, url, active = () => true, img = new win.Image()) {
     return new Promise((resolve, reject) => {
-      const img = new win.Image(); let retries = 0, timer = null;
+      let retries = 0, timer = null;
       const live = () => active() === true;
       img.onload = () => { if (timer !== null) win.clearTimeout(timer); live() ? resolve(img) : reject(new Error('image_superseded')); };
       img.onerror = () => {
@@ -19,6 +19,7 @@
         const delay = Math.min(5000, 400 * (2 ** retries)) + Math.floor(Math.random() * 300); retries++;
         timer = win.setTimeout(() => { timer = null; if (live()) img.src = url + '?shop_retry=' + retries; else reject(new Error('image_superseded')); }, delay);
       };
+      if (img.fetchPriority !== 'low') img.fetchPriority = 'high';
       img.src = url;
     });
   }
@@ -214,6 +215,38 @@
     const demo = config.demo || {}, positions = {front: normalizeWheel(demo.front), rear: normalizeWheel(demo.rear)};
     const state = {base: null, rim: null, backdrop:'dark', rimNotice:'', photoKind:'demo', family: null, product: null, active: 'front', original: false, compare: 100, limit: 12, serial: 0, rimSerial: 0, photoUrl: null, disposed: false};
     const rimCache=new Map();
+    // The media service may only have one upstream download slot. Give the selected
+    // design priority and fetch visible thumbnails one at a time.
+    const visibleThumbnails = new Set();
+    let thumbnailLoading = false;
+    let selectedImagePending = false;
+    const thumbnailObserver = win.IntersectionObserver && new win.IntersectionObserver(entries => {
+      for (const {target, isIntersecting} of entries) {
+        if (isIntersecting && target.isConnected) visibleThumbnails.add(target);
+        else visibleThumbnails.delete(target);
+      }
+      loadNextThumbnail();
+    });
+    async function loadNextThumbnail() {
+      if (thumbnailLoading || selectedImagePending || state.disposed) return;
+      for (const img of visibleThumbnails) {
+        visibleThumbnails.delete(img);
+        if (!img.isConnected || !img.dataset.studioPhoto) continue;
+        thumbnailObserver?.unobserve(img);
+        const url = img.dataset.studioPhoto;
+        delete img.dataset.studioPhoto;
+        thumbnailLoading = true;
+        try {
+          await loadStudioImage(win, url, () => img.isConnected && !state.disposed, img);
+        } catch {
+          if (img.isConnected && !state.disposed) img.replaceWith(node('span', 'Bild gerade nicht verfügbar', 'shop-no-image'));
+        } finally {
+          thumbnailLoading = false;
+        }
+        loadNextThumbnail();
+        return;
+      }
+    }
     const exportUrls = new Set();
     const status = text => { $('ws-status').textContent = text; };
     const fold = value => String(value || '').normalize('NFKC').toLocaleLowerCase('de');
@@ -318,16 +351,18 @@
     }
     async function showRim(product) {
       const serial = ++state.rimSerial;
+      selectedImagePending = true;
       state.rim=null;state.backdrop=rimBackdrop(product);state.rimNotice='';$('ws-look-name').textContent=product.name;draw();
       const face=photoFace(product.photo_face);
-      if(!face){state.rimNotice='Für dieses Design ist die Fotoansicht noch nicht vorbereitet.';status(state.rimNotice);return;}
       const cacheKey=JSON.stringify([product.photo,face]);
       try {
+        if(!face){state.rimNotice='Für dieses Design ist die Fotoansicht noch nicht vorbereitet.';status(state.rimNotice);return;}
         let texture=rimCache.get(cacheKey);
         if(!texture){const img=await image(product.photo,()=>serial===state.rimSerial&&!state.disposed);if(serial!==state.rimSerial||state.disposed)return;texture=rimTexture(img,face);if(!texture)throw new Error('photo_face');
           rimCache.set(cacheKey,texture);if(rimCache.size>8)rimCache.delete(rimCache.keys().next().value);}
         if(serial!==state.rimSerial||state.disposed)return;state.rim=texture;status('Felgenansicht geladen. Klicke auf ein Rad, um es näher anzusehen.');draw();
-      } catch { if (serial === state.rimSerial) { state.rim = null;state.rimNotice='Für dieses Design ist die Fotoansicht noch nicht vorbereitet.'; draw(); status(state.rimNotice); } }
+      } catch { if (serial === state.rimSerial) { state.rim = null;state.rimNotice='Das Felgenbild konnte nicht geladen werden. Wähle das Design erneut.'; draw(); status(state.rimNotice); } }
+      finally { if (serial === state.rimSerial) { selectedImagePending = false; loadNextThumbnail(); } }
     }
     function price(product) {
       $('ws-price').replaceChildren();
@@ -352,18 +387,30 @@
       selected.forEach((product,i)=>{const label=labels[i],index=(indexes.get(label)||0)+1;indexes.set(label,index);$('ws-variant').add(new win.Option(label+(duplicates.get(label)>1?` · Artikel ${index}`:''),product.selection_id));});
       $('ws-variant').disabled = !selected.length;
     }
-    function selectFamily(family) {
+    function selectFamily(family, initialProduct = family.representative) {
       state.family = family; state.product = null; $('ws-selected-name').textContent = family.representative.name;
       $('ws-size').replaceChildren(new win.Option('Größe wählen','')); family.diameters.forEach(d=>$('ws-size').add(new win.Option(`${d} Zoll`,d)));
-      if (family.diameters.length===1) $('ws-size').value=family.diameters[0]; populateVariants(); showRim(family.representative);
+      if (family.diameters.length===1) $('ws-size').value=family.diameters[0]; populateVariants(); showRim(initialProduct);
       doc.querySelectorAll('[data-ws-family]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.wsFamily===family.key)));
     }
     function renderFamilies() {
       const terms=queryFold($('ws-family-query').value).split(/\s+/).filter(Boolean),matches=families.filter(f=>terms.every(term=>fold(f.representative.name).includes(term))),shown=matches.slice(0,state.limit);
+      thumbnailObserver?.disconnect();
+      visibleThumbnails.clear();
       $('ws-family-grid').replaceChildren(...shown.map(family=>{
         const b=node('button','','ws-family');b.type='button';b.dataset.wsFamily=family.key;b.setAttribute('aria-pressed',String(state.family?.key===family.key));b.setAttribute('aria-label',`${family.representative.name} am Auto ansehen`);
-        const img=win.ShopStorefront?.imageElement&&family.representative.public_product?win.ShopStorefront.imageElement({...family.representative.public_product,images:[family.representative.photo]}):node('span','Bild nicht verfügbar','shop-no-image');b.append(img,node('span',family.representative.name)); b.addEventListener('click',()=>selectFamily(family));return b;
+        const img = node('img');
+        img.alt = '';
+        img.decoding = 'async';
+        img.fetchPriority = 'low';
+        img.dataset.studioPhoto = family.representative.photo;
+        b.append(img,node('span',family.representative.name)); b.addEventListener('click',()=>selectFamily(family));return b;
       }));
+      for (const img of $('ws-family-grid').querySelectorAll('img')) {
+        if (thumbnailObserver) thumbnailObserver.observe(img);
+        else visibleThumbnails.add(img);
+      }
+      if (!thumbnailObserver) win.setTimeout(loadNextThumbnail, 0);
       $('ws-family-count').textContent=matches.length?`${shown.length} von ${matches.length} Designs für die Fotoansicht`:'Kein vorbereitetes Design gefunden. Alle Felgen stehen im Katalog.'; $('ws-family-more').hidden=shown.length>=matches.length;
     }
     $('ws-family-query').addEventListener('input',()=>{state.limit=12;renderFamilies();}); $('ws-family-more').addEventListener('click',()=>{state.limit+=12;renderFamilies();});
@@ -391,18 +438,18 @@
     canvas.addEventListener('keydown',event=>{const changes={ArrowLeft:[-.002,0],ArrowRight:[.002,0],ArrowUp:[0,-.002],ArrowDown:[0,.002]};if(!changes[event.key]||!state.base||!doc.querySelector('.ws-adjust')?.open)return;event.preventDefault();const [dx,dy]=changes[event.key],wheel=positions[state.active];positions[state.active]=normalizeWheel({...wheel,x:wheel.x+dx*(event.shiftKey?5:1),y:wheel.y+dy*(event.shiftKey?5:1)});syncControls();draw();});
     $('ws-download').addEventListener('click',()=>{if(!state.base){status('Bitte zuerst ein Seitenfoto wählen.');return;}draw({guides:false});canvas.toBlob(blob=>{if(!blob){status('Die Vorschau konnte nicht gespeichert werden.');return;}const url=win.URL.createObjectURL(blob),link=node('a');exportUrls.add(url);link.href=url;link.download='Gaertner-Felgenstudio-optische-Vorschau.png';link.click();win.setTimeout(()=>{win.URL.revokeObjectURL(url);exportUrls.delete(url);},1000);},'image/png');draw();});
     win.addEventListener('pagehide',()=>{state.disposed=true;state.serial++;state.rimSerial++;revokePhoto();exportUrls.forEach(url=>win.URL.revokeObjectURL(url));exportUrls.clear();});
-    win.addEventListener('pageshow',event=>{state.disposed=false;if(event.persisted){const selected=state.product||state.family?.representative;if(selected)showRim(selected);draw();}});
+    win.addEventListener('pageshow',event=>{state.disposed=false;if(event.persisted){const selected=state.product||state.family?.representative;if(selected)showRim(selected);renderFamilies();draw();}});
     function setProducts(rows) {
       products = (Array.isArray(rows) ? rows.slice(0,25) : []).filter(p => p && ['alloy_wheel','steel_wheel'].includes(p.category) && /^(alloy_wheel|steel_wheel):[a-f0-9]{24}$/.test(p.selection_id || '') && safePhoto(p.photo));
       allFamilies=G.group(products);
       families=allFamilies.flatMap(family=>{const representative=family.rows.find(product=>photoFace(product.photo_face));return representative?[{...family,representative}]:[];});
-      state.family=null;state.product=null;state.rim=null;state.rimSerial++;state.limit=12;
+      state.family=null;state.product=null;state.rim=null;state.rimSerial++;state.limit=12;selectedImagePending=false;
       price(null);renderFamilies();draw();
       const article=new win.URLSearchParams(win.location.search).get('artikel');
       const requested=products.find(p=>p.selection_id===article);
       const family=requested?allFamilies.find(f=>f.rows.includes(requested)):families[0];
-      if(family)selectFamily(family);
-      if(requested){$('ws-size').value=requested.diameter;populateVariants();$('ws-variant').value=requested.selection_id;state.product=requested;price(requested);$('ws-configure').href=doc.body.dataset.completeUrl+'?artikel='+encodeURIComponent(requested.selection_id);showRim(requested);}
+      if(family)selectFamily(family, requested || family.representative);
+      if(requested){$('ws-size').value=requested.diameter;populateVariants();$('ws-variant').value=requested.selection_id;state.product=requested;price(requested);$('ws-configure').href=doc.body.dataset.completeUrl+'?artikel='+encodeURIComponent(requested.selection_id);}
       return products.length;
     }
     setProducts(config.products);

@@ -20,10 +20,10 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/wheel-hero.css') }}">
   {% endif %}
   {% if page_key in ['warenkorb', 'order_status'] %}<script src="{{ url_for('static', filename='shop_v2/appointment.js') }}" defer></script>{% endif %}
-  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261122-tagespreise') }}" defer></script>
+  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261124-kundenwege') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/rim-families.js') }}" defer></script>
-  {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}
+  {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js', v='20261124-kundenwege') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}
 </head>
 <body class="modern-shop catalog-page{{ ' shop-storefront' if storefront else '' }}{{ ' wheel-studio' if page_key == 'felgenstudio' else '' }}" data-page="{{ page_key }}" data-department="{{ department }}"
       data-api="/shop/api/v2" data-order-id="{{ order_id }}" data-return-kind="{{ return_kind }}"
@@ -90,9 +90,9 @@
 {% if page_key in ['home', 'felgen', 'reifen', 'komplettraeder', 'ersatzteile', 'zubehoer'] %}
 <section class="modern-wrap shop-section shop-results" id="sortiment" aria-labelledby="results-heading">
   <div class="shop-section-heading"><div><p class="shop-eyebrow">Produkte entdecken</p><h2 id="results-heading">{{ 'Unser Sortiment' if page_key == 'home' else 'Felge auswählen' if page_key == 'komplettraeder' else title }}</h2></div><a href="{{ url_for('shop_frontend.service') }}">Service in Mosbach ↗</a></div>
-  {% if page_key == 'reifen' and request.args.get('montage') == '1' %}
-  <div class="shop-montage-entry"><label class="shop-checkbox"><input id="catalog-mounting" type="checkbox" checked> Reifen mit Montage in Mosbach auswählen</label>
-    <p>Sie können die Montage abwählen. Ihren Terminwunsch geben Sie später im Warenkorb an.</p></div>
+  {% if page_key == 'reifen' %}
+  <div class="shop-montage-entry"><label class="shop-checkbox"><input id="catalog-mounting" type="checkbox"{% if request.args.get('montage') == '1' %} checked{% endif %}> Reifen mit Montage in Mosbach auswählen</label>
+    <p>Ihren Terminwunsch können Sie im Warenkorb angeben. Wir bestätigen ihn, sobald die Lieferung geklärt ist.</p></div>
   {% endif %}
   {% if page_key in ['felgen', 'komplettraeder'] and feature_links.studio %}<aside class="shop-feature"><div><p class="shop-eyebrow">Ihr Foto. Ihr Look.</p><h3>Wie steht die Felge Ihrem Auto?</h3><p>Felgen am eigenen Fahrzeug ansehen. Optische Simulation; Fahrzeugfreigabe separat prüfen.</p></div><a class="shop-button" href="{{ feature_links.studio }}">Felgenstudio öffnen ↗</a></aside>{% endif %}
   {% if department == 'parts' %}<section class="shop-vehicle" id="vehicle-filter"><h3>Das passende Teil für Ihr Fahrzeug.</h3><form id="vehicle-filters" class="shop-filters"><label>Automarke<input name="make" maxlength="80" placeholder="z. B. Audi" autocomplete="off"></label><label>Modell (optional)<input name="model" maxlength="120" placeholder="z. B. A3"></label><label hidden>Baureihe eingrenzen<select id="parts-model-refinement" disabled></select></label><label>Baujahr (optional)<input name="year" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><label>oder HSN / TSN<input name="keys" maxlength="20" placeholder="0588 / BHT"></label><button class="shop-button" type="submit">Passende Teile anzeigen</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur bestätigte Fahrzeugzuordnungen. Marke allein zeigt bereits die zugeordneten Artikel; genaue Ausführung vor dem Kauf prüfen.</p></section>{% endif %}
@@ -282,7 +282,7 @@
       <h3>{{ service.label }}</h3><p>{{ service.description }}</p>
       <p class="shop-muted">Preis nach Fahrzeug und Umfang</p>
       {% if feature_links.service_request %}
-      <a class="shop-button shop-button-light" href="/anfrage?anliegen={{ service.intent }}&amp;shop_leistung={{ key }}#kurzanfrage" aria-label="{{ service.label }} – {{ 'Termin wählen' if service.intent == 'reifenservice' else 'Anfrage öffnen' }}">{{ 'Termin wählen' if service.intent == 'reifenservice' else 'Anfrage öffnen' }} ↗</a>
+      <a class="shop-button shop-button-light" href="/anfrage?anliegen={{ service.intent }}&amp;shop_leistung={{ key }}#{{ 'terminbuchung' if service.intent == 'reifenservice' else 'kurzanfrage' }}" aria-label="{{ service.label }} – {{ 'Termin wählen' if service.intent == 'reifenservice' else 'Anfrage öffnen' }}">{{ 'Termin wählen' if service.intent == 'reifenservice' else 'Anfrage öffnen' }} ↗</a>
       {% endif %}
     </article>
     {% endfor %}

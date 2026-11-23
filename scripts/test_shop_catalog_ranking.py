@@ -52,6 +52,48 @@ def catalog(rows, **kwargs):
 
 
 class OfferRankingChecks(unittest.TestCase):
+    def test_stock_alternatives_require_exact_dimensions_evidence_price_and_requested_stock(self):
+        rows = [wheel(letter) for letter in 'abcdef']
+        proofs = {identifier(row): rim_proof(row) for row in rows}
+        proofs[identifier(rows[2])]['geometry']['offset'] = '46'
+        del proofs[identifier(rows[3])]
+        for index, row in enumerate(rows):
+            observed = NOW - timedelta(days=1)
+            seen = NOW - (timedelta(minutes=1) if index == 5 else timedelta(hours=1))
+            q = quote(3 if index in (0, 4) else 6)
+            q.update(kind='merchant_pricebook', observed_at=observed.isoformat(),
+                     expires_at=(observed + timedelta(days=7)).isoformat(), review_at=(observed + timedelta(days=1)).isoformat(),
+                     stock_observed_at=seen.isoformat(), stock_expires_at=(seen + timedelta(minutes=15)).isoformat())
+            row['quote_public'] = q
+        approved = {identifier(r) for r in rows}
+        store = catalog(rows, procurement_ids=approved, shipping_ready_ids=approved, standalone_rims=proofs, allow_published_prices=True)
+        app = Flask('stock-options')
+        app.config['SHOP_PUBLIC_CATALOGUE_ENABLED'] = True
+        calls = []
+        app.register_blueprint(create_shop_public_blueprint(catalogue=store, catalogue_warmup=lambda *a, **k: calls.append((a,k))))
+        client = app.test_client()
+        path = '/shop/api/v2/products/' + identifier(rows[0])
+        result = client.get(path + '/stock-alternatives?quantity=4')
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual([p['id'] for p in result.json['items']], [identifier(rows[5]), identifier(rows[1])])
+        self.assertFalse(result.json['items'][1]['price']['stock_current'])
+        self.assertEqual(calls, [], 'alternatives must use only local stock observations')
+        self.assertEqual(client.get(path + '/stock-alternatives?quantity=4&quantity=3').status_code, 400)
+        self.assertEqual(client.get(path + '?quantity=4&recheck_stock=1').status_code, 200)
+        self.assertEqual(sum(kw.get('recheck_stock', False) for _, kw in calls), 1)
+        self.assertEqual(client.get(path + '?quantity=5&recheck_stock=1').status_code, 400)
+
+    def test_tyre_stock_alternatives_preserve_season_dimensions_and_service_description(self):
+        src = tyre()
+        original = catalog([src]).get(identifier(src))
+        key = EnrichedPublicCatalog._stock_peer_key(original)
+        self.assertIsNotNone(key)
+        for mutation in ({'tyre_season':'winter'}, {'size': '205/55 R18 91V XL'},
+                         {'geometry': {**original['geometry'], 'load_index':'88'}},
+                         {'geometry': {**original['geometry'], 'runflat':'1'}},
+                         {'geometry': {**original['geometry'], 'width':'225'}}):
+            self.assertNotEqual(key, EnrichedPublicCatalog._stock_peer_key({**original, **mutation}))
+
     def setUp(self):
         self.network = patch.object(socket, 'socket', side_effect=AssertionError('Network forbidden'))
         self.network.start()

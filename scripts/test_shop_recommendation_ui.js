@@ -32,6 +32,7 @@ function product(number, size = SIZES[0], unit = 5000) {
   return {id: 'tyre:' + number.toString(16).padStart(24, '0'), category: 'tyre', department: 'tyres',
     brand: 'Synthetic Brand', name: 'Synthetic Model ' + number, size: size + ' 92Y',
     images: [], geometry: {width, ratio, diameter, load_index: '92', speed_index: 'Y'},
+    mounting_unit_gross_cent: {mounting: 2500, runflat: 500, disposal: 400},
     specifications: {}, purchase_status: 'supplier_check_required', price_status: 'current',
     price: {currency: 'EUR', vat_percent: '19.00', kind: 'merchant_pricebook', source: 'RSU', stock_reported: 20,
       observed_at: new Date(Date.now() - 86400000).toISOString(), expires_at: new Date(Date.now() + 86400000).toISOString(),
@@ -136,7 +137,15 @@ const requestQueries = state => state.calls.filter(call => call.url.includes('/c
   assert.ok(walk(reviews.panel).some(n => n.textContent.includes('in ' + SIZES[1] + ' ist keine ADAC-Testnote hinterlegt')));
   const first=radios(direct)[0];first.checked=true;first.listeners.change();
   direct.mounting.checked=true;direct.mounting.listeners.change();
-  direct.quantity.value='3';direct.quantity.listeners.change();await flush();
+  assert.ok(walk(direct.panel).some(n=>n.textContent.includes('+25,00\u00a0€ für 1 Reifen')));
+  assert.ok(walk(direct.panel).some(n=>n.className==='shop-summary-total' && n.textContent==='125,00\u00a0€'),
+    'show goods plus service synchronously while the single-unit freight request is pending');
+  assert.ok(walk(direct.panel).some(n=>n.textContent.includes('zzgl. Versand')));
+  direct.quantity.value='3';direct.quantity.listeners.change();
+  assert.ok(walk(direct.panel).some(n=>n.className==='shop-summary-total' && n.textContent==='375,00\u00a0€'),
+    'changing quantity displays the new published tier before the updated recommendations arrive');
+  assert.equal(direct.add.disabled,true,'rechecking the recommendation cannot add an outdated selection');
+  await flush();
   assert.equal(radios(direct)[0].checked,true,'matching selection is kept at the new quantity');
   const amounts=()=>walk(direct.panel).filter(n=>n.className==='shop-summary-total').map(n=>n.textContent);
   assert.deepEqual(amounts(),['375,00\u00a0€']);

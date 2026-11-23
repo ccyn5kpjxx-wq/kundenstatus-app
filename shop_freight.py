@@ -116,9 +116,15 @@ class RSURetailFreight:
 
     def workshop_collection_gross_cent(self, rim_id, tyre_id, quantity):
         """Read the same one-shipment tariff used at checkout for workshop pickup."""
+        return self._pickup_gross_cent((rim_id, tyre_id), quantity)
+
+    def tyre_collection_gross_cent(self, tyre_id, quantity):
+        return self._pickup_gross_cent((tyre_id,), quantity)
+
+    def _pickup_gross_cent(self, product_ids, quantity):
         context = {'workshop_delivery': 'collection'}
         shipment = {'id': 'workshop', 'destination': 'workshop', 'context_hash': _hash(context),
-                    'private_items': [{'id': identifier, 'quantity': quantity} for identifier in (rim_id, tyre_id)]}
+                    'private_items': [{'id': identifier, 'quantity': quantity} for identifier in product_ids]}
         shipment['shipment_hash'] = _hash(shipment)
         quote = self(shipment, context)
         return quote['gross_cent'] if quote is not None else None

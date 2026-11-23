@@ -153,10 +153,13 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
             return reply({'error': 'not_found'}, 404)
         if catalogue is None:
             return reply({'error': 'catalogue_unavailable'}, 503)
-        if (set(request.args) - {'quantity'} - WHEEL_VEHICLE_FIELDS or any(len(v) != 1 for _, v in request.args.lists())
+        if (set(request.args) - {'quantity', 'recheck_stock'} - WHEEL_VEHICLE_FIELDS or any(len(v) != 1 for _, v in request.args.lists())
                 or len(product_id) > 100):
             return reply({'error': 'invalid_query'}, 400)
         quantity = request.args.get('quantity')
+        recheck_stock = request.args.get('recheck_stock')
+        if recheck_stock is not None and (recheck_stock != '1' or quantity not in ('1', '2', '3', '4')):
+            return reply({'error': 'invalid_query'}, 400)
         if quantity is not None and (not re.fullmatch(r'[0-9]{1,2}', quantity) or not 1 <= int(quantity) <= 20):
             return reply({'error': 'invalid_query'}, 400)
         try:
@@ -171,7 +174,14 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         if quantity is not None and value.get('category') in {'tyre', 'alloy_wheel', 'steel_wheel'} and int(quantity) > 4:
             return reply({'error': 'invalid_query'}, 400)
         result = {'item': value}
+        if recheck_stock and value.get('category') not in {'tyre', 'alloy_wheel', 'steel_wheel'}:
+            return reply({'error': 'invalid_query'}, 400)
         if callable(catalogue_warmup):
+            if recheck_stock and value.get('purchase_status') == 'supplier_check_required':
+                try:
+                    catalogue_warmup([product_id], quantities=(int(quantity),), recheck_stock=True)
+                except Exception:
+                    pass  # Return the dated public observation if no refresh is possible.
             pending = warm_prices([value], quantities=(int(quantity),) if quantity else (1, 4))
             if not pending:
                 try:
@@ -182,7 +192,29 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
                     return reply({'error': 'product_not_found'}, 404)
                 result['item'] = value
             result['prices_refreshing'] = pending
+        if (quantity and value.get('category') == 'tyre'
+                and callable(getattr(catalogue, 'tyre_collection_freight', None))):
+            pickup = catalogue.tyre_collection_freight(product_id, int(quantity))
+            if type(pickup) is int and pickup >= 0:
+                result['item']['pickup_freight'] = {'quantity': int(quantity), 'gross_cent': pickup}
         return reply(result, maximum=MAX_DETAIL_RESPONSE)
+
+    @bp.get('/products/<string:product_id>/stock-alternatives')
+    def stock_alternatives(product_id):
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if not callable(getattr(catalogue, 'stock_alternatives', None)):
+            return reply({'error': 'catalogue_unavailable'}, 503)
+        if (set(request.args) - {'quantity'} - WHEEL_VEHICLE_FIELDS
+                or any(len(v) != 1 for _, v in request.args.lists()) or request.args.get('quantity') not in ('1', '2', '3', '4')):
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            result = catalogue.stock_alternatives(product_id, int(request.args['quantity']), **scope_params())
+            return reply(result) if result is not None else reply({'error': 'product_not_found'}, 404)
+        except ValueError:
+            return reply({'error': 'invalid_query'}, 400)
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
 
     @bp.get('/products/<string:product_id>/variants')
     def product_variants(product_id):

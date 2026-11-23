@@ -168,7 +168,7 @@ class ReifentermineTest(unittest.TestCase):
         self.assertIn('Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten.', detail.text)
         home = self.client.get('/homepage')
         self.assertIn('data-reifen-buchung', home.text)
-        self.assertIn('Reifentermin online buchen', home.text)
+        self.assertIn('Termin mit eigenen Rädern buchen', home.text)
 
     def test_request_is_structured_without_order_or_price_commitment(self):
         before = self.count('auftraege')
@@ -201,6 +201,7 @@ class ReifentermineTest(unittest.TestCase):
             {'wunschzeit': '09:61'}, {'wunschzeit': 'vormittags'}, {'wunschzeit': '0١:30'},
             {'wunschzeit': '09:30'}, {'telefon': ''},
             {'reifen_leistung': []}, {'reifen_leistung': ['hacking']},
+            {'reifen_leistung': ['radwechsel', 'montage', 'wuchten']},
             {portal.CSRF_FIELD_NAME: 'invalid'},
         ]
         for changes in cases:
@@ -208,6 +209,18 @@ class ReifentermineTest(unittest.TestCase):
                 before = self.count('leads')
                 self.assertEqual(self.book(changes).status_code, 400)
                 self.assertEqual(self.count('leads'), before)
+
+    def test_extra_service_can_replace_preselected_mounting(self):
+        response = self.book({'shop_leistung': 'reifenmontage', 'reifen_leistung': ['', 'einlagerung']})
+        self.assertEqual(response.status_code, 302)
+        lead = self.latest()
+        self.assertEqual(lead['portal_data']['reifen_leistungen'], ['einlagerung'])
+        self.assertNotIn('Im Shop gewählte Leistung: Reifenmontage', lead['beschreibung'])
+
+    def test_legacy_booking_keeps_both_original_service_labels(self):
+        data = {'anliegen': 'reifenservice', 'reifen_leistungen': ['radwechsel', 'montage', 'einlagerung']}
+        result = portal.reifen_termin_daten({'portal_json': json.dumps(data)})
+        self.assertEqual(result['leistungen'], ['Radwechsel / Saisonwechsel', 'Reifenmontage', 'Reifeneinlagerung'])
 
     def test_past_time_today_is_rejected_in_berlin(self):
         today = date.today().isoformat()

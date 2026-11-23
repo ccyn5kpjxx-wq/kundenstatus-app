@@ -96,8 +96,8 @@ def main():
             and f'href="{portal.public_workshop_contact()["telefon_url"]}"' in hero_html
         ),
         "Shop und Reifenmontage im Einstieg getrennt erreichbar": (
-            'href="/shop">Reifen &amp; Felgen' in hero_html
-            and 'href="/anfrage?anliegen=reifenservice#kurzanfrage">Reifentermin buchen' in hero_html
+            'href="/shop">Reifen oder Felgen kaufen' in hero_html
+            and 'href="/anfrage?anliegen=reifenservice#terminbuchung">Termin mit eigenen Rädern buchen' in hero_html
         ),
         "Shopklick aus dem Einstieg auswertbar": "home-hero-shop" in portal.SHOP_KLICK_ELEMENTE["/"]
         and 'data-shop-click="home-hero-shop"' in hero_html,
@@ -120,7 +120,7 @@ def main():
         "Sprunglink vorhanden": 'class="skip-link" href="#inhalt"' in html,
         "Hero-Bild vorgeladen": 'rel="preload" as="image"' in html,
         "Saisonfoto im aktuellen Angebot vorhanden": image_path(saison["hero_bild"]) in season_html and (ROOT / "static" / saison["hero_bild"]).is_file() and 'werkstatt-hero-v3.webp' not in html,
-        "Reifenbuchung und Leistungen im Saisonbereich": all(x in season_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Reifentermin online buchen','/anfrage?anliegen=reifenservice#kurzanfrage','Ölcheck','Aufbereitung')),
+        "Reifenbuchung und Leistungen im Saisonbereich": all(x in season_html for x in ('Aktuell bei uns',saison['reifen_titel'],'Termin mit eigenen Rädern buchen','/anfrage?anliegen=reifenservice#terminbuchung','Ölcheck','Aufbereitung')),
         "Acht Themen mit Shopkarte an erster Stelle": [card.get("data-card-title") for card in deck.cards] == ["Shop", "Reifen", "Versicherungsschaden", "Lackierarbeiten", "Bremsen", "Ölcheck", "Aufbereitung", "Leasing-Check"],
         "Alle Karten ohne JavaScript lesbar und verlinkt": bool(deck.cards) and all("hidden" not in card and "inert" not in card for card in deck.cards) and all(links and all(card_link_reachable(href) for href in links) for links in deck.card_links),
         "Reifenkarte bietet Reifenauswahl und Werkstatttermin": {"reifenshop", "reifenservice"} <= tire_destinations,
