@@ -228,6 +228,11 @@
         {% for key, label in status_optionen.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
       </select>
     </div>
+    <div class="col-md-6">
+      <label class="form-label" for="mietfahrzeug-neu-verfuegbar-ab">Verfügbar ab</label>
+      <input type="date" id="mietfahrzeug-neu-verfuegbar-ab" name="verfuegbar_ab" class="form-control" aria-describedby="mietfahrzeug-neu-freigabe-hilfe">
+      <div id="mietfahrzeug-neu-freigabe-hilfe" class="form-text">Bei Grundzustand „Verfügbar“ sind Reservierungen ab diesem Tag möglich. Leer lassen, wenn keine Datumsgrenze gilt.</div>
+    </div>
     <div class="col-12">
       <label class="form-label">Notiz</label>
       <input type="text" name="notiz" class="form-control" placeholder="z. B. Winterreifen, kleiner Kratzer hinten rechts">
@@ -486,6 +491,11 @@
             <div class="col-4">
               <label class="form-label small mb-0">Standort</label>
               <input type="text" name="standort" class="form-control form-control-sm" value="{{ f.standort }}">
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-0" for="mietfahrzeug-verfuegbar-ab-{{ f.id }}">Verfügbar ab</label>
+              <input type="date" id="mietfahrzeug-verfuegbar-ab-{{ f.id }}" name="verfuegbar_ab" class="form-control form-control-sm" value="{{ f.verfuegbar_ab or '' }}" aria-describedby="mietfahrzeug-freigabe-hilfe-{{ f.id }}">
+              <div id="mietfahrzeug-freigabe-hilfe-{{ f.id }}" class="form-text">Bei Grundzustand „Verfügbar“ sind Reservierungen ab diesem Tag möglich. Ein späteres Datum darf keine offenen Mieten oder Reservierungen ausschließen. Leer bedeutet keine Datumsgrenze.</div>
             </div>
             <div class="col-6">
               <label class="form-label small mb-0">Grundzustand</label>

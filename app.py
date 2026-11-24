@@ -11480,6 +11480,7 @@ def init_db():
     ensure_column(db, "mietwagen_anfragen", "geplante_km", "INTEGER DEFAULT 0")
     ensure_column(db, "mietfahrzeuge", "archiviert_am", "TEXT DEFAULT ''")
     ensure_column(db, "mietfahrzeuge", "archivgrund", "TEXT DEFAULT ''")
+    ensure_column(db, "mietfahrzeuge", "verfuegbar_ab", "TEXT DEFAULT ''")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS mietbild_backups (
@@ -41443,6 +41444,49 @@ def normalize_mietfahrzeug_status(value):
     return text if text in MIETFAHRZEUG_BASIS_STATUS else "verfuegbar"
 
 
+def normalize_mietfahrzeug_verfuegbar_ab(value):
+    raw = clean_text(value)
+    if not raw:
+        return ""
+    parsed = parse_date(raw)
+    if not parsed:
+        raise ValueError("Bitte ein gültiges Datum für „Verfügbar ab“ angeben.")
+    return parsed.isoformat()
+
+
+def mietfahrzeug_freigabe_hinweis(fahrzeug, start_obj):
+    """Release dates constrain the rental start, including future reservations."""
+    raw = clean_text(dict(fahrzeug).get("verfuegbar_ab"))
+    if not raw:
+        return ""
+    freigabe = parse_date(raw)
+    if not freigabe:
+        return "Das Freigabedatum des Mietfahrzeugs muss zuerst geprüft werden."
+    if not start_obj or start_obj < freigabe:
+        return f"Das Mietfahrzeug ist erst ab dem {freigabe.strftime(DATE_FMT)} verfügbar. Bitte ein späteres Abholdatum wählen."
+    return ""
+
+
+def validiere_mietfahrzeug_freigabe_aenderung(db, fahrzeug_id, verfuegbar_ab):
+    """Do not invalidate an open rental or checkout by moving its release date."""
+    freigabe = parse_date(verfuegbar_ab)
+    if not freigabe:
+        return
+    offene_starts = db.execute(
+        """SELECT start_datum FROM mietvorgaenge WHERE mietfahrzeug_id=?
+           AND COALESCE(status,'') NOT IN ('zurueck','storniert')
+           AND COALESCE(rueckgabe_datum,'')=''""", (int(fahrzeug_id),)
+    ).fetchall()
+    offene_checkouts = db.execute(
+        """SELECT start_datum FROM miet_checkout_holds WHERE mietfahrzeug_id=?
+           AND (status IN ('pending','review')
+                OR (status='confirmed' AND mietvorgang_id IS NULL))""", (int(fahrzeug_id),)
+    ).fetchall()
+    if any(not parse_date(row["start_datum"]) or parse_date(row["start_datum"]) < freigabe
+           for row in [*offene_starts, *offene_checkouts]):
+        raise ValueError("Das Freigabedatum liegt nach dem Beginn einer offenen Vermietung oder Reservierung. Bitte diese zuerst klären.")
+
+
 def parse_tagessatz(value):
     raw = clean_text(value).replace("€", "").replace(",", ".").strip()
     if not raw:
@@ -41551,6 +41595,10 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None, mos_blocked=False):
         return None
     fahrzeug = dict(row)
     fahrzeug["basis_status"] = normalize_mietfahrzeug_status(fahrzeug.get("status"))
+    freigabe = parse_date(fahrzeug.get("verfuegbar_ab"))
+    fahrzeug["verfuegbar_ab"] = freigabe.isoformat() if freigabe else ""
+    fahrzeug["verfuegbar_ab_label"] = freigabe.strftime(DATE_FMT) if freigabe else ""
+    fahrzeug["freigabe_in_zukunft"] = bool(freigabe and freigabe > datetime.now(ZoneInfo("Europe/Berlin")).date())
     fahrzeug["mos_betriebsgesperrt"] = bool(mos_blocked)
     fahrzeug["tagessatz_label"] = tagessatz_label(fahrzeug.get("tagessatz"))
     bilder = bilder if bilder is not None else list_mietfahrzeug_bilder(fahrzeug["id"])
@@ -41571,6 +41619,8 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None, mos_blocked=False):
         effektiv = "vermietet"
     elif fahrzeug["basis_status"] == "wartung":
         effektiv = "wartung"
+    elif fahrzeug["freigabe_in_zukunft"]:
+        effektiv = "bald"
     elif reserviert:
         effektiv = "reserviert"
     else:
@@ -41578,6 +41628,7 @@ def hydrate_mietfahrzeug(row, vorgaenge=None, bilder=None, mos_blocked=False):
     fahrzeug["effektiver_status"] = effektiv
     fahrzeug["effektiver_status_label"] = (
         "Nach MOS-Rückgabe gesperrt" if mos_blocked and effektiv == "wartung"
+        else "Verfügbar ab " + fahrzeug["verfuegbar_ab_label"] if effektiv == "bald" and fahrzeug["freigabe_in_zukunft"]
         else MIETFAHRZEUG_STATUS_LABEL.get(effektiv, "Verfügbar")
     )
     fahrzeug["ist_verfuegbar"] = effektiv == "verfuegbar"
@@ -41860,6 +41911,7 @@ def create_mietfahrzeug(**felder):
     kennzeichen = clean_text(felder.get("kennzeichen")).upper()
     if not kennzeichen:
         raise ValueError("Bitte ein Kennzeichen angeben.")
+    verfuegbar_ab = normalize_mietfahrzeug_verfuegbar_ab(felder.get("verfuegbar_ab"))
     jetzt = now_str()
     db = get_db()
     try:
@@ -41867,8 +41919,8 @@ def create_mietfahrzeug(**felder):
             """
             INSERT INTO mietfahrzeuge
             (kennzeichen, bezeichnung, fahrzeugklasse, farbe, fin_nummer, baujahr,
-             kraftstoff, tagessatz, standort, status, notiz, aktiv, erstellt_am, geaendert_am)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+             kraftstoff, tagessatz, standort, status, notiz, verfuegbar_ab, aktiv, erstellt_am, geaendert_am)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
             """,
             (
                 kennzeichen,
@@ -41882,6 +41934,7 @@ def create_mietfahrzeug(**felder):
                 clean_text(felder.get("standort")),
                 normalize_mietfahrzeug_status(felder.get("status")),
                 clean_text(felder.get("notiz")),
+                verfuegbar_ab,
                 jetzt,
                 jetzt,
             ),
@@ -41902,17 +41955,21 @@ def update_mietfahrzeug(fahrzeug_id, **felder):
     try:
         if USE_POSTGRES:
             aktuell = db.execute(
-                "SELECT aktiv FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                "SELECT aktiv,verfuegbar_ab FROM mietfahrzeuge WHERE id=? FOR UPDATE",
                 (int(fahrzeug_id),),
             ).fetchone()
         else:
             db.execute("BEGIN IMMEDIATE")
             aktuell = db.execute(
-                "SELECT aktiv FROM mietfahrzeuge WHERE id=?",
+                "SELECT aktiv,verfuegbar_ab FROM mietfahrzeuge WHERE id=?",
                 (int(fahrzeug_id),),
             ).fetchone()
         if not aktuell:
             raise ValueError("Das Mietfahrzeug wurde nicht gefunden.")
+        verfuegbar_ab = normalize_mietfahrzeug_verfuegbar_ab(
+            felder.get("verfuegbar_ab", aktuell["verfuegbar_ab"]))
+        if verfuegbar_ab != (aktuell["verfuegbar_ab"] or ""):
+            validiere_mietfahrzeug_freigabe_aenderung(db, fahrzeug_id, verfuegbar_ab)
         if int(aktuell["aktiv"] or 0) and (not aktiv or status == "inaktiv"):
             raise ValueError(
                 "Aktive Fahrzeuge bitte über die Archivierung mit Begründung "
@@ -41926,7 +41983,7 @@ def update_mietfahrzeug(fahrzeug_id, **felder):
             """
             UPDATE mietfahrzeuge
             SET kennzeichen=?, bezeichnung=?, fahrzeugklasse=?, farbe=?, fin_nummer=?,
-                baujahr=?, kraftstoff=?, tagessatz=?, standort=?, status=?, notiz=?, aktiv=?, geaendert_am=?
+                baujahr=?, kraftstoff=?, tagessatz=?, standort=?, status=?, notiz=?, verfuegbar_ab=?, aktiv=?, geaendert_am=?
             WHERE id=?
             """,
             (
@@ -41941,6 +41998,7 @@ def update_mietfahrzeug(fahrzeug_id, **felder):
                 clean_text(felder.get("standort")),
                 status,
                 clean_text(felder.get("notiz")),
+                verfuegbar_ab,
                 1 if aktiv else 0,
                 now_str(),
                 int(fahrzeug_id),
@@ -42043,6 +42101,9 @@ def validiere_mietkontakt(telefon="", email=""):
 
 def mietfahrzeug_zeitraum_frei_db(db, fahrzeug_id, start_obj, end_obj, exclude_vorgang_id=None, exclude_hold_id=None):
     from mos_return import vehicle_blocked
+    fahrzeug = db.execute("SELECT verfuegbar_ab FROM mietfahrzeuge WHERE id=?", (int(fahrzeug_id),)).fetchone()
+    if not fahrzeug or mietfahrzeug_freigabe_hinweis(fahrzeug, start_obj):
+        return False
     if vehicle_blocked(db, fahrzeug_id) or mietkalender_sperren.overlaps(db, fahrzeug_id, start_obj, end_obj):
         return False
     rows = db.execute(
@@ -42087,19 +42148,21 @@ def create_mietvorgang(mietfahrzeug_id, **felder):
     try:
         if USE_POSTGRES:
             fahrzeug = db.execute(
-                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=? FOR UPDATE",
+                "SELECT id, aktiv, status, verfuegbar_ab FROM mietfahrzeuge WHERE id=? FOR UPDATE",
                 (int(mietfahrzeug_id),),
             ).fetchone()
         else:
             db.execute("BEGIN IMMEDIATE")
             fahrzeug = db.execute(
-                "SELECT id, aktiv, status FROM mietfahrzeuge WHERE id=?",
+                "SELECT id, aktiv, status, verfuegbar_ab FROM mietfahrzeuge WHERE id=?",
                 (int(mietfahrzeug_id),),
             ).fetchone()
         if not fahrzeug:
             raise ValueError("Das Mietfahrzeug wurde nicht gefunden.")
         if not int(fahrzeug["aktiv"] or 0) or normalize_mietfahrzeug_status(fahrzeug["status"]) in {"wartung", "inaktiv"}:
             raise ValueError("Das Mietfahrzeug ist aktuell nicht für eine Vermietung freigegeben.")
+        if hinweis := mietfahrzeug_freigabe_hinweis(fahrzeug, start_obj):
+            raise ValueError(hinweis)
         if not mietfahrzeug_zeitraum_frei_db(db, mietfahrzeug_id, start_obj, end_obj):
             raise ValueError("Das Mietfahrzeug ist im gewählten Zeitraum bereits belegt.")
         cur = db.execute(
@@ -43446,6 +43509,7 @@ def admin_mietfahrzeug_neu():
             tagessatz=request.form.get("tagessatz"),
             standort=request.form.get("standort"),
             status=request.form.get("status"),
+            verfuegbar_ab=request.form.get("verfuegbar_ab"),
             notiz=request.form.get("notiz"),
         )
         flash("Mietfahrzeug angelegt.", "success")
@@ -43480,6 +43544,7 @@ def admin_mietfahrzeug_bearbeiten(fahrzeug_id):
             tagessatz=request.form.get("tagessatz"),
             standort=request.form.get("standort"),
             status=request.form.get("status"),
+            verfuegbar_ab=request.form.get("verfuegbar_ab", fahrzeug.get("verfuegbar_ab", "")),
             notiz=request.form.get("notiz"),
             aktiv=aktiv,
         )
@@ -46210,7 +46275,33 @@ WEBSITE_MIETWAGEN_FLOTTE = {
         "preis": "59 € / Tag",
         "preis_hinweis": "Ab 3 Tagen 49 € / Tag",
     },
+    "fiat-ducato": {
+        "name": "Fiat Ducato",
+        "typ": "Kastenwagen · Transporter",
+        "beschreibung": "Kastenwagen für Transporte, Handwerk oder Umzug. Den gewünschten Mietzeitraum bestätigen wir persönlich.",
+        "merkmale": ("Kastenwagen", "Transporter", "150 km / Tag inklusive"),
+        "bild": "mietwagen/ducato-hersteller.jpg",
+        "bild_hinweis": "Herstellerabbildung · Symbolfoto; Ausstattung kann abweichen",
+        "status": "Verfügbar ab 01.12.2026",
+        "status_typ": "bald",
+        "verfuegbar_ab": "2026-12-01",
+        "preis": "69 € / Tag",
+        "preis_hinweis": "150 km pro Tag inklusive",
+    },
 }
+
+
+def website_mietwagen_flotte():
+    """Date labels change with the Berlin calendar without another release."""
+    heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
+    flotte = {slug: dict(info) for slug, info in WEBSITE_MIETWAGEN_FLOTTE.items()}
+    for info in flotte.values():
+        freigabe = parse_date(info.get("verfuegbar_ab"))
+        if freigabe:
+            info["status"] = "Verfügbar ab " + freigabe.strftime(DATE_FMT) if freigabe > heute else "Jetzt verfügbar"
+            info["status_typ"] = "bald" if freigabe > heute else "verfuegbar"
+    return flotte
+
 
 WEBSITE_FAHRZEUGCHECK_ARTEN = {
     "allgemein": "Allgemeiner Fahrzeugcheck",
@@ -46789,7 +46880,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             mechanik_auswahl=mechanik_auswahl,
             reifen_leistungen=WEBSITE_REIFEN_LEISTUNGEN,
             reifen_auswahl=reifen_auswahl,
-            mietwagen_flotte=WEBSITE_MIETWAGEN_FLOTTE,
+            mietwagen_flotte=website_mietwagen_flotte(),
             fahrzeugcheck_arten=WEBSITE_FAHRZEUGCHECK_ARTEN,
             weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
             kurzanfrage=ausgewaehltes_anliegen in {*WEBSITE_KURZANFRAGEN, "schaden", "auswahl"},
@@ -46887,7 +46978,7 @@ def website_anfrage():
         mietwagen_fahrzeug = clean_text(request.form.get("mietwagen_fahrzeug"))
         if anliegen == "mietwagenanfrage" and not mietwagen_fahrzeug and fahrzeug:
             mietwagen_fahrzeug = "offen"
-        mietwagen_fahrzeug_info = WEBSITE_MIETWAGEN_FLOTTE.get(mietwagen_fahrzeug)
+        mietwagen_fahrzeug_info = website_mietwagen_flotte().get(mietwagen_fahrzeug)
         mietbeginn = clean_text(request.form.get("mietbeginn"))[:10]
         mietende = clean_text(request.form.get("mietende"))[:10]
         if anliegen == "mietwagenanfrage":
@@ -59735,6 +59826,8 @@ def mietwagen_public_fahrzeuge():
             return "/static/" + WEBSITE_MIETWAGEN_FLOTTE["fiat-doblo-maxi"]["bild"]
         if "fiat doblo" in name:
             return "/static/mietwagen/doblo-maxi-white.webp"
+        if "fiat ducato" in name:
+            return "/static/" + WEBSITE_MIETWAGEN_FLOTTE["fiat-ducato"]["bild"]
         return ""
 
     def ist_demnaechst_verfuegbar(bezeichnung, gespeicherter_status, basis_status=None):
@@ -59777,6 +59870,10 @@ def mietwagen_public_fahrzeuge():
         if ist_doblo_xl(bezeichnung):
             bezeichnung = re.sub(r"\bMaxi\b", "XL", bezeichnung, flags=re.IGNORECASE)
             bild_hinweis = WEBSITE_MIETWAGEN_FLOTTE["fiat-doblo-maxi"]["bild_hinweis"]
+        elif "fiat ducato" in bezeichnung.casefold():
+            bild_hinweis = WEBSITE_MIETWAGEN_FLOTTE["fiat-ducato"]["bild_hinweis"]
+        freigabe = parse_date(f.get("verfuegbar_ab"))
+        kuenftige_freigabe = bool(freigabe and freigabe > datetime.now(ZoneInfo("Europe/Berlin")).date())
         fahrzeuge.append(
             {
                 "id": f["id"],
@@ -59787,7 +59884,9 @@ def mietwagen_public_fahrzeuge():
                 "bild_url": bild_url,
                 "bild_hinweis": bild_hinweis,
                 "belegt": belegt,
-                "bald": ist_demnaechst_verfuegbar(bezeichnung, f.get("status"), f.get("basis_status")),
+                "bald": kuenftige_freigabe or ist_demnaechst_verfuegbar(bezeichnung, f.get("status"), f.get("basis_status")),
+                "verfuegbar_ab": freigabe.isoformat() if freigabe else "",
+                "verfuegbar_ab_label": freigabe.strftime(DATE_FMT) if freigabe else "",
             }
         )
     return fahrzeuge
@@ -60014,6 +60113,7 @@ def mietwagen_anfrage():
 # (Altbestand vor Einführung von mietbild_backups). Kennzeichnung „Symbolfoto"
 # übernimmt die öffentliche Seite. Zuordnung über Bezeichnung/Klasse, spezifischste zuerst.
 MIETWAGEN_SYMBOLFOTOS = (
+    ("ducato", "ducato-hersteller.jpg"),
     ("maxi", "doblo-maxi.jpg"),
     ("doblo", "doblo.jpg"),
     ("caddy", "doblo.jpg"),

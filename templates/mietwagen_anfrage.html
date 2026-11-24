@@ -149,7 +149,7 @@
               <div class="name">{{ f.bezeichnung }}</div>
               {% if f.bild_hinweis %}<div class="form-text">{{ f.bild_hinweis }}</div>{% endif %}
               <div class="preis">{% if f.tagessatz %}ab {{ f.tagessatz }} €/Tag{% else %}{{ f.fahrzeugklasse }}{% endif %}</div>
-              {% if f.bald %}<div class="belegt" style="color:#8a5b00;">In Kürze verfügbar — vormerken</div>{% elif f.belegt %}<div class="belegt">belegt: {{ f.belegt|join(' · ') }}</div>{% endif %}
+              {% if f.bald %}<div class="belegt" style="color:#8a5b00;">{% if f.verfuegbar_ab_label %}Verfügbar ab {{ f.verfuegbar_ab_label }}{% else %}In Kürze verfügbar{% endif %} — vormerken</div>{% elif f.belegt %}<div class="belegt">belegt: {{ f.belegt|join(' · ') }}</div>{% endif %}
             </div>
           </label>
           {% endfor %}

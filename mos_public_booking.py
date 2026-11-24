@@ -472,13 +472,16 @@ def register(portal):
             raise RentalSelectionError('closed', 'Für einen der gewählten Übergabetermine ist keine Abholung oder Rückgabe geöffnet. '
                                        'Bitte die angebotenen Tage und Uhrzeiten wählen.')
         fleet_entry = cfg['fleet'][slug]
-        vehicle = db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status FROM mietfahrzeuge WHERE id=?',
+        vehicle = db.execute('SELECT id,bezeichnung,kennzeichen,fin_nummer,aktiv,status,verfuegbar_ab FROM mietfahrzeuge WHERE id=?',
                              (fleet_entry['id'],)).fetchone()
         if not vehicle or not int(vehicle['aktiv'] or 0) or portal.normalize_mietfahrzeug_status(vehicle['status']) in {'bald','wartung','inaktiv'}:
             raise RentalSelectionError('unavailable', 'Das zugeordnete Fahrzeug ist nicht verfügbar.')
         if ((slug == 'doblo-xl' and not is_doblo_xl(vehicle['bezeichnung']))
                 or (cfg['mode'] == 'live' and vehicle['bezeichnung'] != fleet_entry['expected_name'])):
             raise RentalSelectionError('unavailable', 'Fahrzeugzuordnung muss von der Werkstatt geprüft werden.')
+        release_hint = portal.mietfahrzeug_freigabe_hinweis(vehicle, a.date())
+        if release_hint:
+            raise RentalSelectionError('not_released', release_hint)
         if not portal.mietfahrzeug_zeitraum_frei_db(db, vehicle['id'], a.date(), b.date()):
             raise RentalSelectionError('occupied', 'Der Zeitraum ist bereits belegt. Bitte andere Termine wählen.')
         return vehicle, days

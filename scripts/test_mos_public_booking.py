@@ -712,6 +712,36 @@ class PublicTests(unittest.TestCase):
             db.commit()
             db.close()
 
+    def test_future_vehicle_release_is_explained_by_availability_and_quote(self):
+        vehicle_id = self.cfg['fleet']['kona']['id']
+        fields = {'vehicle': 'kona', 'start': self.cfg['slots'][0], 'end': self.cfg['slots'][3]}
+        start_day = datetime.fromisoformat(fields['start']).date()
+        release_day = start_day + timedelta(days=1)
+        db = portal.get_db()
+        original = db.execute('SELECT verfuegbar_ab FROM mietfahrzeuge WHERE id=?',
+                              (vehicle_id,)).fetchone()['verfuegbar_ab']
+        try:
+            db.execute('UPDATE mietfahrzeuge SET verfuegbar_ab=? WHERE id=?',
+                       (release_day.isoformat(), vehicle_id))
+            db.commit()
+            availability = self.client.get('/mietwagen-test/availability', query_string=fields)
+            self.assertEqual(availability.status_code, 200)
+            self.assertFalse(availability.json['available'])
+            self.assertEqual(availability.json['reason'], 'not_released')
+            self.assertIn(release_day.strftime('%d.%m.%Y'), availability.json['message'])
+            rejected = self.post('/mietwagen-test/quote', fields)
+            self.assertEqual(rejected.status_code, 409)
+            self.assertIn(release_day.strftime('%d.%m.%Y'), rejected.text)
+            db.execute('UPDATE mietfahrzeuge SET verfuegbar_ab=? WHERE id=?',
+                       (start_day.isoformat(), vehicle_id))
+            db.commit()
+            self.assertTrue(self.client.get('/mietwagen-test/availability', query_string=fields).json['available'])
+            self.assertEqual(self.post('/mietwagen-test/quote', fields).status_code, 200)
+        finally:
+            db.execute('UPDATE mietfahrzeuge SET verfuegbar_ab=? WHERE id=?', (original, vehicle_id))
+            db.commit()
+            db.close()
+
     def test_two_listings_server_prices(self):
         db=portal.get_db()
         try:
