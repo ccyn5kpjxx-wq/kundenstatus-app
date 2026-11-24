@@ -579,13 +579,16 @@ class ReleaseChecks(unittest.TestCase):
         app.before_request(namespace['restrict_public_site_service'])
         for index, endpoint in enumerate(('shop_public_v2.product_variants', 'shop_public_v2.compatible_tyres',
                                           'shop_frontend.felgenstudio', 'shop_public_v2.create_order_draft', 'internal_admin',
-                                          'shop_public_v2.complete_wheel_price')):
+                                          'shop_public_v2.complete_wheel_price', 'shop_public_v2.stock_alternatives')):
             app.add_url_rule('/' + str(index), endpoint, lambda: ('', 204), methods=['GET', 'POST'])
         client = app.test_client()
-        for index in (0, 1, 2, 5):
+        for index in (0, 1, 2, 5, 6):
             self.assertEqual(client.get('/' + str(index)).status_code, 204)
-        for index in (3, 4, 5):
+        for index in (3, 4, 5, 6):
             self.assertEqual(client.post('/' + str(index)).status_code, 404)
+        namespace['PUBLIC_SITE_ONLY'] = False
+        self.assertEqual(client.get('/6').status_code, 204)
+        self.assertEqual(client.post('/6').status_code, 404)
 
 
 if __name__ == '__main__':
