@@ -39368,6 +39368,9 @@ def build_mini_monatskalender(
                 item_url = ""
                 if has_request_context() and endpoint == "betriebs_cockpit":
                     item_url = url_for("admin_mietfahrzeuge")
+                    if vorgang.get("mos_hold_id") and session.get("admin"):
+                        item_url = url_for("mos_public.admin_bookings", hold_id=vorgang["mos_hold_id"],
+                                           _anchor=f"hold-{vorgang['mos_hold_id']}")
                 current = max(m_start, month_start)
                 last_day = min(m_end, month_end)
                 while current <= last_day:
@@ -40462,6 +40465,7 @@ def betriebs_cockpit(sperrformular=None, sperrfehler=None):
             neue_emails,
         ),
         mietwagen_heute=mietwagen_heute_uebersicht(miet_fahrzeuge),
+        mietwagen_anfragen=mos_public_booking.station_inquiries(sys.modules[__name__]) if session.get("admin") else [],
         sperrfahrzeuge=[f for f in miet_fahrzeuge if f["aktiv"] and f["basis_status"] not in {"inaktiv", "wartung", "bald"}],
         sperranlaesse=mietkalender_sperren.SOURCES,
         sperrformular=sperrformular or {"start_date": starttag.isoformat(), "end_date": starttag.isoformat(), "source": "telefon"},

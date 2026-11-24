@@ -76,6 +76,69 @@ class OnsiteCheckoutTests(unittest.TestCase):
         self.assertEqual(len(self.public.rows()), 1)
         self.assertEqual(self.public.client.get(check_url, query_string=fields).json['reason'], 'occupied')
 
+    def test_signed_live_inquiry_visible_before_payment_and_only_once(self):
+        from mos_operator_notice import init_schema
+        from mos_public_booking import station_inquiries
+
+        portal = public.portal
+        db = portal.get_db()
+        try:
+            init_schema(db)
+            db.commit()
+        finally:
+            db.close()
+        customer = {'name': 'Lokaltest', 'email': 'lokal@example.invalid', 'telefon': ''}
+        quote = {**self.quote(self.token('online')), 'test_only': False}
+        signed = presign_quote(quote, customer, self.public.signature())
+        self.assertEqual(station_inquiries(portal), [])
+        args = ('local-repeat-request-key', signed['vehicle_id'], signed['start_slot'][:10],
+                signed['end_slot'][:10], customer, signed)
+        first = self.service.reserve(*args)
+        self.assertEqual(self.service.reserve(*args)['id'], first['id'])
+        self.assertEqual(self.public.rows(), [])
+        inquiries = station_inquiries(portal)
+        self.assertEqual([(s['id'], s['status']) for s in inquiries],
+                         [(first['id'], 'Zahlungsbestätigung ausstehend')])
+        client = portal.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        detail_url = '/mietwagen-test/admin?hold_id=' + first['id']
+        cockpit = client.get('/admin/cockpit')
+        self.assertIn(detail_url + '#hold-' + first['id'], cockpit.get_data(as_text=True))
+        detail = client.get(detail_url)
+        self.assertIn(customer['email'], detail.get_data(as_text=True))
+        self.assertIn('Zahlungsbestätigung ausstehend', detail.get_data(as_text=True))
+        db = portal.get_db()
+        try:
+            notices = db.execute('SELECT event_type FROM miet_checkout_operator_notices WHERE hold_id=?',
+                                 (first['id'],)).fetchall()
+            self.assertEqual([r['event_type'] for r in notices], ['payment_pending'])
+            db.execute("UPDATE miet_checkout_holds SET status='released' WHERE id=?", (first['id'],))
+            db.commit()
+            self.assertEqual(station_inquiries(portal)[0]['status'], 'Ohne Buchungsbestätigung beendet')
+        finally:
+            db.close()
+
+        # A new attempt after the release can reach the ordinary confirmation
+        # path using the local offline provider. Only it belongs in the calendar.
+        second = self.service.reserve('local-second-request-key', *args[1:])
+        self.assertFalse(self.service.gateway.livemode)
+        checkout = self.service.create_checkout(second['id'])
+        self.service.gateway.pay(checkout['id'])
+        body, signature = self.service.gateway.signed_event(checkout['id'])
+        self.service.handle_signed_event(body, signature, portal.app.extensions['mos_public_booking']['secret'])
+        self.assertEqual(self.service.read(second['id'])['status'], 'confirmed')
+        self.assertEqual([item['id'] for item in station_inquiries(portal)], [first['id']])
+        month = signed['start_slot'][:7]
+        with portal.app.test_request_context('/admin/cockpit'):
+            from flask import session
+            session['admin'] = True
+            calendar = portal.build_mini_monatskalender([], month, endpoint='betriebs_cockpit',
+                                                        include_internal_notes=True)
+        matches = [item['url'] for week in calendar['weeks'] for day in week for item in day['items']
+                   if item.get('label') == 'Mietwagen']
+        self.assertIn('/mietwagen-test/admin?hold_id=' + second['id'] + '#hold-' + second['id'], matches)
+
     def test_confirms_once_without_stripe_and_blocks_both_payment_paths(self):
         token = self.token()
         q = self.quote(token)

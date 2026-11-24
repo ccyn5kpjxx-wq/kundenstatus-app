@@ -46,6 +46,46 @@ class RentalSelectionError(ValueError):
         self.reason = reason
 
 
+def station_inquiry_status(hold, quote):
+    if (not isinstance(quote, dict) or hold['mietvorgang_id'] is not None or quote.get('test_only') is not False
+            or quote.get('payment_method', 'online') != 'online'
+            or not quote.get('signed_at') or not quote.get('signed_contract_hash')):
+        return None
+    return {
+        'pending': 'Zahlungsbestätigung ausstehend',
+        'review': 'Zahlungsstatus prüfen',
+        'released': 'Ohne Buchungsbestätigung beendet',
+    }.get(hold['status'])
+
+
+def station_inquiries(portal):
+    """Signed online requests, including recently ended attempts for station callbacks."""
+    cutoff = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp())
+    db = portal.get_db()
+    try:
+        rows = db.execute("""SELECT id, status, mietvorgang_id, payload FROM miet_checkout_holds
+            WHERE mietvorgang_id IS NULL AND
+                (status IN ('pending', 'review') OR (status='released' AND expires_at>=?))""",
+            (cutoff,)).fetchall()
+    finally:
+        db.close()
+    inquiries = []
+    for row in rows:
+        try:
+            payload = json.loads(row['payload'])
+            quote = payload['quote']
+            status = station_inquiry_status(row, quote)
+            if status:
+                inquiries.append({
+                    'id': row['id'], 'status': status, 'signed_at': quote['signed_at'],
+                    'vehicle_name': quote['vehicle_name'], 'start_slot': quote['start_slot'],
+                    'end_slot': quote['end_slot'], 'customer_name': payload['customer']['name'],
+                })
+        except (KeyError, TypeError, ValueError):
+            continue  # Older attempts can lack the signed booking snapshot.
+    return sorted(inquiries, key=lambda item: item['signed_at'], reverse=True)
+
+
 def weekly_handover_enabled(cfg):
     schedule=cfg.get('weekly_handover')
     if schedule is None:return False
@@ -765,7 +805,10 @@ def register(portal):
             closed_slots=listed_slots(db,False)
         finally:db.close()
         for h in holds:
-            h['q']=json.loads(h['payload'])['quote']
+            payload=json.loads(h['payload'])
+            h['q']=payload['quote']
+            h['station_inquiry_status']=station_inquiry_status(h, h['q'])
+            h['customer']=payload.get('customer', {})
             h['account']=account(h['id'], onsite=h['q'].get('payment_method')=='onsite')
             h['order_receipt_open_minutes']=None
             h['order_receipt_delay_seconds']=None

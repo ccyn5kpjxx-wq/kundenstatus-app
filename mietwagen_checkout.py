@@ -284,7 +284,9 @@ class SharedCheckout:
             raise ValueError('Mieten über fünf Tage benötigen eine bestätigte verlängerte Kreditkartenautorisierung; höchstens 28 Miettage.')
         payload = json.dumps({'customer': {'name': name, 'telefon': customer.get('telefon', ''),
                             'email': customer.get('email', '')}, 'quote': quote}, sort_keys=True)
-        if onsite or _card_authorization_quote(quote) or is_long_rental_paid_deposit(quote):
+        verify_amounts = onsite or _card_authorization_quote(quote) or is_long_rental_paid_deposit(quote)
+        notify_pending = not onsite and quote.get('test_only') is False and bool(quote.get('signed_contract_hash'))
+        if verify_amounts:
             if (type(quote.get('rental_cents')) is not int or quote['rental_cents'] <= 0
                     or (_card_authorization_quote(quote) and (
                         quote['amount_cents'] != quote['rental_cents']
@@ -294,6 +296,7 @@ class SharedCheckout:
                     or datetime.fromisoformat(quote['start_slot']).date() != start
                     or datetime.fromisoformat(quote['end_slot']).date() != end):
                 raise ValueError('Mietpreis und gesonderte Kartenautorisierung stimmen nicht.')
+        if verify_amounts or notify_pending:
             from mos_public_contract import signed_payload
             signed_payload(json.loads(payload))
         fingerprint = hashlib.sha256(json.dumps([int(vehicle_id),start.isoformat(),end.isoformat(),payload]).encode()).hexdigest()
@@ -313,6 +316,9 @@ class SharedCheckout:
                 (id,request_key,mietfahrzeug_id,start_datum,end_datum,payload,fingerprint,status,expires_at)
                 VALUES (?,?,?,?,?,?,?,'pending',?)''',
                 (hold_id,request_key,int(vehicle_id),start.isoformat(),end.isoformat(),payload,fingerprint,int(time.time())+2100))
+            if notify_pending:
+                from mos_operator_notice import enqueue
+                enqueue(db, hold_id, 'payment_pending', quote)
             if onsite:
                 # Commit both the confirmed booking and its inventory allocation together.
                 # The transient pending state cannot be observed by another transaction.

@@ -87,6 +87,23 @@
     </div>
   </section>
   {% include "_cockpit_aktionen.html" %}
+  {% if mietwagen_anfragen %}
+  <details class="cockpit-card" id="mietwagen-anfragen" open>
+    <summary class="cockpit-section-summary">
+      <span class="cockpit-section-title">Mietwagenanfragen ohne Buchungsbestätigung</span>
+      <span class="cockpit-approval-count">{{ mietwagen_anfragen|length }}</span>
+    </summary>
+    <div class="cockpit-detail-body start-list">
+      {% for anfrage in mietwagen_anfragen %}
+      <a class="start-list-item" href="{{ url_for('mos_public.admin_bookings', hold_id=anfrage.id, _anchor='hold-' ~ anfrage.id) }}">
+        <strong>{{ anfrage.vehicle_name }} · {{ anfrage.customer_name }}</strong>
+        <span>{{ anfrage.start_slot|mos_slot }} bis {{ anfrage.end_slot|mos_slot }}</span>
+        <span>{{ anfrage.status }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
   {% set offene_freigaben = (belegfreigabe.offen_anzahl or 0) + (lohnfreigabe_count or 0) + (urlaubfreigabe_count or 0) %}
   <details class="cockpit-card cockpit-office" data-cockpit-freigaben{% if offene_freigaben or belegfreigabe.neue_anzahl %} open{% endif %}>
     <summary class="cockpit-section-summary">
