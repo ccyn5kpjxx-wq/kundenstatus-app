@@ -53,6 +53,23 @@ class FrontendChecks(unittest.TestCase):
         self.assertIn(('option', {'value': 'oil', 'selected': None}), tags)
         self.assertEqual(next(a['value'] for tag, a in tags if tag == 'input' and a.get('name') == 'q'), 'A & "B"')
 
+    def test_tyre_finder_preserves_deep_links_and_has_a_native_size_search(self):
+        app = Flask('finder', template_folder=str(ROOT / 'templates'))
+        app.config['SHOP_FRONTEND_ENABLED'] = True
+        app.register_blueprint(create_shop_frontend_blueprint(feature_links={'service_request': '/anfrage'}))
+        html = app.test_client().get('/shop/reifen/?montage=1&width=145&ratio=65&diameter=15').text
+        tags = Markup(html).tags
+        form, = [a for tag, a in tags if tag == 'form' and a.get('id') == 'catalog-filters']
+        self.assertEqual((form['method'], form['action']), ('get', '/shop/reifen/#sortiment'))
+        for name, value in [('width', '145'), ('ratio', '65'), ('diameter', '15')]:
+            control, = [a for tag, a in tags if tag == 'input' and a.get('name') == name]
+            self.assertEqual(control['value'], value)
+        self.assertTrue(any(a.get('id') == 'catalog-mounting' and 'checked' in a for tag, a in tags if tag == 'input'))
+        self.assertIn('/anfrage?anliegen=reifenservice&shop_leistung=raederwechsel#terminbuchung',
+                      [a.get('href') for tag, a in tags if tag == 'a'])
+        self.assertIn('/static/shop_v2/reifen-groessen-640.webp', html)
+        self.assertNotIn('reifen-groessen-hero.png', html)
+
     def test_unregistered_factory_and_literal_enable_gate(self):
         self.assertNotIn('SHOP_FRONTEND_ENABLED', self.app.config)
         for enabled in (None, False, 'true', 1):

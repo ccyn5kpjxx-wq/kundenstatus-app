@@ -1,0 +1,53 @@
+<section class="modern-wrap tyre-finder" aria-labelledby="shop-title">
+  <div class="tyre-finder-main">
+    <div class="tyre-finder-intro">
+      <picture>
+        <source media="(max-width: 740px)" srcset="{{ url_for('static', filename='shop_v2/reifen-groessen-640.webp') }}">
+        <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" width="1200" height="800" alt="" fetchpriority="high">
+      </picture>
+      <h1 id="shop-title">Reifen für Ihr Auto.</h1>
+      <p>Nach Hause liefern oder bei uns in Mosbach montieren lassen.</p>
+    </div>
+    <form id="catalog-filters" class="shop-filters tyre-finder-form" action="{{ url_for('shop_frontend.reifen') }}#sortiment" method="get" role="search" aria-label="Reifenfinder">
+      <fieldset class="shop-season-filter">
+        <legend>Saison</legend>
+        <div class="shop-season-options">
+          {% set season = request.args.get('season') %}
+          {% for value, label, full in [('', 'Alle', 'Alle Saisons'), ('winter', 'Winter', 'Winterreifen'), ('summer', 'Sommer', 'Sommerreifen'), ('allseason', 'Ganzjahr', 'Ganzjahresreifen')] %}
+          <label><input type="radio" name="season" value="{{ value }}" aria-label="{{ full }}"{% if value == (season if season in ('winter', 'summer', 'allseason') else '') %} checked{% endif %}><span>{{ label }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <fieldset><legend>Reifengröße</legend>
+        <div class="tyre-finder-dimensions">
+          {% for name, label, example, minimum, maximum in [('width','Breite (mm)','205',100,455),('ratio','Querschnitt (%)','55',10,100),('diameter','Zoll','16',8,30)] %}
+          <label>{{ label }}<input type="number" name="{{ name }}" value="{{ request.args.get(name,'') }}" min="{{ minimum }}" max="{{ maximum }}" inputmode="numeric" placeholder="z. B. {{ example }}"></label>
+          {% endfor %}
+        </div>
+        <details id="reifengroesse" class="tyre-size-help"><summary>Wo steht meine Reifengröße?</summary>
+          <p>Seitlich auf dem Reifen. Bei <strong>205/55 R16 91V</strong> wählen Sie 205 mm Breite, 55 % Querschnitt und 16 Zoll. 91V bezeichnet Tragfähigkeit und Geschwindigkeit. Die zulässige Ausführung steht in Ihren Fahrzeugunterlagen.</p>
+          <img src="{{ url_for('static', filename='shop_v2/reifen-groessen-640.webp') }}" width="640" height="427" loading="lazy" alt="Beispiel für die Größenangabe auf der Reifenflanke">
+        </details>
+      </fieldset>
+      <label class="tyre-finder-mounting"><input id="catalog-mounting" type="checkbox" name="montage" value="1"{% if request.args.get('montage') == '1' %} checked{% endif %}> Mit Montage in Mosbach</label>
+      <button class="shop-button" type="submit" id="tyre-finder-submit">Passende Reifen anzeigen</button>
+      <details class="tyre-finder-more"{% if request.args.get('wheel_make') or request.args.get('wheel_vehicle') or request.args.get('q') or request.args.get('brand') or request.args.get('sort') in ['wet_grip', 'catalog'] %} open{% endif %}>
+        <summary>Fahrzeug, Hersteller und weitere Filter</summary>
+        <div class="tyre-advanced-fields">
+          {{ wheel_fields() }}
+          {{ search_fields(department) }}
+          <label>Sortierung<select name="sort">
+            {% for value, label in [('rating','Beste ADAC-Testnote zuerst'), ('wet_grip','Beste Nasshaftung zuerst'), ('catalog','Standardsortierung')] %}
+            <option value="{{ value }}"{% if request.args.get('sort', 'rating') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select></label>
+        </div>
+        <p id="wheel-make-help">Für die Suche nach Fahrzeug wählen Sie die genaue Ausführung.</p>
+      </details>
+    </form>
+  </div>
+  {% if feature_links.service_request %}<div class="tyre-finder-service">
+    <div><h2>Sie haben Ihre Räder schon?</h2><p>Räderwechsel mit Ihren eigenen Kompletträdern.</p></div>
+    <a href="/anfrage?anliegen=reifenservice&amp;shop_leistung=raederwechsel#terminbuchung">Termin auswählen ↗</a>
+  </div>{% endif %}
+</section>

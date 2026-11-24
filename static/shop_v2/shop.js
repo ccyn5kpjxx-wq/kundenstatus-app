@@ -1075,7 +1075,28 @@
       form.requestSubmit();
       form.elements.namedItem('width').focus();
     });
-    byId('catalog-filters').addEventListener('submit', event => { event.preventDefault(); root.clearTimeout(makeTimer); filters = Object.fromEntries(new FormData(event.currentTarget)); page = 1; loadPage(); });
+    byId('catalog-filters').addEventListener('submit', event => {
+      event.preventDefault();
+      root.clearTimeout(makeTimer);
+      const form = event.currentTarget;
+      filters = Object.fromEntries(new FormData(form));
+      page = 1;
+      loadPage();
+      if (event.submitter?.id === 'tyre-finder-submit') {
+        // Match the native GET on explicit submit while retaining campaign parameters.
+        const url = new URL(root.location.href);
+        for (const {name} of form.elements) {
+          if (!name) continue;
+          if (filters[name]) url.searchParams.set(name, filters[name]);
+          else url.searchParams.delete(name);
+        }
+        url.searchParams.delete('artikel');
+        url.hash = 'sortiment';
+        root.history.replaceState(root.history.state, '', url);
+        byId('results-heading').focus({preventScroll: true});
+        byId('sortiment').scrollIntoView({block: 'start'});
+      }
+    });
     const queueSearch = event => {
       root.clearTimeout(makeTimer);
       ++sequence;

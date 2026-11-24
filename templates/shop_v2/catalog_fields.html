@@ -1,0 +1,15 @@
+{% macro wheel_fields() %}
+    <label>Fahrzeugmarke<input type="search" id="wheel-make" name="wheel_make" value="{{ request.args.get('wheel_make', '') }}" maxlength="80"
+      placeholder="z. B. Audi, BMW oder MINI" autocomplete="off" list="wheel-make-options" aria-describedby="wheel-make-help"></label>
+    <datalist id="wheel-make-options">
+      {% for make in ['Audi', 'BMW', 'MINI'] %}<option value="{{ make }}">{{ make }}</option>{% endfor %}
+    </datalist>
+    <label id="wheel-vehicle-field" hidden>Modell und Ausführung
+      <select id="wheel-vehicle" name="wheel_vehicle" disabled><option value="">Fahrzeug auswählen</option></select>
+    </label>
+{% endmacro %}
+
+{% macro search_fields(department) %}
+    <label>Produktsuche<input type="search" name="q" value="{{ request.args.get('q', '') }}" maxlength="100" placeholder="Produktname oder Größe"></label>
+    <label>{{ 'Felgenhersteller' if department == 'wheels' else 'Hersteller' }}<input name="brand" value="{{ request.args.get('brand', '') }}" maxlength="90" placeholder="{{ 'z. B. BBS' if department == 'wheels' else 'z. B. Continental' }}"></label>
+{% endmacro %}

@@ -22,7 +22,7 @@ PAGES = {
              'Stellen Sie Ihre Räder zusammen. Auf Wunsch mit Montage in unserer Werkstatt in Mosbach.'),
     'felgen': ('Felgen', 'wheels', 'felgen.webp',
                'Designs und Ausführungen entdecken. Fahrzeug auswählen und bestätigte Gutachten prüfen.'),
-    'reifen': ('Reifen', 'tyres', 'reifen-groessen-hero.png',
+    'reifen': ('Reifen', 'tyres', 'reifen-groessen-1200.webp',
                 'Sommer, Winter oder ganzjährig. Ihre Reifengröße steht seitlich auf dem Reifen.'),
     'komplettraeder': ('Kompletträder.', 'wheels', 'felgen.webp',
                        'Felge auswählen, Reifen vergleichen und Montage in Mosbach ergänzen.'),

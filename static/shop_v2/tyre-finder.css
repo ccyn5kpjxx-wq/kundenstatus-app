@@ -1,0 +1,38 @@
+.tyre-finder { margin-block: 26px 0; }
+.tyre-finder-main { display: grid; grid-template-columns: 1fr 1fr; overflow: clip; border: 1px solid var(--line); border-radius: 16px; background: #fffefa; }
+.tyre-finder-intro { position: relative; isolation: isolate; display: flex; flex-direction: column; justify-content: end; min-width: 0; padding: clamp(26px, 4vw, 60px); color: white; background: #202523; }
+.tyre-finder-intro picture, .tyre-finder-intro picture::after, .tyre-finder-intro img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.tyre-finder-intro picture { z-index: -1; }
+.tyre-finder-intro picture::after { content: ""; background: linear-gradient(0deg, #0d1411f5, #0d141160 75%); }
+.tyre-finder-intro img { object-fit: cover; object-position: 64% 40%; }
+.tyre-finder-intro h1 { margin: 0; max-width: 11ch; color: white; font: 400 clamp(46px, 5.3vw, 78px)/1 Georgia, serif; letter-spacing: -.045em; }
+.tyre-finder-intro p { margin: 14px 0 0; max-width: 32ch; font-size: 17px; color: #fff; }
+.shop-storefront #catalog-filters.tyre-finder-form { display: grid; align-content: center; grid-template-columns: minmax(0, 1fr); gap: 16px; border: 0; margin: 0; padding: clamp(24px, 3.6vw, 52px); }
+.tyre-finder-form fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+.tyre-finder-form legend { margin-bottom: 7px; padding: 0; font-size: 15px; font-weight: 700; }
+.tyre-finder-form .shop-season-options { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
+.tyre-finder-form .shop-season-options span { padding: 0 3px; border-radius: 7px; }
+.tyre-finder-dimensions, .tyre-advanced-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.tyre-finder-form .tyre-finder-dimensions label { font-size: 13px; gap: 4px; }
+.tyre-finder-form summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.tyre-finder-form details p { margin: 7px 0 0; font-size: 14px; }
+.tyre-size-help { margin-top: 10px; }
+.tyre-size-help img { display: block; width: min(100%, 370px); height: auto; margin-top: 8px; border-radius: 7px; }
+.tyre-advanced-fields { grid-template-columns: repeat(2,minmax(0,1fr)); margin-top: 12px; }
+.shop-storefront .tyre-finder-form .tyre-finder-mounting { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.shop-storefront .tyre-finder-form .tyre-finder-mounting input { min-height: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.tyre-finder-form .shop-button { width: 100%; min-height: 48px; font-size: 15px; }
+.tyre-finder-service { display: flex; gap: 15px; justify-content: space-between; align-items: center; margin-top: 14px; padding: 16px 24px; background: #fffefa; border: 1px solid var(--line); border-radius: 12px; }
+.tyre-finder-service h2 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
+.tyre-finder-service p { margin: 3px 0 0; font-size: 14px; }
+.tyre-finder-service a { font-weight: bold; color: var(--accent); text-underline-offset: 3px; }
+@media (max-width: 740px) {
+  .tyre-finder { margin-top: 12px; }
+  .tyre-finder-main { grid-template-columns: minmax(0,1fr); border-radius: 12px; }
+  .tyre-finder-intro { min-height: 124px; padding: 16px 19px; justify-content: center; }
+  .tyre-finder-intro h1 { font-size: clamp(29px, 9vw, 46px); max-width: none; }
+  .tyre-finder-intro p { margin-top: 5px; font-size: 14px; line-height: 1.4; }
+  .shop-storefront #catalog-filters.tyre-finder-form { padding: 15px; gap: 13px; }
+  .tyre-finder-form .shop-season-options span { min-height: 41px; }
+  .tyre-finder-service { flex-wrap: wrap; gap: 7px; padding: 13px 16px; }
+}

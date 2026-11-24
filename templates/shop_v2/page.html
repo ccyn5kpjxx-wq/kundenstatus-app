@@ -15,12 +15,16 @@
   {% if page_key == 'komplettraeder' %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/complete.css') }}">{% endif %}
   {% set storefront = page_key not in ['felgenstudio', 'order_status'] %}
   {% if storefront %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/storefront.css') }}">{% endif %}
+  {% if page_key == 'reifen' %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/tyre-finder.css') }}">
+  <script src="{{ url_for('static', filename='shop_v2/tyre-finder.js') }}" defer></script>
+  {% endif %}
   {% if hero == 'felgen.webp' %}
   <link rel="preload" as="image" href="{{ url_for('static', filename='shop_v2/felgen.webp') }}" fetchpriority="high">
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/wheel-hero.css') }}">
   {% endif %}
   {% if page_key in ['warenkorb', 'order_status'] %}<script src="{{ url_for('static', filename='shop_v2/appointment.js') }}" defer></script>{% endif %}
-  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261124-katalogfilter') }}" defer></script>
+  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261124-reifenfinder') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/rim-families.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js', v='20261124-kundenwege') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}
@@ -44,13 +48,16 @@
   <nav class="modern-navigation" aria-label="Shop">{% for key, label in navigation %}<a href="{{ url_for('shop_frontend.' + key) }}"{% if key == page_key %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</nav>
   <div class="shop-header-actions">{% if feature_links.account %}<a href="{{ feature_links.account }}">Mein Konto</a>{% endif %}<a class="shop-cart-link" href="{{ url_for('shop_frontend.warenkorb') }}" aria-label="Warenkorb öffnen">Warenkorb <span data-cart-count>0</span></a></div>
 </div></header>
+{% from 'shop_v2/catalog_fields.html' import wheel_fields, search_fields with context %}
 <main id="inhalt">
-{% if hero %}
+{% if page_key == 'reifen' %}
+  {% include 'shop_v2/tyre_finder.html' %}
+{% elif hero %}
 <section class="shop-hero{% if page_key == 'home' %} shop-hero-home{% endif %}" aria-labelledby="shop-title">
   {% if hero == 'felgen.webp' %}
     {% include 'shop_v2/wheel_hero.html' %}
   {% else %}
-    <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" alt="{{ 'Beispielreifen mit Größenangabe 205/55 R16 91V' if page_key == 'reifen' else '' }}" fetchpriority="high">
+    <img src="{{ url_for('static', filename='shop_v2/' + hero) }}" alt="" fetchpriority="high">
   {% endif %}
   <div class="modern-wrap shop-hero-copy">
     <p class="shop-eyebrow">Gärtner Shop · Mosbach</p>
@@ -62,7 +69,6 @@
       <a class="shop-button shop-button-outline" href="#produktgruppen">Alle Kategorien</a>
       {% else %}
       <a class="shop-button" href="{{ '#services' if page_key == 'service' else '#sortiment' }}">{{ 'Leistungen ansehen' if page_key == 'service' else 'Sortiment entdecken' }} ↗</a>
-      {% if page_key == 'reifen' %}<a class="shop-button shop-button-outline" href="#reifengroesse">Größe verstehen</a>{% endif %}
       {% endif %}
     </div>
   </div>
@@ -84,61 +90,29 @@
   </nav>
 </section>
 {% endif %}
-{% if page_key == 'reifen' %}
-<details class="modern-wrap shop-size-guide" id="reifengroesse"><summary>205/55 R16 91V – was gebe ich ein?</summary><dl><dt>205</dt><dd>Reifenbreite in Millimetern</dd><dt>55</dt><dd>Querschnitt in Prozent der Breite</dd><dt>R16</dt><dd>Radialreifen, 16 Zoll Felgendurchmesser</dd><dt>91V</dt><dd>Tragfähigkeits- und Geschwindigkeitsindex</dd></dl><p>Beispielkennzeichnung. Größe und Freigabe am eigenen Fahrzeug prüfen.</p></details>
-{% endif %}
 {% if page_key in ['home', 'felgen', 'reifen', 'komplettraeder', 'ersatzteile', 'zubehoer'] %}
 {% macro selected_filter(name, value) %}{% if request.args.get(name) == value %} selected{% endif %}{% endmacro %}
 <section class="modern-wrap shop-section shop-results" id="sortiment" aria-labelledby="results-heading">
-  <div class="shop-section-heading"><div><p class="shop-eyebrow">Produkte entdecken</p><h2 id="results-heading">{{ 'Unser Sortiment' if page_key == 'home' else 'Felge auswählen' if page_key == 'komplettraeder' else title }}</h2></div><a href="{{ url_for('shop_frontend.service') }}">Service in Mosbach ↗</a></div>
-  {% if page_key == 'reifen' %}
-  <div class="shop-montage-entry"><label class="shop-checkbox"><input id="catalog-mounting" type="checkbox"{% if request.args.get('montage') == '1' %} checked{% endif %}> Reifen mit Montage in Mosbach auswählen</label>
-    <p>Ihren Terminwunsch können Sie im Warenkorb angeben. Wir bestätigen ihn, sobald die Lieferung geklärt ist.</p></div>
-  {% endif %}
+  <div class="shop-section-heading"><div>{% if page_key != 'reifen' %}<p class="shop-eyebrow">Produkte entdecken</p>{% endif %}<h2 id="results-heading" tabindex="-1">{{ 'Reifenangebote' if page_key == 'reifen' else 'Unser Sortiment' if page_key == 'home' else 'Felge auswählen' if page_key == 'komplettraeder' else title }}</h2></div>
+    {% if page_key == 'reifen' %}<a href="#catalog-filters">Auswahl ändern ↑</a>{% else %}<a href="{{ url_for('shop_frontend.service') }}">Service in Mosbach ↗</a>{% endif %}
+  </div>
   {% if page_key in ['felgen', 'komplettraeder'] and feature_links.studio %}<aside class="shop-feature"><div><p class="shop-eyebrow">Ihr Foto. Ihr Look.</p><h3>Wie steht die Felge Ihrem Auto?</h3><p>Felgen am eigenen Fahrzeug ansehen. Optische Simulation; Fahrzeugfreigabe separat prüfen.</p></div><a class="shop-button" href="{{ feature_links.studio }}">Felgenstudio öffnen ↗</a></aside>{% endif %}
   {% if department == 'parts' %}<section class="shop-vehicle" id="vehicle-filter"><h3>Das passende Teil für Ihr Fahrzeug.</h3><form id="vehicle-filters" class="shop-filters"><label>Automarke<input name="make" value="{{ request.args.get('make', '') }}" maxlength="80" placeholder="z. B. Audi" autocomplete="off"></label><label>Modell (optional)<input name="model" value="{{ request.args.get('model', '') }}" maxlength="120" placeholder="z. B. A3"></label><label hidden>Baureihe eingrenzen<select id="parts-model-refinement" disabled></select></label><label>Baujahr (optional)<input name="year" value="{{ request.args.get('year', '') }}" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><label>oder HSN / TSN<input name="keys" value="{{ request.args.get('keys', '') }}" maxlength="20" placeholder="0588 / BHT"></label><button class="shop-button" type="submit">Passende Teile anzeigen</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur bestätigte Fahrzeugzuordnungen. Marke allein zeigt bereits die zugeordneten Artikel; genaue Ausführung vor dem Kauf prüfen.</p></section>{% endif %}
+  {% if department != 'tyres' %}
   <form id="catalog-filters" class="shop-filters" role="search">
-    {% if department in ['tyres', 'wheels'] or page_key == 'home' %}
-    <label>Fahrzeugmarke<input type="search" id="wheel-make" name="wheel_make" value="{{ request.args.get('wheel_make', '') }}" maxlength="80"
-      placeholder="z. B. Audi, BMW oder MINI" autocomplete="off" list="wheel-make-options" aria-describedby="wheel-make-help"></label>
-    <datalist id="wheel-make-options">
-      {% for make in ['Audi', 'BMW', 'MINI'] %}<option value="{{ make }}">{{ make }}</option>{% endfor %}
-    </datalist>
-    <label id="wheel-vehicle-field" hidden>Modell und Ausführung
-      <select id="wheel-vehicle" name="wheel_vehicle" disabled><option value="">Fahrzeug auswählen</option></select>
-    </label>
+    {% if department == 'wheels' or page_key == 'home' %}
+    {{ wheel_fields() }}
     {% endif %}
-    {% if department == 'tyres' %}
-    <fieldset class="shop-season-filter">
-      <legend>Reifensaison</legend>
-      <div class="shop-season-options">
-        {% set requested_season = request.args.get('season') %}
-        {% set current_season = requested_season if requested_season in ('summer', 'winter', 'allseason') else '' %}
-        {% for value, label in [('', 'Alle'), ('summer', 'Sommerreifen'), ('winter', 'Winterreifen'), ('allseason', 'Ganzjahresreifen')] %}
-        <label><input type="radio" name="season" value="{{ value }}"{% if value == current_season %} checked{% endif %}><span>{{ label }}</span></label>
-        {% endfor %}
-      </div>
-    </fieldset>
-    {% endif %}
-    <label>Produktsuche<input type="search" name="q" value="{{ request.args.get('q', '') }}" maxlength="100" placeholder="Produktname oder Größe"></label>
-    <label>{{ 'Felgenhersteller' if department == 'wheels' else 'Hersteller' }}<input name="brand" value="{{ request.args.get('brand', '') }}" maxlength="90" placeholder="{{ 'z. B. BBS' if department == 'wheels' else 'z. B. Continental' }}"></label>
-    {% if department == 'tyres' %}
-    <label>Reifenbreite (mm)<input type="number" name="width" value="{{ request.args.get('width', '') }}" inputmode="numeric" min="100" max="455" step="1" placeholder="255"></label>
-    <label>Querschnitt (%)<input type="number" name="ratio" value="{{ request.args.get('ratio', '') }}" inputmode="numeric" min="10" max="100" step="1" placeholder="40"></label>
-    {% endif %}
-    {% if department in ['tyres', 'wheels'] %}
+    {{ search_fields(department) }}
+    {% if department == 'wheels' %}
     <label>Zollgröße<input type="number" name="diameter" value="{{ request.args.get('diameter', '') }}" inputmode="numeric" min="8" max="30" step="1" placeholder="19"></label>
     {% endif %}
-    {% if department == 'tyres' %}
-    <label class="shop-tyre-sort">Sortierung<select name="sort"><option value="rating"{{ selected_filter('sort', 'rating') }}>Beste ADAC-Testnote zuerst</option><option value="wet_grip"{{ selected_filter('sort', 'wet_grip') }}>Beste Nasshaftung zuerst</option><option value="catalog"{{ selected_filter('sort', 'catalog') }}>Standardsortierung</option></select></label>
-    {% endif %}
-    {% if department != 'tyres' %}
     <label>Kategorie<select name="category"><option value="">Alle Kategorien</option>{% if not department %}<option value="tyre"{{ selected_filter('category', 'tyre') }}>Reifen</option>{% endif %}{% if not department or department == 'wheels' %}<option value="alloy_wheel"{{ selected_filter('category', 'alloy_wheel') }}>Alufelgen</option><option value="steel_wheel"{{ selected_filter('category', 'steel_wheel') }}>Stahlfelgen</option>{% endif %}{% if not department or department == 'parts' %}<option value="body_part"{{ selected_filter('category', 'body_part') }}>Karosserieteile</option>{% endif %}{% if not department or department == 'accessories' %}<option value="oil"{{ selected_filter('category', 'oil') }}>Motoröl</option><option value="care"{{ selected_filter('category', 'care') }}>Pflege</option><option value="accessory"{{ selected_filter('category', 'accessory') }}>Zubehör</option>{% endif %}</select></label>
-    {% endif %}
     <button class="shop-button" type="submit">Anzeigen</button>
   </form>
+  {% endif %}
   {% if department == 'wheels' %}<details class="shop-vehicle" id="vehicle-filter"><summary>Nach Fahrzeug und bestätigtem Gutachten filtern</summary><form id="vehicle-filters" class="shop-filters"><label>HSN<input name="hsn" value="{{ request.args.get('hsn', '') }}" pattern="[0-9]{4}" maxlength="4" placeholder="0588"></label><label>TSN<input name="tsn" value="{{ request.args.get('tsn', '') }}" pattern="[A-Za-z0-9]{3}" maxlength="3" placeholder="BHT"></label><span class="shop-filter-or">oder</span><label>Marke<input name="make" value="{{ request.args.get('make', '') }}" maxlength="80" placeholder="Audi"></label><label>Modell<input name="model" value="{{ request.args.get('model', '') }}" maxlength="120" placeholder="A3"></label><label>Baujahr<input name="year" value="{{ request.args.get('year', '') }}" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><button class="shop-button" type="submit">Fahrzeug anwenden</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur einzeln geprüfte Zuordnungen werden angezeigt. Auflagen und die konkrete Ausführung im Gutachten beachten.</p></details>{% endif %}
-  {% if department in ['tyres', 'wheels'] or page_key == 'home' %}<p id="wheel-make-help" class="shop-muted">{% if department == 'tyres' %}Für die Suche nach Fahrzeug wählen Sie die genaue Ausführung. Für die Suche nach Reifengröße verwenden Sie die Maße aus Ihren Fahrzeugpapieren.{% else %}Wählen Sie nach der Marke Ihr Modell und die genaue Ausführung. So sehen Sie, welche Gutachten zu Ihrem Fahrzeug vorliegen.{% endif %}</p>{% endif %}
+  {% if department == 'wheels' or page_key == 'home' %}<p id="wheel-make-help" class="shop-muted">Wählen Sie nach der Marke Ihr Modell und die genaue Ausführung. So sehen Sie, welche Gutachten zu Ihrem Fahrzeug vorliegen.</p>{% endif %}
   <p id="catalog-status" class="shop-muted" role="status" aria-live="polite">Sortiment wird geladen …</p>
   {% if department in ['tyres', 'wheels'] or page_key == 'home' %}<a id="wheel-make-inquiry" hidden href="/anfrage?anliegen=felgenservice#kurzanfrage">Passung für mein Fahrzeug prüfen lassen</a>{% endif %}
   {% if department == 'tyres' %}<button id="tyre-size-search" type="button" class="shop-button shop-button-light" hidden>Nach Reifengröße suchen</button>{% endif %}
