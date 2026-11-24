@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import json
 import sqlite3
 import sys
@@ -81,6 +81,27 @@ class OrderReceiptTests(unittest.TestCase):
             return value
         finally:
             db.close()
+
+    def test_postgres_receipt_insert_returns_the_hold_id(self):
+        from run_mos_public_test import build_test_app
+
+        portal = build_test_app(self.tmp.name)
+        raw_connection = MagicMock()
+        cursor = raw_connection.cursor.return_value.__enter__.return_value
+        cursor.description = [SimpleNamespace(name='hold_id')]
+        cursor.fetchall.return_value = [(self.hold_id,)]
+        cursor.rowcount = 1
+        db = self.portal.get_db()
+        try:
+            hold = dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?',
+                                   (self.hold_id,)).fetchone())
+        finally:
+            db.close()
+
+        self.assertTrue(enqueue(portal.PostgresConnection(raw_connection), hold, self.session))
+        sql, params = cursor.execute.call_args.args
+        self.assertTrue(sql.lower().endswith('returning hold_id'))
+        self.assertEqual(params[0], self.hold_id)
 
     def test_paid_confirmed_is_queued_once_and_delivered_neutrally(self):
         self.assertTrue(self.queue())

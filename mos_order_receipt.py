@@ -89,9 +89,9 @@ def enqueue(db, hold, session, *, source_event_id=None, observed_at=None):
     result = db.execute('''INSERT INTO miet_checkout_order_receipts
         (hold_id,session_id,payment_intent,recipient,amount_cents,currency,
          payload_sha256,source_event_id,provider_observed_at,enqueued_at,status,next_attempt_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,'queued',?) ON CONFLICT (hold_id) DO NOTHING''',
+        VALUES (?,?,?,?,?,?,?,?,?,?,'queued',?) ON CONFLICT (hold_id) DO NOTHING RETURNING hold_id''',
         (hold['id'], *snapshot, source_event_id, observed, now, now))
-    if result.rowcount == 1:
+    if result.fetchone() is not None:
         return True
     row = db.execute('SELECT * FROM miet_checkout_order_receipts WHERE hold_id=?',
                      (hold['id'],)).fetchone()
