@@ -9,10 +9,8 @@
     :root { color-scheme: light; font-family: Arial, Helvetica, sans-serif; color: #13271e; }
     body { margin: 0; background: #e9edea; }
     .toolbar { max-width: 210mm; margin: 20px auto; padding: 0 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .toolbar a, .toolbar button { font: inherit; font-size: 15px; border: 1px solid #153f2d; border-radius: 8px; padding: 11px 15px; text-decoration: none; cursor: pointer; }
-    .toolbar a { color: #153f2d; background: white; }
-    .toolbar button { color: white; background: #153f2d; font-weight: 700; }
-    .toolbar p { margin: 0; color: #4b5d53; font-size: 13px; }
+    .toolbar a { font: inherit; font-size: 15px; border: 1px solid #153f2d; border-radius: 8px; padding: 11px 15px; text-decoration: none; color: #153f2d; background: white; }
+    .toolbar .print-link { color: white; background: #153f2d; font-weight: 700; }
     .sheet { max-width: 210mm; min-height: 275mm; padding: 15mm; margin: 0 auto 24px; background: white; box-shadow: 0 5px 35px #183f251a; }
     .brand { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; border-bottom: 2px solid currentColor; padding-bottom: 10px; font-size: 13px; }
     .brand strong { font-size: 18px; letter-spacing: .3px; }
@@ -51,7 +49,6 @@
       .due p { font-size: 23px; }
     }
     @media print {
-      @page { size: A4 portrait; margin: 13mm; }
       body { background: white; color: black; }
       .toolbar { display: none !important; }
       .sheet { width: auto; max-width: none; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
@@ -68,9 +65,8 @@
 </head>
 <body>
   <nav class="toolbar" aria-label="Druckaktionen">
-    <button type="button" onclick="window.print()">Drucken / als PDF speichern</button>
+    <a class="print-link" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=zettel.nummer) }}">Auftrag als A4-PDF öffnen</a>
     <a href="/admin/auftrag/{{ zettel.nummer }}">Zurück zum Auftrag</a>
-    <p>A4 · Im Druckdialog Kopf- und Fußzeilen ausschalten.</p>
   </nav>
   <main class="sheet">
     <header class="brand"><strong>Gärtner GmbH Karosserie + Lack</strong><span>Werkstattzettel</span></header>

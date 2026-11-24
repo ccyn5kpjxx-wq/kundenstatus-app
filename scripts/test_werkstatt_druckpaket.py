@@ -107,6 +107,12 @@ class OrderPrintTest(unittest.TestCase):
                                 "Vor der Checkliste fehlt eine freie Textzeile")
 
     def test_a4_cover_and_all_order_pages_exclude_other_jobs_and_invoices(self):
+        detail = self.client.get(f"/admin/auftrag/{self.oid}")
+        self.assertEqual(detail.status_code, 200)
+        before_files, marker, files = detail.get_data(as_text=True).partition('id="dateifreigaben"')
+        self.assertTrue(marker)
+        for section in (before_files, files.split("</details>", 1)[0]):
+            self.assertIn(f'href="{self.admin}"', section)
         original = original_pdf("TUER HINTEN RECHTS", "LACKIERFREIGABE")
         self.upload("Lackauftrag9617.pdf", original)
         self.upload("Rechnung_Auftrag_9617.pdf", original_pdf("PRIVATE INVOICE"), kategorie="rechnung")

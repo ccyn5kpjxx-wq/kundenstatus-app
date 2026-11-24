@@ -49,7 +49,7 @@ Validierung: `python scripts/test_assistent_api.py`, `python scripts/smoke_test.
 
 `GET /api/werkstatt/v1/lackplan?zeitraum=heute|woche` liefert laufende Lackierung, Lackierbereitschaft und Aufträge mit Lackangaben im Zeitraum. Farbcode, Farbton und zweiter Farbton bleiben unverändert. Ohne dedizierte Lackiertermine ist dies ausdrücklich kein Kabinen-/Personalplan. Das angezeigte Datum bleibt die Fertigfrist.
 
-`GET /admin/auftrag/<id>/werkstattzettel` ist ein Admin-Druckblatt mit großer stabiler interner Auftragsnummer, Fahrzeug, Arbeitsbeschreibung, Terminen und Lackdaten. Ausdruck über den Browser als A4 oder PDF. Kundenzugangslinks, Kontakt- und Preisfelder werden nicht ausgewählt.
+`GET /admin/auftrag/<id>/werkstattzettel` zeigt die interne Auftragsnummer, Fahrzeug, Arbeitsbeschreibung, Termine und Lackdaten. Die Übersicht wählt keine Kundenzugangslinks, Kontakt- oder Preisfelder aus. „Auftrag als A4-PDF öffnen“ führt zum gemeinsamen Werkstattdruck im Querformat unter `/admin/auftrag/<id>/ausdrucken`.
 
 ## Interner Fortschritt
 

@@ -792,7 +792,7 @@
 
 <details class="page-card p-4 mb-4" id="dateifreigaben">
   <summary class="h4 mb-0">Dateien und Sichtbarkeit · {{ alle_dateien|length }} Unterlagen</summary>
-  <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('auftrag_ausdruck.werkstattzettel', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag.id }}</a>
+  <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag.id }}</a>
   <p class="text-muted mt-3">Für jede Datei gilt die unten bestätigte Sichtbarkeit. Nicht freigegebene Dateien bleiben intern; eigene Uploads bleiben zunächst für ihren Absender sichtbar.</p>
   {% for d in alle_dateien %}
   <form method="POST" action="{{ url_for('admin_datei_freigaben', datei_id=d['id']) }}" class="border-top py-3">

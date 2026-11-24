@@ -150,9 +150,8 @@ class SheetTests(unittest.TestCase):
         register_auftrag_ausdruck(self.portal)
         self.login(admin=True)
         html = self.client.get("/admin/auftrag/156/werkstattzettel").get_data(as_text=True)
-        self.assertIn('onclick="window.print()"', html)
-        self.assertIn("@media print", html)
-        self.assertIn("size: A4 portrait", html)
+        self.assertIn('href="/admin/auftrag/156/ausdrucken"', html)
+        self.assertNotIn("window.print()", html)
         self.assertIn("Zum Assistenten:", html)
 
 
