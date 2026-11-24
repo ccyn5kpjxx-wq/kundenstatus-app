@@ -1,7 +1,10 @@
 """Manually recorded vehicle occupancy, using inclusive Berlin calendar dates."""
 from datetime import date, datetime, timezone
+import json
+from zoneinfo import ZoneInfo
 
 from mietwagen_checkout import locked_vehicle
+from mos_contract_delivery import confirmed_order
 
 
 SCHEMA_FEATURE = 'mietkalender_sperren_v1'
@@ -84,3 +87,59 @@ def list_active(portal, start=None, end=None):
         return [dict(row) for row in db.execute(sql + ' ORDER BY b.start_date, f.bezeichnung, b.id', params).fetchall()]
     finally:
         db.close()
+
+
+def vermietungsuebersicht(portal, heute):
+    """One row per open rental or current/future all-day block."""
+    db = portal.get_db()
+    try:
+        rentals = db.execute("""SELECT v.id, v.mietfahrzeug_id, v.kunde_name, v.start_datum, v.end_datum,
+                f.bezeichnung, f.kennzeichen, h.id AS hold_id, h.payload, h.status AS hold_status,
+                h.payment_intent, uebergabe.handed_at
+            FROM mietvorgaenge v JOIN mietfahrzeuge f ON f.id=v.mietfahrzeug_id
+            LEFT JOIN miet_checkout_holds h ON h.mietvorgang_id=v.id
+            LEFT JOIN miet_checkout_handovers uebergabe ON uebergabe.hold_id=h.id
+            WHERE COALESCE(v.status,'') NOT IN ('zurueck','storniert')
+              AND COALESCE(v.rueckgabe_datum,'')=''""").fetchall()
+    finally:
+        db.close()
+
+    def local_time(value):
+        if not value:
+            return None
+        try:
+            stamp = datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        return stamp.astimezone(ZoneInfo('Europe/Berlin')) if stamp.tzinfo is not None else None
+
+    agenda = []
+    for rental in rentals:
+        start, end = (portal.parse_date(rental[k]) for k in ('start_datum', 'end_datum'))
+        pickup = dropoff = None
+        if rental['hold_id']:
+            try:
+                quote = json.loads(rental['payload'])['quote']
+            except (TypeError, ValueError, KeyError):
+                continue
+            if (not isinstance(quote, dict) or quote.get('test_only') is not False
+                    or not confirmed_order(rental['hold_status'], rental['payment_intent'], quote)):
+                continue
+            pickup, dropoff = (local_time(quote.get(k)) for k in ('start_slot', 'end_slot'))
+        if not start:
+            continue
+        agenda.append({
+            'start': start, 'pickup': pickup, 'end': end, 'dropoff': dropoff,
+            'vehicle': rental['bezeichnung'], 'plate': rental['kennzeichen'], 'customer': rental['kunde_name'],
+            'source': 'Website-Buchung' if rental['hold_id'] else 'Mietvorgang',
+            'vehicle_id': rental['mietfahrzeug_id'], 'hold_id': rental['hold_id'],
+            'handed_at': local_time(rental['handed_at']), 'overdue': end is not None and end < heute,
+        })
+    for block in list_active(portal, start=heute):
+        agenda.append({
+            'start': date.fromisoformat(block['start_date']), 'end': date.fromisoformat(block['end_date']),
+            'vehicle': block['vehicle_name'], 'plate': block['kennzeichen'],
+            'source': SOURCES.get(block['source'], 'Fahrzeugsperre'), 'block_id': block['id'], 'note': block['note'],
+        })
+    return sorted(agenda, key=lambda row: (row['start'], row['pickup'].time() if row.get('pickup') else datetime.min.time(),
+                                           row['plate'] or ''))

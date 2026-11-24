@@ -45,6 +45,16 @@ class CalendarBlockFormTests(unittest.TestCase):
         self.assertIn("Fahrzeugsperre</span>", html)
         self.assertIn("Vor-Ort-Buchung", html)
         self.assertIn("Abholung vor Ort", html)
+        agenda_url = "/admin/kalender?bereich=vermietung"
+        self.assertIn(agenda_url, html)
+        agenda = self.client.get(agenda_url).get_data(as_text=True)
+        self.assertIn("Vermietungskalender", agenda)
+        self.assertIn("Bis einschließlich", agenda)
+        self.assertIn(self.end.strftime("%d.%m.%Y"), agenda)
+        self.assertEqual(agenda.count('Abholung vor Ort'), 1)
+        self.assertEqual(agenda.count('#fahrzeugsperre-' + str(block_id) + '"'), 1)
+        self.assertNotIn('Übergabetermine am Datum', agenda)
+        self.assertNotIn('Kommende Termine aller Autohäuser', agenda)
         again = self.client.post(self.form_url, data=fields)
         self.assertEqual(again.status_code, 409)
         self.assertIn('role="alert"', again.get_data(as_text=True))
@@ -63,10 +73,15 @@ class CalendarBlockFormTests(unittest.TestCase):
         response = self.client.post(release, data={"monat": self.start.strftime("%Y-%m"), "csrf_token": self.csrf})
         self.assertEqual(response.status_code, 303)
         self.assertNotIn(f'id="fahrzeugsperre-{block_id}"', self.client.get(response.location).get_data(as_text=True))
+        self.assertNotIn('Abholung vor Ort', self.client.get(agenda_url).get_data(as_text=True))
 
     def test_protected_routes_and_navigation(self):
         self.assertEqual(self.client.post(self.form_url, data=self.fields).status_code, 400)
         guest = self.portal.app.test_client()
+        agenda_url = "/admin/kalender?bereich=vermietung"
+        self.assertEqual(guest.get(agenda_url).location, "/login?return_to=vermietungskalender")
+        self.assertEqual(self.client.get("/login?return_to=vermietungskalender").location, agenda_url)
+        self.assertIn(agenda_url, self.client.get("/admin/kalender").get_data(as_text=True))
         guest.get("/login")
         with guest.session_transaction() as session:
             token = session["csrf_token"]
@@ -80,6 +95,17 @@ class CalendarBlockFormTests(unittest.TestCase):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
                 self.assertIn("mietsperre=1#fahrzeug-sperren", page.get_data(as_text=True))
+
+    def test_rental_calendar_keeps_overdue_offline_rentals_until_return(self):
+        start, end = date.today() - timedelta(days=3), date.today() - timedelta(days=1)
+        case = self.portal.create_mietvorgang(self.vehicle, kunde_name='Kalender-Fixture',
+                                              start_datum=start.isoformat(), end_datum=end.isoformat())
+        agenda_url = '/admin/kalender?bereich=vermietung'
+        agenda = self.client.get(agenda_url).get_data(as_text=True)
+        self.assertEqual(agenda.count('Kalender-Fixture'), 1)
+        self.assertIn('Rückgabe offen', agenda)
+        self.portal.mietvorgang_zuruecknehmen(case, rueckgabe_datum=date.today().isoformat())
+        self.assertNotIn('Kalender-Fixture', self.client.get(agenda_url).get_data(as_text=True))
 
     def test_calendar_deep_link_survives_login_and_expired_csrf(self):
         guest = self.portal.app.test_client()

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Vermietungskalender{% endblock %}
+{% block content %}
+<section class="page-card p-3 p-lg-4">
+  <div class="section-title align-items-start">
+    <div>
+      <h1 class="mb-2">Vermietungskalender</h1>
+      <p>Offene Vermietungen und Fahrzeugsperren ab heute.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+      {% if session.get('admin') %}<a class="btn btn-brand" href="{{ url_for('betriebs_cockpit', mietsperre=1, _anchor='fahrzeug-sperren') }}">Fahrzeug blockieren</a>{% endif %}
+      <a class="btn btn-soft" href="{{ url_for('kalender') }}">Gesamten Kalender öffnen</a>
+    </div>
+  </div>
+  {% for e in eintraege %}
+  <article class="row align-items-center g-2 border-top py-3 mx-0" data-mietbelegung>
+    <div class="col-12 col-md-4">
+      <strong>{{ e.vehicle or 'Mietfahrzeug' }}</strong>
+      {% if e.plate %}<span class="small text-muted ms-1">{{ e.plate }}</span>{% endif %}
+      <div class="small">{{ e.source }}{% if e.customer %} · {{ e.customer }}{% endif %}</div>
+      {% if e.note %}<div class="small text-muted">{{ e.note }}</div>{% endif %}
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="small text-muted">{{ 'Gesperrt ab' if e.block_id else 'Abholung' }}</div>
+      {{ e.pickup.strftime('%d.%m.%Y · %H:%M Uhr') if e.pickup else e.start.strftime('%d.%m.%Y') }}
+      {% if e.handed_at %}<div class="small">Übergeben am {{ e.handed_at.strftime('%d.%m.%Y um %H:%M Uhr') }}</div>{% endif %}
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="small text-muted">{{ 'Bis einschließlich' if e.block_id else 'Geplante Rückgabe' }}</div>
+      {{ e.dropoff.strftime('%d.%m.%Y · %H:%M Uhr') if e.dropoff else e.end.strftime('%d.%m.%Y') if e.end else 'Offen' }}
+      {% if e.overdue %}<div class="small fw-semibold">Rückgabe offen</div>{% endif %}
+    </div>
+    <div class="col-12 col-md-2 text-md-end">
+      {% if e.block_id %}
+      <a href="{{ url_for('betriebs_cockpit', monat=e.start.strftime('%Y-%m'), _anchor='fahrzeugsperre-' ~ e.block_id) }}">Sperre öffnen</a>
+      {% elif e.hold_id %}
+      <a href="{{ url_for('mos_public.admin_bookings', hold_id=e.hold_id, _anchor='hold-' ~ e.hold_id) }}">Buchung öffnen</a>
+      {% else %}
+      <a href="{{ url_for('admin_mietfahrzeuge', _anchor='fahrzeug-' ~ e.vehicle_id) }}">Fahrzeug öffnen</a>
+      {% endif %}
+    </div>
+  </article>
+  {% else %}
+  <p class="text-muted mt-4">Aktuell sind keine offenen Vermietungen oder Fahrzeugsperren eingetragen.</p>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,5 +1,8 @@
 <section id="fahrzeug-sperren" class="page-card p-3 p-lg-4 mb-3" aria-labelledby="fahrzeug-sperren-titel">
-  <h3 id="fahrzeug-sperren-titel" class="h5">Fahrzeug blockieren</h3>
+  <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap mb-2">
+    <h3 id="fahrzeug-sperren-titel" class="h5 mb-0">Fahrzeug blockieren</h3>
+    <a class="btn btn-soft btn-sm" href="{{ url_for('kalender', bereich='vermietung') }}">Vermietungskalender öffnen</a>
+  </div>
   <p class="text-muted">Für Telefon- und Vor-Ort-Buchungen. Die Homepage sperrt das Fahrzeug sofort für den gesamten Zeitraum, einschließlich des letzten Tages.</p>
   {% if sperrfehler %}<p class="alert alert-warning" role="alert">{{ sperrfehler }}</p>{% endif %}
   {% if sperrfahrzeuge %}

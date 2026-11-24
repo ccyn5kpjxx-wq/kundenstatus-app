@@ -39681,7 +39681,7 @@ def iso_date_filter(value):
 
 def admin_login_return_marker():
     values = request.args.getlist("return_to")
-    return values[0] if len(values) == 1 and values[0] in {"chef", "mietkalender"} else None
+    return values[0] if len(values) == 1 and values[0] in {"chef", "mietkalender", "vermietungskalender"} else None
 
 
 def admin_login_destination():
@@ -39690,6 +39690,8 @@ def admin_login_destination():
         return url_for("admin_mitarbeiter")
     if marker == "mietkalender":
         return url_for("betriebs_cockpit", mietsperre=1, _anchor="fahrzeug-sperren")
+    if marker == "vermietungskalender":
+        return url_for("kalender", bereich="vermietung")
     return url_for("betriebs_cockpit")
 
 
@@ -39707,6 +39709,9 @@ def admin_required(func):
             if (request.endpoint == "betriebs_cockpit" and request.method == "GET"
                     and request.args.getlist("mietsperre") == ["1"]):
                 return redirect(url_for("login", return_to="mietkalender"))
+            if (request.endpoint == "kalender" and request.method == "GET"
+                    and request.args.getlist("bereich") == ["vermietung"]):
+                return redirect(url_for("login", return_to="vermietungskalender"))
             return redirect(url_for("login"))
         return func(*args, **kwargs)
 
@@ -55394,6 +55399,10 @@ def admin_erinnerung_erledigt(erinnerung_id):
 @app.route("/admin/kalender")
 @admin_required
 def kalender():
+    if request.args.get("bereich") == "vermietung":
+        heute = datetime.now(ZoneInfo("Europe/Berlin")).date()
+        return render_template("kalender_vermietung.html",
+                               eintraege=mietkalender_sperren.vermietungsuebersicht(sys.modules[__name__], heute))
     auftraege = list_auftraege(include_archived=True, include_angebote=True)
     zeige_vergangenheit = request.args.get("ansicht") == "vergangenheit"
     kalender_suche = clean_text(request.args.get("suche"))

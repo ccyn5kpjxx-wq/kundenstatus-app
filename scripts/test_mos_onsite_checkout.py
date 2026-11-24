@@ -58,6 +58,10 @@ class OnsiteCheckoutTests(unittest.TestCase):
         reservation = self.public.checkout(token)
         self.assertEqual(reservation.status_code, 303)
         self.assertEqual(self.service.read(reservation.location.rsplit('/', 1)[1])['status'], 'confirmed')
+        operator = public.portal.app.test_client()
+        with operator.session_transaction() as session:
+            session['admin'] = True
+        self.assertNotIn('data-mietbelegung', operator.get('/admin/kalender?bereich=vermietung').get_data(as_text=True))
         fields['payment_method'] = 'online'
         availability = self.public.client.get('/mietwagen-test/availability', query_string=fields)
         self.assertEqual(availability.json['reason'], 'occupied')
@@ -108,6 +112,8 @@ class OnsiteCheckoutTests(unittest.TestCase):
         detail = client.get(detail_url)
         self.assertIn(customer['email'], detail.get_data(as_text=True))
         self.assertIn('Zahlungsbestätigung ausstehend', detail.get_data(as_text=True))
+        agenda_url = '/admin/kalender?bereich=vermietung'
+        self.assertNotIn(customer['name'], client.get(agenda_url).get_data(as_text=True))
         db = portal.get_db()
         try:
             notices = db.execute('SELECT event_type FROM miet_checkout_operator_notices WHERE hold_id=?',
@@ -129,6 +135,13 @@ class OnsiteCheckoutTests(unittest.TestCase):
         self.service.handle_signed_event(body, signature, portal.app.extensions['mos_public_booking']['secret'])
         self.assertEqual(self.service.read(second['id'])['status'], 'confirmed')
         self.assertEqual([item['id'] for item in station_inquiries(portal)], [first['id']])
+        agenda = client.get(agenda_url).get_data(as_text=True)
+        self.assertEqual(agenda.count(customer['name']), 1)
+        self.assertEqual(agenda.count('Buchung öffnen'), 1)
+        self.assertNotIn(first['id'], agenda)
+        for key in ('start_slot', 'end_slot'):
+            stamp = public.datetime.fromisoformat(signed[key]).astimezone(public.ZoneInfo('Europe/Berlin'))
+            self.assertIn(stamp.strftime('%d.%m.%Y · %H:%M Uhr'), agenda)
         month = signed['start_slot'][:7]
         with portal.app.test_request_context('/admin/cockpit'):
             from flask import session
