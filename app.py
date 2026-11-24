@@ -3219,7 +3219,7 @@ def restrict_public_site_service():
     # portal (including its configured public hostname), the exact v2 handlers
     # enforce their own disabled flags, origin/session/CSRF or Stripe signature.
     if request.endpoint in {"shop_public_v2.products", "shop_public_v2.tyre_sizes", "shop_public_v2.product", "shop_media_v2.image", "shop_documents.document",
-                            "shop_public_v2.product_variants", "shop_public_v2.compatible_tyres",
+                            "shop_public_v2.product_variants", "shop_public_v2.compatible_tyres", "shop_public_v2.tyre_set_comparison",
                             "shop_public_v2.complete_wheel_price", "shop_public_v2.stock_alternatives"} and request.method == "GET":
         return None
     if not PUBLIC_SITE_ONLY and request.endpoint in {

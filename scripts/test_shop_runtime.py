@@ -93,22 +93,24 @@ class ShopRuntimeChecks(unittest.TestCase):
         exec(compile(module, str(ROOT / 'app.py'), 'exec'), namespace)
         app = Flask('isolated-public-gate')
         app.before_request(namespace['restrict_public_site_service'])
-        handlers = ('products', 'product', 'tyre_sizes', 'cart_quote', 'create_order_draft',
+        handlers = ('products', 'product', 'tyre_sizes', 'tyre_set_comparison', 'cart_quote', 'create_order_draft',
                     'order_status', 'start_checkout', 'stripe_webhook')
         for name in handlers:
-            methods = ['GET'] if name in {'products', 'product', 'tyre_sizes', 'order_status'} else ['POST']
+            methods = ['GET'] if name in {'products', 'product', 'tyre_sizes', 'tyre_set_comparison', 'order_status'} else ['POST']
             app.add_url_rule('/' + name, 'shop_public_v2.' + name, lambda: ('', 204), methods=methods)
         app.add_url_rule('/admin', 'internal_admin', lambda: ('', 204))
         app.add_url_rule('/media', 'shop_media_v2.image', lambda: ('', 204))
         client = app.test_client()
         self.assertEqual(client.get('/products').status_code, 204)
         self.assertEqual(client.get('/tyre_sizes').status_code, 204)
+        self.assertEqual(client.get('/tyre_set_comparison').status_code, 204)
         self.assertEqual(client.get('/product').status_code, 204)
         self.assertEqual(client.get('/media').status_code, 204)
         self.assertEqual(client.get('/order_status').status_code, 404)
         for name in ('cart_quote', 'create_order_draft', 'start_checkout', 'stripe_webhook'):
             self.assertEqual(client.post('/' + name).status_code, 404)
         namespace['PUBLIC_SITE_ONLY'] = False
+        self.assertEqual(client.get('/tyre_set_comparison').status_code, 204)
         self.assertEqual(client.get('/order_status').status_code, 204)
         for name in ('cart_quote', 'create_order_draft', 'start_checkout', 'stripe_webhook'):
             self.assertEqual(client.post('/' + name).status_code, 204)
