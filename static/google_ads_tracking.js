@@ -44,10 +44,11 @@
     if (consent !== 'granted') return;
     try { localStorage.setItem(key, JSON.stringify(map)); } catch (_) { /* Google transaction IDs still deduplicate. */ }
   };
-  const gtag = (...args) => {
+  function gtag() {
     window.dataLayer = window.dataLayer || [];
-    window.dataLayer.push(args);
-  };
+    // gtag.js processes commands pushed as Arguments objects.
+    window.dataLayer.push(arguments);
+  }
   const safePage = () => {
     // Allow only the ad click identifiers needed for attribution after consent.
     const path = /^\/shop\/orders\//.test(location.pathname) ? '/shop/bestellstatus/' : location.pathname;

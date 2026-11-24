@@ -51,6 +51,21 @@ function response(value, options = {}) { return {ok: options.ok !== false,
 async function settle() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 (async () => {
+  await check('Google tag receives Arguments commands for both shop conversions only after consent', () => {
+    const b = browser({consent: 'denied'});
+    const lead = {transaction_id: leadId};
+    assert.equal(b.w.gaertnerAdsTrack('purchase', paid()), false);
+    assert.equal(b.w.gaertnerAdsTrack('shop_lead', lead), false);
+    assert.equal(b.w.dataLayer, undefined);
+    b.grant();
+    assert.equal(b.w.gaertnerAdsTrack('purchase', paid()), true);
+    assert.equal(b.w.gaertnerAdsTrack('shop_lead', lead), true);
+    for (const command of b.w.dataLayer) {
+      assert.equal(Object.prototype.toString.call(command), '[object Arguments]');
+    }
+    assert.deepEqual(Array.from(b.events(), event => event[2].send_to), [purchaseLabel, leadLabel]);
+    b.close();
+  });
   await check('unknown consent sends nothing; discarded lead is never replayed on grant', () => {
     const b = browser(); assert.equal(b.googleScripts().length, 0); assert.equal(b.w.dataLayer, undefined);
     assert.equal(b.w.gaertnerAdsTrack('shop_lead', {transaction_id: leadId}), false);
