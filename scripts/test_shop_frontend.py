@@ -36,6 +36,23 @@ class FrontendChecks(unittest.TestCase):
     def tearDown(self):
         self.network.stop()
 
+    def test_native_catalog_forms_restore_search_without_vehicle(self):
+        self.app.config['SHOP_FRONTEND_ENABLED'] = True
+        args = {'wheel_make': '', 'q': '8859903120511', 'brand': 'GOODRIDE', 'width': '225',
+                'ratio': '50', 'diameter': '16', 'season': 'winter', 'sort': 'wet_grip'}
+        html = self.client.get('/shop/reifen/', query_string=args).get_data(as_text=True)
+        tags = Markup(html).tags
+        inputs = {a['name']: a for tag, a in tags if tag == 'input' and 'name' in a and a['name'] != 'season'}
+        for name in ('q', 'brand', 'width', 'ratio', 'diameter', 'wheel_make'):
+            self.assertEqual(inputs[name]['value'], args[name])
+        selected_seasons = [a['value'] for tag, a in tags if tag == 'input' and a.get('name') == 'season' and 'checked' in a]
+        self.assertEqual(selected_seasons, ['winter'])
+        self.assertIn(('option', {'value': 'wet_grip', 'selected': None}), tags)
+        accessory = self.client.get('/shop/zubehoer/', query_string={'category': 'oil', 'q': 'A & "B"'}).get_data(as_text=True)
+        tags = Markup(accessory).tags
+        self.assertIn(('option', {'value': 'oil', 'selected': None}), tags)
+        self.assertEqual(next(a['value'] for tag, a in tags if tag == 'input' and a.get('name') == 'q'), 'A & "B"')
+
     def test_unregistered_factory_and_literal_enable_gate(self):
         self.assertNotIn('SHOP_FRONTEND_ENABLED', self.app.config)
         for enabled in (None, False, 'true', 1):
@@ -564,15 +581,17 @@ class Node {
  append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this.children=[...nodes];}
  addEventListener(key,fn){this.listeners[key]=fn;} setAttribute(){} replaceWith(){}
 }
-async function fixture(page,result,search='') {
+async function fixture(page,result,search='',entered={}) {
  const nodes={};
  for(const key of ['close-product','shop-announcement',...(page==='order_status'?['order-status','order-summary']:['catalog-products','catalog-status','previous-page','next-page','page-label','catalog-filters'])])nodes[key]=new Node();
+ if(nodes['catalog-filters'])for(const [name,value] of Object.entries(entered))nodes['catalog-filters'].fields[name]={value,addEventListener(){}};
  const body=new Node('body');body.dataset={api:'/shop/api/v2',page,department:'tyres',orderId:'sho_'+'a'.repeat(32)};
  const requests=[];
  const win={document:{body,createElement:tag=>new Node(tag),getElementById:key=>nodes[key]||null,querySelector:()=>({content:''}),querySelectorAll:()=>[]},
   localStorage:{getItem:()=> '[]',setItem(){}},setTimeout(){},setInterval(){},location:{search},
   fetch:async(url,options)=>{requests.push({url,options});return {ok:true,text:async()=>JSON.stringify(result)}}};
- vm.runInNewContext(fs.readFileSync(path,'utf8'),{window:win,URLSearchParams,URL,Intl,Date,console});
+ function FormData(form){return Object.entries(form.fields).map(([name,control])=>[name,control.value]);}
+ vm.runInNewContext(fs.readFileSync(path,'utf8'),{window:win,URLSearchParams,URL,Intl,Date,console,FormData});
  await new Promise(resolve=>setImmediate(resolve));
  return {nodes,requests};
 }
@@ -613,6 +632,11 @@ async function cartFixture(deferredQuote=false,consumerEnabled=true,invalidTerms
  assert.equal(new URL('https://shop.example'+catalog.requests[0].url).searchParams.get('page_size'),'24');
  assert.equal(catalog.nodes['catalog-products'].children.length,24);
  assert.equal(catalog.nodes['next-page'].disabled,false);
+ const early=await fixture('reifen',{items:[product],page:1,total:1,has_more:false},'?wheel_make=&q=old',{q:'8859903120511',wheel_make:'',width:'225',ratio:'50',diameter:'16',season:'winter',sort:'wet_grip'});
+ assert.equal(early.requests.length,1);
+ const earlyParams=new URL('https://shop.example'+early.requests[0].url).searchParams;
+ for(const [key,value] of Object.entries({q:'8859903120511',width:'225',ratio:'50',diameter:'16',season:'winter',sort:'wet_grip'}))assert.equal(earlyParams.get(key),value);
+ assert.equal(earlyParams.has('wheel_make'),false);
  const tooLarge=await fixture('reifen',{items:Array.from({length:25},()=>product),page:1,total:25,has_more:false});
  assert.equal(tooLarge.nodes['catalog-products'].children.length,0);
  const status=await fixture('order_status',{order:{id:'sho_'+'a'.repeat(32),status:'authorized',amount_gross_cent:48000,mode:'test'}},'?paid=1&status=paid');

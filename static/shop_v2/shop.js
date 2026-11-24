@@ -1111,7 +1111,12 @@
         const form = event.currentTarget;
         vehicleTimer = root.setTimeout(() => applyVehicle(form), 450);
       });
-      byId('vehicle-filters').addEventListener('reset', () => { vehicleFilters = {}; page = 1; loadPage(); });
+      byId('vehicle-filters').addEventListener('reset', event => {
+        event.preventDefault();
+        root.clearTimeout(vehicleTimer);
+        for (const input of event.currentTarget.querySelectorAll('input')) input.value = '';
+        vehicleFilters = {}; page = 1; loadPage();
+      });
       byId('parts-model-refinement')?.addEventListener('change', event => {
         const form = byId('vehicle-filters'), option = event.currentTarget.selectedOptions[0];
         if (!option?.value || !option.dataset.make) return;
@@ -1121,28 +1126,32 @@
       });
     }
     const initial = new URLSearchParams(root.location.search);
-    if (byId('wheel-make') && initial.has('wheel_make')) {
-      const form = byId('catalog-filters'), make = initial.get('wheel_make').trim();
-      if (make && make.length <= 80) {
-        byId('wheel-make').value = filters.wheel_make = make;
-        const key = initial.get('wheel_vehicle');
-        if (key) filters.wheel_vehicle = key;
-        for (const field of ['width', 'ratio', 'diameter', 'season', 'q']) {
-          const input = form.elements.namedItem(field), value = initial.get(field);
-          if (input && value) input.value = filters[field] = value;
-        }
-        for (const field of ['make', 'model', 'year', 'hsn', 'tsn']) {
-          if (initial.has(field)) {
-            vehicleFilters[field] = initial.get(field);
-            const input = byId('vehicle-filters')?.elements.namedItem(field);
-            if (input) input.value = vehicleFilters[field];
-          }
-        }
+    // The HTML form already contains the GET filters. Read its current values so
+    // edits made while the deferred script was loading also reach the first search.
+    filters = Object.fromEntries(new FormData(byId('catalog-filters')));
+    const linkedMake = initial.get('wheel_make')?.trim();
+    const linkedVehicle = linkedMake && linkedMake === filters.wheel_make?.trim();
+    if (linkedVehicle && initial.get('wheel_vehicle')) {
+      // The model picker gets its options from this first catalogue response.
+      filters.wheel_vehicle = initial.get('wheel_vehicle');
+    }
+    const vehicleForm = byId('vehicle-filters');
+    if (vehicleForm) {
+      vehicleFilters = vehicleQuery(Object.fromEntries(new FormData(vehicleForm)));
+    } else if (linkedVehicle) {
+      const details = {};
+      for (const field of ['make', 'model', 'year', 'hsn', 'tsn']) {
+        if (initial.has(field)) details[field] = initial.get(field);
       }
+      vehicleFilters = vehicleQuery(details);
     }
     byId('previous-page').addEventListener('click', () => { if (page > 1) { page--; loadPage(); } });
     byId('next-page').addEventListener('click', () => { page++; loadPage(); });
-    loadPage();
+    if (vehicleFilters) loadPage();
+    else {
+      vehicleFilters = {};
+      byId('catalog-status').textContent = 'Bitte HSN und TSN gemeinsam oder Marke, Modell und Baujahr passend eingeben.';
+    }
   }
   function checkbox(label, name, form) {
     const wrap = el('label', null, 'shop-checkbox'), input = el('input'); input.type = 'checkbox'; input.name = name;
