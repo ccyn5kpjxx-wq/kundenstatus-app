@@ -69,6 +69,7 @@ from lexware_zahlungsuebersicht import (
 from mos_company_identity import LEGAL_NAME as WORKSHOP_LEGAL_NAME
 import mietwagen_checkout
 import mietkalender_sperren
+import workshop_booking_whatsapp
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
 from reifenservice import RADWECHSEL_GROESSEN, RADWECHSEL_TERMINPREISE, EINLAGERUNG_BRUTTO_CENT
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
@@ -11511,6 +11512,7 @@ def init_db():
         """
     )
     mietwagen_checkout.init_schema(db)
+    workshop_booking_whatsapp.init_schema(db)
     init_reifen_bestellung_schema(db)
     init_reifen_kauf_schema(db)
     init_reifen_sms_schema(db)
@@ -13354,7 +13356,7 @@ class ReifenAnfrageBereitsVorhanden(ValueError):
         self.lead_id = int(lead_id)
 
 
-def create_lead(payload, attachments=None):
+def create_lead(payload, attachments=None, *, notify_wheel_service=False):
     jetzt = now_str()
     website = normalize_lead_website(payload.get("website"))
     kunden_status_token = secrets.token_urlsafe(24) if website == "auto-lackierzentrum" else ""
@@ -13446,6 +13448,13 @@ def create_lead(payload, attachments=None):
                 jetzt,
             ),
         )
+    if notify_wheel_service:
+        try:
+            enqueue_website_wheel_notice(db, lead_id, payload)
+        except Exception:
+            db.rollback()
+            db.close()
+            raise
     db.commit()
     db.close()
     if kunden_status_token:
@@ -23912,10 +23921,10 @@ def notify_customer_whatsapp_fertig(auftrag):
     return False, grund
 
 
-def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus"):
+def build_whatsapp_template_payload(to_phone, auftrag, nachricht, absender_label="Autohaus", *, reference=None):
     auftrag_id = int((auftrag or {}).get("id") or 0)
     parameters = [
-        {"type": "text", "text": whatsapp_template_parameter(whatsapp_order_code(auftrag_id), limit=40)},
+        {"type": "text", "text": whatsapp_template_parameter(reference or whatsapp_order_code(auftrag_id), limit=40)},
         {"type": "text", "text": whatsapp_template_parameter(whatsapp_auftrag_label(auftrag), limit=250)},
         {"type": "text", "text": whatsapp_template_parameter(absender_label or "Autohaus", limit=80)},
         {"type": "text", "text": whatsapp_template_parameter(nachricht, limit=900)},
@@ -23989,10 +23998,14 @@ def send_whatsapp_notice_with_fallback(
     return False, errors
 
 
-def post_whatsapp_payload(payload):
+def post_whatsapp_payload(payload, *, include_http_status=False):
+    def result(ok, provider_id, error, status=None):
+        outcome = (ok, provider_id, error)
+        return outcome + (status,) if include_http_status else outcome
+
     requests_module = get_requests()
     if not requests_module:
-        return False, "", "Python-Modul requests ist nicht verfügbar."
+        return result(False, "", "Python-Modul requests ist nicht verfügbar.", 0)
     url = (
         f"https://graph.facebook.com/{whatsapp_graph_version()}/"
         f"{WHATSAPP_PHONE_NUMBER_ID}/messages"
@@ -24004,7 +24017,7 @@ def post_whatsapp_payload(payload):
     try:
         response = requests_module.post(url, headers=headers, json=payload, timeout=12)
     except Exception as exc:
-        return False, "", f"WhatsApp-Versand fehlgeschlagen: {exc}"
+        return result(False, "", f"WhatsApp-Versand fehlgeschlagen: {exc}")
 
     try:
         data = response.json()
@@ -24015,12 +24028,12 @@ def post_whatsapp_payload(payload):
     if messages:
         message_id = clean_text(messages[0].get("id"))
     if 200 <= response.status_code < 300 and message_id:
-        return True, message_id, ""
+        return result(True, message_id, "", response.status_code)
     error = ""
     if isinstance(data, dict):
         raw_error = data.get("error") or {}
         error = clean_text(raw_error.get("message") or raw_error.get("error_user_msg"))
-    return False, message_id, error or f"WhatsApp API Status {response.status_code}"
+    return result(False, message_id, error or f"WhatsApp API Status {response.status_code}", response.status_code)
 
 
 def record_whatsapp_message(
@@ -24195,12 +24208,42 @@ def resolve_whatsapp_reply_auftrag_id(message, text, from_phone):
     if context_row:
         return int(context_row.get("auftrag_id") or 0), context_id
 
+    phone = whatsapp_payload_phone(from_phone)
+    if context_id:
+        db = get_db()
+        try:
+            own_notice = db.execute(
+                "SELECT 1 FROM workshop_booking_wa_deliveries WHERE phone=? AND provider_id=? LIMIT 1",
+                (phone, context_id),
+            ).fetchone()
+        finally:
+            db.close()
+        if own_notice:
+            return 0, context_id
+
     explicit_id = extract_whatsapp_order_id(text)
     if explicit_id:
         return explicit_id, context_id
 
+    if context_id:
+        # A quoted message must identify its own thread. It can be an operator
+        # notice accepted by Meta just before its provider ID was persisted.
+        return 0, context_id
+
     recent_row = find_recent_whatsapp_thread_for_phone(from_phone)
     if recent_row:
+        db = get_db()
+        try:
+            latest_notice = db.execute(
+                """SELECT MAX(attempted_at) AS stamp FROM workshop_booking_wa_deliveries
+                   WHERE phone=? AND state IN ('sent','sending','review')""", (phone,)
+            ).fetchone()
+        finally:
+            db.close()
+        if latest_notice and latest_notice["stamp"]:
+            workshop_time = parse_postfach_datetime(recent_row["erstellt_am"]).timestamp()
+            if latest_notice["stamp"] >= workshop_time:
+                return 0, context_id
         return int(recent_row.get("auftrag_id") or 0), context_id
     return 0, context_id
 
@@ -44363,6 +44406,19 @@ def admin_mietvertrag_bestaetigen(vorgang_id):
         )
         if int(version_cursor.rowcount or 0) != 1:
             raise ValueError("Die Vertragsversion konnte nicht bestätigt werden.")
+        if not vorgang.get("auftrag_id"):
+            vehicle = db.execute(
+                "SELECT bezeichnung, kennzeichen FROM mietfahrzeuge WHERE id=?",
+                (vorgang["mietfahrzeug_id"],),
+            ).fetchone()
+            label = (vehicle["bezeichnung"] or vehicle["kennzeichen"]) if vehicle else "Mietfahrzeug"
+            workshop_booking_whatsapp.enqueue(
+                db, event_key=f"rental-confirmed:{vorgang_id}", reference=f"M-{vorgang_id}",
+                title="Mietbuchung bestätigt",
+                message=(f"{label} · {vorgang['kunde_name']}\n"
+                         f"Abholung {vorgang['start_datum']} · Rückgabe {vorgang['end_datum']}"),
+                path=f"/admin/mietvorgang/{vorgang_id}/vertrag",
+            )
         db.commit()
     except ValueError as exc:
         db.rollback()
@@ -46505,10 +46561,26 @@ def erstelle_shop_montageauftrag(order, snapshot, context):
         # Die einmal vergebene Auftragsnummer bleibt auch nach einer manuellen
         # Löschung belegt. Ein Rücklauf darf keinen Ersatzauftrag auslösen.
         db.execute("INSERT INTO shop_montageauftraege (shop_order_id,auftrag_id) VALUES (?,?)", (order_id, auftrag_id))
+        slot = None
         if local_mounting:
             slot = db.execute("SELECT datum,uhrzeit FROM shop_reifen_termin_slots WHERE shop_order_id=?", (order_id,)).fetchone()
             if slot:
                 plane_shop_montageauftrag(db, auftrag_id, slot["datum"], slot["uhrzeit"])
+        wheel_work = [snapshot["lines"][i] for i in booked_services
+                      if snapshot["lines"][i]["id"].startswith(("tyre:", "alloy_wheel:", "steel_wheel:"))]
+        if wheel_work:
+            details = [contact["name"], vehicle]
+            details.extend(f"{line['quantity']} × {line['name']}" for line in wheel_work)
+            if slot:
+                details.append(f"Termin {format_date(slot['datum'])} um {slot['uhrzeit']} Uhr")
+            elif intake.get("shop_montagewunsch"):
+                wish = intake["shop_montagewunsch"]
+                details.append(f"Terminwunsch {format_date(wish['date'])} um {wish['time']} Uhr")
+            workshop_booking_whatsapp.enqueue(
+                db, event_key=f"shop-wheel-service:{order_id}", reference=f"S-{auftrag_id}",
+                title="Reifen-/Felgenservice im Shop gebucht",
+                message=" · ".join(filter(None, details)), path=f"/admin/auftrag/{auftrag_id}",
+            )
         db.commit()
     except Exception:
         db.rollback()
@@ -46921,6 +46993,27 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
     return response
 
 
+WEBSITE_WHEEL_NOTICES = {
+    "reifenservice": "Reifentermin reserviert",
+    "felgenservice": "Neue Felgenservice-Anfrage",
+    "reifenangebot": "Neue Reifenangebotsanfrage",
+}
+
+
+def enqueue_website_wheel_notice(db, lead_id, payload):
+    intake = payload["portal_data"]
+    details = [payload["kunde_name"], payload["fahrzeug"], payload["kennzeichen"]]
+    details.extend(WEBSITE_REIFEN_LEISTUNGEN[key] for key in intake["reifen_leistungen"])
+    if payload["reifen_slot"]:
+        day, time = payload["reifen_slot"]
+        details.append(f"Termin {format_date(day)} um {time} Uhr")
+    workshop_booking_whatsapp.enqueue(
+        db, event_key=f"wheel-service-lead:{lead_id}", reference=f"L-{lead_id}",
+        title=WEBSITE_WHEEL_NOTICES[intake["anliegen"]],
+        message=" · ".join(filter(None, details)), path=f"/admin/leads/{lead_id}",
+    )
+
+
 @app.route("/anfrage", methods=["GET", "POST"])
 def website_anfrage():
     """Zentrales Anfrageformular des Portals für Homepage-Kontakte."""
@@ -47299,8 +47392,11 @@ def website_anfrage():
                 "notiz": "Öffentliches Anfrageformular. Rückruf oder E-Mail gewünscht; keine WhatsApp-Einwilligung erfasst.",
             }
         )
+        wheel_notice = anliegen in WEBSITE_WHEEL_NOTICES
+        # Attachments and service-app binding can still reject and delete the lead.
+        defer_wheel_notice = wheel_notice and bool(valid_bilder or service_context)
         try:
-            lead_id = create_lead(lead_payload)
+            lead_id = create_lead(lead_payload, notify_wheel_service=wheel_notice and not defer_wheel_notice)
         except ReifenAnfrageBereitsVorhanden as exc:
             existing = get_lead(exc.lead_id)
             if not hmac.compare_digest(existing.get("reifen_angebot_request_hash") or "", anfrage_hash):
@@ -47331,6 +47427,13 @@ def website_anfrage():
             except (LookupError, PermissionError, ValueError) as exc:
                 delete_lead(lead_id)
                 return render_website_anfrage(formdata=request.form, errors=[str(exc)], status_code=409)
+        if defer_wheel_notice:
+            db = get_db()
+            try:
+                enqueue_website_wheel_notice(db, lead_id, lead_payload)
+                db.commit()
+            finally:
+                db.close()
         schedule_change_backup("website-anfrage-erfolgreich")
         sende_website_lead_benachrichtigung(
             lead_id,
@@ -47375,7 +47478,8 @@ def website_anfrage():
             else:
                 lead_notice(lead_id, "Ihre Anfrage ist eingegangen", "E-Mail", email,
                     ("Ihre Meldung ist angekommen. Den Stand finden Sie in Ihrem geschützten Servicebereich: " if service_context else "Ihre Anfrage ist angekommen. Hier können Sie den Stand verfolgen, Ihr Angebot prüfen und Unterlagen ergänzen: ") + kunden_buchungs_url)
-        notify_lead_workshop(lead_id, "Neue Anfrage")
+        if not wheel_notice:
+            notify_lead_workshop(lead_id, "Neue Anfrage")
         if ist_reifenangebot:
             return bestaetige_reifenangebot_anfrage(lead_id)
         session["website_anfrage_gesendet"] = int(lead_id)
@@ -47451,7 +47555,9 @@ def bestaetige_reifenangebot_anfrage(lead_id, *, ads_measurement=True):
 
 @app.route("/healthz")
 def healthz():
-    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal", "lead_portal_notifications": True, "lead_accept_notice_version": 2})
+    return jsonify({"ok": True, "mode": "public" if PUBLIC_SITE_ONLY else "portal",
+                    "lead_portal_notifications": True, "lead_accept_notice_version": 2,
+                    "booking_notification_version": 1})
 
 
 @app.route("/robots.txt")
@@ -51345,6 +51451,10 @@ def admin_daten_import():
                     elif USE_POSTGRES:
                         import_sqlite_rows_into_current_database(imported_db)
                     else:
+                        # Row imports leave the operational WhatsApp ledger intact.
+                        # Only a complete SQLite file replacement can rewind it.
+                        from workshop_booking_whatsapp import check_sqlite_replacement
+                        check_sqlite_replacement(DB, imported_db)
                         DATA_DIR.mkdir(exist_ok=True)
                         backup_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
                         if DB.exists():
@@ -60887,6 +60997,12 @@ def api_whatsapp_status():
     anfragen_status = [dict(row) for row in db.execute(
         "SELECT id, name, whatsapp_status, erstellt_am FROM mietwagen_anfragen ORDER BY id DESC LIMIT 5"
     ).fetchall()]
+    delivery_counts = {row["state"]: row["n"] for row in db.execute(
+        "SELECT state,COUNT(*) AS n FROM workshop_booking_wa_deliveries GROUP BY state"
+    ).fetchall()}
+    waiting_count = db.execute(
+        "SELECT COUNT(*) AS n FROM workshop_booking_wa_events WHERE expanded=0"
+    ).fetchone()["n"]
     db.close()
     return jsonify({
         "ok": True,
@@ -60895,6 +61011,7 @@ def api_whatsapp_status():
         "workshop_nummern": len(whatsapp_workshop_numbers()),
         "letzte_versuche": letzte,
         "mietanfragen_whatsapp": anfragen_status,
+        "buchungshinweise": {"noch_ohne_empfaenger": waiting_count, "versand": delivery_counts},
     })
 
 
@@ -61482,6 +61599,14 @@ if not PUBLIC_SITE_ONLY:
 start_hourly_backups()
 start_lexware_auto_sync()
 start_google_ads_auto_sync()
+
+
+@app.before_request
+def start_booking_whatsapp_for_serving_process():
+    # Gunicorn can preload the app. Start in the process which serves HTTP,
+    # after fork, and keep CLI, public-only services and test clients isolated.
+    if RUNNING_ON_RENDER and not PUBLIC_SITE_ONLY and not app.testing and WHATSAPP_ENABLED:
+        workshop_booking_whatsapp.start_worker(sys.modules[__name__])
 
 
 if __name__ == "__main__":

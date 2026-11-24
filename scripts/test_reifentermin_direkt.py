@@ -89,8 +89,13 @@ class ReifenterminDirektTest(TestCase):
             "wunschdatum": day.isoformat(), "wunschzeit": "11:00", "name": "Werkstatt Test",
             "telefon": "06261 000000", "fahrzeug": "Muster-Pkw", "nachricht": "Eigene Reifen.",
         }
-        self.assertEqual(self.client.post("/anfrage", data=booking).status_code, 302)
-        conflict = self.client.post("/anfrage", data=booking)
+        with patch("workshop_booking_whatsapp.enqueue") as notice:
+            self.assertEqual(self.client.post("/anfrage", data=booking).status_code, 302)
+            conflict = self.client.post("/anfrage", data=booking)
+        notice.assert_called_once()
+        self.assertEqual(notice.call_args.kwargs["title"], "Reifentermin reserviert")
+        self.assertIn(f"{portal.format_date(day.isoformat())} um 11:00 Uhr", notice.call_args.kwargs["message"])
+        portal.notify_lead_workshop.assert_not_called()
         self.assertEqual(conflict.status_code, 409)
         form = self.booking_form(conflict)
         for value in ('value="montage" checked', 'value="wuchten" checked', 'value="Muster-Pkw"',
@@ -98,6 +103,21 @@ class ReifenterminDirektTest(TestCase):
             self.assertIn(value, form)
         self.assertNotIn('<option value="11:00"', form)
         self.assertIn('<option value="12:00"', form)
+
+    def test_rim_service_inquiry_notifies_workshop_once_without_confirming_a_slot(self):
+        page = self.client.get("/anfrage?anliegen=felgenservice")
+        self.assertEqual(page.status_code, 200)
+        with self.client.session_transaction() as sess:
+            token = sess[portal.CSRF_FIELD_NAME]
+        data = {portal.CSRF_FIELD_NAME: token, "name": "Felgen Test", "telefon": "06261 000000",
+                "anliegen": "felgenservice", "nachricht": "Bitte vier Felgen instand setzen."}
+        with patch("workshop_booking_whatsapp.enqueue") as notice:
+            self.assertEqual(self.client.post("/anfrage", data=data).status_code, 302)
+        notice.assert_called_once()
+        self.assertEqual(notice.call_args.kwargs["title"], "Neue Felgenservice-Anfrage")
+        self.assertIn("Felgen Test", notice.call_args.kwargs["message"])
+        self.assertNotIn("Termin", notice.call_args.kwargs["message"])
+        portal.notify_lead_workshop.assert_not_called()
 
 
 if __name__ == "__main__":

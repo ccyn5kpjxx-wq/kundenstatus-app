@@ -80,6 +80,22 @@ class ShopWerkstattauftragTest(TestCase):
         self.assertIsNone(self.ensure())
         self.assertEqual(portal.shop_montageauftraege([self.order_id]), {})
 
+    def test_one_operator_notice_per_paid_wheel_service_order(self):
+        line, request = self.snapshot["lines"][0], self.snapshot["request"][0]
+        line["id"] = request["id"] = "alloy_wheel:" + "a" * 24
+        line["name"] = "Beispielfelge"
+        request["services"] = {"painting": True}
+        line["services"] = [{"code": "painting", "gross_cent": 12000}]
+        with patch("workshop_booking_whatsapp.enqueue") as notice:
+            order_number = self.ensure()
+            self.assertEqual(self.ensure(), order_number)
+        notice.assert_called_once()
+        data = notice.call_args.kwargs
+        self.assertEqual(data["event_key"], "shop-wheel-service:" + self.order_id)
+        self.assertEqual(data["path"], f"/admin/auftrag/{order_number}")
+        self.assertIn("Beispielfelge", data["message"])
+        self.assertNotIn("Terminwunsch", data["message"])
+
     def test_only_selected_and_costed_work_creates_a_job(self):
         line, request = self.snapshot["lines"][0], self.snapshot["request"][0]
         for options, code, price in (

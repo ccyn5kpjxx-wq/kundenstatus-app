@@ -465,6 +465,25 @@ class ReifenKaufTest(unittest.TestCase):
         self.assertNotIn("10:00",portal.freie_reifen_slots(day))
         self.assertFalse(self.supplier.commits)
 
+    def test_only_accepted_live_mounting_queues_a_workshop_notice(self):
+        self.gateway.livemode = self.supplier.livemode = True
+        live = {"REIFEN_KAUF_MODE": "live", "TESTING": False, "PREFERRED_URL_SCHEME": "https",
+                "REIFEN_GEWAERLEISTUNG_NOTICE_READY": True}
+        with patch.dict(portal.app.config, live), patch.dict(portal.app.extensions, self.worker_extensions()):
+            day = self.montage_day()
+            order = self.ready({"zahlungsart": "vor_ort", "montage_datum": day, "montage_uhrzeit": "16:00"},
+                               query={"montage": "ja"})
+            key = "tyre-purchase-mounting:" + order["id"]
+            self.assertFalse(any(row["event_key"] == key for row in self.rows("workshop_booking_wa_events")))
+            self.final(order)
+            self.final(order)
+            accepted = self.read(order)
+            notices = [row for row in self.rows("workshop_booking_wa_events") if row["event_key"] == key]
+            self.assertEqual(accepted["state"], "bestellt_zahlung_offen")
+            self.assertEqual(len(notices), 1)
+            self.assertEqual(notices[0]["path"], f"/admin/auftrag/{accepted['auftrag_id']}")
+            self.assertIn("16:00 Uhr", notices[0]["message"])
+
     def test_shared_native_slot_conflict_does_not_charge_or_commit(self):
         day=self.montage_day()
         one=self.ready({"zahlungsart":"vor_ort","montage_datum":day,"montage_uhrzeit":"11:00"},query={"montage":"ja"})

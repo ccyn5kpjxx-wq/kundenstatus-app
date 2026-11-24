@@ -218,6 +218,26 @@ def main():
            rpdf2.status_code == 200 and pb2[:4] == b"%PDF" and len(pb2) > 2000)
     rpdf2.close()
 
+    client.post(f"/admin/mietvorgang/{vid2}/vertrag/speichern", data=with_csrf(client, {
+        **draft_meta(vid2), **felder, "kunde_telefon": "0151 99887766",
+    }))
+    client.post(f"/admin/mietvorgang/{vid2}/vertrag/unterschrift", data=with_csrf(client, {
+        **draft_meta(vid2), "unterschrift_data": png_dataurl(),
+        "unterschrift_name": "Erika Beispiel", "unterschrift_ort": "Mosbach",
+    }))
+    for _ in range(2):
+        client.post(f"/admin/mietvorgang/{vid2}/vertrag/bestaetigen",
+                    data=with_csrf(client, version_meta(vid2)))
+    db = portal.get_db()
+    try:
+        keys = [r["event_key"] for r in db.execute(
+            "SELECT event_key FROM workshop_booking_wa_events WHERE event_key LIKE 'rental-confirmed:%'"
+        ).fetchall()]
+        report("Nur die bestätigte reine Vermietung löst einmal eine Stations-WhatsApp aus",
+               keys == [f"rental-confirmed:{vid2}"])
+    finally:
+        db.close()
+
     print()
     fails = [x for x in RESULTS if not x[1]]
     print(f"== ERGEBNIS: {len(RESULTS) - len(fails)}/{len(RESULTS)} Checks bestanden ==")

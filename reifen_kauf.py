@@ -409,6 +409,13 @@ class ReifenKauf:
                         db.execute("UPDATE reifen_kaeufe SET auftrag_id=? WHERE id=?", (workshop_order,row["id"]))
                         db.execute("UPDATE leads SET auftrag_id=?,status='gewonnen',portal_json=? WHERE id=?",
                             (workshop_order,encode(intake),row["slot_lead_id"]))
+                        if row["mode"] == "live":
+                            from workshop_booking_whatsapp import enqueue as enqueue_workshop_notice
+                            message = (f"{customer['name']} · {order['anzahl']} × {order['produkt']['bezeichnung']} · "
+                                       f"Termin {self.p.format_date(row['montage_datum'])} um {row['montage_uhrzeit']} Uhr")
+                            enqueue_workshop_notice(db, event_key=f"tyre-purchase-mounting:{row['id']}",
+                                reference=f"S-{workshop_order}", title="Reifenmontage gebucht",
+                                message=message, path=f"/admin/auftrag/{workshop_order}")
                     from reifen_vertrag import enqueue
                     accepted = self.order(dict(db.execute("SELECT * FROM reifen_kaeufe WHERE id=?", (row["id"],)).fetchone()))
                     enqueue(db, accepted, "bestellbestaetigung")

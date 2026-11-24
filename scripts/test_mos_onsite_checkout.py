@@ -1,5 +1,6 @@
 """Exercise the public pay-at-pickup path against the isolated portal inventory."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import timedelta
 from html import unescape
 from io import BytesIO
@@ -49,6 +50,31 @@ class OnsiteCheckoutTests(unittest.TestCase):
         signer = URLSafeTimedSerializer(public.portal.app.secret_key, salt='mos-public-quote-v1')
         return signer.loads(token)['quote']
 
+    def rental_whatsapp_events(self):
+        with closing(public.portal.get_db()) as db:
+            rows = db.execute("""SELECT event_key,reference,message,path FROM workshop_booking_wa_events
+                                 WHERE event_key LIKE 'rental-confirmed:%'""").fetchall()
+        return {r['event_key']: dict(r) for r in rows}
+
+    def test_real_onsite_reservation_enqueues_one_workshop_whatsapp_on_replay(self):
+        customer = {'name': 'Abholtest', 'email': 'abholung@example.invalid', 'telefon': ''}
+        q = presign_quote(dict(self.quote(self.token()), test_only=False), customer, self.public.signature())
+        args = ('same-onsite-reservation', q['vehicle_id'], q['start_slot'][:10],
+                q['end_slot'][:10], customer, q)
+        before = self.rental_whatsapp_events()
+        hold = self.service.reserve(*args)
+        self.assertEqual(self.service.reserve(*args)['id'], hold['id'])
+        key = f"rental-confirmed:{hold['mietvorgang_id']}"
+        after = self.rental_whatsapp_events()
+        self.assertEqual(after.keys() - before.keys(), {key})
+        self.assertEqual(after[key]['reference'], f"M-{hold['mietvorgang_id']}")
+        self.assertEqual(after[key]['path'], '/admin/kalender?bereich=vermietung')
+        for part in (customer['name'], q['vehicle_name'], 'Zahlung bei Abholung'):
+            self.assertIn(part, after[key]['message'])
+        for field in ('start_slot', 'end_slot'):
+            local = public.datetime.fromisoformat(q[field]).astimezone(public.ZoneInfo('Europe/Berlin'))
+            self.assertIn(local.strftime('%d.%m.%Y, %H:%M Uhr'), after[key]['message'])
+
     def test_direct_booking_creates_an_onsite_reservation_and_updates_public_availability(self):
         fields = {'vehicle':'kona', 'start':self.slots[0], 'end':self.slots[3], 'payment_method':'onsite'}
         page = self.public.client.get('/mietwagen-test/buchen', query_string=fields)
@@ -97,6 +123,7 @@ class OnsiteCheckoutTests(unittest.TestCase):
         self.assertEqual(station_inquiries(portal), [])
         args = ('local-repeat-request-key', signed['vehicle_id'], signed['start_slot'][:10],
                 signed['end_slot'][:10], customer, signed)
+        prior_whatsapp = self.rental_whatsapp_events()
         first = self.service.reserve(*args)
         self.assertEqual(self.service.reserve(*args)['id'], first['id'])
         self.assertEqual(self.public.rows(), [])
@@ -128,11 +155,20 @@ class OnsiteCheckoutTests(unittest.TestCase):
         # A new attempt after the release can reach the ordinary confirmation
         # path using the local offline provider. Only it belongs in the calendar.
         second = self.service.reserve('local-second-request-key', *args[1:])
+        self.assertEqual(self.rental_whatsapp_events(), prior_whatsapp)
         self.assertFalse(self.service.gateway.livemode)
         checkout = self.service.create_checkout(second['id'])
         self.service.gateway.pay(checkout['id'])
         body, signature = self.service.gateway.signed_event(checkout['id'])
-        self.service.handle_signed_event(body, signature, portal.app.extensions['mos_public_booking']['secret'])
+        secret = portal.app.extensions['mos_public_booking']['secret']
+        rental_id = self.service.handle_signed_event(body, signature, secret)
+        self.assertEqual(self.service.handle_signed_event(body, signature, secret), rental_id)
+        retry_body, retry_signature = self.service.gateway.signed_event(checkout['id'], event_id='evt_paid_replay')
+        self.assertEqual(self.service.handle_signed_event(retry_body, retry_signature, secret), rental_id)
+        key = f'rental-confirmed:{rental_id}'
+        notices = self.rental_whatsapp_events()
+        self.assertEqual(notices.keys() - prior_whatsapp.keys(), {key})
+        self.assertIn('Miete online bezahlt', notices[key]['message'])
         self.assertEqual(self.service.read(second['id'])['status'], 'confirmed')
         self.assertEqual([item['id'] for item in station_inquiries(portal)], [first['id']])
         agenda = client.get(agenda_url).get_data(as_text=True)
@@ -168,6 +204,7 @@ class OnsiteCheckoutTests(unittest.TestCase):
             hold = self.service.read(first.location.rsplit('/', 1)[1])
             self.assertEqual((hold['status'], hold['session_id'], hold['payment_intent']), ('confirmed', None, None))
             self.assertEqual(self.public.rows()[0]['id'], hold['mietvorgang_id'])
+            self.assertNotIn(f"rental-confirmed:{hold['mietvorgang_id']}", self.rental_whatsapp_events())
             signed, _, _ = signed_payload(json.loads(hold['payload']))
             self.assertEqual(signed['payment_method'], 'onsite')
             self.assertEqual(signed['pickup_payment_note'], q['pickup_payment_note'])

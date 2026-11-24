@@ -1,4 +1,4 @@
-"""Transactional notifications for the rental station. SMTP is worker-only."""
+"""Transactional notifications for the rental station. Delivery is worker-only."""
 
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -10,6 +10,7 @@ from urllib.parse import quote as urlquote
 from zoneinfo import ZoneInfo
 
 from mos_contract_delivery import _single_address, _smtp_send, confirmed_order
+import workshop_booking_whatsapp
 
 
 BERLIN = ZoneInfo('Europe/Berlin')
@@ -37,6 +38,27 @@ def enqueue(db, hold_id, event_type, quote):
         (hold_id,event_type,status,enqueued_at,next_attempt_at)
         VALUES (?,?,'queued',?,?) ON CONFLICT (hold_id,event_type) DO NOTHING RETURNING hold_id''',
         (hold_id, event_type, now, now)).fetchone()
+
+
+def _local_slot(value):
+    return datetime.fromisoformat(value).astimezone(BERLIN).strftime('%d.%m.%Y, %H:%M Uhr')
+
+
+def enqueue_confirmation(db, hold_id, quote, rental_id, customer_name):
+    """Queue both station notifications at the point a new rental is confirmed."""
+    enqueue(db, hold_id, 'confirmed', quote)
+    if quote.get('test_only') is not False or not quote.get('signed_at'):
+        return
+    payment = ('Zahlung bei Abholung' if quote.get('payment_method') == 'onsite'
+               else 'Miete online bezahlt')
+    workshop_booking_whatsapp.enqueue(
+        db, event_key=f'rental-confirmed:{rental_id}', reference=f'M-{rental_id}',
+        title='Mietbuchung bestätigt',
+        message=(f"{quote['vehicle_name']} · {customer_name}\n"
+                 f"Abholung {_local_slot(quote['start_slot'])}\n"
+                 f"Rückgabe {_local_slot(quote['end_slot'])}\n{payment}"),
+        path='/admin/kalender?bereich=vermietung',
+    )
 
 
 def backfill_recent(db, now):
@@ -81,9 +103,6 @@ def _message(row, recipient, sender, display_name, origin):
             'review': 'Der Zahlungsvorgang muss im Buchungsportal geprüft werden.',
         }[row['hold_status']]
 
-    def local_slot(key):
-        return datetime.fromisoformat(q[key]).astimezone(BERLIN).strftime('%d.%m.%Y, %H:%M Uhr')
-
     ref = urlquote(row['hold_id'], safe='')
     message = EmailMessage()
     message['To'] = recipient
@@ -92,8 +111,8 @@ def _message(row, recipient, sender, display_name, origin):
     digest = sha256(f"{row['hold_id']}:{row['event_type']}".encode()).hexdigest()[:32]
     message['Message-ID'] = f"<mos-station-{digest}@{sender.rsplit('@', 1)[1]}>"
     message.set_content('\n'.join([
-        status, '', f"Fahrzeug: {q['vehicle_name']}", f"Abholung: {local_slot('start_slot')}",
-        f"Rückgabe: {local_slot('end_slot')}", f"Kunde: {customer['name']}",
+        status, '', f"Fahrzeug: {q['vehicle_name']}", f"Abholung: {_local_slot(q['start_slot'])}",
+        f"Rückgabe: {_local_slot(q['end_slot'])}", f"Kunde: {customer['name']}",
         f"E-Mail: {customer['email']}", '', f"Im Buchungsportal öffnen: {origin}/mieten/admin?hold_id={ref}#hold-{ref}",
     ]))
     return message

@@ -371,8 +371,10 @@ class ReifenangeboteTest(unittest.TestCase):
 
     def test_failed_photo_save_does_not_leave_a_partial_offer(self):
         before = {table: self.count(table) for table in ("leads", "reifen_termin_slots", "lead_dateien")}
-        with patch.object(portal, "save_lead_upload_file", side_effect=OSError("test disk unavailable")):
+        with patch.object(portal, "save_lead_upload_file", side_effect=OSError("test disk unavailable")), \
+                patch("workshop_booking_whatsapp.enqueue") as notice:
             response = self.submit({"reifen_groesse_vorne": ""}, photo=True)
+        notice.assert_not_called()
         self.assertEqual(response.status_code, 503)
         for table, count in before.items():
             self.assertEqual(self.count(table), count)

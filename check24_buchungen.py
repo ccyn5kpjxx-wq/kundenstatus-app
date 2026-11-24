@@ -34,6 +34,15 @@ def _needs_parser_refresh(data, attempted_version=0):
             and max(data.get('parser_version', 0), attempted_version) < PARSER_VERSION)
 
 
+def _receiver_arrival(received):
+    """Timestamp at the top receiving server. Never trust a forwarded lower header."""
+    try:
+        stamp = parsedate_to_datetime(str(received[0]).rsplit(';', 1)[1])
+        return stamp if stamp.tzinfo is not None else None
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
 def ionos_verified(raw, config):
     """Only call for bytes fetched from this configured TLS mailbox, never uploads.
 
@@ -84,9 +93,9 @@ def ionos_verified(raw, config):
     if config.get('user', '').lower() not in recipients:
         return False
     try:
-        arrival = parsedate_to_datetime(str(received[0]).rsplit(';', 1)[1])
+        arrival = _receiver_arrival(received)
         sent = parsedate_to_datetime(str(msg.get('Date', '')))
-        if arrival.tzinfo is None or sent.tzinfo is None or abs(arrival - sent) > timedelta(days=1):
+        if arrival is None or sent.tzinfo is None or abs(arrival - sent) > timedelta(days=1):
             return False
     except (ValueError, TypeError, IndexError):
         return False
@@ -130,6 +139,8 @@ class Check24Bookings:
                 failures INTEGER NOT NULL DEFAULT 0)''')
             db.execute('INSERT INTO check24_worker_state(id) VALUES(1) ON CONFLICT(id) DO NOTHING RETURNING id').fetchall()
             db.execute("INSERT INTO check24_sync_state(key,value) VALUES('booking_lock','') ON CONFLICT(key) DO NOTHING RETURNING key").fetchall()
+            db.execute("""INSERT INTO check24_sync_state(key,value) VALUES('whatsapp_enabled_from',?)
+                          ON CONFLICT(key) DO NOTHING RETURNING key""", (str(self._clock()),)).fetchall()
             db.commit()
         finally:
             db.close()
@@ -203,9 +214,10 @@ class Check24Bookings:
             if _sync_claim:
                 self._guard_sync(db, _sync_claim)
             self.lock(db)
-            db.execute('''INSERT INTO check24_events(raw_hash,source_key,provider_id,payload,created_at,verified)
-                VALUES(?,?,?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''',
-                (data['raw_sha256'], source_key, data['provider_id'], json.dumps(data, ensure_ascii=False), self.p.now_str(), int(verified)))
+            inserted = db.execute('''INSERT INTO check24_events(raw_hash,source_key,provider_id,payload,created_at,verified)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING RETURNING id''',
+                (data['raw_sha256'], source_key, data['provider_id'], json.dumps(data, ensure_ascii=False),
+                 self.p.now_str(), int(verified))).fetchone()
             event = db.execute('SELECT * FROM check24_events WHERE raw_hash=?', (data['raw_sha256'],)).fetchone()
             previous_data = json.loads(event['payload'])
             attempt_key = 'parser_attempt:' + event['raw_hash']
@@ -239,9 +251,12 @@ class Check24Bookings:
                     event = db.execute('SELECT * FROM check24_events WHERE id=?', (event['id'],)).fetchone()
             if auto_apply and event['state'] == 'review' and event['verified']:
                 try:
-                    self._apply(db, event)
+                    order_id = self._apply(db, event)
                 except ValueError as exc:
                     db.execute('UPDATE check24_events SET note=? WHERE id=?', (str(exc), event['id']))
+                else:
+                    if _sync_claim and inserted and verified and not self.p.app.config.get('CHECK24_DEMO'):
+                        self._queue_new_booking_notice(db, data, order_id)
             db.commit()
             return event['id']
         except Exception:
@@ -249,6 +264,23 @@ class Check24Bookings:
             raise
         finally:
             db.close()
+
+    def _queue_new_booking_notice(self, db, data, order_id):
+        # The trusted received date prevents a first sync of the 45-day
+        # backlog from notifying the station about pre-rollout bookings.
+        arrived = _receiver_arrival((data.get('authentication') or {}).get('received') or [])
+        if arrived is None:
+            return
+        enabled = db.execute("SELECT value FROM check24_sync_state WHERE key='whatsapp_enabled_from'").fetchone()
+        if not enabled or not float(enabled['value']) < arrived.timestamp() <= self._clock():
+            return
+        from workshop_booking_whatsapp import enqueue
+        start, end = datetime.fromisoformat(data['start_at']), datetime.fromisoformat(data['end_at'])
+        enqueue(db, event_key='check24-booking:' + data['provider_id'], reference=f'C24-{order_id}',
+                title='CHECK24-Reifentermin bestätigt',
+                message=(f"{data['customer_name']} · {data['service']}\n"
+                         f"Termin {start:%d.%m.%Y, %H:%M} bis {end:%H:%M} Uhr"),
+                path=f'/admin/auftrag/{order_id}')
 
     def apply(self, event_id):
         db = self.p.get_db()

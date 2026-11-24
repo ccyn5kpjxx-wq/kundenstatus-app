@@ -727,6 +727,54 @@ class Check24IntegrationTest(unittest.TestCase):
         self.assertFalse(ionos_verified(good, dict(cfg, ssl=False)))
         self.assertFalse(ionos_verified(good, dict(cfg, user='other@example.invalid')))
 
+    def test_workshop_notice_only_for_new_verified_arrivals_after_activation(self):
+        from contextlib import closing
+        from unittest.mock import patch
+
+        def mail(number, start, end, received, auth='pass', change=''):
+            body = BODY.replace('TEST9001', number).replace('08:00 - 08:30', f'{start} - {end}') + change
+            subject = f'Neue CHECK24 Terminbuchung (Bestellnummer: {number})'
+            headers = ('Authentication-Results: kundenserver.de; dkim=pass header.i=@check24.de; '
+                       f'spf=pass smtp.mailfrom=montagepartner@check24.de; dmarc={auth} header.from=check24.de\n'
+                       f'Received: from provider by mx.kundenserver.de (tls); Mon, 26 Oct 2026 {received} +0100\n')
+            return headers.encode() + synthetic_mail(body, subject=subject)
+
+        # Future appointments in an initial sync may have arrived before this feature.
+        activated = self.fixed.timestamp() - 3600
+        with closing(self.p.get_db()) as db, db:
+            db.execute("DELETE FROM check24_sync_state WHERE key='whatsapp_enabled_from'")
+        with patch.object(self.service, '_clock', return_value=activated):
+            self.service.init_schema()
+        self.service.init_schema()  # a process restart must not reset the cutoff
+        fresh = mail('C249001', '09:00', '10:00', '11:29:01')
+        old = mail('C249002', '10:00', '11:00', '10:59:59')
+        repeated = fresh.replace(b'Guten Tag', b'Guten Morgen')
+        pending = mail('C249003', '11:00', '12:00', '11:29:01', auth='fail')
+        cancelled = mail('C249004', '12:00', '13:00', '11:29:01', change='\nDer Kunde hat diesen Termin storniert.')
+        batch = [old, fresh, fresh, repeated, pending, cancelled]
+        with self.fake_sync_mailbox(count=len(batch), raw_bytes=lambda uid: batch[int(uid)-1]) as (cfg, _):
+            cfg['host'] = 'imap.ionos.de'
+            self.assertEqual(self.service.sync(auto_apply=True), len(batch))
+            self.assertEqual(self.service.sync(auto_apply=True), 0)
+        self.assertEqual(self.count_orders(), 2)
+        with closing(self.p.get_db()) as db:
+            event = db.execute("SELECT * FROM workshop_booking_wa_events WHERE event_key LIKE 'check24-booking:%'").fetchall()
+            self.assertEqual([r['event_key'] for r in event], ['check24-booking:C249001'])
+            order = db.execute("SELECT order_id FROM check24_bookings WHERE provider_id='C249001'").fetchone()
+            self.assertEqual(event[0]['path'], f"/admin/auftrag/{order['order_id']}")
+            self.assertEqual(event[0]['reference'], f"C24-{order['order_id']}")
+            self.assertIn('30.10.2026, 09:00 bis 10:00 Uhr', event[0]['message'])
+            self.assertIn('Erika Beispiel', event[0]['message'])
+        # A manually uploaded, manually accepted EML must not masquerade as a new provider arrival.
+        self.service.apply(self.service.ingest(mail('C249005', '13:00', '14:00', '11:29:01')))
+        batch.append(mail('C249006', '14:00', '15:00', '11:29:01'))
+        with self.fake_sync_mailbox(count=len(batch), raw_bytes=lambda uid: batch[int(uid)-1]) as (cfg, _):
+            cfg['host'] = 'imap.ionos.de'
+            with patch.dict(self.p.app.config, {'CHECK24_DEMO': True}):
+                self.assertEqual(self.service.sync(auto_apply=True), 1)
+        with closing(self.p.get_db()) as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM workshop_booking_wa_events WHERE event_key LIKE 'check24-booking:%'").fetchone()[0], 1)
+
     def test_verified_storno_releases_time_but_never_started_or_invoiced_order(self):
         event = self.service.ingest(synthetic_mail(), verified=True, auto_apply=True)
         row = self.service.rows()[0]

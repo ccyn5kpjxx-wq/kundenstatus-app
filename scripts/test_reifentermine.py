@@ -189,7 +189,15 @@ class ReifentermineTest(unittest.TestCase):
         self.assertIn('09:00 Uhr', notice[4])
         self.assertIn('30–45 Minuten', notice[4])
         self.assertIn('Stundenblock mit Planungspuffer', notice[4])
-        portal.notify_lead_workshop.assert_called_once()
+        db = portal.get_db()
+        try:
+            events = db.execute("SELECT title, path FROM workshop_booking_wa_events WHERE event_key=?",
+                                (f"wheel-service-lead:{lead['id']}",)).fetchall()
+        finally:
+            db.close()
+        self.assertEqual([(row["title"], row["path"]) for row in events],
+                         [("Reifentermin reserviert", f"/admin/leads/{lead['id']}")])
+        portal.notify_lead_workshop.assert_not_called()
 
     def test_invalid_dates_times_and_services_do_not_create_leads(self):
         cases = [
