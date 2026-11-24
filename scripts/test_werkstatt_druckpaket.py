@@ -196,11 +196,32 @@ class OrderPrintTest(unittest.TestCase):
                                         ("05.12.2026", "11:00"), ("05.12.2026", "12:00"),
                                         ("Tina Beispiel", "Reifenservice", "TEST532"))
             rack_window = fitz.Rect(0, 0, page.rect.width - 40 * mm, 21 * mm)
-            for label in ("Arbeitsbeginn", "Gebuchtes Ende"):
-                self.assertTrue(page.search_for(label, clip=rack_window))
+            spans = {s["text"]: s for block in page.get_text("dict", clip=rack_window)["blocks"]
+                     for line in block.get("lines", []) for s in line["spans"]}
+            schedule_text = fitz.Rect()
+            for text, minimum_size in (("Arbeitsbeginn", 13), ("Gebuchtes Ende", 13),
+                                       ("05.12.2026 · 11:00", 19), ("05.12.2026 · 12:00", 19)):
+                self.assertIn(text, spans)
+                span = spans[text]
+                self.assertEqual(span["color"], 0xFFFFFF)
+                self.assertIn("bold", span["font"].lower())
+                self.assertGreaterEqual(span["size"], minimum_size)
+                self.assertTrue(rack_window.contains(span["bbox"]))
+                schedule_text.include_rect(span["bbox"])
+            self.assertTrue(any(path["fill"] == (0, 0, 0) and path["fill_opacity"] == 1
+                                and path["rect"].contains(schedule_text) for path in page.get_drawings()),
+                            "Beide Termine müssen im selben schwarzen Balken stehen")
             for text in ("Fahrzeugübergabe", "Angaben zum Auftrag", "Voraussichtliche Reifenlieferung",
                          "245/40 R18 97 V", "Auftrag erledigt"):
                 self.assertTrue(page.search_for(text), text)
+
+        del intake["check24_ende"]
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET schaden_aufnahme_json=? WHERE id=?", (json.dumps(intake), oid))
+            db.commit()
+        with fitz.open(stream=self.client.get(f"/admin/auftrag/{oid}/ausdrucken").data) as pdf:
+            self.assertTrue(pdf[0].search_for("Offen", clip=rack_window))
+            self.assertTrue(pdf[0].search_for("05.12.2026 · 11:00", clip=rack_window))
 
     def test_image_and_unreadable_original_show_what_will_print(self):
         photo = BytesIO()

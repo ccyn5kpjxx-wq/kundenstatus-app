@@ -6,12 +6,12 @@ from xml.sax.saxutils import escape
 
 import fitz
 from PIL import Image, ImageOps
-from reportlab.lib.colors import HexColor
+from reportlab.lib.colors import HexColor, black, white
 from reportlab.graphics.shapes import Drawing, Rect
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.pdfbase.pdfmetrics import getAscentDescent
+from reportlab.pdfbase.pdfmetrics import getAscentDescent, stringWidth
 from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, Table, TableStyle
 
 from auftragsarten import AUFTRAGSARTEN, auftrag_leistungsart
@@ -144,27 +144,41 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
         identification.append("Auftragsreferenz " + sheet["externe_referenz"])
     # The rack exposes only the upper edge. Keep the two appointments beside
     # the order number, even when the service or vehicle description wraps.
-    key_style = ParagraphStyle("field", fontName="Helvetica-Bold", fontSize=10, leading=12, textColor=green)
+    key_style = ParagraphStyle("field", fontName="Helvetica-Bold", fontSize=14, leading=15, textColor=white)
     service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=15, leading=19)
-    time_style = ParagraphStyle("time", parent=service_style, leading=18)
-    date_width = 63*mm
+    time_style = ParagraphStyle("time", parent=key_style, fontSize=21, leading=22)
+    date_width = 68*mm
+    date_padding = 7
+
+    def date_cell(caption, text):
+        # Keep even "05.12.2026 · Zeit offen" together in the rack window.
+        available = date_width - 2 * date_padding
+        scale = available / max(1, stringWidth(text, time_style.fontName, time_style.fontSize))
+        style = time_style.clone("time-fit", fontSize=time_style.fontSize * scale) if scale < 1 else time_style
+        return [_paragraph(caption, key_style), _paragraph(text, style)]
+
     rack = Table([[
         Paragraph(f"{title} <font size='32'>{sheet['nummer']}</font>", heading),
-        [_paragraph(start_name, key_style), _paragraph(start_value, time_style)],
-        [_paragraph(end_name, key_style), _paragraph(end_value, time_style)],
+        date_cell(start_name, start_value),
+        date_cell(end_name, end_value),
     ]], colWidths=[doc.width - 2*date_width, date_width, date_width])
     rack.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
                               ("LEFTPADDING", (0, 0), (-1, -1), 0),
                               ("RIGHTPADDING", (0, 0), (-1, -1), 3),
                               ("TOPPADDING", (0, 0), (-1, -1), 0),
-                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                              ("BACKGROUND", (1, 0), (2, 0), black),
+                              ("LEFTPADDING", (1, 0), (2, 0), date_padding),
+                              ("RIGHTPADDING", (1, 0), (2, 0), date_padding),
+                              ("TOPPADDING", (1, 0), (2, 0), 2),
+                              ("BOTTOMPADDING", (1, 0), (2, 0), 6)]))
     top = [
         (rack, 5),
         (Paragraph(f"<font size='11' color='#37654f'>Service:</font>   {escape(service_name)}", service_style), 3),
         (_paragraph("   ·   ".join(identification), note), 5),
     ]
     header = [(item, item.wrap(doc.width, size[1])[1], gap) for item, gap in top]
-    header_top = size[1] - 6*mm
+    header_top = size[1] - 5*mm
     body_top = header_top - sum(height + gap for _, height, gap in header) - 4*mm
     if sheet["archiviert"] or order["angebotsphase"]:
         section("Status", "Archiviert" if sheet["archiviert"] else "Angebotsphase")
