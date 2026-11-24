@@ -64,6 +64,26 @@ def verified(row):
 
 
 class PublicCatalogueTests(unittest.TestCase):
+    def test_tyre_size_choices_only_use_consistent_released_rows_without_prices(self):
+        def tyre(letter, **updates):
+            return {'id': 'tyre:' + letter * 24, 'category': 'tyre', 'name': 'Synthetic product',
+                    'width': '205', 'ratio': '55', 'diameter': '16', 'size': '205/55 R16',
+                    'group': 'Winterreifen', **updates}
+
+        rows = [tyre('a'), tyre('b', width='205.0'), tyre('c', group='Sommerreifen'),
+                tyre('d', group='Ganzjahresreifen'), tyre('e', group='unknown'),
+                tyre('f', size='225/55 R16'), tyre('1', width=None), tyre('2', diameter='33'),
+                tyre('3', width='225', size='225/55 R16', dimensions_valid=False),
+                wheel('4', width=205, ratio=55), tyre('5', width=195, size='195/55 R16')]
+        lookup = unittest.mock.Mock()
+        released = [r.get('selection_id', r.get('id')) for r in rows[:-1]]
+        c = catalogue(rows, released_ids=released, quote_lookup=lookup)
+        expected = ((205, 55, 16, ''), (205, 55, 16, 'allseason'),
+                    (205, 55, 16, 'summer'), (205, 55, 16, 'winter'))
+        self.assertEqual(c.tyre_sizes, expected)
+        self.assertIs(c.tyre_sizes, c.tyre_sizes)
+        lookup.assert_not_called()
+
     def test_separate_tyre_dimensions_are_exact_independent_and_not_title_search(self):
         def tyre(letter, width, ratio, diameter, **extra):
             return wheel(letter, selection_id='tyre:'+letter*24, category='tyre',

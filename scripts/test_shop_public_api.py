@@ -107,6 +107,17 @@ class PublicApiChecks(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self.client.get('/shop/api/v2/products?' + query).status_code, 400)
 
+    def test_tyre_size_choices_are_public_only_with_enabled_catalogue_and_never_quote(self):
+        path = '/shop/api/v2/tyre-sizes'
+        self.catalogue.tyre_sizes = ((205, 55, 16, 'winter'),)
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.enabled()
+        self.assertEqual(self.client.get(path).get_json(), {'items': [[205, 55, 16, 'winter']]})
+        self.assertEqual(self.client.get(path + '?provider=all').status_code, 400)
+        self.assertEqual(self.client.post(path).status_code, 405)
+        self.catalogue.page.assert_not_called()
+        self.service.quote.assert_not_called()
+
     def test_size_filters_forward_only_three_exact_typed_query_values(self):
         self.enabled()
         result=self.client.get('/shop/api/v2/products?department=tyres&width=255&ratio=40&diameter=19')

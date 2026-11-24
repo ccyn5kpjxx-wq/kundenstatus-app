@@ -491,6 +491,19 @@ class PublicCatalog:
         return (self._offer_rank(entry, now), *self._browse_order(entry))
 
     @cached_property
+    def tyre_sizes(self):
+        """Published dimensions only, cached with this catalogue and independent of prices."""
+        from shop_wheel_vehicles import consistent_tyre_size
+
+        sizes = set()
+        for entry in self._rows.values():
+            product = entry['public']
+            if product['category'] == 'tyre' and consistent_tyre_size(product):
+                dimensions = tuple(_size_value(product['geometry'][key]) for key in ('width', 'ratio', 'diameter'))
+                sizes.add((*dimensions, product['tyre_season'] or ''))
+        return tuple(sorted(sizes))
+
+    @cached_property
     def _parts_vehicle_terms(self):
         # Built after source enrichment, solely from the immutable published fitments.
         terms = {}

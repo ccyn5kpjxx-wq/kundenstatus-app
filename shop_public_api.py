@@ -100,6 +100,17 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except Exception:
             return False
 
+    @bp.get('/tyre-sizes')
+    def tyre_sizes():
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        if request.args:
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            return reply({'items': catalogue.tyre_sizes})
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
+
     @bp.get('/products')
     def products():
         if not catalogue_enabled():
