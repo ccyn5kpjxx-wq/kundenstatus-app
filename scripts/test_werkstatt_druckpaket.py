@@ -8,6 +8,7 @@ import unittest
 import fitz
 from PIL import Image
 from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.units import mm
 from werkzeug.datastructures import FileStorage
 
 import smoke_test
@@ -16,16 +17,17 @@ import smoke_test
 portal = smoke_test.portal
 
 
-def quarter_cut_lines(page):
-    cut_y = page.rect.height * .75
+def cut_lines(page):
     lines = []
     for drawing in page.get_drawings():
+        dashes = drawing["dashes"]
+        if not dashes or dashes.replace(" ", "").startswith("[]"):
+            continue
         for item in drawing["items"]:
             if item[0] != "l":
                 continue
             start, end = item[1:3]
-            if (abs(start.y - cut_y) <= .75 and abs(end.y - cut_y) <= .75
-                    and abs(end.x - start.x) > page.rect.width * .75):
+            if abs(end.y - start.y) > page.rect.height * .85 or abs(end.x - start.x) > page.rect.width * .75:
                 lines.append((start, end))
     return lines
 
@@ -61,47 +63,48 @@ class OrderPrintTest(unittest.TestCase):
                 self.assertAlmostEqual(page.rect.height, 595.28, delta=.5)
 
     def assert_first_page_tearoff(self, page, number):
-        self.assertEqual(len(quarter_cut_lines(page)), 1, "Schnittlinie bei 75 % der A4-Höhe erwartet")
-        cut_y = page.rect.height * .75
-        lower = [s for block in page.get_text("dict")["blocks"] for line in block.get("lines", [])
-                 for s in line["spans"] if s["text"].strip() and s["bbox"][3] > cut_y]
-        self.assertEqual(" ".join(s["text"].strip() for s in lower), f"Auftrag {number}")
-        self.assertGreaterEqual(min(s["size"] for s in lower), 29)
-        bounds = fitz.Rect(lower[0]["bbox"])
-        for span in lower[1:]:
+        cuts = cut_lines(page)
+        self.assertEqual(len(cuts), 1, "Senkrechte Schnittlinie am rechten Rand erwartet")
+        start, end = cuts[0]
+        cut_x = page.rect.width - 40 * mm
+        self.assertAlmostEqual(start.x, cut_x, delta=.75)
+        self.assertAlmostEqual(end.x, cut_x, delta=.75)
+        tag_spans = []
+        for block in page.get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for span in line["spans"]:
+                    if span["text"].strip() and span["bbox"][2] > cut_x:
+                        self.assertGreater(span["bbox"][0], cut_x, "Die Schnittlinie kreuzt Text")
+                        self.assertAlmostEqual(abs(line["dir"][1]), 1, places=2)
+                        self.assertGreaterEqual(span["size"], 29)
+                        tag_spans.append(span)
+        self.assertEqual(" ".join(s["text"].strip() for s in tag_spans), f"Auftrag {number}")
+        bounds = fitz.Rect(tag_spans[0]["bbox"])
+        for span in tag_spans[1:]:
             bounds.include_rect(span["bbox"])
-        self.assertAlmostEqual((bounds.x0 + bounds.x1) / 2, page.rect.width / 2, delta=2)
-        self.assertAlmostEqual((bounds.y0 + bounds.y1) / 2, (cut_y + page.rect.height) / 2, delta=10)
+        self.assertAlmostEqual((bounds.x0 + bounds.x1) / 2, (cut_x + page.rect.width) / 2, delta=10)
+        self.assertAlmostEqual((bounds.y0 + bounds.y1) / 2, page.rect.height / 2, delta=10)
 
     def assert_print_hierarchy(self, page, title, number, service, start, end, identification):
-        spans = [s for block in page.get_text("dict")["blocks"] for line in block.get("lines", [])
-                 for s in line["spans"] if s["text"].strip()]
-        first_baseline = min(s["origin"][1] for s in spans)
-        first = sorted((s for s in spans if abs(s["origin"][1] - first_baseline) < 1.5),
-                       key=lambda s: s["bbox"][0])
-        title_text = " ".join(s["text"].strip() for s in first)
-        self.assertRegex(title_text, rf"(?i)^{title}\s+(?:Nr\.?\s*)?{number}$")
-        self.assertTrue(any("bold" in s["font"].lower() for s in first))
+        retained_width = page.rect.width - 40 * mm
+        rack_window = fitz.Rect(0, 0, retained_width, 21 * mm)
+        titles = page.search_for(f"{title} {number}", clip=rack_window)
+        self.assertTrue(titles, "Titel und Nummer müssen über der Fachkante stehen")
+        title_right = max(rect.x1 for rect in titles)
+        schedule_window = fitz.Rect(title_right, 0, retained_width, rack_window.y1)
+        for day, time in (start, end):
+            self.assertTrue(page.search_for(f"{day} · {time}", clip=schedule_window),
+                            f"Termin {day} {time} fehlt oben rechts auf dem bleibenden Blatt")
+        work, = page.search_for("Arbeiten abhaken")
+        body_header = fitz.Rect(0, 0, retained_width, work.y0)
+        for text in (service, *identification):
+            self.assertTrue(page.search_for(text, clip=body_header), f"{text!r} fehlt über der Checkliste")
 
-        def find(text, after):
-            matches = [s for s in spans if s["origin"][1] > after + 1.5 and text.casefold() in s["text"].casefold()]
-            self.assertTrue(matches, f"{text!r} fehlt unterhalb der PDF-Zeile bei {after:.1f} pt")
-            return min(matches, key=lambda s: s["origin"][1])
-
-        work = find("Arbeiten abhaken", first_baseline)
-        service_row = find(service, first_baseline)
-        start_row = find(start[1], service_row["origin"][1])
-        end_row = find(end[1], start_row["origin"][1])
-        for day, row in ((start[0], start_row), (end[0], end_row)):
-            same_row = " ".join(s["text"] for s in spans if abs(s["origin"][1] - row["origin"][1]) < 1.5)
-            self.assertIn(day, same_row)
-        fields = [find(text, end_row["origin"][1]) for text in identification]
-        self.assertLess(max(s["origin"][1] for s in fields), work["origin"][1])
-        self.assertLess(max(s["size"] for s in fields), min(s["size"] for s in (service_row, start_row, end_row)))
-        self.assertGreater(max(s["size"] for s in first), max(s["size"] for s in (service_row, start_row, end_row)))
-
-        previous = [s["bbox"][3] for s in spans if s["origin"][1] < work["origin"][1] - 1.5]
-        self.assertGreaterEqual(work["bbox"][1] - max(previous), 9, "Vor der Checkliste fehlt eine freie Textzeile")
+        spans = [s for block in page.get_text("dict", clip=body_header)["blocks"]
+                 for line in block.get("lines", []) for s in line["spans"] if s["text"].strip()]
+        self.assertTrue(any(title in s["text"] and "bold" in s["font"].lower() for s in spans))
+        self.assertGreaterEqual(work.y0 - max(s["bbox"][3] for s in spans), 9,
+                                "Vor der Checkliste fehlt eine freie Textzeile")
 
     def test_a4_cover_and_all_order_pages_exclude_other_jobs_and_invoices(self):
         original = original_pdf("TUER HINTEN RECHTS", "LACKIERFREIGABE")
@@ -151,9 +154,13 @@ class OrderPrintTest(unittest.TestCase):
             spans = [span for block in page.get_text("dict")["blocks"] if "lines" in block
                      for line in block["lines"] for span in line["spans"]]
             self.assertTrue(any("NEUTEIL" in span["text"] and "Bold" in span["font"] for span in spans))
-            squares = [path for path in page.get_drawings() if abs(path["rect"].width - 11) < .1
-                       and abs(path["rect"].height - 11) < .1]
+            squares = [path for path in page.get_drawings() if 8 <= path["rect"].width <= 14
+                       and abs(path["rect"].height - path["rect"].width) < .1]
             self.assertEqual(len(squares), 3)
+            done, = page.search_for("Auftrag erledigt")
+            self.assertGreater(done.y0, page.rect.height - 25 * mm)
+            self.assertTrue(any(abs(path["rect"].y0 - done.y0) < 5 and 0 < done.x0 - path["rect"].x1 < 15
+                                for path in squares), "Erledigt-Feld braucht eine Checkbox zum Abhaken")
 
     def test_tyre_order_uses_the_same_header_hierarchy_and_checklist_spacing(self):
         order_id = portal.create_auftrag("intern", leistungsart="reifenservice", kunde_name="Tina Beispiel",
@@ -170,6 +177,30 @@ class OrderPrintTest(unittest.TestCase):
                                         ("20.11.2026", "10:15"), ("20.11.2026", "11:00"),
                                         ("Tina Beispiel", "Opel Corsa", "TEST EF 456"))
             self.assert_first_page_tearoff(page, order_id)
+
+    def test_check24_booking_and_tyre_details_fit_on_one_worksheet(self):
+        intake = {"anliegen": "reifenservice", "reifen_leistungen": ["montage"],
+                  "check24_bestellnummer": "TEST532", "check24_start": "2026-12-05T11:00",
+                  "check24_ende": "2026-12-05T12:00"}
+        notes = "\n".join(("CHECK24 · Bestellung TEST532", "Reifenmontage für 4 Reifen",
+                           "Termin: 05.12.2026 11:00–12:00 Uhr", "4x Test-Winterreifen 245/40 R18 97 V",
+                           "Voraussichtliche Reifenlieferung: 2026-12-02", "Gebuchter Gesamtpreis: 120 EUR"))
+        oid = portal.create_auftrag("check24", leistungsart="reifenservice", kunde_name="Tina Beispiel",
+                                    fahrzeug="Reifenservice", auftragsnummer="TEST532", beschreibung=notes,
+                                    annahme_datum="05.12.2026", schaden_aufnahme_json=json.dumps(intake))
+        with fitz.open(stream=self.client.get(f"/admin/auftrag/{oid}/ausdrucken").data) as pdf:
+            self.assertEqual(len(pdf), 1, "Die Fertigmeldung darf keine zusätzliche Seite erzeugen")
+            page = pdf[0]
+            self.assert_first_page_tearoff(page, oid)
+            self.assert_print_hierarchy(page, "Werkstattauftrag", oid, "Reifenmontage",
+                                        ("05.12.2026", "11:00"), ("05.12.2026", "12:00"),
+                                        ("Tina Beispiel", "Reifenservice", "TEST532"))
+            rack_window = fitz.Rect(0, 0, page.rect.width - 40 * mm, 21 * mm)
+            for label in ("Arbeitsbeginn", "Gebuchtes Ende"):
+                self.assertTrue(page.search_for(label, clip=rack_window))
+            for text in ("Fahrzeugübergabe", "Angaben zum Auftrag", "Voraussichtliche Reifenlieferung",
+                         "245/40 R18 97 V", "Auftrag erledigt"):
+                self.assertTrue(page.search_for(text), text)
 
     def test_image_and_unreadable_original_show_what_will_print(self):
         photo = BytesIO()
@@ -249,7 +280,9 @@ class OrderPrintTest(unittest.TestCase):
             self.assert_first_page_tearoff(pdf[0], self.oid)
             continuation = [pdf[index] for index in range(1, len(pdf))]
             for page in continuation:
-                self.assertFalse(quarter_cut_lines(page), "Es gibt nur auf Blatt 1 einen Abrissstreifen")
+                self.assertFalse(cut_lines(page), "Es gibt nur auf Blatt 1 einen Abrissstreifen")
+                self.assertNotIn("Auftrag erledigt", page.get_text())
+                self.assertIn("Position ", page.get_text(), "Ein Folgeblatt braucht echte Arbeitspositionen")
             self.assertTrue(any("Position " in page.get_text(clip=fitz.Rect(0, page.rect.height * .75,
                                 page.rect.width, page.rect.height)) for page in continuation),
                             "Folgeseiten müssen das untere Viertel für Arbeitspositionen nutzen")

@@ -22,6 +22,7 @@ from werkstatt_druckquellen import druckquellen, lade_druckquelle
 
 
 _PAGE_SIZE = landscape(A4)
+_STRIP_WIDTH = 40 * mm
 
 
 def _order(portal, order_id, tafel):
@@ -81,15 +82,35 @@ def _boxes(rows, width, style):
     return table
 
 
+def _draw_tearoff(canvas, width, height, number):
+    cut_x = width - _STRIP_WIDTH
+    canvas.saveState()
+    canvas.setLineWidth(0.8)
+    canvas.setDash(4, 3)
+    canvas.line(cut_x, 6*mm, cut_x, height - 13*mm)
+    canvas.setDash()
+    for dx in (-3, 3):
+        canvas.circle(cut_x + dx, height - 7*mm, 2.2)
+        canvas.line(cut_x + dx, height - 7*mm - 2, cut_x - dx, height - 12*mm)
+    tag = f"Auftrag {number}"
+    font = "Helvetica-Bold"
+    pts = min(54, (height - 24*mm) / canvas.stringWidth(tag, font, 1))
+    asc, desc = getAscentDescent(font, pts)
+    canvas.translate(cut_x + _STRIP_WIDTH / 2, height / 2)
+    canvas.rotate(90)
+    canvas.setFont(font, pts)
+    canvas.drawCentredString(0, -(asc + desc) / 2, tag)
+    canvas.restoreState()
+
+
 def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     stream = BytesIO()
     size = _PAGE_SIZE
     doc = BaseDocTemplate(stream, pagesize=size, title=f"Auftrag {sheet['nummer']}",
-                          author="Gärtner Karosserie & Lack", leftMargin=12*mm, rightMargin=12*mm,
+                          author="Gärtner Karosserie & Lack", leftMargin=10*mm, rightMargin=_STRIP_WIDTH + 8*mm,
                           allowSplitting=True)
-    cut = size[1] / 4  # The bottom quarter of the first sheet is the tear-off.
     ink, green = HexColor("#172f25"), HexColor("#37654f")
-    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=25, leading=40, textColor=ink)
+    heading = ParagraphStyle("title", fontName="Helvetica-Bold", fontSize=24, leading=33, textColor=ink)
     label = ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=green,
                            spaceBefore=8, spaceAfter=3, keepWithNext=True)
     checklist_label = ParagraphStyle("checklist", parent=label, spaceBefore=17)
@@ -121,27 +142,30 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     identification.append(vehicle)
     if sheet["externe_referenz"] and sheet["externe_referenz"] != str(sheet["nummer"]):
         identification.append("Auftragsreferenz " + sheet["externe_referenz"])
-    # Lay out the same stack on each worksheet page. Its height follows the
-    # complete service name, including a booking with several services.
-    key_style = ParagraphStyle("field", parent=label, fontSize=12, leading=17)
-    service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=16, leading=19)
-    time_style = ParagraphStyle("time", parent=service_style, fontSize=17, leading=20)
-    fields = Table([
-        [_paragraph("Service:", key_style), _paragraph(service_name, service_style)],
+    # The rack exposes only the upper edge. Keep the two appointments beside
+    # the order number, even when the service or vehicle description wraps.
+    key_style = ParagraphStyle("field", fontName="Helvetica-Bold", fontSize=10, leading=12, textColor=green)
+    service_style = ParagraphStyle("service", parent=value, fontName="Helvetica-Bold", fontSize=15, leading=19)
+    time_style = ParagraphStyle("time", parent=service_style, leading=18)
+    date_width = 63*mm
+    rack = Table([[
+        Paragraph(f"{title} <font size='32'>{sheet['nummer']}</font>", heading),
         [_paragraph(start_name, key_style), _paragraph(start_value, time_style)],
         [_paragraph(end_name, key_style), _paragraph(end_value, time_style)],
-    ], colWidths=[46*mm, doc.width - 12 - 46*mm], hAlign="LEFT")
-    fields.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                                ("TOPPADDING", (0, 0), (-1, -1), 1),
-                                ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
+    ]], colWidths=[doc.width - 2*date_width, date_width, date_width])
+    rack.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                              ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                              ("TOPPADDING", (0, 0), (-1, -1), 0),
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
     top = [
-        (Paragraph(f"{title} <font size='36'>{sheet['nummer']}</font>", heading), 3),
-        (fields, 5),
+        (rack, 5),
+        (Paragraph(f"<font size='11' color='#37654f'>Service:</font>   {escape(service_name)}", service_style), 3),
         (_paragraph("   ·   ".join(identification), note), 5),
     ]
-    header = [(item, item.wrap(doc.width - 12, size[1])[1], gap) for item, gap in top]
-    doc.topMargin = 12*mm + sum(height + gap for _, height, gap in header)
+    header = [(item, item.wrap(doc.width, size[1])[1], gap) for item, gap in top]
+    header_top = size[1] - 6*mm
+    body_top = header_top - sum(height + gap for _, height, gap in header) - 4*mm
     if sheet["archiviert"] or order["angebotsphase"]:
         section("Status", "Archiviert" if sheet["archiviert"] else "Angebotsphase")
     dates = []
@@ -165,7 +189,7 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
         story.append(_paragraph("Positionen aus der beigefügten Auftragsunterlage übernehmen." if printed
                                 else "Arbeitsumfang vor Beginn klären und hier eintragen.", note))
         rows = [{"text": "_" * 56, "new_part": False} for _ in range(2)]
-    story.append(_boxes(rows, doc.width - 12, value))
+    story.append(_boxes(rows, doc.width, value))
     if tyre and tyre["service_items"] and sheet["arbeit"] and not all(
             item.casefold() in tyre["service"].casefold() for item in sheet["arbeit"].splitlines()):
         section("Angaben zum Auftrag", sheet["arbeit"], note)
@@ -173,39 +197,37 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
         section("Beigefügte Auftragsunterlagen", "\n".join(printed), note)
     if omitted:
         section("Fehlende Druckseiten · Original im Auftrag prüfen", "\n".join(omitted), note)
-    story.append(_paragraph("Abschluss und Rückgabe ans Büro", label))
-    story.append(_boxes([{"text": "Auftrag erledigt   ·   Datum __________________   ·   Kürzel __________________",
-                          "new_part": False}], doc.width - 12, value))
 
     def chrome(canvas, document):
         width, height = size
-        y = height - 8*mm
+        left, right = doc.leftMargin, width - doc.rightMargin
+        y = header_top
         for item, item_height, gap in header:
             y -= item_height
-            item.drawOn(canvas, doc.leftMargin + 6, y)
+            item.drawOn(canvas, left, y)
             y -= gap
         canvas.setStrokeColor(green)
-        canvas.line(doc.leftMargin + 6, y, width-doc.rightMargin - 6, y)
+        canvas.setFillColor(ink)
+        canvas.line(left, y, right, y)
         canvas.setFont("Helvetica", 8)
-        footer_y = cut + 4*mm if document.page == 1 else 9*mm
-        canvas.drawRightString(width-14*mm, footer_y, f"Gärtner Karosserie & Lack   ·   Auftrag {sheet['nummer']}   ·   Blatt {document.page}")
+        canvas.drawRightString(right, 6*mm, f"Gärtner Karosserie & Lack   ·   Auftrag {sheet['nummer']}   ·   Blatt {document.page}")
         if document.page == 1:
-            canvas.setLineWidth(0.8)
-            canvas.setDash(4, 3)
-            canvas.line(14*mm, cut, width-7*mm, cut)
-            canvas.setDash()
-            for dy in (-3, 3):
-                canvas.circle(8*mm, cut+dy, 2.2)
-                canvas.line(8*mm+2, cut+dy, 13*mm, cut-dy)
-            tag = f"Auftrag {sheet['nummer']}"
-            font = "Helvetica-Bold"
-            pts = min(54, (width - 28*mm) / canvas.stringWidth(tag, font, 1))
-            asc, desc = getAscentDescent(font, pts)
-            canvas.setFont(font, pts)
-            canvas.drawCentredString(width / 2, (cut - asc - desc) / 2, tag)
+            # A fixed sign-off cannot spill onto a sheet of its own.
+            baseline = 15*mm
+            canvas.rect(left, baseline - 1, 11, 11)
+            canvas.setFont("Helvetica-Bold", 11)
+            canvas.drawString(left + 17, baseline, "Auftrag erledigt")
+            canvas.setFont("Helvetica", 11)
+            canvas.drawString(left + 38*mm, baseline, "·  Rückgabe ans Büro")
+            for caption, offset in (("Datum", 112*mm), ("Kürzel", 170*mm)):
+                x = left + offset
+                canvas.drawString(x, baseline, caption)
+                canvas.line(x + 15*mm, baseline - 1, x + 46*mm, baseline - 1)
+            _draw_tearoff(canvas, width, height, sheet["nummer"])
 
-    for name, bottom in (("Auftragsblatt", cut + 9*mm), ("Fortsetzung", 17*mm)):
-        frame = Frame(doc.leftMargin, bottom, doc.width, size[1] - doc.topMargin - bottom, id=name)
+    for name, bottom in (("Auftragsblatt", 23*mm), ("Fortsetzung", 13*mm)):
+        frame = Frame(doc.leftMargin, bottom, doc.width, body_top - bottom, id=name,
+                      leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0)
         doc.addPageTemplates(PageTemplate(id=name, frames=[frame], onPage=chrome,
                                           autoNextPageTemplate="Fortsetzung"))
     doc.build(story)
