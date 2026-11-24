@@ -94,6 +94,7 @@ class ActualIntakeChecks(unittest.TestCase):
             'PORTAL_BASE_URL':'https://portal.example.test','CSRF_FIELD_NAME':'_csrf_token',
             'progress_csrf_exempt':lambda _:False,'csrf_recovery_response':lambda:None,
             'clean_text':lambda x:str(x or '').strip(),'render_website_anfrage':render,'public_form_rate_limit_status':self.rate,
+            'website_mietwagen_flotte':lambda: {},
             'record_public_form_attempt':self.attempts,'login_wait_label':lambda n:str(n),
             'WEBSITE_ANLIEGEN':{'allgemein':'Allgemeine Beratung'},'WEBSITE_KURZANFRAGEN':{},
             'WEBSITE_BESICHTIGUNGSARTEN':{'werkstatt':'Werkstatt'},'WEBSITE_MIETWAGEN_FLOTTE':{},'HOMEPAGE_LEISTUNGEN':{},
