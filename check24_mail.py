@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 
 MAX_MAIL_BYTES = 5 * 1024 * 1024
-PARSER_VERSION = 3
+PARSER_VERSION = 4
 BERLIN = ZoneInfo("Europe/Berlin")
 MONTHS = {name: index for index, name in enumerate((
     "januar", "februar", "märz", "april", "mai", "juni", "juli", "august",
@@ -273,8 +273,13 @@ def parse_check24_mail(raw_bytes):
         errors.append("Kundenname fehlt oder ist nicht eindeutig.")
     if not (result["customer_phone"] or result["customer_email"]):
         errors.append("Telefonnummer oder E-Mail des Kunden fehlt.")
-    services = re.findall(r"(?im)^Reifenmontage\s+für\s+\d{1,2}\s+Reifen\s*$", text)
-    result["service"] = _one(services, "Gebuchte Leistung", errors)
+    booked_services = _section(text, r"Gebuchte Leistungen", r"Gesamtpreis|Bestellnummer")
+    services = re.findall(
+        r"(?im)^Reifenmontage\s+für\s+\d{1,2}\s+Reifen(?:\s+\([1-9][0-9]\s+Zoll\))?[ \t]*$",
+        booked_services)
+    # An unsupported second mounting position must not disappear behind a known one.
+    if len(services) == len(re.findall(r"(?im)^Reifenmontage\b", booked_services)):
+        result["service"] = _one(services, "Gebuchte Leistung", errors)
     if not result["service"]:
         errors.append("Gebuchte Reifenmontage konnte nicht eindeutig erkannt werden.")
     result["tires"] = list(dict.fromkeys(re.findall(r"(?im)^\d{1,2}\s*[x×]\s*[^\n]+", text)))

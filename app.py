@@ -54716,7 +54716,7 @@ def check24_rechnungsbasis(auftrag):
         return None
     intake = auftrag.get('schaden_aufnahme') or json.loads(auftrag.get('schaden_aufnahme_json') or '{}')
     return {'bestellnummer':intake.get('check24_bestellnummer'),
-            'leistung':next((line for line in (auftrag.get('beschreibung') or '').splitlines() if line.startswith('Reifenmontage')), 'Reifenservice gemäß CHECK24-Buchung'),
+            'leistung':intake.get('check24_leistung') or next((line for line in (auftrag.get('beschreibung') or '').splitlines() if line.startswith('Reifenmontage')), 'Reifenservice gemäß CHECK24-Buchung'),
             'brutto':intake.get('check24_preis_brutto')}
 
 
@@ -54744,13 +54744,21 @@ def reifen_rechnungsentwurf(auftrag):
     }
     if not isinstance(kunde,dict):
         raise ValueError("Die gespeicherte Rechnungsadresse ist ungültig.")
+    selection = kalkulation or vorschlag or {}
+    if basis and kalkulation and not kalkulation.get('check24_buchung'):
+        # Existing manual snapshot already covers the full provider gross price.
+        # Only new extras explicitly selected after linking may be added.
+        selection = {}
+    revision_source = raw
+    if basis:
+        revision_source += '\0' + json.dumps(basis, sort_keys=True)
     return {
         "kalkulation":kalkulation, "kunde":kunde,
         "leistungsdatum":data.get("leistungsdatum") or (parse_date(auftrag.get("fertig_datum")) or date.today()).isoformat(),
         "check24_basis":basis, "check24_vorschlag":vorschlag,
-        "auswahl":{p["preis_id"]:p["menge"] for p in (kalkulation or vorschlag or {}).get("positionen",[]) if p["preis_id"] not in ("lose_raeder", "check24_buchung")},
+        "auswahl":{p["preis_id"]:p["menge"] for p in selection.get("positionen",[]) if p["preis_id"] not in ("lose_raeder", "check24_buchung")},
         "lose_raeder":bool((kalkulation or {}).get("lose_raeder")),
-        "revision":hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        "revision":hashlib.sha256(revision_source.encode("utf-8")).hexdigest(),
     }
 
 
@@ -54804,6 +54812,8 @@ def reifen_rechnung(auftrag_id):
                     raise ValueError("Die Auftragsart wurde inzwischen geändert. Bitte den Auftrag neu öffnen.")
                 if frisch["archiviert"] or reifen_rechnung_gesperrt(dict(frisch)):
                     raise ValueError("Die Rechnung wurde inzwischen gesperrt. Bitte den Auftrag neu öffnen.")
+                if check24_rechnungsbasis(dict(frisch)) != entwurf.get('check24_basis'):
+                    raise ValueError("Die CHECK24-Preisbasis wurde inzwischen geändert. Bitte den Auftrag neu öffnen.")
                 changed = db.execute("""UPDATE auftraege SET reifen_rechnung_json=?, geaendert_am=?
                     WHERE id=? AND COALESCE(reifen_rechnung_json,'{}')=?
                     AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')=''
