@@ -302,7 +302,7 @@
         <div class="success" role="status">
           <div class="success-mark" aria-hidden="true">✓</div>
           <h2>{% if ist_probeauftrag %}Ihre Anfrage ist angekommen.{% elif reifenangebot_gesendet %}Ihre Reifenanfrage ist angekommen.{% elif bremsen_gesendet %}Ihre Bremsenanfrage ist angekommen.{% elif reifen_gesendet %}Ihre Reifenbuchung ist eingegangen.{% else %}Ihre Anfrage ist angekommen.{% endif %}</h2>
-          <p>{% if ist_probeauftrag %}Vielen Dank. Wir melden uns bei Ihrer Ansprechperson, um Umfang, Preis und Termin gemeinsam zu klären.{% elif reifenangebot_gesendet %}Vielen Dank. Sie erhalten Ihr persönliches Reifenangebot innerhalb von 24 Stunden per E-Mail. Falls Angaben fehlen, melden wir uns bei Ihnen. Ihre Anfrage ist unverbindlich. Einen Montagetermin vereinbaren wir bei Bedarf im Anschluss.{% elif bremsen_gesendet %}Vielen Dank. Wir prüfen anhand Ihrer FIN die passenden Teile und melden uns persönlich, um Arbeiten, Preise und Termin abzustimmen. Das Absenden reserviert keinen Termin.{% elif reifen_gesendet %}Ihr Termin ist reserviert: <strong>{{ gebuchter_reifentermin }}</strong>. Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten. Wir reservieren einen Stundenblock mit Planungspuffer. Bei Rückfragen zu den Arbeiten oder zur Einlagerung melden wir uns persönlich. Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.{% else %}Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.{% endif %}</p>
+          <p>{% if ist_probeauftrag %}Vielen Dank. Wir melden uns bei Ihrer Ansprechperson, um Umfang, Preis und Termin gemeinsam zu klären.{% elif reifenangebot_gesendet %}Vielen Dank. Sie erhalten Ihr persönliches Reifenangebot innerhalb von 24 Stunden per E-Mail. Falls Angaben fehlen, melden wir uns bei Ihnen. Ihre Anfrage ist unverbindlich. Einen Montagetermin vereinbaren wir bei Bedarf im Anschluss.{% elif bremsen_gesendet %}Vielen Dank. Wir prüfen anhand Ihrer FIN die passenden Teile und melden uns persönlich, um Arbeiten, Preise und Termin abzustimmen. Das Absenden reserviert keinen Termin.{% elif reifen_gesendet %}Ihr Termin ist reserviert: <strong>{{ gebuchter_reifentermin }}</strong>. Voraussichtliche Arbeits- und Wartezeit: ca. 30–45 Minuten. Wir reservieren einen Stundenblock mit Planungspuffer. {% if gebuchter_radwechsel_cent is number %}{% from "_reifenpreis_betrag.html" import money %}Gesamtpreis für die gewählten Leistungen an vier Rädern inklusive MwSt. <strong>{{ money(gebuchter_radwechsel_cent) }}</strong>.{% else %}Bei Rückfragen zu den Arbeiten oder zur Einlagerung melden wir uns persönlich. Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.{% endif %}{% else %}Vielen Dank. Wir sehen uns Ihre Angaben an und melden uns persönlich. Das Absenden ist noch keine Termin-, Preis- oder Auftragsbestätigung.{% endif %}</p>
           {% if ist_probeauftrag and kundenlink %}<p><a href="{{ kundenlink }}">Meine Anfrage und Angebote öffnen</a></p>{% endif %}
           <div class="success-actions"><a class="primary" href="{{ werkstatt_oeffentlich.telefon_url }}">{{ werkstatt_oeffentlich.telefon }}</a><a href="{{ url_for('oeffentliche_homepage') }}">Zur Homepage</a></div>
         </div>
@@ -553,6 +553,32 @@
       const hinweis = document.getElementById('reifen-slot-hinweis');
       if (!datum || !zeit || !hinweis) return;
       const leistungen = [...document.querySelectorAll('.tire-booking-form [name="reifen_leistung"]')];
+      const groesse = document.getElementById('radwechsel-groesse');
+      const summe = document.querySelector('[data-radwechsel-preise]');
+      const preise = JSON.parse(summe.dataset.radwechselPreise);
+      const euro = new Intl.NumberFormat('de-DE', {style: 'currency', currency: 'EUR'});
+      function zeigeRadwechselpreis() {
+        const auswahl = leistungen.filter(feld => feld.checked && feld.value).map(feld => feld.value).sort();
+        const radwechsel = auswahl.includes('radwechsel');
+        groesse.disabled = !radwechsel;
+        if (!radwechsel) {
+          summe.textContent = '';
+          return;
+        }
+        const leistung = auswahl.join('+');
+        const cent = preise[groesse.value]?.[leistung];
+        if (Number.isInteger(cent)) {
+          summe.textContent = 'Gesamt für vier Räder inkl. MwSt. ' + euro.format(cent / 100);
+        } else if (!groesse.value && Number.isInteger(preise.bis17[leistung])) {
+          summe.textContent = 'Vier Räder am Standard-Pkw inkl. MwSt. · bis 17 Zoll '
+            + euro.format(preise.bis17[leistung] / 100) + ' · 18–20 Zoll ' + euro.format(preise['18_20'][leistung] / 100);
+        } else {
+          summe.textContent = 'Den Preis für diese Auswahl vereinbaren wir persönlich.';
+        }
+      }
+      leistungen.forEach(feld => feld.addEventListener('change', zeigeRadwechselpreis));
+      groesse.addEventListener('change', zeigeRadwechselpreis);
+      zeigeRadwechselpreis();
       const pruefeLeistung = () => leistungen[0].setCustomValidity(
         leistungen.some(feld => feld.checked && feld.value) ? '' : 'Bitte wählen Sie mindestens eine Leistung.'
       );

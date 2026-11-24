@@ -706,7 +706,7 @@
     }, 'shop-detail-link');
     results.setAttribute('aria-live', 'polite'); panel.append(alternatives, results);
   }
-  function appendTyreDocuments(node, product) {
+  function appendTyreDocuments(node, product, comparison = false) {
     if (product.category !== 'tyre') return;
     const docs = product.product_documents || {}, label = docs.tyre_label_url, sheet = docs.tyre_sheet_url;
     const labelValid = safeMedia(label) && /\.(jpg|png)$/i.test(label), sheetValid = safeMedia(sheet, true);
@@ -719,7 +719,12 @@
         const original = el('a', 'Originales EU-Reifenlabel in voller Größe öffnen ↗'); original.href = label; original.target = '_blank'; original.rel = 'noopener';
         dialog.setAttribute('aria-label', 'EU-Reifenlabel'); dialog.append(close, el('h2', 'EU-Reifenlabel'), image, original); dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
       }, 'shop-tyre-label');
-      open.setAttribute('aria-label', 'EU-Reifenlabel für ' + product.name + ' vergrößert ansehen'); const image = el('img'); image.alt = 'EU-Reifenlabel'; image.loading = 'lazy'; setImageSource(image, label); open.append(image); box.append(open);
+      open.setAttribute('aria-label', 'EU-Reifenlabel für ' + product.name + ' vergrößert ansehen'); const image = el('img'); image.alt = 'EU-Reifenlabel'; image.loading = 'lazy'; setImageSource(image, label); open.append(image);
+      if (comparison) {
+        showComparisonImageWhenReady(image);
+        open.append(el('span', 'EU-Reifenlabel ansehen'));
+      }
+      box.append(open);
     }
     const links = el('div');
     if (sheetValid) { const link = el('a', 'Produktdatenblatt (PDF) ↗'); link.href = sheet; link.target = '_blank'; link.rel = 'noopener'; links.append(link); }
@@ -871,6 +876,7 @@
     else { notice('Maximal 40 Positionen möglich. Bitte die Auswahl im Warenkorb prüfen.'); return; }
     saveCart(); notice(product.name + (inquiryOnly(product) ? ' ist zur lokalen Anfrage hinzugefügt.' : ' ist im Warenkorb.'));
     if (body.dataset.page === 'warenkorb') renderCart();
+    return true;
   }
   function card(product, active, vehicle = {}) {
     const family = ['alloy_wheel', 'steel_wheel'].includes(product.category) && Number.isSafeInteger(product.family?.variant_count) && product.family.variant_count > 1;
@@ -921,6 +927,118 @@
     return {node, price, product, updateMounting};
   }
   let page = 1, sequence = 0, filters = {}, vehicleFilters = {}, pageTimer = null, pendingPageRefresh = null;
+  const setComparison = byId('tyre-set-comparison');
+  const setMounting = byId('tyre-set-mounting');
+  const tyreSeasons = {summer: 'Sommerreifen', winter: 'Winterreifen', allseason: 'Ganzjahresreifen'};
+  const setCriteria = {lowest_price: 'Günstigster Satz', best_wet_grip: 'Beste Nasshaftung', best_adac_grade: 'Beste ADAC-Testnote'};
+  let comparisonRun = 0;
+
+  function showComparisonImageWhenReady(image) {
+    if (image.tagName !== 'IMG') return;
+    const show = () => { image.hidden = !image.naturalWidth; };
+    image.addEventListener('load', show);
+    image.addEventListener('error', show);
+    show();
+    // A hidden lazy image might otherwise never start loading.
+    image.loading = 'eager';
+  }
+  function comparisonQuery() {
+    if (!setComparison || !vehicleFilters || page !== 1 || !Object.hasOwn(tyreSeasons, filters.season) ||
+        ['q', 'brand', 'wheel_make', 'wheel_vehicle'].some(key => filters[key]) || Object.keys(vehicleFilters).length) return null;
+    const params = new URLSearchParams({season: filters.season});
+    for (const [field, min, max] of [['width', 100, 455], ['ratio', 10, 100], ['diameter', 8, 30]]) {
+      const raw = filters[field] || '';
+      if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) return null;
+      params.set(field, String(Number(raw)));
+    }
+    if (mountingEntry.checked) params.set('montage', '1');
+    return params;
+  }
+  function tyreSetCard(offer, mounted, active) {
+    const product = offer?.product, price = currentPrice(product, 4);
+    const criteria = Array.isArray(offer?.criteria) ? offer.criteria.filter(key => Object.hasOwn(setCriteria, key)) : [];
+    const mountedTotal = offer?.mounted_total_gross_cent;
+    const mountedPrice = Number.isSafeInteger(mountedTotal) && mountedTotal >= offer?.goods_gross_cent;
+    const reported = Date.parse(offer?.stock_observed_at);
+    const stockInWindow = () => Number.isFinite(reported) && reported <= Date.now() && Date.now() - reported <= 86400000;
+    if (!validProduct(product) || product.category !== 'tyre' || product.purchase_status !== 'supplier_check_required' ||
+        !price || price.stock < 4 || !stockInWindow() || offer.goods_gross_cent !== price.total || !criteria.length ||
+        (mounted && !mountedPrice) || offer.total_gross_cent !== (mounted ? mountedTotal : price.total)) return null;
+
+    const card = el('article', null, 'tyre-set-card');
+    card.append(el('p', criteria.map(key => setCriteria[key]).join(' · '), 'tyre-set-criteria'));
+    const identity = el('div', null, 'tyre-set-identity');
+    const title = el('div');
+    title.append(el('h4', product.name), el('p', product.size, 'shop-muted'));
+    if (!/R\s*\d{2}\s+\d{2,3}(?:\/\d{2,3})?\s*[A-Z](?:\b|$)/i.test(product.size)) {
+      const geometry = product.geometry || {};
+      title.append(el('small', 'Lastindex ' + (geometry.load_index || 'offen') + ' · Geschwindigkeitsindex ' + (geometry.speed_index || 'offen')));
+    }
+    const photo = productImage(product, '');
+    showComparisonImageWhenReady(photo);
+    identity.append(photo, title);
+    card.append(identity);
+    appendTyreRating(card, product);
+    const prices = el('dl', null, 'tyre-set-prices');
+    for (const [label, amount, selected] of [['4 Reifen', money(price.total), !mounted],
+        ['Mit Montage in Mosbach', mountedPrice ? money(mountedTotal) : 'Gesamtpreis offen', mounted]]) {
+      const row = el('div', null, selected ? 'is-selected' : '');
+      row.append(el('dt', label), el('dd', amount)); prices.append(row);
+    }
+    const stamp = new Intl.DateTimeFormat('de-DE', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'Europe/Berlin'}).format(reported);
+    card.append(prices, el('small', 'Mindestens 4 laut Bestandsmeldung vom ' + stamp + ' Uhr.', 'shop-muted'));
+    const choose = button('Diesen Satz wählen', () => {
+      if (!active()) return;
+      if (!currentPrice(product, 4) || !stockInWindow()) { notice('Preis und Bestand werden neu geprüft. Bitte wählen Sie den Satz danach erneut.'); loadSetComparison(); return; }
+      const services = mounted ? {mounting: true} : {};
+      const matching = cart.filter(row => row.id === product.id);
+      const different = matching.some(row => row.assembly_group || row.selection_pair || JSON.stringify(row.services) !== JSON.stringify(services));
+      if (different) {
+        notice('Dieser Reifen liegt bereits mit anderer Auswahl im Warenkorb. Bitte prüfen Sie dort Menge und Montage.');
+        return;
+      }
+      const remaining = 4 - matching.reduce((sum, row) => sum + row.quantity, 0);
+      if (remaining > 0 && !addToCart(product, remaining, services)) return;
+      choose.disabled = true;
+      choose.textContent = '4 Reifen im Warenkorb';
+    });
+    choose.setAttribute('aria-label', 'Diesen Satz wählen: 4 × ' + product.name + (mounted ? ' mit Montage' : ' ohne Montage'));
+    const checkout = document.querySelector('a.shop-cart-link');
+    const actions = el('div', null, 'tyre-set-actions');
+    actions.append(choose);
+    if (checkout) { const link = el('a', 'Zum Warenkorb'); link.href = checkout.href; actions.append(link); }
+    card.append(actions);
+    appendTyreDocuments(card, product, true);
+    return card;
+  }
+  async function loadSetComparison() {
+    if (!setComparison) return;
+    const generation = ++comparisonRun, catalogueRun = sequence;
+    const params = comparisonQuery(), cards = byId('tyre-set-cards'), note = byId('tyre-set-note');
+    const active = () => generation === comparisonRun && catalogueRun === sequence;
+    cards.replaceChildren();
+    setComparison.hidden = !params;
+    if (!params) return;
+    const mounted = params.has('montage');
+    setMounting.checked = mounted;
+    byId('tyre-set-scope').textContent = tyreSeasons[filters.season] + ' · ' + filters.width + '/' + filters.ratio + ' R' + filters.diameter;
+    note.textContent = 'Passende Reifensätze werden verglichen …';
+    try {
+      const result = await requestJSON('/tyre-set-comparison?' + params);
+      if (!active()) return;
+      if (result.quantity !== 4 || result.mounting !== mounted || !Array.isArray(result.items) || result.items.length > 3) throw new Error('invalid_comparison');
+      const shown = new Set();
+      for (const offer of result.items) {
+        if (shown.has(offer?.product?.id)) continue;
+        const card = tyreSetCard(offer, mounted, active);
+        if (card) { shown.add(offer.product.id); cards.append(card); }
+      }
+      note.textContent = shown.size ? 'Preise inkl. MwSt. Standardmontage inklusive Lieferung zur Werkstatt. Versand zu Ihnen und Zusatzleistungen im Warenkorb. Bitte Last- und Geschwindigkeitsindex mit den Fahrzeugpapieren abgleichen. Bestand wird vor Zahlung geprüft.'
+        : 'Für diese Auswahl liegt derzeit kein passendes Viererangebot vor.';
+    } catch (_) {
+      if (active()) note.textContent = 'Der Satzvergleich ist gerade nicht verfügbar. Die einzelnen Reifenangebote finden Sie unten.';
+    }
+  }
   function updateWheelPicker(result, context) {
     const select = byId('wheel-vehicle');
     if (!select) return;
@@ -941,7 +1059,20 @@
     byId('wheel-vehicle-field').hidden = select.disabled;
   }
   const visibleCards = new Map();
-  mountingEntry?.addEventListener('change', () => visibleCards.forEach(card => card.updateMounting()));
+  mountingEntry?.addEventListener('change', () => {
+    visibleCards.forEach(card => card.updateMounting());
+    if (setComparison) {
+      const url = new URL(root.location.href);
+      if (mountingEntry.checked) url.searchParams.set('montage', '1');
+      else url.searchParams.delete('montage');
+      root.history.replaceState(root.history.state, '', url);
+      loadSetComparison();
+    }
+  });
+  setMounting?.addEventListener('change', () => {
+    mountingEntry.checked = setMounting.checked;
+    mountingEntry.dispatchEvent(new Event('change', {bubbles: true}));
+  });
   function pendingPagePrices() {
     return [...visibleCards.values()].some(({price}) => {
       const state = priceNodes.get(price);
@@ -978,6 +1109,7 @@
   }
   async function loadPage() {
     const run = ++sequence, status = byId('catalog-status'), grid = byId('catalog-products');
+    loadSetComparison();
     const modelPicker = byId('parts-model-refinement');
     const wheelMakeOptions = byId('wheel-make-options'), wheelInquiry = byId('wheel-make-inquiry');
     if (wheelInquiry) wheelInquiry.hidden = true;
@@ -1082,8 +1214,9 @@
       filters = Object.fromEntries(new FormData(form));
       page = 1;
       loadPage();
-      if (event.submitter?.id === 'tyre-finder-submit') {
-        // Match the native GET on explicit submit while retaining campaign parameters.
+      const finderSubmit = event.submitter?.id === 'tyre-finder-submit';
+      if (finderSubmit || comparisonQuery()) {
+        // Keep filtered results shareable while retaining campaign parameters.
         const url = new URL(root.location.href);
         for (const {name} of form.elements) {
           if (!name) continue;
@@ -1091,8 +1224,10 @@
           else url.searchParams.delete(name);
         }
         url.searchParams.delete('artikel');
-        url.hash = 'sortiment';
+        if (finderSubmit) url.hash = 'sortiment';
         root.history.replaceState(root.history.state, '', url);
+      }
+      if (finderSubmit) {
         byId('results-heading').focus({preventScroll: true});
         byId('sortiment').scrollIntoView({block: 'start'});
       }
@@ -1100,6 +1235,7 @@
     const queueSearch = event => {
       root.clearTimeout(makeTimer);
       ++sequence;
+      if (setComparison) setComparison.hidden = true;
       byId('catalog-products').replaceChildren();
       byId('catalog-status').textContent = 'Auswahl wird gesucht …';
       byId('previous-page').disabled = true; byId('next-page').disabled = true;

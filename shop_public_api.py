@@ -111,6 +111,25 @@ def create_shop_public_blueprint(*, catalogue=None, quote_service=None, authoriz
         except Exception:
             return reply({'error': 'catalogue_unavailable'}, 503)
 
+    @bp.get('/tyre-set-comparison')
+    def tyre_set_comparison():
+        if not catalogue_enabled():
+            return reply({'error': 'not_found'}, 404)
+        params = request.args
+        required = {'width', 'ratio', 'diameter', 'season'}
+        if (not required <= params.keys() or set(params) - required - {'montage'}
+                or any(len(values) != 1 for _, values in params.lists())
+                or 'montage' in params and params['montage'] != '1'):
+            return reply({'error': 'invalid_query'}, 400)
+        try:
+            result = catalogue.tyre_set_comparison(width=params['width'], ratio=params['ratio'],
+                diameter=params['diameter'], season=params['season'], mounting='montage' in params)
+            return reply(result)
+        except ValueError:
+            return reply({'error': 'invalid_query'}, 400)
+        except Exception:
+            return reply({'error': 'catalogue_unavailable'}, 503)
+
     @bp.get('/products')
     def products():
         if not catalogue_enabled():

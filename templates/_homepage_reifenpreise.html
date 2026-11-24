@@ -1,4 +1,4 @@
-{% macro money(cents) -%}{{ cents // 100 }}{% if cents % 100 %},{{ '%02d'|format(cents % 100) }}{% endif %} €{%- endmacro %}
+{% from '_reifenpreis_betrag.html' import money %}
 {% macro price(cents) -%}<span class="tire-price-value" data-gross-cents="{{ cents }}"><strong>{{ money(cents) }}</strong></span>{%- endmacro %}
 <dialog class="tire-pricing" id="reifenpreise" aria-labelledby="tire-pricing-title">
   <div class="tire-price-dialog-head"><div><span class="eyebrow">Reifenservice &amp; Einlagerung</span><h2 id="tire-pricing-title">Unsere Preise.</h2></div><button class="tire-price-close" type="button" data-tire-price-close aria-label="Preisliste schließen" autofocus>×</button></div>

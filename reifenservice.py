@@ -76,6 +76,26 @@ _PREISE = (
 _PREIS_NACH_ID = {preis.id: preis for preis in _PREISE}
 _LOSE_RAEDER = _Preis("lose_raeder", "Nachlass bei angelieferten losen Rädern", -500, "Rad", "nachlass", "5 EUR weniger je montiertem Rad.")
 
+# Die Schlüssel entsprechen der sortierten Auswahl im öffentlichen Terminformular.
+RADWECHSEL_GROESSEN = {
+    "bis17": "Standard-Pkw bis 17 Zoll",
+    "18_20": "Standard-Pkw von 18 bis 20 Zoll",
+    "individuell": "Ab 21 Zoll oder besonderer Aufwand",
+}
+RADWECHSEL_TERMINPREISE = {
+    groesse: {
+        auswahl: _PREIS_NACH_ID[f"{tarif}_{groesse}"].brutto_cent
+        for auswahl, tarif in {
+            "radwechsel": "radwechsel",
+            "radwechsel+wuchten": "radwechsel_wuchten",
+            "einlagerung+radwechsel": "saison_radwechsel",
+            "einlagerung+radwechsel+wuchten": "saison_wuchten",
+        }.items()
+    }
+    for groesse in ("bis17", "18_20")
+}
+EINLAGERUNG_BRUTTO_CENT = _PREIS_NACH_ID["einlagerung"].brutto_cent
+
 
 def reifen_preiskatalog():
     """JSON-safe copies of the selectable gross prices, never shared state."""

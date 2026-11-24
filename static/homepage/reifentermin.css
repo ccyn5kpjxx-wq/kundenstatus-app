@@ -59,6 +59,13 @@
 .tire-booking-form .choice input { flex: none; accent-color: var(--red-dark); }
 .booking-service-copy strong, .booking-service-copy small { display: block; }
 .booking-service-copy small { color: var(--muted); font-weight: normal; }
+.booking-storage .storage-individuell,
+.tire-booking-form:is(:has(input[value="montage"]:checked), :has(input[value="radwechsel"]:checked):has(option[value="individuell"]:checked)) .storage-standard { display: none; }
+.tire-booking-form:is(:has(input[value="montage"]:checked), :has(input[value="radwechsel"]:checked):has(option[value="individuell"]:checked)) .storage-individuell { display: block; }
+.tire-booking-form .booking-storage { margin-top: 9px; }
+.booking-wheel-size, .booking-wheel-fallback { margin-top: 11px; }
+.tire-booking-form:not(:has(input[value="radwechsel"]:checked)) :is(.booking-wheel-size, .booking-wheel-fallback) { display: none; }
+.booking-wheel-total:not(:empty) { display: block; clear: both; margin-top: 6px; padding: 10px 0; border-top: 1px solid var(--line); font-weight: 650; }
 .tire-booking-form summary { width: fit-content; padding: 11px 0; font-weight: 650; cursor: pointer; }
 .booking-more-services { display: inline-block; max-width: 100%; }
 .booking-more-services[open] { display: block; }

@@ -6,6 +6,7 @@ the original released image, and are never guessed from a similar design.
 """
 from collections.abc import Mapping
 from copy import deepcopy
+from datetime import timedelta
 import math
 import re
 import unicodedata
@@ -460,6 +461,61 @@ class EnrichedPublicCatalog(PublicCatalog):
         if product_id in self._procurement_ids and callable(self._tyre_pickup_freight):
             return self._tyre_pickup_freight(product_id, quantity)
         return None
+
+    def tyre_set_comparison(self, *, width, ratio, diameter, season, mounting=False):
+        """Compare four identical tyres across the whole released dimension and season."""
+        if (None in (width, ratio, diameter) or season not in ('summer', 'winter', 'allseason')
+                or type(mounting) is not bool):
+            raise CatalogError('invalid_set_options')
+        entries, now = self._page_entries(department='tyres', width=width, ratio=ratio, diameter=diameter, season=season)
+        wanted_size = f'{width}/{ratio} R{diameter}'
+        service = tyre_service_gross_cent('mounting', int(diameter), 4, {})
+        offers = []
+        for entry in entries:
+            if self._offer_rank(entry, now) != 0 or consistent_tyre_size(entry['public']) != wanted_size:
+                continue
+            product = self._project(entry, now, detail=False)
+            tier = published_wheel_tier(product, 4, now)
+            if tier is None or now >= _stamp(product['price']['review_at']):
+                continue
+            price = product['price']
+            if now - _stamp(price['stock_observed_at']) >= timedelta(days=1):
+                continue
+            goods = tier['items_gross_cent']
+            pickup = self.tyre_collection_freight(product['id'], 4)
+            if type(pickup) is not int or pickup < 0:
+                # Without a current supplier freight class the order cannot be priced.
+                continue
+            mounted = goods + service + pickup if service is not None else None
+            if mounting and mounted is None:
+                continue
+            product['pickup_freight'] = {'quantity': 4, 'gross_cent': pickup}
+            offers.append({'product': product, 'criteria': [], 'goods_gross_cent': goods,
+                           'stock_observed_at': price['stock_observed_at'], 'stock_current': price['stock_current'],
+                           'mounting_gross_cent': service if mounting else 0, 'freight_gross_cent': pickup if mounting else None,
+                           'total_gross_cent': mounted if mounting else goods, 'mounted_total_gross_cent': mounted})
+
+        # A deterministic inexpensive tie-breaker also applies when several tyres
+        # have the same best EU class or ADAC grade. Never badge a runner-up.
+        offers.sort(key=lambda o: (o['total_gross_cent'], o['product']['name'], o['product']['id']))
+        winners = []
+        if offers:
+            cheapest = offers[0]
+            cheapest['criteria'].append('lowest_price')
+            winners.append(cheapest)
+        graded = [(o['product'].get('quality_facts', {}).get('wet_grip'), o) for o in offers]
+        ratings = [(o['product']['test_rating']['grade'], o) for o in offers
+                   if o['product'].get('test_rating', {}).get('source') == 'ADAC']
+        for criterion, scores in [('best_wet_grip', [(g, o) for g, o in graded if g in ('A', 'B', 'C', 'D', 'E')]),
+                                  ('best_adac_grade', ratings)]:
+            if scores:
+                best = min(score for score, _ in scores)
+                tied = [offer for score, offer in scores if score == best]
+                winner = next((offer for offer in tied if not offer['criteria']), tied[0])
+                if not winner['criteria']:
+                    winners.append(winner)
+                winner['criteria'].append(criterion)
+        return {'quantity': 4, 'mounting': mounting, 'eligible_count': len(offers), 'items': winners}
 
     def _wheel_selection(self, filters, *, query='', department=None):
         options = {key: filters.pop(key) for key in ('wheel_make', 'wheel_vehicle', 'wheel_query') if key in filters}

@@ -16,7 +16,7 @@
   {% set storefront = page_key not in ['felgenstudio', 'order_status'] %}
   {% if storefront %}<link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/storefront.css') }}">{% endif %}
   {% if page_key == 'reifen' %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/tyre-finder.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/tyre-finder.css', v='20261124-satzvergleich') }}">
   <script src="{{ url_for('static', filename='shop_v2/tyre-finder.js') }}" defer></script>
   {% endif %}
   {% if hero == 'felgen.webp' %}
@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='shop_v2/wheel-hero.css') }}">
   {% endif %}
   {% if page_key in ['warenkorb', 'order_status'] %}<script src="{{ url_for('static', filename='shop_v2/appointment.js') }}" defer></script>{% endif %}
-  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261124-reifenfinder') }}" defer></script>
+  <script src="{{ url_for('static', filename='shop_v2/shop.js', v='20261124-satzvergleich') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/analytics.js') }}" defer></script>
   <script src="{{ url_for('static', filename='shop_v2/rim-families.js') }}" defer></script>
   {% if page_key == 'felgenstudio' %}<script src="{{ url_for('static', filename='shop_v2/studio.js', v='20261124-kundenwege') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-zoom.js') }}" defer></script><script src="{{ url_for('static', filename='shop_v2/studio-api.js') }}" defer></script>{% endif %}
@@ -113,6 +113,15 @@
   {% endif %}
   {% if department == 'wheels' %}<details class="shop-vehicle" id="vehicle-filter"><summary>Nach Fahrzeug und bestätigtem Gutachten filtern</summary><form id="vehicle-filters" class="shop-filters"><label>HSN<input name="hsn" value="{{ request.args.get('hsn', '') }}" pattern="[0-9]{4}" maxlength="4" placeholder="0588"></label><label>TSN<input name="tsn" value="{{ request.args.get('tsn', '') }}" pattern="[A-Za-z0-9]{3}" maxlength="3" placeholder="BHT"></label><span class="shop-filter-or">oder</span><label>Marke<input name="make" value="{{ request.args.get('make', '') }}" maxlength="80" placeholder="Audi"></label><label>Modell<input name="model" value="{{ request.args.get('model', '') }}" maxlength="120" placeholder="A3"></label><label>Baujahr<input name="year" value="{{ request.args.get('year', '') }}" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="2016"></label><button class="shop-button" type="submit">Fahrzeug anwenden</button><button class="shop-button shop-button-light" type="reset">Zurücksetzen</button></form><p>Nur einzeln geprüfte Zuordnungen werden angezeigt. Auflagen und die konkrete Ausführung im Gutachten beachten.</p></details>{% endif %}
   {% if department == 'wheels' or page_key == 'home' %}<p id="wheel-make-help" class="shop-muted">Wählen Sie nach der Marke Ihr Modell und die genaue Ausführung. So sehen Sie, welche Gutachten zu Ihrem Fahrzeug vorliegen.</p>{% endif %}
+  {% if department == 'tyres' %}
+  <section class="tyre-set-comparison" id="tyre-set-comparison" aria-labelledby="tyre-set-heading" hidden>
+    <div class="tyre-set-heading"><div><h3 id="tyre-set-heading">Vier Reifen im Vergleich</h3><p id="tyre-set-scope"></p></div>
+      <label class="tyre-set-mounting"><input id="tyre-set-mounting" type="checkbox"> Mit Montage in Mosbach</label>
+    </div>
+    <div class="tyre-set-grid" id="tyre-set-cards"></div>
+    <p id="tyre-set-note" class="shop-muted" role="status"></p>
+  </section>
+  {% endif %}
   <p id="catalog-status" class="shop-muted" role="status" aria-live="polite">Sortiment wird geladen …</p>
   {% if department in ['tyres', 'wheels'] or page_key == 'home' %}<a id="wheel-make-inquiry" hidden href="/anfrage?anliegen=felgenservice#kurzanfrage">Passung für mein Fahrzeug prüfen lassen</a>{% endif %}
   {% if department == 'tyres' %}<button id="tyre-size-search" type="button" class="shop-button shop-button-light" hidden>Nach Reifengröße suchen</button>{% endif %}

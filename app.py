@@ -70,6 +70,7 @@ from mos_company_identity import LEGAL_NAME as WORKSHOP_LEGAL_NAME
 import mietwagen_checkout
 import mietkalender_sperren
 from reifenservice import reifen_preiskatalog, berechne_reifenservice, berechne_check24_reifenservice, export_reifenservice_xlsx, _gepruefter_snapshot
+from reifenservice import RADWECHSEL_GROESSEN, RADWECHSEL_TERMINPREISE, EINLAGERUNG_BRUTTO_CENT
 from reifenangebote import (REIFEN_SAISONS, REIFEN_QUALITAETEN, parse_reifenangebot,
     reifenangebot_summary, reifenangebot_deadline, reifenangebot_frist, reifenangebot_mail, reifenangebot_preis)
 from reifen_suche import suche_reifenangebote, ReifenSucheEingabefehler
@@ -46886,6 +46887,7 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             reifenangebot_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenangebot"),
             reifen_gesendet=bool(gesendet and session.get("website_anfrage_art") == "reifenservice"),
             gebuchter_reifentermin=session.get("website_reifentermin", ""),
+            gebuchter_radwechsel_cent=session.get("website_radwechsel_cent") if gesendet else None,
             reifen_slots=freie_reifen_slots(clean_text(formdata.get("wunschdatum"))) if ausgewaehltes_anliegen == "reifenservice" else [],
             kundenlink=session.get("website_anfrage_kundenlink", "") if gesendet else "",
             anliegen_optionen=WEBSITE_ANLIEGEN,
@@ -46899,6 +46901,9 @@ def render_website_anfrage(formdata=None, errors=None, gesendet=False, status_co
             mechanik_auswahl=mechanik_auswahl,
             reifen_leistungen=WEBSITE_REIFEN_LEISTUNGEN,
             reifen_auswahl=reifen_auswahl,
+            radwechsel_groessen=RADWECHSEL_GROESSEN,
+            radwechsel_preise=RADWECHSEL_TERMINPREISE,
+            einlagerung_cent=EINLAGERUNG_BRUTTO_CENT,
             mietwagen_flotte=website_mietwagen_flotte(),
             fahrzeugcheck_arten=WEBSITE_FAHRZEUGCHECK_ARTEN,
             weitere_anfrage_arten=WEBSITE_WEITERE_ANFRAGE_ARTEN,
@@ -46989,6 +46994,10 @@ def website_anfrage():
             clean_text(value) for value in request.form.getlist("reifen_leistung")
             if clean_text(value)
         ))
+        radwechsel_groesse = (clean_text(request.form.get("radwechsel_groesse"))
+                              if anliegen == "reifenservice" and "radwechsel" in reifen_leistungen else "")
+        radwechsel_cent = (RADWECHSEL_TERMINPREISE.get(radwechsel_groesse, {}).get("+".join(sorted(reifen_leistungen)))
+                           if radwechsel_groesse else None)
         wunschzeit = clean_text(request.form.get("wunschzeit"))[:100] if anliegen == "reifenservice" else ""
         bremsen_achse = clean_text(request.form.get("bremsen_achse"))
         teile_qualitaet = clean_text(request.form.get("teile_qualitaet"))
@@ -47064,6 +47073,8 @@ def website_anfrage():
                 errors.append("Bitte entweder Radwechsel für montierte Räder oder Reifenmontage für lose Reifen wählen.")
             elif not reifen_leistungen:
                 errors.append("Bitte mindestens eine Reifenleistung auswählen.")
+            if radwechsel_groesse and radwechsel_groesse not in RADWECHSEL_GROESSEN:
+                errors.append("Bitte eine gültige Radgröße auswählen oder die Größe offenlassen.")
             if not wunschdatum:
                 errors.append("Bitte ein Wunschdatum für Ihren Reifentermin auswählen.")
             elif not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", wunschdatum):
@@ -47154,6 +47165,10 @@ def website_anfrage():
             beschreibungsteile.append(reifenangebot_summary(reifenangebot_daten))
         if anliegen == "reifenservice":
             beschreibungsteile.append("Reifenservice: " + ", ".join(WEBSITE_REIFEN_LEISTUNGEN[value] for value in reifen_leistungen))
+            if radwechsel_groesse:
+                beschreibungsteile.append(RADWECHSEL_GROESSEN[radwechsel_groesse])
+                if radwechsel_cent is not None:
+                    beschreibungsteile.append(f"Vier Räder inkl. MwSt. {euro_de_label(radwechsel_cent / 100)} €")
         if wunschzeit:
             beschreibungsteile.append(f"Wunschuhrzeit: {wunschzeit}")
         if kennzeichen:
@@ -47267,6 +47282,8 @@ def website_anfrage():
                     "pflege_kategorien": pflege_kategorien if anliegen == "fahrzeugpflege" else [],
                     "fahrzeugcheck_art": fahrzeugcheck_art if anliegen == "fahrzeugcheck" else "",
                     "reifen_leistungen": reifen_leistungen if anliegen == "reifenservice" else [],
+                    **({"radwechsel_groesse": radwechsel_groesse,
+                        "radwechsel_brutto_cent": radwechsel_cent} if radwechsel_groesse else {}),
                     "service_vehicle_id": service_context['vehicle']['id'] if service_context else '',
                     "service_company_id": service_context['vehicle']['firma_id'] if service_context else '',
                     "service_reported_by": service_context['actor']['id'] if service_context else '',
@@ -47370,6 +47387,7 @@ def website_anfrage():
         }
         session["website_anfrage_art"] = anliegen
         session["website_reifentermin"] = f"{format_date(wunschdatum)} · {wunschzeit} Uhr" if anliegen == "reifenservice" else ""
+        session["website_radwechsel_cent"] = radwechsel_cent
         return redirect(url_for("website_anfrage", gesendet=1))
 
     vorauswahl = clean_text(request.args.get("anliegen"))

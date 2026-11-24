@@ -1,6 +1,7 @@
 {% set hauptleistungen = ('radwechsel', 'montage') %}
 {% set hauptauswahl = hauptleistungen|select('in', reifen_auswahl)|list %}
 {% set weitere_gewaehlt = reifen_auswahl|reject('in', hauptleistungen)|list %}
+{% from '_reifenpreis_betrag.html' import money %}
 <form class="form-card tire-booking-form" method="post" action="{{ url_for('website_anfrage') }}" enctype="multipart/form-data">
   {{ csrf_field()|safe }}
   <input type="hidden" name="anliegen" value="reifenservice">
@@ -30,11 +31,27 @@
         </label>
       {% endfor %}
     </div>
-    <details class="booking-more-services"{% if weitere_gewaehlt %} open{% endif %}>
+    <label class="choice booking-storage">
+      <input type="checkbox" name="reifen_leistung" value="einlagerung"{% if 'einlagerung' in reifen_auswahl %} checked{% endif %}>
+      <span class="booking-service-copy"><strong>Zweiten Radsatz einlagern</strong>
+        <small class="storage-standard">+{{ money(einlagerung_cent) }} für vier Kompletträder eines Standard-Pkw bis 20 Zoll, bis zu sechs Monate.</small>
+        <small class="storage-individuell">Für lose Reifen, größere Räder oder besonderen Aufwand klären wir die Einlagerung und den Preis persönlich.</small>
+      </span>
+    </label>
+    <div class="booking-wheel-size field">
+      <label for="radwechsel-groesse">Radgröße für den Satzpreis</label>
+      <select id="radwechsel-groesse" name="radwechsel_groesse">
+        <option value="">Größe noch offen</option>
+        {% for key, label in radwechsel_groessen.items() %}
+          <option value="{{ key }}"{% if formdata.get('radwechsel_groesse') == key %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <details class="booking-more-services"{% if weitere_gewaehlt|reject('equalto', 'einlagerung')|list %} open{% endif %}>
       <summary>Weitere Leistungen</summary>
       <label class="choice"><input type="radio" name="reifen_leistung" value=""{% if weitere_gewaehlt and not hauptauswahl %} checked{% endif %}><span>Nur weitere Leistungen</span></label>
       <div class="choice-grid">
-        {% for key, label in reifen_leistungen.items() if key not in hauptleistungen %}
+        {% for key, label in reifen_leistungen.items() if key not in hauptleistungen and key != 'einlagerung' %}
           <label class="choice"><input type="checkbox" name="reifen_leistung" value="{{ key }}"{% if key in reifen_auswahl %} checked{% endif %}><span>{{ label }}</span></label>
         {% endfor %}
       </div>
@@ -42,6 +59,8 @@
     <div class="booking-service-note">
       <button class="tire-price-open booking-price-link" type="button" data-tire-price-open aria-haspopup="dialog" aria-controls="reifenpreise">Preise ansehen</button>
     </div>
+    <output class="booking-wheel-total" data-radwechsel-preise="{{ radwechsel_preise|tojson|forceescape }}" aria-live="polite"></output>
+    <noscript><p class="booking-wheel-fallback">Mit Einlagerung für vier Standardräder bis 17 Zoll {{ money(radwechsel_preise['bis17']['einlagerung+radwechsel']) }}, von 18 bis 20 Zoll {{ money(radwechsel_preise['18_20']['einlagerung+radwechsel']) }}. Mit Wuchten {{ money(radwechsel_preise['bis17']['einlagerung+radwechsel+wuchten']) }} bzw. {{ money(radwechsel_preise['18_20']['einlagerung+radwechsel+wuchten']) }}. Alle Preise inklusive MwSt.</p></noscript>
   </fieldset>
 
   <fieldset class="booking-section">

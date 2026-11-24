@@ -739,10 +739,17 @@ class Clock{
  async next(){const [id,job]=[...this.jobs].sort((a,b)=>a[1].at-b[1].at)[0]||[];if(!job)return false;this.jobs.delete(id);this.now=job.at;job.fn();await flush();return true;}
  async drain(max=30){let count=0;while(this.jobs.size&&count++<max)await this.next();assert.ok(count<=max,'timer bound exceeded');}
 }
-async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[]}={}){
+async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[],finder=null}={}){
  const clock=new Clock(),nodes={};
  const keys=['close-product','product-dialog','product-detail','shop-announcement',...(mode==='warenkorb'?['cart-items','cart-summary','cart-status','request-quote','quote-status','quote-review','checkout-button','checkout-note']:['catalog-products','catalog-status','previous-page','next-page','page-label','catalog-filters'])];
  for(const key of keys)nodes[key]=new Node();
+ if(finder){
+   for(const key of ['tyre-set-comparison','tyre-set-cards','tyre-set-mounting','tyre-set-heading','tyre-set-scope','tyre-set-note','catalog-mounting'])nodes[key]=new Node();
+   for(const [name,value] of Object.entries(finder)){
+     const field=new Node('input');field.name=name;field.value=value;nodes['catalog-filters'].fields[name]=field;
+   }
+   nodes['catalog-mounting'].checked=finder.montage==='1';
+ }
  if(['felgen','komplettraeder'].includes(mode)){
    const form=nodes['catalog-filters'];
    const input=nodes['wheel-make']=new Node('input');
@@ -768,6 +775,19 @@ async function boot(handler,{mode='reifen',cart=[],visibility='visible',tiles=[]
  await flush();return {clock,nodes,calls,stored,document,events,win};
 }
 (async()=>{
+ const finder={width:'205',ratio:'55',diameter:'16',season:'winter',montage:'1'};
+ const product=priced(A,4,6765), selectedSet={product,criteria:['lowest_price','best_wet_grip'],stock_observed_at:product.price.observed_at,goods_gross_cent:27060,mounted_total_gross_cent:36060,total_gross_cent:36060};
+ const comparison=await boot(url=>url.includes('/tyre-set-comparison?')?{quantity:4,mounting:true,items:[selectedSet,selectedSet]}:page(priced(),false),
+   {finder,cart:[{id:A,quantity:1,services:{mounting:true}}]});
+ const setCards=comparison.nodes['tyre-set-cards'];assert.equal(setCards.children.length,1);
+ assert.ok(walk(setCards).some(n=>n.textContent==='270,60\u00a0€'));assert.ok(walk(setCards).some(n=>n.textContent==='360,60\u00a0€'));
+ const chooseSet=walk(setCards).find(n=>n.textContent==='Diesen Satz wählen');chooseSet.listeners.click();chooseSet.listeners.click();
+ assert.deepEqual(JSON.parse(comparison.stored.at(-1)),[{id:A,quantity:4,services:{mounting:true}}]);
+ assert.ok(comparison.calls.every(call=>(call.options.method||'GET')==='GET'));
+ for(const extra of [{season:''},{ratio:''},{brand:'andere'},{q:'EAN'},{wheel_make:'BMW'}]){
+   const scoped=await boot(()=>page(priced(),false),{finder:{...finder,...extra}});
+   assert.equal(scoped.nodes['tyre-set-comparison'].hidden,true);assert.ok(!scoped.calls.some(call=>call.url.includes('/tyre-set-comparison')));
+ }
  // Missing/false warmup flags do not create background GET timers.
  for(const flag of [undefined,false]){const f=await boot(()=>page(pending(),flag));assert.equal(f.clock.jobs.size,0);assert.equal(f.calls.length,1);}
  // Unmapped raw prices are never displayed or usable, even in an old response.

@@ -202,6 +202,7 @@ class ReifentermineTest(unittest.TestCase):
             {'wunschzeit': '09:30'}, {'telefon': ''},
             {'reifen_leistung': []}, {'reifen_leistung': ['hacking']},
             {'reifen_leistung': ['radwechsel', 'montage', 'wuchten']},
+            {'radwechsel_groesse': 'unbekannte-preisgruppe'},
             {portal.CSRF_FIELD_NAME: 'invalid'},
         ]
         for changes in cases:
@@ -209,6 +210,46 @@ class ReifentermineTest(unittest.TestCase):
                 before = self.count('leads')
                 self.assertEqual(self.book(changes).status_code, 400)
                 self.assertEqual(self.count('leads'), before)
+
+    def test_wheel_change_price_snapshot_uses_only_the_tariff_and_selected_services(self):
+        groups = ('bis17', '18_20')
+        expected = {
+            ('radwechsel',): (3500, 4000),
+            ('radwechsel', 'einlagerung'): (8000, 8500),
+            ('radwechsel', 'wuchten'): (6000, 7000),
+            ('radwechsel', 'wuchten', 'einlagerung'): (10500, 11500),
+        }
+        for index, (services, prices) in enumerate(expected.items()):
+            for group, price in zip(groups, prices):
+                with self.subTest(group=group, services=services):
+                    hour = 8 + index + (4 if group == '18_20' else 0)
+                    response = self.book({'wunschzeit': f'{hour:02d}:00', 'reifen_leistung': list(services),
+                                          'radwechsel_groesse': group, 'radwechsel_brutto_cent': '1'})
+                    self.assertEqual(response.status_code, 302)
+                    lead = self.latest()
+                    self.assertEqual(lead['portal_data']['radwechsel_brutto_cent'], price)
+                    self.assertEqual(lead['portal_data']['radwechsel_groesse'], group)
+                    self.assertIn(f'{price // 100},00 €', lead['beschreibung'])
+                    confirmation = self.client.get(response.location).text
+                    self.assertIn(f'<strong>{price // 100} €</strong>', confirmation)
+                    self.assertNotIn('Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.', confirmation)
+
+    def test_storage_for_special_sizes_loose_tyres_or_unpriced_extras_has_no_package_price(self):
+        for index, (services, size) in enumerate([
+            (['radwechsel', 'einlagerung'], 'individuell'),
+            (['radwechsel', 'einlagerung'], ''),
+            (['montage', 'einlagerung'], 'bis17'),
+            (['einlagerung'], 'bis17'),
+            (['radwechsel', 'einlagerung', 'pruefung'], '18_20'),
+        ]):
+            response = self.book({'wunschzeit': f'{9+index:02d}:00', 'reifen_leistung': services,
+                                  'radwechsel_groesse': size})
+            self.assertEqual(response.status_code, 302)
+            data = self.latest()['portal_data']
+            self.assertEqual(data['reifen_leistungen'], services)
+            self.assertIsNone(data.get('radwechsel_brutto_cent'))
+            self.assertEqual(data.get('radwechsel_groesse'), size if size and 'radwechsel' in services else None)
+            self.assertIn('Den Leistungsumfang und Preis stimmen wir mit Ihnen ab.', self.client.get(response.location).text)
 
     def test_extra_service_can_replace_preselected_mounting(self):
         response = self.book({'shop_leistung': 'reifenmontage', 'reifen_leistung': ['', 'einlagerung']})

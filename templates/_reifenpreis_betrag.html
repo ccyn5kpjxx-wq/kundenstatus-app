@@ -1,0 +1,1 @@
+{% macro money(cents) -%}{{ cents // 100 }}{% if cents % 100 %},{{ '%02d'|format(cents % 100) }}{% endif %} €{%- endmacro %}
