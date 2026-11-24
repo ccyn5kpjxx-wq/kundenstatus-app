@@ -14,8 +14,8 @@
   .reifen-card-head small { display:block; opacity:.9; }
   .reifen-card-head strong { display:block; font-size:1.05rem; }
   .reifen-status { background:#fff; color:#135d84; padding:.2rem .65rem; border-radius:20px; font-size:.8rem; font-weight:750; white-space:nowrap; }
-  .reifen-card-badges { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
-  .reifen-status[data-reifen-neu] { background:#ffdb70; color:#402e00; }
+  .reifen-neu-balken { margin:-1rem -1rem 0; padding:.45rem 1rem; border-radius:13px 13px 0 0; background:#ffdb70; color:#402e00; font-size:.95rem; font-weight:800; line-height:1.25; }
+  .reifen-neu-balken + .reifen-card-head { margin-top:0; border-radius:0; }
   .reifen-card[data-order-state="fertig"] .reifen-card-head { background:#47635b; }
   .reifen-card h2 a { color:inherit; text-decoration:none; }
   .reifen-card h2 a:hover { text-decoration:underline; }
@@ -96,12 +96,10 @@
   {% set c24=intake.get('check24_bestellnummer') %}
   {% set entsorgung=intake.get('check24_entsorgung_menge', 0)|int %}
   <article class="reifen-card" data-reifenauftrag="{{ auftrag.id }}" data-order-state="{{ 'fertig' if auftrag.status >= 4 else 'offen' }}">
+    {% if auftrag.reifen_auftrag_gedruckt_am == '' %}<div class="reifen-neu-balken" data-reifen-neu title="Für diesen Werkstattauftrag ist noch kein Druck im Portal erfasst.">Neu</div>{% endif %}
     <header class="reifen-card-head">
       <div><small>Anlieferung{% if auftrag.annahme_datum_obj %} · {{ ['Mo.','Di.','Mi.','Do.','Fr.','Sa.','So.'][auftrag.annahme_datum_obj.weekday()] }}{% endif %}</small><strong>{{ auftrag.annahme_datum or 'Termin offen' }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}</strong></div>
-      <div class="reifen-card-badges">
-        {% if auftrag.reifen_auftrag_gedruckt_am == '' %}<span class="reifen-status" data-reifen-neu title="Für diesen Werkstattauftrag ist noch kein Druck im Portal erfasst.">Neu</span>{% endif %}
-        <span class="reifen-status">{{ auftrag.status_meta.label }}</span>
-      </div>
+      <span class="reifen-status">{{ auftrag.status_meta.label }}</span>
     </header>
     <span class="reifen-order-ref">Auftrag {{ auftrag.id }}{% if c24 %} · CHECK24 {{ c24 }}{% endif %}</span>
     <h2><a href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">{{ auftrag.kunde_name or 'Kunde noch offen' }}</a></h2>
