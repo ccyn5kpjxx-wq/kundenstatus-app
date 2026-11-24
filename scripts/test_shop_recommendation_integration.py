@@ -39,8 +39,8 @@ class RecommendationIntegrationChecks(unittest.TestCase):
         guard.start();self.addCleanup(guard.stop)
         self.rim=wheel()
 
-    def catalogue(self, tyres, *, enabled=True, paired=None, excluded=(), unbound=(), verified=None, missing_docs=()):
-        pairs=[pair(self.rim,row) for row in tyres if paired is None or row['selection_id'] in paired]
+    def catalogue(self, tyres, *, enabled=True, paired=None, excluded=(), unbound=(), verified=None, missing_docs=(), pair_evidence=None):
+        pairs=[{**pair(self.rim,row), **(pair_evidence or {})} for row in tyres if paired is None or row['selection_id'] in paired]
         documents, paths={},{}
         for n,row in enumerate(tyres,1):
             label='/shop/documents/'+f'{n:064x}'+'.jpg'
@@ -124,6 +124,24 @@ class RecommendationIntegrationChecks(unittest.TestCase):
         self.assertIsNone(catalogue.get(unbound['selection_id'])['price'])
         none=self.catalogue([unbound],unbound={unbound['selection_id']})
         self.assertEqual(self.result(none)['items'],[])
+
+    def test_empty_quantity_offer_is_distinct_from_an_unproven_candidate(self):
+        low_stock = offer(stock=1)
+        other_size = offer(2, size=('235', '45', '18'))
+        evidence = {'scope': 'rim_width_candidate', 'evidence_id': 'synthetic-reviewed-row',
+                    'source': {'page': 2, 'sha256': 'a' * 64}}
+        catalogue = self.catalogue([low_stock, other_size], pair_evidence=evidence)
+        single_size = self.catalogue([low_stock], pair_evidence=evidence)
+        for size in ({}, {'tyre_size': '225/40 R18'}):
+            result = self.result(single_size, quantity=4, **size)
+            self.assertEqual(result['items'], [])
+            self.assertEqual(result['empty_reason'], 'no_priced_offer_for_quantity')
+        self.assertEqual(self.result(catalogue, tyre_size='225/40 R18')['empty_reason'], 'no_priced_offer_for_quantity')
+        self.assertNotIn('empty_reason', self.result(single_size, quantity=1))
+        self.assertNotIn('empty_reason', self.result(single_size, season='winter'))
+        self.assertNotIn('empty_reason', self.result(single_size, tyre_size='215/50 R18'))
+        self.assertNotIn('empty_reason', self.result(single_size, wheel_make='unlisted'))
+        self.assertNotIn('empty_reason', self.result(self.catalogue([low_stock])))
 
     def test_explicit_unavailable_size_does_not_silently_fallback(self):
         catalogue=self.catalogue([offer()])

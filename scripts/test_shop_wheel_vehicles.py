@@ -125,7 +125,7 @@ class VehicleApplicationTests(unittest.TestCase):
         self.assertEqual(other['wheel_fitment_sources'][0]['rim_id'],self.rid)
         self.assertEqual(other['wheel_fitment_sources'][0]['reports'],[self.path])
         self.assertEqual(self.get('',department='tyres',q='MINI Cooper R56')['total'],2)
-        for args in ({'wheel_query':'MINI Countryman'}, {'make':'Audi','model':'Q5'}, {'wheel_make':'MINI'}):
+        for args in ({'wheel_query':'MINI Countryman'}, {'make':'Audi','model':'Q5'}):
             self.assertEqual(self.get('/'+self.rid+'/compatible-tyres',**args)['items'],[])
         exact=self.get('/'+self.rid+'/compatible-tyres',season='winter',**self.filters)
         self.assertEqual(exact['vehicle_sizes'],['205/55 R18'])
@@ -136,6 +136,42 @@ class VehicleApplicationTests(unittest.TestCase):
         self.assertEqual(self.get('',department='wheels',complete='1',group='family',**self.filters)['items'][0]['tyre_seasons'],['winter'])
         for pid in (self.wrong['selection_id'],self.conflict['selection_id']):
             self.assertIsNone(self.catalog.complete_wheel_price(self.rid,pid,quantity=1))
+
+    def test_brand_filters_the_rim_then_keeps_its_nominal_tyres_and_price_preview(self):
+        path = '/' + self.rid + '/compatible-tyres'
+        price_path = '/' + self.rid + '/complete-wheel-price'
+        params = {'season': 'winter', 'quantity': 4}
+        price_params = {'tyre_id': self.tid, 'quantity': 4}
+        expected = self.get(path, **params)
+        self.assertIn(self.tid, [tyre['id'] for tyre in expected['items']])
+        expected_price = self.get(price_path, **price_params)
+        for filters in ({'wheel_make': 'MINI'}, {'wheel_query': 'mini'}, {'wheel_make': 'MINI', 'wheel_query': 'mini'}):
+            with self.subTest(filters=filters):
+                result = self.get(path, **params, **filters)
+                self.assertEqual(result['scope'], 'rim_width_candidate')
+                self.assertEqual(result['vehicle_filter_scope'], 'make_only')
+                self.assertNotIn('vehicle_sizes', result)
+                self.assertEqual(result['items'], expected['items'])
+                self.assertEqual(self.get(path, season='summer', **filters)['items'], [])
+                self.assertEqual(self.get(price_path, **price_params, **filters), expected_price)
+                self.assertIsNone(self.catalog.complete_wheel_price(self.rid, self.inquiry['selection_id'], quantity=4, **filters))
+
+    def test_vehicle_constraints_and_unlisted_makes_never_fall_back_to_nominal_tyres(self):
+        path = '/' + self.rid + '/compatible-tyres'
+        for filters in ({'wheel_make': 'BMW'}, {'wheel_query': 'MINI Cooper'},
+                        {'wheel_make': 'MINI', 'wheel_vehicle': '9' * 24},
+                        {'wheel_make': 'MINI', 'hsn': '0000', 'tsn': 'ZZZ'},
+                        {'make': 'MINI'}, {'wheel_make': 'MINI', 'make': 'MINI'},
+                        {'make': 'MINI', 'model': 'Cooper', 'year': 2010}):
+            with self.subTest(filters=filters):
+                result = self.get(path, **filters)
+                self.assertEqual(result['items'], [])
+                self.assertIsNone(self.catalog.complete_wheel_price(self.rid, self.tid, quantity=4, **filters))
+        for filters in (self.filters, {'wheel_query': 'MINI Cooper Typ R56'}):
+            result = self.get(path, **filters)
+            self.assertEqual(result['vehicle_filter_scope'], 'vehicle')
+            self.assertEqual([p['id'] for p in result['items']], [self.tid])
+            self.assertEqual(result['items'][0]['wheel_fitment_scope'], 'documented_rim_tyre_candidate')
 
 
 if __name__ == '__main__':

@@ -302,6 +302,7 @@ class EnrichedPublicCatalog(PublicCatalog):
         # reserve goods or turn a width candidate into vehicle approval.
         identities = {identifier: variant_fingerprint(self._source_rows[identifier]) for identifier in self._rows}
         self._candidate_tyres = {}
+        self._candidates_without_width_evidence = {}
         documented_pairs = {}
         for identifier, entry in self._rows.items():
             if entry['public']['department'] != 'wheels':
@@ -338,6 +339,8 @@ class EnrichedPublicCatalog(PublicCatalog):
                 seen.add(tyre_id)
                 candidates.append((tyre_id, tyre['tyre_season']))
             self._candidate_tyres[identifier] = candidates
+            if seen != documented_pairs[identifier]:
+                self._candidates_without_width_evidence[identifier] = seen - documented_pairs[identifier]
             seasons = {season for _, season in candidates}
             entry['public']['tyre_seasons'] = [season for season in ('summer', 'winter', 'allseason') if season in seasons]
 
@@ -592,13 +595,16 @@ class EnrichedPublicCatalog(PublicCatalog):
         # alone never changes the scope to vehicle-approved.
         self._validate_scope_fields(filters)
         selection = self._wheel_selection(filters, department='wheels')
-        allowed = None
+        records = self._wheel_index.tyre_application_records(identifier, selection)
+        allowed = None if records is None else {tid for record in records for tid in record['tyres']}
         if selection:
-            records = self._wheel_index.rim_records(identifier, selection)
-            result['vehicle_sizes'] = sorted({v['tyre_size'] for record in records if record['option']['key'] == selection['exact']
-                                              for v in record['vehicles'] if v.get('tyre_size')})
-            allowed = {tid for record in records if record['option']['key'] == selection['exact'] for tid in record['tyres']}
-            result['reason'] = 'Für diese Fahrzeugauswahl sind nur im Gutachten der konkreten Felge aufgeführte Reifengrößen berücksichtigt. Fahrzeugpapiere, Traglast, Geschwindigkeitsindex und Auflagen prüfen.'
+            result['vehicle_filter_scope'] = 'make_only' if selection['make_only'] else 'vehicle'
+            if selection['make_only']:
+                result['reason'] = ('Die Vorschläge beruhen auf den Maßen der Felge. Die Freigabe für Ihr Fahrzeug ist offen.'
+                                    if records is None else 'Diese Felge ist für die ausgewählte Marke nicht gelistet.')
+            else:
+                result['vehicle_sizes'] = sorted({v['tyre_size'] for record in records for v in record['vehicles'] if v.get('tyre_size')})
+                result['reason'] = 'Für diese Fahrzeugauswahl sind nur im Gutachten der konkreten Felge aufgeführte Reifengrößen berücksichtigt. Fahrzeugpapiere, Traglast, Geschwindigkeitsindex und Auflagen prüfen.'
         current = self._now(None)
         candidates = []
         for tyre_id, canonical_season in self._candidate_tyres.get(identifier, []):
@@ -606,7 +612,7 @@ class EnrichedPublicCatalog(PublicCatalog):
                     or allowed is not None and tyre_id not in allowed):
                 continue
             entry = self._rows[tyre_id]
-            if selection:
+            if allowed is not None:
                 entry = self._wheel_index.project(entry, selection)
             if entry:
                 candidates.append(self._cached_entry(entry))
@@ -618,6 +624,11 @@ class EnrichedPublicCatalog(PublicCatalog):
             except ValueError:
                 raise CatalogError('invalid_filter') from None
             result.update(comparison)
+            if not result['items']:
+                undocumented = self._candidates_without_width_evidence.get(identifier, ())
+                if any(entry['public']['id'] not in undocumented and
+                       (tyre_size is None or consistent_tyre_size(entry['public']) == tyre_size) for entry in candidates):
+                    result['empty_reason'] = 'no_priced_offer_for_quantity'
             return result
         if tyre_size is not None:
             raise CatalogError('invalid_filter')
@@ -649,8 +660,8 @@ class EnrichedPublicCatalog(PublicCatalog):
             raise CatalogError('invalid_set_options')
         self._validate_scope_fields(filters)
         selection = self._wheel_selection(filters, department='wheels')
-        if selection and not any(record['option']['key'] == selection['exact'] and tyre_id in record['tyres']
-                                 for record in self._wheel_index.rim_records(rim_id, selection)):
+        records = self._wheel_index.tyre_application_records(rim_id, selection)
+        if records is not None and not any(tyre_id in record['tyres'] for record in records):
             return None
         if not any(candidate == tyre_id for candidate, _ in self._candidate_tyres.get(rim_id, ())):
             return None

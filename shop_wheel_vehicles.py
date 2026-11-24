@@ -218,7 +218,11 @@ class WheelVehicleIndex:
         if wheel_vehicle is None and len(exact_text) == 1:
             wheel_vehicle = next(iter(exact_text))
         criteria = [(_term(make), _term(model) if model else None, year)] if make else []
-        return {'keys': selected, 'options': options, 'exact': wheel_vehicle,
+        # The legacy make/model form is a filter on reviewed vehicle records.
+        # Only the separate wheel browser's brand controls request nominal suggestions.
+        make_only = (len(makes) == 1 and not tokens and wheel_vehicle is None
+                     and make is None and model is None and hsn is None)
+        return {'keys': selected, 'options': options, 'exact': wheel_vehicle, 'make_only': make_only,
                 'query_make': query_make, 'alias_articles': alias_articles, 'criteria': criteria, 'hsn': hsn, 'tsn': tsn}
 
     @staticmethod
@@ -231,6 +235,15 @@ class WheelVehicleIndex:
         return [record for key, record in records.items() if key in selection['keys']
                 and (key not in selection['alias_articles'] or rid in selection['alias_articles'][key]) and
                 (not (selection['criteria'] or selection['hsn']) or self._vehicles(record, selection))]
+
+    def tyre_application_records(self, rim_id, selection):
+        """None permits nominal rim/tyre proposals; otherwise require the listed report records."""
+        if selection is None:
+            return None
+        records = self.rim_records(rim_id, selection)
+        if selection['make_only'] and records:
+            return None
+        return [record for record in records if record['option']['key'] == selection['exact']]
 
     def project(self, entry, selection):
         product = entry['public']

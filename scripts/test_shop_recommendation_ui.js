@@ -53,7 +53,7 @@ function recommendations(query) {
   return {rim_id: RIM, items, scope: 'rim_width_candidate', available_sizes: SIZES,
     selected_size: selected, prices_refreshing: false};
 }
-async function boot(responder = recommendations, {configure = false, setPrice} = {}) {
+async function boot(responder = recommendations, {configure = false, setPrice, vehicle = {}, wheel = rim()} = {}) {
   const nodes = Object.fromEntries(['close-product', 'product-dialog', 'product-detail', 'shop-announcement'].map(id => [id, new Node()]));
   const body = new Node('body'); body.dataset = {api: '/shop/api/v2', page: 'komplettraeder'};
   const link = new Node('a'); link.href = '/shop/warenkorb/';
@@ -70,11 +70,11 @@ async function boot(responder = recommendations, {configure = false, setPrice} =
       let value;
       if (parsed.pathname.endsWith('/compatible-tyres')) value = await responder(parsed.searchParams);
       else if (parsed.pathname.endsWith('/complete-wheel-price') && setPrice) value = await setPrice(parsed.searchParams);
-      else value = {item: rim(), prices_refreshing: false};
+      else value = {item: wheel, prices_refreshing: false};
       return {ok: true, text: async () => JSON.stringify(value)};
     }};
   vm.runInNewContext(source, {window, URL, URLSearchParams, Intl, Date, console});
-  await window.ShopStorefront.openProduct(RIM, configure); await flush();
+  await window.ShopStorefront.openProduct(RIM, configure, vehicle); await flush();
   const panel = walk(nodes['product-detail']).find(node => node.className === 'shop-bundle-panel');
   assert.ok(panel);
   const labels = panel.children.filter(node => node.tagName === 'LABEL');
@@ -93,6 +93,40 @@ const requestQueries = state => state.calls.filter(call => call.url.includes('/c
   .map(call => new URL(call.url, 'https://synthetic.invalid').searchParams);
 
 (async () => {
+  const makeSelection = {wheel_make: 'BMW'};
+  const makePrices = query => ({...recommendations(query), vehicle_filter_scope: 'make_only'});
+  for (const status of ['supplier_check_required', 'inquiry_only']) {
+    const wheel = {...rim(), purchase_status: status};
+    if (status === 'inquiry_only') wheel.price = null;
+    const m = await boot(makePrices, {configure:true, vehicle:makeSelection, wheel});
+    assert.equal(requestQueries(m)[0].get('wheel_make'), 'BMW');
+    assert.equal(radios(m).length, 5);
+    assert.ok(walk(m.panel).some(n => n.textContent.includes('bestätigt keine Fahrzeugfreigabe')));
+    assert.equal(m.add.disabled, true);
+    if (status === 'inquiry_only') assert.equal(m.add.textContent, 'Felgen + Reifen zur Anfrage hinzufügen');
+    const radio = radios(m)[0]; radio.checked = true; radio.listeners.change();
+    assert.equal(m.add.disabled, false);
+    assert.equal(m.add.textContent, status === 'inquiry_only' ? 'Felgen + Reifen zur Anfrage hinzufügen' : 'Felgen + Reifen zur Prüfung in den Warenkorb');
+  }
+  const precise = {wheel_make:'BMW', wheel_vehicle:'example-exact'};
+  const exactEmpty = await boot(() => ({rim_id:RIM,scope:'rim_width_candidate',vehicle_filter_scope:'vehicle',
+    items:[],available_sizes:[],selected_size:null,vehicle_sizes:[]}), {configure:true,vehicle:precise});
+  assert.ok(requestQueries(exactEmpty).every(q => q.get('wheel_vehicle') === precise.wheel_vehicle));
+  const separate = walk(exactEmpty.panel).find(n => n.tagName === 'A' && n.target === '_blank');
+  assert.equal(separate.rel, 'noopener');
+  const href = new URL(separate.href, 'https://synthetic.invalid');
+  assert.equal(href.pathname, '/shop/komplettraeder/');
+  assert.deepEqual([...href.searchParams.entries()], [['artikel', RIM]]);
+  assert.equal(radios(exactEmpty).length, 0); assert.equal(exactEmpty.add.disabled, true);
+  const noOffer = await boot(() => ({rim_id:RIM,scope:'rim_width_candidate',vehicle_filter_scope:'vehicle',
+    items:[],available_sizes:[],selected_size:null,vehicle_sizes:SIZES,empty_reason:'no_priced_offer_for_quantity'}),
+    {configure:true,vehicle:precise});
+  noOffer.quantity.value='4'; noOffer.quantity.listeners.change(); await flush();
+  assert.ok(walk(noOffer.panel).some(n=>n.textContent.includes('Für 4 Stück liegt aktuell kein Angebot mit bestätigtem Preis')));
+  assert.ok(walk(noOffer.panel).some(n=>n.textContent.includes('Einzelreifen in den Größen aus dem Gutachten')));
+  assert.equal(noOffer.add.disabled,true);
+  const unsafe = await boot(q => ({...makePrices(q), scope:'approved'}), {configure:true,vehicle:makeSelection});
+  assert.equal(radios(unsafe).length, 0); assert.equal(unsafe.add.disabled, true);
   let releaseFirstPreview;
   const direct=await boot(recommendations,{configure:true,setPrice:async query=>{
     const q=Number(query.get('quantity')), value={rim_id:RIM,tyre_id:query.get('tyre_id'),quantity:q,currency:'EUR',

@@ -1325,11 +1325,11 @@
       return !!match && match[0] === value && Number(match[1]) >= 100 && Number(match[1]) <= 455 &&
         Number(match[2]) >= 10 && Number(match[2]) <= 100 && Number(match[3]) >= 8 && Number(match[3]) <= 30;
     }
-    function showVehicleSizes(dimensions) {
+    function showVehicleSizes(dimensions, scopedVehicle) {
       const key = vehicle.wheel_vehicle || rim.wheel_vehicle_match?.key;
       const make = vehicle.wheel_make || rim.wheel_vehicle_match?.make;
       if (make && key && Array.isArray(dimensions) && dimensions.some(exactSize)) {
-        status.textContent = 'Für diese Felge ist aktuell kein bestellbarer Satz mit den gewählten Reifen belegt. Einzelreifen in den Größen aus dem Gutachten:';
+        status.append(el('p', 'Einzelreifen in den Größen aus dem Gutachten:'));
         const list = el('ul');
         for (const dimension of new Set(dimensions.filter(exactSize))) {
           const [width, ratio, diameter] = dimension.match(/[0-9]+/g);
@@ -1343,6 +1343,13 @@
           li.append(link); list.append(li);
         }
         status.append(list);
+      }
+      if (scopedVehicle) {
+        const link = el('a', 'Reifen nur nach Felgenmaß vergleichen (neuer Tab)');
+        link.href = '/shop/komplettraeder/?' + new URLSearchParams({artikel:rim.id});
+        link.target = '_blank'; link.rel = 'noopener';
+        const note = el('p', 'Der separate Vergleich prüft weder Ihr Fahrzeug noch dessen Freigabe. ');
+        note.append(link); status.append(note);
       }
       status.append(fitmentInquiry(rim, getQuantity, vehicle));
     }
@@ -1388,7 +1395,8 @@
       }
       feedback.scrollIntoView({block: 'nearest'});
     }
-    const summary = el('div', null, 'shop-bundle-summary'), add = button('Felgen + Reifen in den Warenkorb', () => {
+    const initialAction = inquiryOnly(rim) ? 'Felgen + Reifen zur Anfrage hinzufügen' : 'Felgen + Reifen in den Warenkorb';
+    const summary = el('div', null, 'shop-bundle-summary'), add = button(initialAction, () => {
       clearFeedback();
       if (!selected || checkingSelection || !active()) return;
       const quantity = getQuantity();
@@ -1406,7 +1414,7 @@
         showFeedback('error', 'Nicht hinzugefügt', 'Bitte die vorhandenen Mengen im Warenkorb prüfen. Es wurde nichts hinzugefügt.'); return;
       }
       const added = quantity + (quantity === 1 ? ' Felge + ' : ' Felgen + ') + quantity + ' Reifen hinzugefügt.';
-      if (cartStored) showFeedback('success', 'Im Warenkorb', added, true);
+      if (cartStored) showFeedback('success', 'Im Warenkorb', added + (inquiryOnly(rim) || inquiryOnly(selected) ? ' Diese Auswahl können Sie als Gesamtangebot anfragen.' : ''), true);
       else showFeedback('warning', 'In dieser Ansicht hinzugefügt', added + ' Ihr Browser konnte die Auswahl nicht speichern. Lassen Sie dieses Fenster geöffnet.');
     });
     add.disabled = true;
@@ -1415,7 +1423,10 @@
       const quantity = getQuantity(), rimPrice = selectionPrice(rim, quantity), tyrePrice = selected && selectionPrice(selected, quantity), inquiry = inquiryOnly(rim) || inquiryOnly(selected);
       mountingText.textContent = selected ? mountingChoiceLabel(selected, quantity) : 'Mit Montage bei uns in Mosbach';
       add.disabled = checkingSelection || !selected || (!inquiryOnly(rim) && !rimPrice) || (!inquiryOnly(selected) && !tyrePrice);
-      if (!selected) return;
+      if (!selected) {
+        add.textContent = initialAction;
+        return;
+      }
       summary.append(el('p', quantity + ' × Felge + ' + quantity + ' × ' + selected.name + ' · ' + selected.size, 'shop-muted'));
       for (const product of [rim, selected]) {
         const wanted = selectedWheelQuantity(product, quantity), stock = wheelStock(product, wanted);
@@ -1432,7 +1443,7 @@
         showMountedTotal(output, rimPrice.total + tyrePrice.total, [{rim, tyre: selected, quantity, services: {mounting: true}, vehicle}], true);
       } else if (rimPrice && tyrePrice) summary.append(el('p', 'Warenwert · zzgl. Versand', 'shop-muted'), el('strong', money(rimPrice.total + tyrePrice.total), 'shop-summary-total'));
       else if (!inquiry) summary.append(el('p', 'Aktuelle Preise für diese Menge werden noch geprüft.', 'shop-muted'));
-      summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Ihren Montagetermin können Sie im Warenkorb anfragen. Wir bestätigen ihn nach Lieferklärung.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
+      if (!inquiry) summary.append(el('p', mounting.checked ? 'Abholung in Mosbach. Ihren Montagetermin können Sie im Warenkorb anfragen. Wir bestätigen ihn nach Lieferklärung.' : 'Ohne Montage als separate Felgen und Reifen. Versand wird im Warenkorb geprüft.', 'shop-muted'));
       if (scope !== 'approved') summary.append(el('p', 'Größen-/Breitenvorschlag: Fahrzeugfreigabe, Tragfähigkeit und Auflagen sind noch zu prüfen.', 'shop-notice'));
       add.textContent = inquiry ? 'Felgen + Reifen zur Anfrage hinzufügen' : scope === 'approved' ? 'Felgen + Reifen in den Warenkorb' : 'Felgen + Reifen zur Prüfung in den Warenkorb';
     }
@@ -1452,15 +1463,25 @@
         if (run !== serial || !active()) return;
         selected = null;
         if (result.rim_id !== rim.id || !Array.isArray(result.items) || result.items.length > 5 || !['approved', 'rim_width_candidate', 'blocked'].includes(result.scope)) throw new Error('invalid_recommendations');
+        if (result.vehicle_filter_scope === 'make_only' && result.scope === 'approved') throw new Error('invalid_make_fitment');
         if (exactSize(requestedSize) && result.selected_size !== requestedSize) throw new Error('changed_recommendation_size');
         const comparison = setSizes(result);
         scope = result.scope;
         if (scope === 'blocked' || !result.items.length) {
-          status.textContent = 'Für diese Auswahl liegt noch kein dokumentierter Reifenvorschlag vor.';
-          if (Object.keys(vehicle).length) showVehicleSizes(result.vehicle_sizes);
+          if (result.empty_reason === 'no_priced_offer_for_quantity') {
+            status.textContent = 'Eine Reifengröße für diese Felge und Saison ist belegt. Für ' + quantity + ' Stück liegt aktuell kein Angebot mit bestätigtem Preis und ausreichendem gemeldeten Bestand vor.';
+          } else {
+            status.textContent = result.vehicle_filter_scope === 'vehicle'
+              ? 'Für diese Fahrzeugauswahl ist aktuell kein Reifenvorschlag in der gewählten Saison und Menge belegt.'
+              : 'Für diese Felge ist aktuell kein dokumentiertes Reifenangebot in der gewählten Saison und Menge verfügbar.';
+          }
+          if (Object.keys(vehicle).length) showVehicleSizes(result.vehicle_sizes, result.vehicle_filter_scope === 'vehicle');
           return;
         }
         status.textContent = scope === 'approved' ? 'Dokumentierte Reifenvorschläge. Die konkrete Fahrzeugausführung und Auflagen beachten.' : 'Vorschläge nach dokumentiertem Größen-/Breitenabgleich. Die Fahrzeugfreigabe bleibt offen.';
+        if (result.vehicle_filter_scope === 'make_only') {
+          status.textContent = 'Diese Reifen passen zu Durchmesser und Breite der Felge. Die Auswahl der Automarke bestätigt keine Fahrzeugfreigabe. Prüfen Sie Modell, Ausführung und Auflagen im Gutachten.';
+        }
         if (comparison) {
           status.textContent += ' Angebote gleicher Reifengröße nach Preis aufsteigend. Last- und Geschwindigkeitsindex gesondert beachten.';
           if (Array.isArray(result.rated_sizes) && !result.rated_sizes.includes(result.selected_size)) {
@@ -1502,7 +1523,9 @@
     search.disabled = !seasons.length;
     if (!seasons.length && Object.keys(vehicle).length) {
       seasonLabel.hidden = true; mountingLabel.hidden = true; add.hidden = true; search.hidden = true;
-      showVehicleSizes(rim.vehicle_sizes || reviewedRimVehicles(rim).map(v => v.tyre_size));
+      const scopedVehicle = Boolean(vehicle.wheel_vehicle || vehicle.model || vehicle.hsn || vehicle.tsn || vehicle.year);
+      if (scopedVehicle) status.textContent = 'Für diese Fahrzeugausführung ist zur gewählten Felge aktuell kein Reifenvorschlag belegt.';
+      showVehicleSizes(rim.vehicle_sizes || reviewedRimVehicles(rim).map(v => v.tyre_size), scopedVehicle);
     }
     mounting.addEventListener('change', () => { clearFeedback(); updateSummary(); });
     season.addEventListener('change', () => { clear(); if (configure) searchTyres(); });
