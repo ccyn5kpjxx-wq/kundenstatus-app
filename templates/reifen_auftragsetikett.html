@@ -12,7 +12,7 @@
     nav { display:flex; align-items:center; flex-wrap:wrap; gap:1rem; padding:0 16px }
     button, nav a { font:inherit; font-weight:650; border:1px solid #193e30; border-radius:.5rem; padding:.7rem 1rem; cursor:pointer }
     button { background:#193e30; color:white }
-    nav a { color:#193e30; background:white; text-decoration:none }
+    nav a, .a4-druck { color:#193e30; background:white; text-decoration:none }
     article { background:white; padding:5mm; overflow-wrap:anywhere; border:1px solid #d2d9d4 }
     header { border-bottom:2px solid; padding-bottom:1.5mm; margin-bottom:4mm }
     header dl { grid-template-columns:1.3fr 1.05fr auto; gap:2mm }
@@ -48,8 +48,10 @@
   </style>
 </head>
 <body>
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
   <nav aria-label="Druckoptionen"><button type="button" onclick="window.print()">A5-Etikett drucken</button>
-    <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck' if etikett.tafel else 'auftrag_ausdruck.auftragsdruck', auftrag_id=etikett.number) }}">A4-Auftrag mit Abrissstreifen</a>
+    {{ druckknopf(etikett.number, 'a4-druck', 'A4-Auftrag mit Abrissstreifen drucken', tafel=etikett.tafel) }}
     <span>DIN A5 · Hochformat{% if etikett.positions|length > 1 %} · {{ etikett.positions|length }} Etiketten{% endif %}</span></nav>
   <main>
   {% for position in etikett.positions %}

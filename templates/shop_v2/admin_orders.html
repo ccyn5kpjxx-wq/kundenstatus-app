@@ -29,9 +29,12 @@
     .supplier-panel label{display:grid;gap:5px;font-size:13px}
     .supplier-panel input{padding:7px 8px;font:inherit;color:inherit}
     @media(max-width:760px){.supplier-panel dl{grid-template-columns:1fr;gap:12px}.supplier-heading{margin-bottom:14px}.supplier-heading h2{margin:0}}
+    .order-print { background:none; border:0; padding:0; color:inherit; font:inherit; text-decoration:underline; cursor:pointer }
   </style>
 </head>
 <body>
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
 <header><a href="/admin">Gärtner · Werkstattcockpit</a> · <a href="{{ url_for('shop_admin.orders') }}">Shopbestellungen</a> · <a href="{{ url_for('shop_admin.withdrawals') }}">Widerrufe{% if shop_withdrawal_pending %} ({{ shop_withdrawal_pending }}){% endif %}{% if shop_withdrawal_unavailable %} – Status prüfen{% endif %}</a></header>
 <main>
 {% if withdrawal_detail %}
@@ -55,7 +58,7 @@
   <p class="muted">{{ detail.created }} · {{ detail.mode }}</p>
   {% if detail.workshop_order_number %}
     <p><a href="{{ url_for('auftrag_detail', auftrag_id=detail.workshop_order_number) }}"><strong>Werkstattauftrag Nr. {{ detail.workshop_order_number }} öffnen</strong></a>
-    · <a href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=detail.workshop_order_number) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>
+    · {{ druckknopf(detail.workshop_order_number, 'order-print') }}
     · <a href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=detail.workshop_order_number) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a></p>
   {% elif detail.workshop_lookup_unavailable %}
     <p class="note warning">Die Werkstatt-Auftragsnummer ist derzeit nicht abrufbar.</p>

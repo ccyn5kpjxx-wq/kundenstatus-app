@@ -1,0 +1,13 @@
+{# Ein Formular für alle Druckknöpfe einer Seite, auch innerhalb anderer Bedienelemente. #}
+{% macro druckformular() -%}
+<form id="reifen-auftragsdruck" method="post" target="_blank" rel="noopener" hidden></form>
+{%- endmacro %}
+
+{% macro druckknopf(nummer, klasse='', text='Auftrag ausdrucken', tafel=false, reifen=true) -%}
+  {% set ziel = url_for('auftrag_ausdruck.tafel_auftragsdruck' if tafel else 'auftrag_ausdruck.auftragsdruck', auftrag_id=nummer) %}
+  {% if reifen %}
+    <button type="submit" form="reifen-auftragsdruck" formaction="{{ ziel }}" class="{{ klasse }}" aria-label="{{ text }} – {{ nummer }}">{{ text }}</button>
+  {% else %}
+    <a href="{{ ziel }}" class="{{ klasse }}" target="_blank" rel="noopener" aria-label="Auftrag {{ nummer }} ausdrucken">{{ text }}</a>
+  {% endif %}
+{%- endmacro %}

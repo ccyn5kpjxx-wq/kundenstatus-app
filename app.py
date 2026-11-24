@@ -8394,6 +8394,24 @@ def ensure_column(db, table_name, column_name, column_definition):
                 raise
 
 
+def ensure_reifen_auftragsdruck(db):
+    # NULL = historical, already finished or archived; '' = pending; timestamp = issued.
+    started = db.execute("""INSERT INTO app_settings(key,value,updated_at)
+        VALUES('reifen_auftragsdruck_start','1',?)
+        ON CONFLICT(key) DO NOTHING RETURNING key""", (now_str(),)).fetchone()
+    ensure_column(db, "auftraege", "reifen_auftrag_gedruckt_am", "TEXT DEFAULT ''")
+    if not started:
+        return
+    historical = db.execute("""SELECT id,leistungsart,schaden_aufnahme_json FROM auftraege
+        WHERE (status>=4 OR archiviert=1) AND reifen_auftrag_gedruckt_am=''
+        AND (leistungsart='reifenservice' OR LOWER(schaden_aufnahme_json) LIKE ?)""",
+        ('%reifenservice%',)).fetchall()
+    for row in historical:
+        if auftrag_ist_reifen(dict(row)):
+            db.execute("""UPDATE auftraege SET reifen_auftrag_gedruckt_am=NULL
+                WHERE id=? AND reifen_auftrag_gedruckt_am='' AND (status>=4 OR archiviert=1)""", (row['id'],))
+
+
 def ensure_index(db, index_name, table_name, columns):
     if USE_POSTGRES:
         existing = db.execute(
@@ -11075,6 +11093,7 @@ def init_db():
     ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "reifen_rechnung_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "leistungsart", "TEXT DEFAULT ''")
+    ensure_reifen_auftragsdruck(db)
     ensure_column(db, "auftraege", "rechnung_erstellung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
@@ -46742,6 +46761,25 @@ def admin_reifentermine():
     return response
 
 
+@app.get("/admin/reifenportal/druckoffen")
+@admin_required
+def reifenportal_druckoffen():
+    ids = request.args.getlist("id", type=int)
+    if not 1 <= len(ids) <= 100:
+        abort(400)
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    try:
+        rows = db.execute(f"""SELECT id, leistungsart, schaden_aufnahme_json FROM auftraege
+                              WHERE id IN ({placeholders}) AND reifen_auftrag_gedruckt_am=''
+                                AND archiviert=0 AND angebotsphase=0""", ids).fetchall()
+    finally:
+        db.close()
+    response = jsonify([row["id"] for row in rows if auftrag_ist_reifen(dict(row))])
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/admin/reifenbestellungen")
 @admin_required
 def admin_reifenbestellungen():
@@ -54716,7 +54754,7 @@ def check24_rechnungsbasis(auftrag):
         return None
     intake = auftrag.get('schaden_aufnahme') or json.loads(auftrag.get('schaden_aufnahme_json') or '{}')
     return {'bestellnummer':intake.get('check24_bestellnummer'),
-            'leistung':next((line for line in (auftrag.get('beschreibung') or '').splitlines() if line.startswith('Reifenmontage')), 'Reifenservice gemäß CHECK24-Buchung'),
+            'leistung':intake.get('check24_leistung') or next((line for line in (auftrag.get('beschreibung') or '').splitlines() if line.startswith('Reifenmontage')), 'Reifenservice gemäß CHECK24-Buchung'),
             'brutto':intake.get('check24_preis_brutto')}
 
 
@@ -54744,13 +54782,21 @@ def reifen_rechnungsentwurf(auftrag):
     }
     if not isinstance(kunde,dict):
         raise ValueError("Die gespeicherte Rechnungsadresse ist ungültig.")
+    selection = kalkulation or vorschlag or {}
+    if basis and kalkulation and not kalkulation.get('check24_buchung'):
+        # Existing manual snapshot already covers the full provider gross price.
+        # Only new extras explicitly selected after linking may be added.
+        selection = {}
+    revision_source = raw
+    if basis:
+        revision_source += '\0' + json.dumps(basis, sort_keys=True)
     return {
         "kalkulation":kalkulation, "kunde":kunde,
         "leistungsdatum":data.get("leistungsdatum") or (parse_date(auftrag.get("fertig_datum")) or date.today()).isoformat(),
         "check24_basis":basis, "check24_vorschlag":vorschlag,
-        "auswahl":{p["preis_id"]:p["menge"] for p in (kalkulation or vorschlag or {}).get("positionen",[]) if p["preis_id"] not in ("lose_raeder", "check24_buchung")},
+        "auswahl":{p["preis_id"]:p["menge"] for p in selection.get("positionen",[]) if p["preis_id"] not in ("lose_raeder", "check24_buchung")},
         "lose_raeder":bool((kalkulation or {}).get("lose_raeder")),
-        "revision":hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        "revision":hashlib.sha256(revision_source.encode("utf-8")).hexdigest(),
     }
 
 
@@ -54804,6 +54850,8 @@ def reifen_rechnung(auftrag_id):
                     raise ValueError("Die Auftragsart wurde inzwischen geändert. Bitte den Auftrag neu öffnen.")
                 if frisch["archiviert"] or reifen_rechnung_gesperrt(dict(frisch)):
                     raise ValueError("Die Rechnung wurde inzwischen gesperrt. Bitte den Auftrag neu öffnen.")
+                if check24_rechnungsbasis(dict(frisch)) != entwurf.get('check24_basis'):
+                    raise ValueError("Die CHECK24-Preisbasis wurde inzwischen geändert. Bitte den Auftrag neu öffnen.")
                 changed = db.execute("""UPDATE auftraege SET reifen_rechnung_json=?, geaendert_am=?
                     WHERE id=? AND COALESCE(reifen_rechnung_json,'{}')=?
                     AND COALESCE(rechnung_erstellung_status,'')='' AND COALESCE(lexware_invoice_id,'')=''

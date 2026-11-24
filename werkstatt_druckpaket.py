@@ -5,6 +5,7 @@ import re
 from xml.sax.saxutils import escape
 
 import fitz
+from flask import abort
 from PIL import Image, ImageOps
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.graphics.shapes import Drawing, Rect
@@ -25,9 +26,9 @@ _PAGE_SIZE = landscape(A4)
 _STRIP_WIDTH = 40 * mm
 
 
-def _order(portal, order_id, tafel):
+def _order(portal, order_id, tafel, *, connection=None):
     fields = ", ".join("a." + name for name in _FIELDS)
-    db = portal.get_db()
+    db = connection if connection is not None else portal.get_db()
     try:
         row = db.execute(f"""SELECT {fields}, a.leistungsart, a.schaden_aufnahme_json,
             a.quelle, a.kunde_name, a.start_uhrzeit,
@@ -36,7 +37,8 @@ def _order(portal, order_id, tafel):
             FROM auftraege a LEFT JOIN autohaeuser h ON h.id=a.autohaus_id WHERE a.id=?""",
                          (order_id,)).fetchone()
     finally:
-        db.close()
+        if connection is None:
+            db.close()
     if row is None:
         return None
     order = dict(row)
@@ -44,6 +46,28 @@ def _order(portal, order_id, tafel):
                   or not portal.werkstatt_tafel_auftrag_sichtbar(order)):
         return None
     return order
+
+
+def _record_tyre_print(portal, order_id, tafel):
+    """Mark the first issued package, atomically and only while the order is accessible."""
+    db = portal.get_db()
+    try:
+        db.execute("""UPDATE auftraege SET reifen_auftrag_gedruckt_am=?
+            WHERE id=? AND COALESCE(reifen_auftrag_gedruckt_am,'')=''
+            AND COALESCE(archiviert,0)=0 AND COALESCE(angebotsphase,0)=0""", (portal.now_str(), order_id))
+        # Recheck on the transaction connection. A concurrent type/visibility
+        # change must not associate the generated package with another workflow.
+        current = _order(portal, order_id, tafel, connection=db)
+        if current is None:
+            abort(404)
+        if auftrag_leistungsart(current) != "reifenservice":
+            abort(409, description="Die Auftragsart wurde geändert. Bitte den Auftrag neu öffnen.")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _paragraph(text, style):
@@ -287,7 +311,7 @@ def _append_landscape_pages(attachments, original):
                 target.show_pdf_page(frame, original, index, keep_proportion=True)
 
 
-def druckpaket(portal, order_id, *, tafel=False):
+def druckpaket(portal, order_id, *, tafel=False, druckauftrag=False):
     order = _order(portal, order_id, tafel)
     if order is None:
         return None
@@ -319,4 +343,8 @@ def druckpaket(portal, order_id, *, tafel=False):
         with fitz.open(stream=_cover(sheet, order, printed, omitted, tyre, finished), filetype="pdf") as result:
             if attachments.page_count:
                 result.insert_pdf(attachments)
-            return BytesIO(result.tobytes(garbage=3, deflate=True))
+            pdf = BytesIO(result.tobytes(garbage=3, deflate=True))
+    if (druckauftrag and not omitted and not order["archiviert"] and not order["angebotsphase"]
+            and auftrag_leistungsart(order) == "reifenservice"):
+        _record_tyre_print(portal, order_id, tafel)
+    return pdf

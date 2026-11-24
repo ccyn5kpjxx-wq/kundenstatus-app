@@ -4,6 +4,7 @@ from email import policy
 from email.parser import BytesParser
 from email.utils import getaddresses, parsedate_to_datetime
 import hashlib
+import imaplib
 import json
 import os
 import re
@@ -168,13 +169,69 @@ class Check24Bookings:
                 return True
         return False
 
-    def _apply(self, db, event):
-        data = json.loads(event['payload'])
+    def _manual_orders(self, db, provider_id):
+        """Only exact, explicitly labelled CHECK24 references identify a manual order."""
+        if not re.fullmatch(r'[A-Z0-9]+', provider_id or ''):
+            return []
+        contains = '%' + provider_id + '%'
+        rows = db.execute("""SELECT id,auftragsnummer,beschreibung,analyse_text FROM auftraege
+            WHERE quelle='intern' AND leistungsart='reifenservice' AND
+            (UPPER(TRIM(auftragsnummer))=? OR UPPER(beschreibung) LIKE ? OR UPPER(analyse_text) LIKE ?)
+            ORDER BY id""", (provider_id, contains, contains)).fetchall()
+        reference = re.compile(r'\bCHECK24[\s:·-]*(?:(?:Bestellung|Bestellnummer|Bestellnr\.?)'
+                               r'[\s:#-]+)?' + re.escape(provider_id) + r'(?![A-Z0-9])', re.I)
+        return [r['id'] for r in rows if (r['auftragsnummer'] or '').strip().upper() == provider_id
+                or any(reference.search(r[key] or '') for key in ('beschreibung', 'analyse_text'))]
+
+    def _attach_manual(self, db, order_id, data, start, intake):
+        db.execute('UPDATE auftraege SET status=status WHERE id=?', (order_id,))
+        order = dict(db.execute('SELECT * FROM auftraege WHERE id=?', (order_id,)).fetchone() or {})
+        if not order or self._manual_orders(db, data['provider_id']) != [order_id]:
+            raise ValueError('Die Bestellnummer ist keinem eindeutigen manuellen Reifenauftrag zugeordnet.')
+        if (order['archiviert'] or int(order['status'] or 0) not in (1, 2)
+                or self.p.reifen_rechnung_gesperrt(order)):
+            raise ValueError('Nur offene Reifenaufträge vor Arbeitsbeginn und Abrechnung können verknüpft werden.')
+        if (' '.join((order['kunde_name'] or '').split()).casefold() != ' '.join(data['customer_name'].split()).casefold()
+                or self.p.parse_date(order['annahme_datum']) != start.date()
+                or order['annahme_uhrzeit'] != start.strftime('%H:%M')):
+            raise ValueError('Kundenname oder Annahmetermin im Auftrag weicht von der Buchung ab.')
+        if (order['kontakt_telefon'] and data['customer_phone']
+                and self.p.whatsapp_number_key(order['kontakt_telefon']) != self.p.whatsapp_number_key(data['customer_phone'])):
+            raise ValueError('Die Telefonnummer im Auftrag weicht von der Buchung ab.')
+        if (order['kunde_email'] and data['customer_email']
+                and order['kunde_email'].strip().casefold() != data['customer_email'].strip().casefold()):
+            raise ValueError('Die E-Mail-Adresse im Auftrag weicht von der Buchung ab.')
+        if db.execute('SELECT provider_id FROM check24_bookings WHERE order_id=?', (order_id,)).fetchone():
+            raise ValueError('Dieser Auftrag ist bereits einer anderen Bestellung zugeordnet.')
+        if not data.get('total_gross'):
+            raise ValueError('Für die Verknüpfung fehlt ein eindeutiger CHECK24-Bruttobetrag.')
+        basis = self.p.berechne_check24_reifenservice(data['provider_id'], data['service'], data['total_gross'])
+        draft = self.p.reifen_rechnungsentwurf(order)['kalkulation']
+        if draft and draft['gesamt']['brutto_cent'] != basis['gesamt']['brutto_cent']:
+            raise ValueError('Der gespeicherte Reifenrechnungsentwurf weicht vom CHECK24-Bruttobetrag ab. '
+                             'Bitte den Entwurf vor der Verknüpfung prüfen.')
+        existing = json.loads(order['schaden_aufnahme_json'] or '{}')
+        if not isinstance(existing, dict) or any(
+                existing.get(k) and existing[k] != v for k, v in intake.items() if k.startswith('check24_')):
+            raise ValueError('Die gespeicherten Buchungsdaten im Auftrag weichen ab.')
+        for key, value in intake.items():
+            if key.startswith('check24_') or key not in existing:
+                existing[key] = value
+        db.execute("""UPDATE auftraege SET quelle='check24',auftragsnummer=?,schaden_aufnahme_json=?,
+            status=2,geaendert_am=? WHERE id=?""", (order['auftragsnummer'] or data['provider_id'], json.dumps(existing, ensure_ascii=False),
+                                                     self.p.now_str(), order_id))
+        if int(order['status']) == 1:
+            db.execute('INSERT INTO status_log(auftrag_id,status,zeitstempel) VALUES(?,2,?)', (order_id, self.p.now_str()))
+
+    def _apply(self, db, event, *, existing_order_id=None, verified_data=None):
+        data = verified_data if verified_data is not None else json.loads(event['payload'])
         if not data.get('valid') or data.get('kind') != 'new':
             raise ValueError('Diese Nachricht muss anhand des CHECK24-Portals manuell geklärt werden.')
         old = db.execute('SELECT order_id FROM check24_bookings WHERE provider_id=?', (data['provider_id'],)).fetchone()
         if old:
             raise ValueError('Bestellnummer bereits übernommen. Abweichende Nachricht bitte mit dem vorhandenen Auftrag vergleichen.')
+        if existing_order_id is None and self._manual_orders(db, data['provider_id']):
+            raise ValueError('Die CHECK24-Bestellnummer steht bereits in einem manuellen Reifenauftrag. Zuordnung prüfen.')
         start, end = datetime.fromisoformat(data['start_at']), datetime.fromisoformat(data['end_at'])
         if start <= datetime.now(BERLIN):
             raise ValueError('Der Termin liegt in der Vergangenheit. Bitte im Auftrag manuell nacherfassen.')
@@ -191,17 +248,25 @@ class Check24Bookings:
         intake = {'anliegen': 'reifenservice', 'reifen_leistungen': ['montage'],
                   'check24_bestellnummer': data['provider_id'], 'check24_start': data['start_at'],
                   'check24_ende': data['end_at'], 'check24_preis_brutto': data['total_gross']}
-        order_id = self.p.create_auftrag('check24', kunde_name=data['customer_name'],
-            kunde_email=data['customer_email'], kontakt_telefon=data['customer_phone'],
-            fahrzeug='Reifenservice · CHECK24', kennzeichen=data.get('vehicle_plate', ''), auftragsnummer=data['provider_id'],
-            schadenart='Reifenservice', leistungsart='reifenservice', beschreibung=description,
-            analyse=description, annahme_datum=start.strftime('%d.%m.%Y'),
-            schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False), _db=db)
-        db.execute('UPDATE auftraege SET status=2,annahme_uhrzeit=? WHERE id=?', (start.strftime('%H:%M'), order_id))
-        db.execute('INSERT INTO status_log(auftrag_id,status,zeitstempel) VALUES(?,2,?)', (order_id, self.p.now_str()))
+        if existing_order_id is None:
+            order_id = self.p.create_auftrag('check24', kunde_name=data['customer_name'],
+                kunde_email=data['customer_email'], kontakt_telefon=data['customer_phone'],
+                fahrzeug='Reifenservice · CHECK24', kennzeichen=data.get('vehicle_plate', ''), auftragsnummer=data['provider_id'],
+                schadenart='Reifenservice', leistungsart='reifenservice', beschreibung=description,
+                analyse=description, annahme_datum=start.strftime('%d.%m.%Y'),
+                schaden_aufnahme_json=json.dumps(intake, ensure_ascii=False), _db=db)
+            db.execute('UPDATE auftraege SET status=2,annahme_uhrzeit=? WHERE id=?', (start.strftime('%H:%M'), order_id))
+            db.execute('INSERT INTO status_log(auftrag_id,status,zeitstempel) VALUES(?,2,?)', (order_id, self.p.now_str()))
+            note = 'Als Auftrag ' + str(order_id) + ' übernommen.'
+        else:
+            order_id = existing_order_id
+            intake['check24_leistung'] = data['service']
+            self._attach_manual(db, order_id, data, start, intake)
+            note = ((event['note'] or '') + f'\nNach CHECK24-Abgleich mit Auftrag {order_id} verknüpft und Montagezeit reserviert.').strip()
         db.execute('''INSERT INTO check24_bookings(provider_id,order_id,start_at,end_at,event_id)
             VALUES(?,?,?,?,?) RETURNING provider_id''', (data['provider_id'], order_id, data['start_at'], data['end_at'], event['id'])).fetchall()
-        db.execute("UPDATE check24_events SET state='applied',note=? WHERE id=?", ('Als Auftrag ' + str(order_id) + ' übernommen.', event['id']))
+        db.execute("UPDATE check24_events SET state='applied',note=?,payload=? WHERE id=?",
+                   (note, json.dumps(data, ensure_ascii=False), event['id']))
         return order_id
 
     def ingest(self, raw, source_key='upload', verified=False, auto_apply=False, _sync_claim=None):
@@ -303,13 +368,96 @@ class Check24Bookings:
         finally:
             db.close()
 
-    def rows(self, page=1):
+    def _read_booking_original(self, event, receipts):
+        """Recover the same bytes from their recorded UID without trusting an EML upload."""
+        cfg = self.p.get_werkstatt_imap_config()
+        box = Mailbox(lambda: cfg)
+        with box.connect() as client:
+            for item in box.folders(client):
+                folder = item['id']
+                account = hashlib.sha256((cfg['host'].lower() + '/' + cfg['user'].lower() + '/' + folder).encode()).hexdigest()
+                keys = [key.split('/') for key in receipts if re.fullmatch(account + r'/[1-9][0-9]*/[1-9][0-9]*', key)]
+                if not keys:
+                    continue
+                validity = box.select(client, folder, readonly=True)
+                for _, version, uid in keys:
+                    if version != validity:
+                        continue
+                    try:
+                        raw, _ = box.raw(client, uid)
+                    except ValueError:
+                        continue
+                    if hashlib.sha256(raw).hexdigest() == event['raw_hash'] and ionos_verified(raw, cfg):
+                        return parse_check24_mail(raw)
+        raise ValueError('Verifizierte Originalmail nicht wiedergefunden. CHECK24-Postfach erneut abgleichen und Zuordnung wiederholen.')
+
+    def link_existing(self, event_id, order_id):
+        db = self.p.get_db()
+        try:
+            event = db.execute('SELECT * FROM check24_events WHERE id=?', (event_id,)).fetchone()
+            if not event or not event['verified']:
+                raise ValueError('Für die Verknüpfung ist eine verifizierte CHECK24-Postfachnachricht erforderlich.')
+            data = json.loads(event['payload'])
+            if data.get('kind') != 'new' or event['state'] not in ('review', 'resolved', 'applied'):
+                raise ValueError('Nur eine ursprüngliche Terminbuchung kann verknüpft werden.')
+            receipts = [r['source_key'] for r in db.execute(
+                'SELECT source_key FROM check24_receipts WHERE raw_hash=?', (event['raw_hash'],)).fetchall()]
+        finally:
+            db.close()
+        if not data.get('valid'):
+            data = self._read_booking_original(event, receipts)
+        db = self.p.get_db()
+        try:
+            self.lock(db)
+            event = db.execute('SELECT * FROM check24_events WHERE id=?', (event_id,)).fetchone()
+            if (not event or not event['verified'] or data.get('provider_id') != event['provider_id']
+                    or data.get('raw_sha256') != event['raw_hash']):
+                raise ValueError('Die Originalnachricht passt nicht zur gespeicherten Buchung.')
+            if event['state'] == 'applied':
+                linked = db.execute('SELECT order_id FROM check24_bookings WHERE event_id=? AND active=1', (event_id,)).fetchone()
+                if linked and linked['order_id'] == order_id:
+                    return order_id
+            if event['state'] not in ('review', 'resolved'):
+                raise ValueError('Diese Nachricht ist bereits bearbeitet.')
+            history = db.execute('SELECT id,verified,payload,state,note FROM check24_events WHERE provider_id=?',
+                                 (event['provider_id'],)).fetchall()
+            # Old manual resolutions have no structured outcome. Accept only a positive
+            # cancellation statement about this reference, never a name or "nicht storniert".
+            pid = re.escape(event['provider_id'])
+            label = r'(?:(?:CHECK24|Bestellung|Bestellnummer)[\s:#-]+)*'
+            cancelled_note = re.compile(
+                r'(?:^|[.!;\n]\s*)\s*(?:' + label + pid + r'\s+(?:(?:wurde|ist)\s+)?(?:storniert|abgesagt)\b'
+                r'|(?:Storno|Stornierung|Absage)\s+(?:für\s+)?' + label + pid + r'\b)', re.I)
+            for entry in history:
+                previous = json.loads(entry['payload'])
+                documented_cancel = entry['state'] == 'resolved' and cancelled_note.search(entry['note'] or '')
+                later_change = entry['id'] > event_id and entry['verified'] and previous.get('kind') != 'new'
+                if documented_cancel or later_change:
+                    raise ValueError('Zu dieser Bestellnummer liegt ein Stornovermerk oder eine weitere '
+                                     'Änderungsnachricht vor. Den aktuellen Termin bitte im Büro klären.')
+            result = self._apply(db, event, existing_order_id=order_id, verified_data=data)
+            db.commit()
+            return result
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def rows(self, page=1, *, manual_candidates=False):
         db = self.p.get_db()
         try:
             rows = db.execute('''SELECT e.*,b.order_id,b.start_at AS current_start,b.end_at AS current_end FROM check24_events e LEFT JOIN check24_bookings b
                 ON b.provider_id=e.provider_id ORDER BY CASE WHEN e.state='review' THEN 0 ELSE 1 END,e.id DESC
                 LIMIT 50 OFFSET ?''', ((max(1, page)-1)*50,)).fetchall()
-            return [dict(row) | {'data': json.loads(row['payload'])} for row in rows]
+            result = [dict(row) | {'data': json.loads(row['payload'])} for row in rows]
+            if manual_candidates:
+                for item in result:
+                    if (item['state'] in ('review', 'resolved') and not item['order_id'] and item['verified']
+                            and item['data'].get('kind') == 'new'):
+                        matches = self._manual_orders(db, item['provider_id'])
+                        item['manual_order_ids'] = matches
+            return result
         finally:
             db.close()
 
@@ -546,72 +694,102 @@ class Check24Bookings:
             self._finish_sync(claim, 0, 'stopped' if isinstance(exc, Check24SyncStopped) else 'sync_failed')
             raise
 
+    @staticmethod
+    def _scan_folders(box, client, configured):
+        # IONOS advertises either a top-level folder or a child of INBOX.
+        # Restrict discovery to CHECK24 itself; archived/trash copies are not sources.
+        available = [item['id'] for item in box.folders(client)]
+        roots = list(dict.fromkeys([configured, 'INBOX']))
+        result = [name for name in roots if name in available]
+        candidates = {'check24'} | {
+            root.casefold() + delimiter + 'check24' for root in roots for delimiter in ('.', '/')
+        }
+        result.extend(name for name in available if name.casefold() in candidates and name not in result)
+        if not result:
+            raise ValueError('Kein CHECK24-Quellordner im Postfach gefunden.')
+        return result
+
+    def _known_sync_receipts(self):
+        db = self.p.get_db()
+        try:
+            known = {r['source_key'] for r in db.execute('SELECT source_key FROM check24_receipts').fetchall()}
+            attempts = {r['key']: int(r['value']) for r in db.execute(
+                'SELECT key,value FROM check24_sync_state WHERE key LIKE ?', ('parser_attempt:%',)).fetchall()}
+            for receipt in db.execute('''SELECT r.source_key,r.raw_hash,e.payload FROM check24_receipts r
+                JOIN check24_events e ON e.raw_hash=r.raw_hash WHERE e.state='review' ''').fetchall():
+                old_data = json.loads(receipt['payload'])
+                if _needs_parser_refresh(old_data, attempts.get('parser_attempt:' + receipt['raw_hash'], 0)):
+                    known.discard(receipt['source_key'])
+            return known
+        finally:
+            db.close()
+
     def _scan(self, cfg, claim, auto_apply):
         """Bounded read-only scan, including read mails. Never STORE/MOVE/EXPUNGE."""
-        deadline = self._monotonic() + SYNC_BUDGET_SECONDS
+        started = self._monotonic()
         cfg = dict(cfg)
         cfg['timeout'] = min(20, max(1, int(cfg.get('timeout', 20))))
         box = Mailbox(lambda: cfg)
-        folder = cfg.get('folder') or 'INBOX'
+        since_day = (datetime.now(BERLIN) - timedelta(days=45)).date()
+        month = ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')[since_day.month-1]
+        since = f'{since_day.day:02d}-{month}-{since_day.year}'
+        known = self._known_sync_receipts()
         processed = 0
         with box.connect() as client:
-            validity = box.select(client, folder, readonly=True)
-            if not re.fullmatch(r'[1-9][0-9]*', validity):
-                raise ValueError('UIDVALIDITY des Postfachs fehlt; sicherer Abgleich nicht möglich.')
-            since_day = (datetime.now(BERLIN) - timedelta(days=45)).date()
-            month = ('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec')[since_day.month-1]
-            since = f'{since_day.day:02d}-{month}-{since_day.year}'
-            status, rows = client.uid('SEARCH', None, 'SINCE', since, 'FROM', quote('montagepartner@check24.de'))
-            if status != 'OK':
-                raise ValueError('CHECK24-Nachrichten konnten nicht gesucht werden.')
-            ids = (rows[0].split() if rows and rows[0] else [])
-            account = hashlib.sha256((cfg['host'].lower() + '/' + cfg['user'].lower() + '/' + folder).encode()).hexdigest()
-            # Oldest-first batches do not starve unread or older unprocessed mail.
-            db = self.p.get_db()
+            folders = self._scan_folders(box, client, cfg.get('folder') or 'INBOX')
+            for index, folder in enumerate(folders):
+                if index and (processed >= SYNC_BATCH_LIMIT or self._monotonic() >= started + SYNC_BUDGET_SECONDS):
+                    break
+                # Leave capacity for mail filters that deliver straight to a subfolder.
+                remaining_folders = len(folders) - index
+                limit = (SYNC_BATCH_LIMIT - processed + remaining_folders - 1) // remaining_folders
+                deadline = started + SYNC_BUDGET_SECONDS * (index + 1) / len(folders)
+                processed += self._scan_folder(box, client, cfg, folder, since, known, limit, deadline, claim, auto_apply)
+        return processed
+
+    def _scan_folder(self, box, client, cfg, folder, since, known, limit, deadline, claim, auto_apply):
+        processed = 0
+        validity = box.select(client, folder, readonly=True)
+        if not re.fullmatch(r'[1-9][0-9]*', validity):
+            raise ValueError('UIDVALIDITY des Postfachs fehlt; sicherer Abgleich nicht möglich.')
+        status, rows = client.uid('SEARCH', None, 'SINCE', since, 'FROM', quote('montagepartner@check24.de'))
+        if status != 'OK':
+            raise ValueError('CHECK24-Nachrichten konnten nicht gesucht werden.')
+        ids = (rows[0].split() if rows and rows[0] else [])
+        account = hashlib.sha256((cfg['host'].lower() + '/' + cfg['user'].lower() + '/' + folder).encode()).hexdigest()
+        for uid in ids:
+            if self._monotonic() >= deadline:
+                break
+            key = account + '/' + validity + '/' + uid.decode('ascii')
+            if key in known:
+                continue
+            self._renew_sync(claim)
             try:
-                known = {r['source_key'] for r in db.execute('SELECT source_key FROM check24_receipts').fetchall()}
-                attempts = {r['key']: int(r['value']) for r in db.execute(
-                    'SELECT key,value FROM check24_sync_state WHERE key LIKE ?', ('parser_attempt:%',)).fetchall()}
-                for receipt in db.execute('''SELECT r.source_key,r.raw_hash,e.payload FROM check24_receipts r
-                    JOIN check24_events e ON e.raw_hash=r.raw_hash WHERE e.state='review' ''').fetchall():
-                    old_data = json.loads(receipt['payload'])
-                    if _needs_parser_refresh(old_data, attempts.get('parser_attempt:' + receipt['raw_hash'], 0)):
-                        known.discard(receipt['source_key'])
-            finally:
-                db.close()
-            for uid in ids:
-                if self._monotonic() >= deadline:
-                    break
-                key = account + '/' + validity + '/' + uid.decode('ascii')
-                if key in known:
-                    continue
-                self._renew_sync(claim)
+                raw, _ = box.raw(client, uid.decode('ascii'))
+                self.ingest(raw, key, verified=ionos_verified(raw, cfg), auto_apply=auto_apply, _sync_claim=claim)
+            except ValueError:
+                # A malformed/oversize message must be visible, but must not
+                # starve all later bookings on every scheduled run.
+                data = {'subject': 'CHECK24-Nachricht nicht lesbar', 'provider_id': '',
+                        'parser_version': PARSER_VERSION,
+                        'customer_name': '', 'start_at': '', 'end_at': '', 'service': '',
+                        'tires': [], 'valid': False, 'errors': ['Originalnachricht im Postfach prüfen. Automatische Übernahme nicht möglich.']}
+                digest = hashlib.sha256(('failed:' + key).encode()).hexdigest()
+                db = self.p.get_db()
                 try:
-                    raw, _ = box.raw(client, uid.decode('ascii'))
-                    self.ingest(raw, key, verified=ionos_verified(raw, cfg), auto_apply=auto_apply, _sync_claim=claim)
-                except ValueError:
-                    # A malformed/oversize message must be visible, but must not
-                    # starve all later bookings on every scheduled run.
-                    data = {'subject': 'CHECK24-Nachricht nicht lesbar', 'provider_id': '',
-                            'parser_version': PARSER_VERSION,
-                            'customer_name': '', 'start_at': '', 'end_at': '', 'service': '',
-                            'tires': [], 'valid': False, 'errors': ['Originalnachricht im Postfach prüfen. Automatische Übernahme nicht möglich.']}
-                    digest = hashlib.sha256(('failed:' + key).encode()).hexdigest()
-                    db = self.p.get_db()
-                    try:
-                        self._guard_sync(db, claim)
-                        db.execute('''INSERT INTO check24_events(raw_hash,source_key,payload,created_at)
-                            VALUES(?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''', (digest, key, json.dumps(data), self.p.now_str()))
-                        db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key', (key, digest)).fetchall()
-                        db.commit()
-                    except Exception:
-                        db.rollback()
-                        raise
-                    finally:
-                        db.close()
-                processed += 1
-                if processed >= SYNC_BATCH_LIMIT:
-                    break
+                    self._guard_sync(db, claim)
+                    db.execute('''INSERT INTO check24_events(raw_hash,source_key,payload,created_at)
+                        VALUES(?,?,?,?) ON CONFLICT(raw_hash) DO NOTHING''', (digest, key, json.dumps(data), self.p.now_str()))
+                    db.execute('INSERT INTO check24_receipts(source_key,raw_hash) VALUES(?,?) ON CONFLICT(source_key) DO NOTHING RETURNING source_key', (key, digest)).fetchall()
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+                finally:
+                    db.close()
+            processed += 1
+            if processed >= limit:
+                break
         return processed
 
 
@@ -648,7 +826,7 @@ def register_check24(portal):
     @portal.admin_required
     def index():
         page = max(1, request.args.get('seite', 1, type=int))
-        events = service.rows(page)
+        events = service.rows(page, manual_candidates=True)
         response = make_response(render_template('werkstatt_check24.html', events=events, page=page,
             sync_status=service.status(),
             imap_configured=bool(portal.get_werkstatt_imap_config().get('configured')),
@@ -695,6 +873,23 @@ def register_check24(portal):
             return redirect(url_for('check24.index'))
         portal.schedule_change_backup('check24-buchung')
         return redirect(url_for('auftrag_detail', auftrag_id=order_id))
+
+    @bp.post('/admin/check24/<int:event_id>/verknuepfen')
+    @portal.admin_required
+    def link_existing(event_id):
+        order_id = request.form.get('order_id', type=int)
+        if request.form.get('reviewed') != '1' or not order_id or order_id < 1:
+            abort(400)
+        try:
+            service.link_existing(event_id, order_id)
+        except ValueError as exc:
+            flash(str(exc), 'warning')
+        except (OSError, EOFError, imaplib.IMAP4.error):
+            flash('Das Postfach konnte nicht geprüft werden. Bitte den Abruf erneut versuchen.', 'warning')
+        else:
+            portal.schedule_change_backup('check24-verknuepfung')
+            flash(f'Auftrag {order_id} mit CHECK24 verknüpft und Montagezeit reserviert.', 'success')
+        return redirect(url_for('check24.index'))
 
     @bp.post('/admin/check24/<int:event_id>/erledigt')
     @portal.admin_required

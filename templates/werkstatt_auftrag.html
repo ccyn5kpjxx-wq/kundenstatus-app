@@ -543,6 +543,8 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='inspektionscheckliste.css') }}">
 </head>
 <body class="ws-legacy ws-legacy-auftrag" data-auftrag-id="{{ auftrag['id'] }}">
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
   <div class="topbar">
     <div class="auftrag-kopfzeile">
       <a class="zurueck" href="{{ url_for('werkstatt_tafel') }}">← Zur Tafel</a>
@@ -553,7 +555,7 @@
     {% endif %}
     <h1><small style="display:block; width:fit-content; margin-bottom:.4rem; padding:.25rem .6rem; border-radius:8px; font-size:.8rem; background:{{ auftrag['auftragsart_bg'] }}; color:{{ auftrag['auftragsart_farbe'] }};">{{ auftrag['auftragsart_label'] }}</small>{{ auftrag['fahrzeug'] }}</h1>
     <span class="status-badge">{{ auftrag['status_meta']['icon'] }} {{ auftrag['status_meta']['label'] }}</span>
-    {% if tafel_auftragsdruck %}<a class="ws-back" href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>{% endif %}
+    {% if tafel_auftragsdruck %}{{ druckknopf(auftrag.id, 'ws-back', tafel=true, reifen=auftrag.ist_reifenauftrag) }}{% endif %}
     {% if tafel_etikett %}<a class="ws-back" href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">A5-Etikett drucken</a>{% endif %}
     {% if session.admin and config.SERVICE_APP_ENABLED %}<a class="ws-back" href="{{ url_for('serviceapp.admin_index') }}">Servicefälle &amp; Kostenfreigaben →</a>{% endif %}
     {% if session.admin %}{% if auftrag['ist_reifenauftrag'] %}<a class="ws-back" href="{{ url_for('admin_reifentermine') }}">← Reifenportal</a><a class="ws-back" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Reifenleistungen &amp; Rechnung →</a>{% else %}<a class="ws-back" href="/admin/cockpit">← Werkstatt-Cockpit</a>{% endif %}{% endif %}

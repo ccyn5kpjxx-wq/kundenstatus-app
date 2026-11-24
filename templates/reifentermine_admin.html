@@ -14,6 +14,8 @@
   .reifen-card-head small { display:block; opacity:.9; }
   .reifen-card-head strong { display:block; font-size:1.05rem; }
   .reifen-status { background:#fff; color:#135d84; padding:.2rem .65rem; border-radius:20px; font-size:.8rem; font-weight:750; white-space:nowrap; }
+  .reifen-neu-balken { margin:-1rem -1rem 0; padding:.45rem 1rem; border-radius:13px 13px 0 0; background:#ffdb70; color:#402e00; font-size:.95rem; font-weight:800; line-height:1.25; }
+  .reifen-neu-balken + .reifen-card-head { margin-top:0; border-radius:0; }
   .reifen-card[data-order-state="fertig"] .reifen-card-head { background:#47635b; }
   .reifen-card h2 a { color:inherit; text-decoration:none; }
   .reifen-card h2 a:hover { text-decoration:underline; }
@@ -26,6 +28,9 @@
   .reifen-price strong { font-size:1.25rem; white-space:nowrap; flex-shrink:0; }
   .reifen-note { padding:.75rem; border-left:3px solid #bf790e; background:#fff8e7; color:#5c431c; white-space:pre-line; }
   .reifen-card-actions { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.6rem; }
+  .reifen-order-heading { display:flex; flex-wrap:wrap; align-items:center; gap:.75rem; margin-top:1.5rem; }
+  .reifen-order-heading h2 { margin:0; }
+  .reifen-order-heading button[aria-pressed="true"] { color:#402e00; background:#ffdb70; border-color:#b17d0b; }
   .reifen-filter { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; margin:1rem 0; }
   .reifen-filter label { flex:1; min-width:min(100%,220px); }
   .reifen-filter input,.reifen-filter select { width:100%; }
@@ -76,10 +81,13 @@
   {% endfor %}
 </div>
 {% endif %}
-<h2 class="h4 mt-4">Reifenaufträge</h2>
+<div class="reifen-order-heading">
+  <h2 class="h4">Reifenaufträge</h2>
+  <button type="button" id="reifen-neu-filter" class="btn btn-soft btn-sm" aria-controls="reifen-auftragskarten" aria-pressed="false" title="Reifenaufträge ohne erfassten Auftragsdruck anzeigen" disabled>Neu (<span id="reifen-neu-anzahl">{{ reifenauftraege|selectattr('reifen_auftrag_gedruckt_am', 'equalto', '')|list|length }}</span>)</button>
+</div>
 <div class="reifen-filter" data-reifen-filter hidden>
   <label for="reifen-suche">Kunde, Kennzeichen oder Auftragsnummer<input id="reifen-suche" class="form-control" type="search" placeholder="Auftrag suchen …"></label>
-  <label for="reifen-status-filter">Status<select id="reifen-status-filter" class="form-select"><option value="offen" selected>Offene Aufträge</option><option value="fertig">Fertig / zurückgegeben</option><option value="alle">Alle Aufträge</option></select></label>
+  <label for="reifen-status-filter">Status<select id="reifen-status-filter" class="form-select"><option value="offen" selected>Offene Aufträge</option><option value="neu">Neu · noch zu drucken</option><option value="fertig">Fertig / zurückgegeben</option><option value="alle">Alle Aufträge</option></select></label>
   <p class="mb-2" id="reifen-ergebnis" role="status"></p>
 </div>
 <div class="reifen-grid" id="reifen-auftragskarten">
@@ -88,7 +96,11 @@
   {% set c24=intake.get('check24_bestellnummer') %}
   {% set entsorgung=intake.get('check24_entsorgung_menge', 0)|int %}
   <article class="reifen-card" data-reifenauftrag="{{ auftrag.id }}" data-order-state="{{ 'fertig' if auftrag.status >= 4 else 'offen' }}">
-    <header class="reifen-card-head"><div><small>Anlieferung{% if auftrag.annahme_datum_obj %} · {{ ['Mo.','Di.','Mi.','Do.','Fr.','Sa.','So.'][auftrag.annahme_datum_obj.weekday()] }}{% endif %}</small><strong>{{ auftrag.annahme_datum or 'Termin offen' }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}</strong></div><span class="reifen-status">{{ auftrag.status_meta.label }}</span></header>
+    {% if auftrag.reifen_auftrag_gedruckt_am == '' %}<div class="reifen-neu-balken" data-reifen-neu title="Für diesen Werkstattauftrag ist noch kein Druck im Portal erfasst.">Neu</div>{% endif %}
+    <header class="reifen-card-head">
+      <div><small>Anlieferung{% if auftrag.annahme_datum_obj %} · {{ ['Mo.','Di.','Mi.','Do.','Fr.','Sa.','So.'][auftrag.annahme_datum_obj.weekday()] }}{% endif %}</small><strong>{{ auftrag.annahme_datum or 'Termin offen' }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}</strong></div>
+      <span class="reifen-status">{{ auftrag.status_meta.label }}</span>
+    </header>
     <span class="reifen-order-ref">Auftrag {{ auftrag.id }}{% if c24 %} · CHECK24 {{ c24 }}{% endif %}</span>
     <h2><a href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">{{ auftrag.kunde_name or 'Kunde noch offen' }}</a></h2>
     {% if auftrag.kennzeichen or not c24 %}<p>{{ auftrag.fahrzeug }}{% if auftrag.kennzeichen %} · <strong>{{ auftrag.kennzeichen }}</strong>{% endif %}</p>{% endif %}
@@ -107,7 +119,7 @@
     {% if c24 and entsorgung %}<p class="small">{{ entsorgung }} Altreifen entsorgen · {{ (entsorgung * reifen_entsorgung_cent)|geld_cent }}</p>{% endif %}
     {% if c24 and intake.get('check24_preis_brutto') %}<div class="reifen-price"><span>{% if entsorgung %}Geplanter Gesamtpreis{% else %}Gebuchter Gesamtpreis{% endif %}<br><small>inkl. MwSt.{% if entsorgung %} · CHECK24 {{ intake.check24_preis_brutto|replace('.', ',') }} € + Entsorgung{% endif %}</small></span><strong>{{ ((intake.check24_preis_brutto|float * 100)|round|int + entsorgung * reifen_entsorgung_cent)|geld_cent }}</strong></div>{% endif %}
     <div class="reifen-card-actions"><a class="btn btn-brand btn-sm" href="{{ url_for('auftrag_detail', auftrag_id=auftrag.id) }}">Auftrag öffnen →</a>
-    <a class="btn btn-soft btn-sm" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>
+    <form method="post" action="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" data-reifen-druck><button class="btn btn-soft btn-sm" type="submit">Auftrag ausdrucken</button></form>
     <a class="btn btn-soft btn-sm" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>
     {% if auftrag.status < 4 %}<form method="POST" action="{{ url_for('status_update',auftrag_id=auftrag.id,neuer_status=4) }}"><input type="hidden" name="next" value="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}"><button class="btn btn-soft btn-sm">Fertig · Rechnung →</button></form>{% else %}<a class="btn btn-soft btn-sm" href="{{ url_for('reifen_rechnung',auftrag_id=auftrag.id) }}">Rechnung →</a>{% endif %}</div>
     {% if c24 and auftrag.status < 3 %}<details class="mt-2"><summary>Anlieferung bearbeiten</summary>
@@ -132,21 +144,67 @@
   const panel = document.querySelector('[data-reifen-filter]');
   const search = document.getElementById('reifen-suche');
   const status = document.getElementById('reifen-status-filter');
+  const newFilter = document.getElementById('reifen-neu-filter');
+  const newCount = document.getElementById('reifen-neu-anzahl');
   const cards = Array.from(document.querySelectorAll('[data-reifenauftrag]'));
   if (!panel || !search || !status) return;
   panel.hidden = false;
+  newFilter.disabled = false;
   const filter = () => {
     const query = search.value.trim().toLocaleLowerCase('de');
     let shown = 0;
+    let unprinted = 0;
     cards.forEach(card => {
-      card.hidden = (status.value !== 'alle' && card.dataset.orderState !== status.value) || !card.textContent.toLocaleLowerCase('de').includes(query);
+      const isNew = Boolean(card.querySelector('[data-reifen-neu]'));
+      if (isNew) unprinted++;
+      const matchesStatus = status.value === 'neu' ? isNew
+        : status.value === 'alle' || card.dataset.orderState === status.value;
+      card.hidden = !matchesStatus || !card.textContent.toLocaleLowerCase('de').includes(query);
       if (!card.hidden) shown++;
     });
+    newCount.textContent = unprinted;
+    newFilter.setAttribute('aria-pressed', String(status.value === 'neu'));
     document.getElementById('reifen-ergebnis').textContent = shown + ' von ' + cards.length + ' Aufträgen';
     document.getElementById('reifen-kein-treffer').hidden = shown > 0;
   };
   search.addEventListener('input', filter);
   status.addEventListener('change', filter);
+  newFilter.addEventListener('click', () => {
+    status.value = status.value === 'neu' ? 'offen' : 'neu';
+    filter();
+  });
+  const refreshPrintStatus = async () => {
+    if (document.hidden) return;
+    const marked = cards.filter(card => card.querySelector('[data-reifen-neu]'));
+    try {
+      for (let offset = 0; offset < marked.length; offset += 100) {
+        const batch = marked.slice(offset, offset + 100);
+        const url = new URL({{ url_for('reifenportal_druckoffen')|tojson }}, location.href);
+        batch.forEach(card => url.searchParams.append('id', card.dataset.reifenauftrag));
+        const response = await fetch(url, {cache:'no-store'});
+        if (!response.ok || response.redirected) break;
+        const pending = new Set(await response.json());
+        batch.forEach(card => {
+          if (!pending.has(Number(card.dataset.reifenauftrag))) card.querySelector('[data-reifen-neu]')?.remove();
+        });
+      }
+      filter();
+    } catch {
+      // Keep the last confirmed status until the next successful read.
+    }
+  };
+  document.addEventListener('visibilitychange', refreshPrintStatus);
+  window.addEventListener('pageshow', event => {
+    if (event.persisted) refreshPrintStatus();
+  });
+  document.addEventListener('submit', event => {
+    if (!event.target.matches('[data-reifen-druck]')) return;
+    const card = event.target.closest('[data-reifenauftrag]');
+    // Some browsers open the PDF in the background and never hide the portal.
+    for (const delay of [1000, 4000, 12000]) {
+      setTimeout(() => { if (card.querySelector('[data-reifen-neu]')) refreshPrintStatus(); }, delay);
+    }
+  });
   filter();
 })();
 </script>

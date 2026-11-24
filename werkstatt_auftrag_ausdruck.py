@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 from zoneinfo import ZoneInfo
 
-from flask import Blueprint, abort, make_response, render_template, send_file
+from flask import Blueprint, abort, make_response, render_template, request, send_file
 
 
 _FIELDS = (
@@ -124,7 +124,7 @@ def register_auftrag_ausdruck(portal):
 
     def auftragsdruck_antwort(auftrag_id, *, tafel=False):
         from werkstatt_druckpaket import druckpaket
-        pdf = druckpaket(portal, auftrag_id, tafel=tafel)
+        pdf = druckpaket(portal, auftrag_id, tafel=tafel, druckauftrag=request.method == "POST")
         if pdf is None:
             abort(404)
         response = send_file(pdf, mimetype="application/pdf", as_attachment=False,
@@ -134,12 +134,12 @@ def register_auftrag_ausdruck(portal):
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
-    @blueprint.get("/admin/auftrag/<int:auftrag_id>/ausdrucken")
+    @blueprint.route("/admin/auftrag/<int:auftrag_id>/ausdrucken", methods=["GET", "POST"])
     @portal.admin_required
     def auftragsdruck(auftrag_id):
         return auftragsdruck_antwort(auftrag_id)
 
-    @blueprint.get("/werkstatt/auftrag/<int:auftrag_id>/ausdrucken")
+    @blueprint.route("/werkstatt/auftrag/<int:auftrag_id>/ausdrucken", methods=["GET", "POST"])
     def tafel_auftragsdruck(auftrag_id):
         guard = portal.werkstatt_tafel_guard()
         if guard:

@@ -267,6 +267,8 @@ class Check24IntegrationTest(unittest.TestCase):
             def __init__(self, config): pass
             @contextmanager
             def connect(self): yield FakeClient()
+            def folders(self, client):
+                return [{'id': 'INBOX'}]
             def select(self, client, folder, readonly):
                 if readonly is not True: raise AssertionError('Writable mailbox')
                 return '991'
@@ -815,6 +817,8 @@ class Check24IntegrationTest(unittest.TestCase):
             def __init__(self, config): pass
             @contextmanager
             def connect(self): yield Client()
+            def folders(self, client):
+                return [{'id': 'INBOX'}]
             def select(self, client, folder, readonly):
                 self_readonly = readonly
                 calls.append(('SELECT', folder, self_readonly))
@@ -1067,6 +1071,8 @@ class Check24IntegrationTest(unittest.TestCase):
             @contextmanager
             def connect(self):
                 yield FakeClient()
+            def folders(self, client):
+                return [{'id': 'INBOX'}]
             def select(self, client, folder, readonly):
                 return '8'
             def raw(self, client, uid):
