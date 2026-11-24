@@ -128,8 +128,9 @@ a { color: inherit; }
 .prod-knopf.is-aktiv { color: #fff; background: #185563; border-color: #185563; }
 .prod-pfeil { display: none; }
 .karten-druckaktionen { display: flex; flex-wrap: wrap; border-top: 1px solid #dce4e1; }
-.karten-druckaktionen a { display: flex; align-items: center; justify-content: center; flex: 1 1 5.4rem; min-height: 44px; padding: .37rem .3rem; color: #35565d; font-size: .82rem; font-weight: 650; text-align: center; text-underline-offset: .15rem; }
-.karten-druckaktionen a + a { border-left: 1px solid #dce4e1; }
+.karten-druckaktionen :is(a, button) { display: flex; align-items: center; justify-content: center; flex: 1 1 5.4rem; min-height: 44px; padding: .37rem .3rem; color: #35565d; font-size: .82rem; font-weight: 650; text-align: center; text-underline-offset: .15rem; }
+.karten-druckaktionen button { border: 0; background: none; font-family: inherit; text-decoration: underline; cursor: pointer; }
+.karten-druckaktionen :is(a, button) + a { border-left: 1px solid #dce4e1; }
 .leer-hinweis { text-align: center; color: var(--muted); padding: 1.1rem .5rem; font-size: .9rem; }
 .toast-leiste { position: fixed; z-index: 30; top: 1rem; left: 50%; transform: translateX(-50%); display: grid; gap: .4rem; max-width: 90vw; }
 .toast-leiste .toast { background: #fff; color: var(--ink); border: 2px solid #4e886b; border-radius: .5rem; padding: .65rem .85rem; box-shadow: 0 3px 12px #142d322b; }

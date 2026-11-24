@@ -10,6 +10,8 @@
 </style>
 {% endblock %}
 {% block content %}
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
 {% if check24_demo %}<div class="alert alert-info">Lokale Vorschau mit Beispieldaten · keine echte Buchung und kein Live-Abgleich</div>{% endif %}
 <div class="c24-head"><div><h1>CHECK24-Montagebuchungen</h1><p>Termine und Reifenlieferungen für eure Werkstatt.</p></div><a class="btn btn-soft" href="{{ url_for('werkstatt_tafel') }}">Werkstatt-Tafel →</a></div>
 <div class="c24-card">
@@ -40,7 +42,7 @@
  {% if d.total_gross %}<p>Gebuchter Gesamtpreis: <strong>{{ d.total_gross|replace('.', ',') }} € brutto</strong></p>{% endif %}
  {% if event.note %}<p class="c24-review">{{ event.note }}</p>{% endif %}
  {% if event.order_id %}<a class="btn btn-soft" href="{{ url_for('auftrag_detail', auftrag_id=event.order_id) }}">Auftrag {{ event.order_id }} öffnen →</a>
- <a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=event.order_id) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>
+ {{ druckknopf(event.order_id, 'btn btn-soft') }}
  <a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=event.order_id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>{% endif %}
  {% if event.order_id %}<details class="mt-3"><summary>Bestätigte Terminänderung übernehmen</summary><form method="post" action="{{ url_for('check24.reschedule',event_id=event.id) }}"><p>Den neuen Termin zuerst mit CHECK24 abstimmen. Hier werden Auftrag und Zeitreservierung gemeinsam geändert.</p><label>Datum <input class="form-control" type="date" name="day" required></label><label>Beginn <input class="form-control" type="time" name="begin" required></label><label>Ende <input class="form-control" type="time" name="finish" required></label><label class="form-label">Prüfvermerk <input class="form-control" name="note" required maxlength="1000"></label><label><input type="checkbox" name="reviewed" value="1" required> Neuen Termin mit CHECK24 abgeglichen</label><br><button class="btn btn-soft mt-2">Neue Zeit übernehmen</button></form></details>{% endif %}
  {% if event.order_id %}<details class="mt-3"><summary>Bestätigten Storno übernehmen</summary><form method="post" action="{{ url_for('check24.cancel',event_id=event.id) }}"><p>Nur verwenden, wenn CHECK24 die Buchung tatsächlich storniert hat. Der Werkstattauftrag wird archiviert und die Zeit freigegeben.</p><label><input type="checkbox" name="reviewed" value="1" required> Storno im CHECK24-Portal geprüft</label><label class="form-label mt-2" for="cancel-note-{{ event.id }}">Prüfvermerk</label><input class="form-control" id="cancel-note-{{ event.id }}" name="note" required maxlength="1000"><button class="btn btn-outline-danger mt-2">Storno in Werkstatt übernehmen</button></form></details>{% endif %}

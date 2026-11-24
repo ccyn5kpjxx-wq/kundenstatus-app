@@ -14,6 +14,8 @@
   <script defer src="{{ static_asset_url('werkstatt_tafel_suche.js') }}"></script>
 </head>
 <body>
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
   <a class="sprunglink" href="#auftraege">Zu den Aufträgen</a>
   <header class="topbar">
     <div class="titel">
@@ -235,7 +237,7 @@
         {% endif %}
       </div>
         <div class="karten-druckaktionen">
-          <a href="{{ url_for('auftrag_ausdruck.tafel_auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="Auftrag {{ auftrag.id }} ausdrucken">Auftrag ausdrucken</a>
+          {{ druckknopf(auftrag.id, tafel=true, reifen=auftrag.ist_reifenauftrag) }}
           {% if auftrag.get('tafel_etikett') %}<a href="{{ url_for('auftrag_ausdruck.tafel_reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener" aria-label="A5-Etikett für Auftrag {{ auftrag.id }} drucken">A5-Etikett drucken</a>{% endif %}
         </div>
       </article>

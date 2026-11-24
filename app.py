@@ -8394,6 +8394,24 @@ def ensure_column(db, table_name, column_name, column_definition):
                 raise
 
 
+def ensure_reifen_auftragsdruck(db):
+    # NULL = historical, already finished or archived; '' = pending; timestamp = issued.
+    started = db.execute("""INSERT INTO app_settings(key,value,updated_at)
+        VALUES('reifen_auftragsdruck_start','1',?)
+        ON CONFLICT(key) DO NOTHING RETURNING key""", (now_str(),)).fetchone()
+    ensure_column(db, "auftraege", "reifen_auftrag_gedruckt_am", "TEXT DEFAULT ''")
+    if not started:
+        return
+    historical = db.execute("""SELECT id,leistungsart,schaden_aufnahme_json FROM auftraege
+        WHERE (status>=4 OR archiviert=1) AND reifen_auftrag_gedruckt_am=''
+        AND (leistungsart='reifenservice' OR LOWER(schaden_aufnahme_json) LIKE ?)""",
+        ('%reifenservice%',)).fetchall()
+    for row in historical:
+        if auftrag_ist_reifen(dict(row)):
+            db.execute("""UPDATE auftraege SET reifen_auftrag_gedruckt_am=NULL
+                WHERE id=? AND reifen_auftrag_gedruckt_am='' AND (status>=4 OR archiviert=1)""", (row['id'],))
+
+
 def ensure_index(db, index_name, table_name, columns):
     if USE_POSTGRES:
         existing = db.execute(
@@ -11075,6 +11093,7 @@ def init_db():
     ensure_column(db, "auftraege", "preisstand_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "reifen_rechnung_json", "TEXT DEFAULT '{}'")
     ensure_column(db, "auftraege", "leistungsart", "TEXT DEFAULT ''")
+    ensure_reifen_auftragsdruck(db)
     ensure_column(db, "auftraege", "rechnung_erstellung_status", "TEXT DEFAULT ''")
     ensure_column(db, "dateien", "reklamation_id", "INTEGER")
     ensure_column(db, "dateien", "dokument_typ", "TEXT DEFAULT ''")
@@ -46738,6 +46757,25 @@ def admin_reifentermine():
     response = make_response(render_template("reifentermine_admin.html", reifentermine=list_reifentermine(), reifenauftraege=reifenauftraege,
                                             check24_review_count=check24_bookings.review_count(),
                                             reifen_entsorgung_cent=next(p['brutto_cent'] for p in reifen_preiskatalog() if p['id']=='entsorgung')))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/admin/reifenportal/druckoffen")
+@admin_required
+def reifenportal_druckoffen():
+    ids = request.args.getlist("id", type=int)
+    if not 1 <= len(ids) <= 100:
+        abort(400)
+    placeholders = ",".join("?" for _ in ids)
+    db = get_db()
+    try:
+        rows = db.execute(f"""SELECT id, leistungsart, schaden_aufnahme_json FROM auftraege
+                              WHERE id IN ({placeholders}) AND reifen_auftrag_gedruckt_am=''
+                                AND archiviert=0 AND angebotsphase=0""", ids).fetchall()
+    finally:
+        db.close()
+    response = jsonify([row["id"] for row in rows if auftrag_ist_reifen(dict(row))])
     response.headers["Cache-Control"] = "no-store"
     return response
 

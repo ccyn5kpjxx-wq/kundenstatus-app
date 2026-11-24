@@ -274,6 +274,8 @@
 {% endblock %}
 
 {% block content %}
+{% from "auftragsdruck_macros.html" import druckknopf, druckformular %}
+{{ druckformular() }}
 {% set shop_wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch') %}
 <header class="order-focus-header page-card p-4 mb-3">
   {% if auftrag.get('shop_order_id') %}
@@ -297,7 +299,7 @@
     <div><span class="badge text-bg-{{ auftrag['status_meta']['farbe'] }} p-2">{{ auftrag['status_meta']['label'] }}</span><div class="mt-2 text-end"><a href="{{ detail_back_url }}" class="small">Zur Auftragsliste</a></div></div>
   </div>
   <div class="d-flex flex-wrap gap-2 mt-3">
-    {% if not auftrag.angebotsphase %}<a class="btn btn-brand" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftrag ausdrucken</a>{% endif %}
+    {% if not auftrag.angebotsphase %}{{ druckknopf(auftrag.id, 'btn btn-brand', reifen=auftrag.ist_reifenauftrag) }}{% endif %}
     {% if auftrag.ist_reifenauftrag or auftrag.quelle == 'shop' %}<a class="btn btn-soft" href="{{ url_for('auftrag_ausdruck.reifenetikett', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Auftragsetikett drucken · A5</a>{% endif %}
   </div>
   <div class="order-keyfacts mt-4">
@@ -792,7 +794,7 @@
 
 <details class="page-card p-4 mb-4" id="dateifreigaben">
   <summary class="h4 mb-0">Dateien und Sichtbarkeit · {{ alle_dateien|length }} Unterlagen</summary>
-  <a class="btn btn-soft btn-sm mt-3" href="{{ url_for('auftrag_ausdruck.auftragsdruck', auftrag_id=auftrag.id) }}" target="_blank" rel="noopener">Werkstattzettel drucken · Auftrag {{ auftrag.id }}</a>
+  {{ druckknopf(auftrag.id, 'btn btn-soft btn-sm mt-3', 'Werkstattzettel drucken', reifen=auftrag.ist_reifenauftrag) }}
   <p class="text-muted mt-3">Für jede Datei gilt die unten bestätigte Sichtbarkeit. Nicht freigegebene Dateien bleiben intern; eigene Uploads bleiben zunächst für ihren Absender sichtbar.</p>
   {% for d in alle_dateien %}
   <form method="POST" action="{{ url_for('admin_datei_freigaben', datei_id=d['id']) }}" class="border-top py-3">
