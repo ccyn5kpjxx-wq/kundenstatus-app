@@ -11,6 +11,7 @@ import secrets
 import time
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
+import mos_operator_notice
 from werkstatt_kontakt import BUSINESS_ADDRESS as WORKSHOP_ADDRESS
 
 STANDARD_DEPOSIT_MAX_DAYS = 5
@@ -22,6 +23,7 @@ LONG_RENTAL_MAX_DAYS = 30
 
 
 def init_schema(db):
+    mos_operator_notice.init_schema(db)
     db.execute('''CREATE TABLE IF NOT EXISTS miet_checkout_holds (
         id TEXT PRIMARY KEY, request_key TEXT NOT NULL UNIQUE,
         mietfahrzeug_id INTEGER NOT NULL, start_datum TEXT NOT NULL, end_datum TEXT NOT NULL,
@@ -318,6 +320,7 @@ class SharedCheckout:
                                                'MOS Vor-Ort-Zahlung ' + hold_id)
                 db.execute("""UPDATE miet_checkout_holds SET status='confirmed',mietvorgang_id=?,
                               expires_at=0 WHERE id=?""", (rental_id, hold_id))
+                mos_operator_notice.enqueue(db, hold_id, 'confirmed', quote)
             return dict(db.execute('SELECT * FROM miet_checkout_holds WHERE id=?', (hold_id,)).fetchone())
 
     def _insert_rental(self, db, vehicle_id, start, end, name, customer, note):
@@ -1081,6 +1084,7 @@ class SharedCheckout:
                 note = ('Stripe TEST Checkout ' if q.get('test_only') else 'Stripe Checkout ') + h['id']
                 rental_id = self._insert_rental(db, h['mietfahrzeug_id'], start, end, c['name'], c, note)
                 db.execute("UPDATE miet_checkout_holds SET status='confirmed',payment_intent=?,mietvorgang_id=? WHERE id=?",(pi,rental_id,h['id']))
+                mos_operator_notice.enqueue(db, h['id'], 'confirmed', q)
                 return rental_id
             if session.get('status') == 'expired' and session.get('payment_status') == 'unpaid' and h['status'] != 'review':
                 deposit = db.execute('SELECT status FROM miet_checkout_deposit_auths WHERE hold_id=?',

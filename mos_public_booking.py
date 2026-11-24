@@ -1162,15 +1162,18 @@ def register(portal):
             except Exception:
                 errors+=1
                 app.logger.exception('MOS Vertragszustellung muss geprüft werden')
+        from mos_operator_notice import run_cycle as deliver_operator_notices
+        station_errors = deliver_operator_notices(portal, mail_cfg, cfg['origin'])
         unresolved=unresolved_count(portal)
         unresolved_receipts=order_receipt_unresolved_count(portal)
         missing=len(unfinished_live_ids(portal))
         click.echo(f'MOS Bestelleingangsbestätigungen offen oder zu prüfen: {unresolved_receipts}; '
+                   f'Stationsmeldungen zu prüfen: {station_errors}; '
                    f'Vertragszustellungen offen oder zu prüfen: {unresolved}; ohne PDF/Versandauftrag: {missing}; '
                    f'Kautionserinnerungen versandt: {reminders["sent"]}; offen oder zu prüfen: {reminders["unresolved"]}; '
                    f'Kautionserinnerungen verspätet: {reminders["overdue"]}; '
                    f'Kaution nach Abholzeit noch offen: {reminders["missing_deposit_overdue"]}')
-        if (errors or unresolved_receipts or unresolved or missing or reminders['errors']
+        if (errors or station_errors or unresolved_receipts or unresolved or missing or reminders['errors']
                 or reminders['unresolved'] or reminders['overdue'] or reminders['missing_deposit_overdue']):
             raise click.ClickException('MOS Bestell- oder Vertragszustellung ist noch nicht abgeschlossen.')
 

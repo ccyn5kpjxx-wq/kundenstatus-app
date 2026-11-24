@@ -8286,6 +8286,7 @@ class PostgresConnection:
         inserts_with_id = bool(insert_table and insert_table not in {
             "app_settings", "miet_checkout_contracts", "miet_checkout_review_refunds",
             "kundenflotten_fahrer", "kundenflotten_reifen",
+            "miet_checkout_operator_notices",
             "reifen_kauf_sms_budget", "reifen_kauf_events", "reifen_vertrag_anhaenge",
             "shop_klick_tageswerte"
         }
@@ -8533,6 +8534,7 @@ MOS_IMPORT_PROTECTED_TABLES = (
     "miet_checkout_contracts",
     "miet_checkout_contract_delivery",
     "miet_checkout_order_receipts",
+    "miet_checkout_operator_notices",
     "miet_checkout_deposit_reminders",
     "miet_checkout_deposit_attempts",
     "miet_checkout_handovers",
