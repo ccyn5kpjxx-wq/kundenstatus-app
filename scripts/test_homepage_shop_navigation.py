@@ -76,7 +76,7 @@ class HomepageShopNavigationChecks(unittest.TestCase):
             'homepage_stellenanzeigen': [], 'homepage_oeffnungszeiten': 'SYNTHETIC opening hours',
             'werkstatt_anfahrt_url': '#kontakt', 'site_indexable': False, 'canonical_url': '',
             'portal_links': {key: '/anfrage' for key in ('auswahl', 'schaden', 'schadenaufnahme', 'status', 'privat',
-                'mietwagen', 'anfrage', 'fahrer_demo', 'partner', 'flotte', 'service', 'versicherung', 'karriere')},
+                'mietwagen', 'anfrage', 'reifenservice', 'fahrer_demo', 'partner', 'flotte', 'service', 'versicherung', 'karriere')},
             'leistungen': {'reifenservice': self.service}, 'besucher_ohne_google_ads': True,
             'static_asset_url': lambda filename: url_for('static', filename=filename),
         }

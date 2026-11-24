@@ -72,7 +72,7 @@ class ServiceNavigationTests(unittest.TestCase):
                 for a in actions:
                     target = urlsplit(a["href"])
                     self.assertEqual(target.path, "/anfrage")
-                    self.assertEqual(target.fragment, "kurzanfrage")
+                    self.assertEqual(target.fragment, "terminbuchung" if slug == "reifenservice" else "kurzanfrage")
                     category = parse_qs(target.query)["anliegen"][0]
                     self.assertIn(category, portal.WEBSITE_KURZANFRAGEN)
                     form_html, form = self.page(a["href"])
@@ -91,6 +91,29 @@ class ServiceNavigationTests(unittest.TestCase):
                         selected = [f["value"] for f in form.find("input")
                                     if f.get("name") == "mechanik_kategorie" and "checked" in f]
                         self.assertEqual(selected, [expected_category])
+
+    def test_tyre_appointments_use_the_persistent_company_host_or_configured_portal(self):
+        company, central = "https://site.example.test", "https://portal.example.test"
+        for stateless, origin, destination in (
+            (False, company, ""), (True, company, central), (False, "https://preview.example.test", central)
+        ):
+            with self.subTest(stateless=stateless, origin=origin), patch.multiple(
+                portal, PUBLIC_SITE_ONLY=stateless, PUBLIC_HOSTS={"site.example.test"}, PORTAL_BASE_URL=central
+            ):
+                _, homepage = self.page("/homepage", base_url=origin)
+                links = [a["href"] for a in homepage.find("a") if "anliegen=reifenservice" in a.get("href", "")]
+                self.assertEqual(links, [destination + "/anfrage?anliegen=reifenservice#terminbuchung"] * 2)
+                _, service = self.page("/leistungen/reifenservice", base_url=origin)
+                self.assertEqual([a["href"] for a in service.find("a", "service-enquiry")],
+                                 [destination + "/anfrage?anliegen=reifenservice&leistungsart=reifenservice#terminbuchung",
+                                  destination + "/anfrage?anliegen=reifenservice#terminbuchung",
+                                  destination + "/anfrage?anliegen=reifenservice&leistungsart=reifenservice#terminbuchung"])
+                self.assertIn(central + "/anfrage?anliegen=reifenangebot#kurzanfrage",
+                              [a.get("href") for a in service.find("a")])
+                if not destination:
+                    _, form = self.page(links[0], base_url=origin)
+                    self.assertIn("terminbuchung", [section.get("id") for section in form.find("section")])
+                    self.assertIn("reifenservice", [field.get("value") for field in form.find("input") if field.get("name") == "anliegen"])
 
     def test_public_host_details_and_sitemap_but_no_internal_access(self):
         with patch.multiple(portal, PUBLIC_SITE_ONLY=True, PUBLIC_SITE_INDEXABLE=True,

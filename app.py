@@ -45856,6 +45856,13 @@ def homepage_portal_links():
             return f"{PORTAL_BASE_URL}{path}"
         return url_for(endpoint, **values)
 
+    anfrage = link("website_anfrage", "/anfrage")
+    reifenservice = anfrage
+    if not PUBLIC_SITE_ONLY and has_request_context() and (
+        is_public_site_request() or request.host_url.rstrip("/") == app.config.get("SHOP_PUBLIC_ORIGIN")
+    ):
+        reifenservice = url_for("website_anfrage")
+
     return {
         "auswahl": link("website_anfrage", "/anfrage?anliegen=auswahl", anliegen="auswahl"),
         "schaden": link("website_anfrage", "/anfrage?anliegen=schaden", anliegen="schaden"),
@@ -45863,7 +45870,8 @@ def homepage_portal_links():
         "status": link("privat_status_zugang", "/privat/status"),
         "privat": link("privat_portal", "/privat/"),
         "mietwagen": link("mietwagen_anfrage", "/mietwagen"),
-        "anfrage": link("website_anfrage", "/anfrage"),
+        "anfrage": anfrage,
+        "reifenservice": reifenservice,
         "autohaus_probeauftrag": link(
             "website_anfrage", "/anfrage?anliegen=autohaus_probeauftrag", anliegen="autohaus_probeauftrag"
         ),
