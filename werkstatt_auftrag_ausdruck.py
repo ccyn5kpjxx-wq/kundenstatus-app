@@ -15,7 +15,7 @@ from flask import Blueprint, abort, make_response, render_template, request, sen
 
 _FIELDS = (
     "id", "fahrzeug", "kennzeichen", "auftragsnummer", "beschreibung", "status",
-    "produktion_schritt", "annahme_datum", "annahme_uhrzeit", "start_datum",
+    "produktion_schritt", "annahme_datum", "annahme_uhrzeit", "start_datum", "start_uhrzeit",
     "fertig_datum", "fertig_uhrzeit", "abholtermin", "abhol_uhrzeit",
     "transport_art", "archiviert", "farbcode", "farbton", "farbton_2",
 )
@@ -108,7 +108,7 @@ def _sheet_data(portal, order):
         "fertig": _event("Geplante Fertigstellung", order.get("fertig_datum"), order.get("fertig_uhrzeit")),
         "termine": [
             _event(arrival, order.get("annahme_datum"), order.get("annahme_uhrzeit")),
-            _event("Geplanter Arbeitsbeginn", order.get("start_datum")),
+            _event("Geplanter Arbeitsbeginn", order.get("start_datum"), order.get("start_uhrzeit")),
             _event(departure, order.get("abholtermin"), order.get("abhol_uhrzeit")),
         ],
         "transport": transport_label,

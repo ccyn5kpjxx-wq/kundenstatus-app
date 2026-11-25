@@ -17,7 +17,7 @@ from reportlab.platypus import BaseDocTemplate, Frame, PageTemplate, Paragraph, 
 
 from auftragsarten import AUFTRAGSARTEN, auftrag_leistungsart
 from reifen_auftragsetikett import reifenetikett
-from werkstatt_auftrag_ausdruck import _FIELDS, _event, _sheet_data, _work_text
+from werkstatt_auftrag_ausdruck import _FIELDS, _sheet_data, _work_text
 from werkstatt_druck_checkliste import checklist_rows
 from werkstatt_druckquellen import druckquellen, lade_druckquelle
 
@@ -31,7 +31,7 @@ def _order(portal, order_id, tafel, *, connection=None):
     db = connection if connection is not None else portal.get_db()
     try:
         row = db.execute(f"""SELECT {fields}, a.leistungsart, a.schaden_aufnahme_json,
-            a.quelle, a.kunde_name, a.start_uhrzeit, a.reifen_termin_revision,
+            a.quelle, a.kunde_name, a.reifen_termin_revision,
             a.angebotsphase, a.angebot_status, a.werkstatt_angebot_text, a.versicherung_id,
             a.versicherung_freigabe_status, a.schaden_eigenauftrag, h.name AS autohaus
             FROM auftraege a LEFT JOIN autohaeuser h ON h.id=a.autohaus_id WHERE a.id=?""",
@@ -149,7 +149,7 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     vehicle = f"{sheet['fahrzeug']} · {sheet['kennzeichen']}"
     story = []
     service_name = AUFTRAGSARTEN.get(service, {}).get("label", "Werkstattauftrag")
-    start = _event("Arbeitsbeginn", order["start_datum"], order["start_uhrzeit"])
+    arrival, start, departure = sheet["termine"]
     end = sheet["fertig"]
     start_name, start_value = "Arbeitsbeginn", _date_text(start)
     end_name, end_value = "Planende", _date_text(end)
@@ -209,7 +209,6 @@ def _cover(sheet, order, printed, omitted, tyre=None, finished=None):
     if sheet["archiviert"] or order["angebotsphase"]:
         section("Status", "Archiviert" if sheet["archiviert"] else "Angebotsphase")
     dates = []
-    arrival, _, departure = sheet["termine"]
     for event in (arrival, departure):
         if event["datum"]:
             dates.append(" ".join(filter(None, (event["label"], event["datum"], event["uhrzeit"]))))
