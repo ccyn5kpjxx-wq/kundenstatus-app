@@ -12,6 +12,11 @@ from werkstatt_auftrag_ausdruck import _date, _time
 _SIZE = re.compile(
     r"(?<!\d)\d{3}\s*/\s*\d{2,3}\s*(?:Z?R|B|D|-)\s*\d{2}(?:[C]|\.\d)?"
     r"(?:\s+\d{2,3}(?:/\d{2,3})?\s*[A-Z]\b)?(?:\s+(?:XL|RF)\b)?", re.I)
+_MANUAL_BOOKING = re.compile(
+    r"^CHECK24\s+([A-Z0-9]{4,20})\s*·\s*(\d{2}\.\d{2}\.\d{4}),\s*"
+    r"(\d{2}:\d{2})\s*[–-]\s*(\d{2}:\d{2})\s*Uhr(?:\s*·|\s*$)")
+_DATE_IN_TEXT = re.compile(r"\b(?:\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2})(?!\d)")
+_TIME_IN_TEXT = re.compile(r"\b\d{1,2}:\d{2}\b")
 
 
 def _slot(day, at):
@@ -20,6 +25,8 @@ def _slot(day, at):
 
 
 def _timestamp(value):
+    if not isinstance(value, str) or len(value.strip()) <= 10:
+        return None
     try:
         return datetime.fromisoformat(value)
     except (TypeError, ValueError):
@@ -28,6 +35,73 @@ def _timestamp(value):
 
 def _source_time(value):
     return value.strftime("%d.%m.%Y · %H:%M") if value else "Offen"
+
+
+def _manual_booking_window(order):
+    # Older office orders kept the CHECK24 reference and interval in a fixed
+    # heading. Only use it for printing when the order fields corroborate it.
+    summary = (order.get("analyse_text") or "").strip()
+    match = _MANUAL_BOOKING.match(summary)
+    if not match:
+        return None
+    ref, day, begin, end = match.groups()
+    description = (order.get("beschreibung") or "").strip()
+    if not description.startswith(f"CHECK24-Bestellung {ref}."):
+        return None
+    if _DATE_IN_TEXT.search(summary[match.end():]) or _TIME_IN_TEXT.search(summary[match.end():]):
+        return None
+    if (any(_date(other_day) != day for other_day in _DATE_IN_TEXT.findall(description))
+            or _TIME_IN_TEXT.findall(description) not in ([], [begin, end])):
+        return None
+    if not _date(day) or not _time(begin) or not _time(end) or end <= begin:
+        return None
+    if (_date(order["annahme_datum"]), _time(order["annahme_uhrzeit"])) != (day, begin):
+        return None
+    for key, expected, normalize in (("start_datum", day, _date), ("start_uhrzeit", begin, _time),
+                                     ("fertig_datum", day, _date), ("fertig_uhrzeit", end, _time)):
+        if order[key] and normalize(order[key]) != expected:
+            return None
+    return dict(start_label="Arbeitsbeginn", start=_slot(day, begin),
+                end_label="Gebuchtes Ende", end=_slot(day, end))
+
+
+def _workshop_times(order):
+    if order["quelle"] == "intern":
+        window = _manual_booking_window(order)
+        if window:
+            return window
+    start_day = _date(order["start_datum"])
+    start_at = _time(order["start_uhrzeit"])
+    times = dict(start_label="Arbeitsbeginn", start=_slot(start_day, start_at),
+                 end_label="Planende", end=_slot(order["fertig_datum"], order["fertig_uhrzeit"]))
+    arrival_day = _date(order["annahme_datum"])
+    arrival_at = _time(order["annahme_uhrzeit"])
+    if (order["quelle"] != "shop" and arrival_day and arrival_at
+            and (not start_day or (start_day == arrival_day and not start_at))):
+        times.update(start_label="Anlieferung", start=_slot(arrival_day, arrival_at))
+    return times
+
+
+def _check24_times(times, booking, intake, order):
+    if booking:
+        if not booking["active"]:
+            return dict(start_label="Arbeitsbeginn", start="Storniert", end_label="Planende", end="–")
+        return dict(start_label="Arbeitsbeginn", start=_source_time(_timestamp(booking["start_at"])),
+                    end_label="Gebuchtes Ende", end=_source_time(_timestamp(booking["end_at"])))
+    start = _timestamp(intake.get("check24_start"))
+    end = _timestamp(intake.get("check24_ende"))
+    effective = times.copy()
+    if start:
+        effective.update(start_label="Arbeitsbeginn", start=_source_time(start))
+    if end:
+        effective.update(end_label="Gebuchtes Ende", end=_source_time(end))
+    elif start:
+        planned_day, planned_at = _date(order["fertig_datum"]), _time(order["fertig_uhrzeit"])
+        if planned_day == start.strftime("%d.%m.%Y") and planned_at > start.strftime("%H:%M"):
+            effective.update(end_label="Planende", end=_slot(planned_day, planned_at))
+        else:
+            effective.update(end_label="Gebuchtes Ende", end="Offen")
+    return effective
 
 
 def _reserved_hour(slot):
@@ -73,8 +147,9 @@ def tafel_etikett_sichtbar(portal, order):
 def reifenetikett(portal, order_id, *, tafel=False, nur_arbeitsdaten=False):
     db = portal.get_db()
     try:
-        row = db.execute("""SELECT id, quelle, leistungsart, kunde_name, kennzeichen, start_datum,
-            start_uhrzeit, fertig_datum, fertig_uhrzeit, schaden_aufnahme_json, beschreibung, archiviert, angebotsphase,
+        row = db.execute("""SELECT id, quelle, leistungsart, kunde_name, kennzeichen, annahme_datum, annahme_uhrzeit,
+            start_datum, start_uhrzeit, fertig_datum, fertig_uhrzeit, schaden_aufnahme_json,
+            analyse_text, beschreibung, archiviert, angebotsphase,
             status, versicherung_id, versicherung_freigabe_status, schaden_eigenauftrag
             FROM auftraege WHERE id=?""",
                          (order_id,)).fetchone()
@@ -88,8 +163,7 @@ def reifenetikett(portal, order_id, *, tafel=False, nur_arbeitsdaten=False):
         if not is_shop and auftrag_leistungsart(order) != "reifenservice":
             return None
 
-        times = dict(start_label="Arbeitsbeginn", start=_slot(order["start_datum"], order["start_uhrzeit"]),
-                     end_label="Planende", end=_slot(order["fertig_datum"], order["fertig_uhrzeit"]))
+        times = _workshop_times(order)
         selected = intake.get("reifen_leistungen")
         services = [portal.WEBSITE_REIFEN_LEISTUNGEN[k] for k in selected
                     if isinstance(k, str) and k in portal.WEBSITE_REIFEN_LEISTUNGEN] if isinstance(selected, list) else []
@@ -122,15 +196,9 @@ def reifenetikett(portal, order_id, *, tafel=False, nur_arbeitsdaten=False):
                         positions.append(_position(tyre, ", ".join(_dimensions(tyre)), data.get("delivery_date")))
                     if not positions:
                         positions.append(_position(delivery=data.get("delivery_date")))
-                if booking["active"]:
-                    times.update(start=_source_time(_timestamp(booking["start_at"])), end_label="Gebuchtes Ende",
-                                 end=_source_time(_timestamp(booking["end_at"])))
-                else:
-                    times.update(start="Storniert", end="–")
             else:
                 reference = ("CHECK24 " + str(intake.get("check24_bestellnummer") or "")).strip()
-                times.update(start=_source_time(_timestamp(intake.get("check24_start"))), end_label="Gebuchtes Ende",
-                             end=_source_time(_timestamp(intake.get("check24_ende"))))
+            times = _check24_times(times, booking, intake, order)
             disposal = intake.get("check24_entsorgung_menge")
             if type(disposal) is int and disposal > 0:
                 services.append(f"{disposal} Altreifen entsorgen")

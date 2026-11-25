@@ -23,14 +23,14 @@ class SheetTests(unittest.TestCase):
             db.executescript("""CREATE TABLE auftraege (
                 id INTEGER PRIMARY KEY, fahrzeug TEXT, kennzeichen TEXT, auftragsnummer TEXT,
                 beschreibung TEXT, status INTEGER, produktion_schritt TEXT, annahme_datum TEXT,
-                annahme_uhrzeit TEXT, start_datum TEXT, fertig_datum TEXT, fertig_uhrzeit TEXT,
+                annahme_uhrzeit TEXT, start_datum TEXT, start_uhrzeit TEXT, fertig_datum TEXT, fertig_uhrzeit TEXT,
                 abholtermin TEXT, abhol_uhrzeit TEXT, transport_art TEXT, archiviert INTEGER,
                 kunde_name TEXT, kunde_email TEXT, kontakt_telefon TEXT, werkstatt_angebot_preis TEXT,
                 kunden_status_token TEXT, analyse_text TEXT, farbcode TEXT, farbton TEXT, farbton_2 TEXT
             );""")
-            db.execute("INSERT INTO auftraege VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            db.execute("INSERT INTO auftraege VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 156, "Audi A4", "MOS AB 156", "EXTERN-9042", "Stoßfänger vorne rechts lackieren.",
-                3, "lackierung", "2026-09-28", "9.30", "28.09.2026", "29.09.2026", "16:15",
+                3, "lackierung", "2026-09-28", "9.30", "28.09.2026", "11:30", "29.09.2026", "16:15",
                 "2026-09-30", "", "hol_und_bring", 0, "PRIVATE CUSTOMER", "secret@example.invalid",
                 "012345678901", "9922,33", "PRIVATE-STATUS-TOKEN", "UNREVIEWED OCR AND PRICES", "LY7W", "Silber", ""))
             db.commit()
@@ -104,6 +104,10 @@ class SheetTests(unittest.TestCase):
         self.assertEqual(sheet["fertig"], {"label": "Geplante Fertigstellung", "datum": "29.09.2026", "uhrzeit": "16:15"})
         self.assertEqual(sheet["termine"][0]["label"], "Abholung durch uns")
         self.assertEqual(sheet["termine"][0]["uhrzeit"], "09:30")
+        self.assertEqual(sheet["termine"][1]["uhrzeit"], "11:30")
+        self.login(admin=True)
+        html = self.client.get("/admin/auftrag/156/werkstattzettel").get_data(as_text=True)
+        self.assertIn("11:30 Uhr", html)
         self.assertEqual(sheet["termine"][2]["label"], "Rückbringung")
         self.assertEqual(sheet["termine"][2]["uhrzeit"], "")
         self.update(transport_art="standard", fertig_uhrzeit="25:70", annahme_datum="", annahme_uhrzeit="08:00")

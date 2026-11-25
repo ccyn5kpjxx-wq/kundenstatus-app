@@ -184,6 +184,56 @@ class OrderPrintTest(unittest.TestCase):
                                         ("Tina Beispiel", "Opel Corsa", "TEST EF 456"))
             self.assert_first_page_tearoff(page, order_id)
 
+    def test_manual_tyre_dropoff_is_visible_without_inventing_mounting_times(self):
+        oid = portal.create_auftrag("intern", leistungsart="reifenservice",
+                                    annahme_datum="26.11.2026", fertig_datum="26.11.2026")
+        path = f"/admin/auftrag/{oid}"
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET annahme_uhrzeit='11:30', abholtermin='26.11.2026', abhol_uhrzeit='15:15' WHERE id=?", (oid,))
+            db.commit()
+        with fitz.open(stream=self.client.get(path + "/ausdrucken").data) as pdf:
+            rack = pdf[0].get_text(clip=fitz.Rect(0, 0, pdf[0].rect.width - 40 * mm, 21 * mm))
+            self.assertIn("Anlieferung", rack)
+            self.assertIn("26.11.2026 · 11:30", rack)
+            self.assertIn("Planende", rack)
+            self.assertNotIn("15:15", rack)
+            self.assertIn("15:15", pdf[0].get_text())
+        label = self.client.get(path + "/reifenetikett").get_data(as_text=True)
+        self.assertIn("Anlieferung</dt>", label)
+        self.assertIn("26.11.2026 · 11:30", label)
+
+    def test_legacy_manual_check24_interval_requires_matching_order_fields(self):
+        number = portal.create_auftrag("intern", leistungsart="reifenservice",
+            annahme_datum="26.11.2026", fertig_datum="26.11.2026",
+            beschreibung="CHECK24-Bestellung TEST123. Montage von vier Reifen.")
+        summary = "CHECK24 TEST123 · 26.11.2026, 11:30–12:30 Uhr · Reifenmontage"
+        path = f"/admin/auftrag/{number}/ausdrucken"
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET annahme_uhrzeit='11:30', analyse_text=? WHERE id=?", (summary, number))
+            db.commit()
+        with fitz.open(stream=self.client.get(path).data) as pdf:
+            header = pdf[0].get_text(clip=fitz.Rect(0, 0, pdf[0].rect.width - 40 * mm, 21 * mm))
+            for text in ("Arbeitsbeginn", "26.11.2026 · 11:30", "Gebuchtes Ende", "26.11.2026 · 12:30"):
+                self.assertIn(text, header)
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET beschreibung=? WHERE id=?",
+                       ("CHECK24-Bestellung TEST123. Montage am 2026-11-27, 11:30–12:30 Uhr.", number))
+            db.commit()
+        with fitz.open(stream=self.client.get(path).data) as pdf:
+            header = pdf[0].get_text(clip=fitz.Rect(0, 0, pdf[0].rect.width - 40 * mm, 21 * mm))
+            self.assertIn("Anlieferung", header)
+            self.assertNotIn("Gebuchtes Ende", header)
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET annahme_datum='27.11.2026', beschreibung=? WHERE id=?",
+                       ("CHECK24-Bestellung TEST123. Montage von vier Reifen.", number))
+            db.commit()
+        with fitz.open(stream=self.client.get(path).data) as pdf:
+            header = pdf[0].get_text(clip=fitz.Rect(0, 0, pdf[0].rect.width - 40 * mm, 21 * mm))
+            self.assertIn("Anlieferung", header)
+            self.assertIn("27.11.2026 · 11:30", header)
+            self.assertNotIn("Gebuchtes Ende", header)
+            self.assertNotIn("12:30", header)
+
     def test_check24_booking_and_tyre_details_fit_on_one_worksheet(self):
         intake = {"anliegen": "reifenservice", "reifen_leistungen": ["montage"],
                   "check24_bestellnummer": "TEST532", "check24_start": "2026-12-05T11:00",

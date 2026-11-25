@@ -52100,6 +52100,35 @@ def admin_neuer_auftrag_analysieren():
     )
 
 
+def auftragstermine_aus_formular(form, auftrag):
+    termine = {}
+    for datum, zeit, label in (
+        ("annahme_datum", "annahme_uhrzeit", "Annahme"),
+        ("start_datum", "start_uhrzeit", "Arbeitsbeginn"),
+        ("fertig_datum", "fertig_uhrzeit", "Planende"),
+        ("abholtermin", "abhol_uhrzeit", "Rückgabe"),
+    ):
+        tag, uhrzeit = auftrag.get(datum), auftrag.get(zeit)
+        if datum in form:
+            tag = clean_text(form[datum])
+            if tag and not parse_date(tag):
+                raise ValueError(f"Bitte für „{label}“ ein gültiges Datum eingeben.")
+            tag = format_date(tag)
+        if zeit in form:
+            uhrzeit = clean_text(form[zeit])
+            if uhrzeit and not parse_time_value(uhrzeit):
+                raise ValueError(f"Bitte für „{label}“ eine gültige Uhrzeit eingeben.")
+            uhrzeit = parse_time_value(uhrzeit)
+        if (datum in form or zeit in form) and uhrzeit and not parse_date(tag):
+            # Removing a date in the full form also removes its previous clock.
+            if zeit in form and not (datum in form and auftrag.get(datum)
+                                      and uhrzeit == parse_time_value(auftrag.get(zeit))):
+                raise ValueError(f"Bitte zur Uhrzeit für „{label}“ auch ein Datum eingeben.")
+            uhrzeit = ""
+        termine[datum], termine[zeit] = tag, uhrzeit
+    return termine
+
+
 @app.route("/admin/auftrag/<int:auftrag_id>", methods=["GET", "POST"])
 @admin_required
 def auftrag_detail(auftrag_id):
@@ -52122,45 +52151,55 @@ def auftrag_detail(auftrag_id):
         form = request.form
         neue_art = leistungsart_formular(form, fallback="") if "leistungsart" in form else None
         aktion = form.get("aktion", "speichern")
-        analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
         shop_wunsch = (auftrag.get('schaden_aufnahme') or {}).get('shop_montagewunsch')
         gebuchter_termin = hat_reifenbuchung(auftrag) or auftrag.get('quelle') == 'check24' or shop_wunsch
+        db = get_db()
+        db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+        zeile = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+        if not zeile:
+            db.rollback()
+            db.close()
+            abort(404)
+        frisch = dict(zeile)
+        if (frisch['quelle'] == 'check24' and auftrag.get('quelle') != 'check24'
+                or gebuchter_termin and any(frisch[k] != auftrag.get(k) for k in ('annahme_datum', 'annahme_uhrzeit'))):
+            db.rollback()
+            db.close()
+            flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.", "warning")
+            return redirect(detail_self_url if shop_wunsch else url_for("admin_reifentermine"))
+        try:
+            termine = auftragstermine_aus_formular(form, frisch)
+        except ValueError as exc:
+            db.rollback()
+            db.close()
+            flash(str(exc), "warning")
+            return redirect(detail_self_url)
         if gebuchter_termin and (
-            format_date(form.get("annahme_datum")) != format_date(auftrag.get("annahme_datum"))
-            or format_time_value(form.get("annahme_uhrzeit")) != format_time_value(auftrag.get("annahme_uhrzeit"))
+            format_date(termine["annahme_datum"]) != format_date(frisch["annahme_datum"])
+            or format_time_value(termine["annahme_uhrzeit"]) != format_time_value(frisch["annahme_uhrzeit"])
         ):
+            db.rollback()
+            db.close()
             if shop_wunsch:
                 flash('Den Montagetermin bitte in der Shopbestellung bestätigen.', 'warning')
                 return redirect(detail_self_url)
-            if auftrag.get('quelle') == 'check24':
+            if frisch['quelle'] == 'check24':
                 flash('CHECK24-Termine bitte im CHECK24-Bereich ändern. Dort wird das gesamte Zeitintervall geprüft.', 'warning')
                 return redirect(url_for('check24.index'))
-            flash("Bitte den Reifentermin im Reifenportal ändern. Dort wird die freie Stunde geprüft.","warning")
+            flash("Bitte den Reifentermin im Reifenportal ändern. Dort wird die freie Stunde geprüft.", "warning")
             return redirect(url_for("admin_reifentermine"))
+        # Partial office forms must retain the order data on which its printout relies.
+        form = {**frisch, **form.to_dict()}
+        analyse = frisch.get("analyse_text")
+        if "analyse_text" in request.form or ("beschreibung" in request.form and not analyse):
+            analyse = clean_text(form.get("analyse_text")) or analyse_text(form.get("beschreibung"))
+        druckdaten = {**termine, "beschreibung": clean_text(form.get("beschreibung")), "analyse_text": analyse}
+        check24_bookings.reopen_for_office_dates(db, frisch, druckdaten)
         bonus_netto_betrag = positive_money_amount(form.get("bonus_netto_betrag")) or 0.0
-        bisheriger_bonus = positive_money_amount(auftrag.get("bonus_netto_betrag")) or 0.0
-        bonus_preis_aktualisiert_am = clean_text(auftrag.get("bonus_preis_aktualisiert_am"))
+        bisheriger_bonus = positive_money_amount(frisch.get("bonus_netto_betrag")) or 0.0
+        bonus_preis_aktualisiert_am = clean_text(frisch.get("bonus_preis_aktualisiert_am"))
         if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
             bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
-        db = get_db()
-        if neue_art is not None or gebuchter_termin or auftrag_ist_reifen(auftrag):
-            db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
-            zeile = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
-            if not zeile:
-                db.rollback()
-                db.close()
-                abort(404)
-            frisch = dict(zeile)
-            if (frisch['quelle'] == 'check24' and auftrag.get('quelle') != 'check24'
-                    or gebuchter_termin and any(frisch[k] != auftrag.get(k) for k in ('annahme_datum', 'annahme_uhrzeit'))):
-                db.rollback()
-                db.close()
-                flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.", "warning")
-                return redirect(detail_self_url if shop_wunsch else url_for("admin_reifentermine"))
-            if auftrag_ist_reifen(frisch):
-                terminfelder = ("annahme_datum", "annahme_uhrzeit", "start_datum", "fertig_datum",
-                                "abholtermin", "abhol_uhrzeit")
-                check24_bookings.reopen_for_office_dates(db, frisch, {key: form.get(key) for key in terminfelder})
         if neue_art is not None:
             hat_reifenrechnung = clean_text(frisch.get("reifen_rechnung_json")) not in ("", "{}")
             if (gebuchter_termin or hat_reifenbuchung(frisch) or hat_reifenrechnung) and neue_art != "reifenservice":
@@ -52191,7 +52230,9 @@ def auftrag_detail(auftrag_id):
                 annahme_datum=?,
                 annahme_uhrzeit=?,
                 start_datum=?,
+                start_uhrzeit=?,
                 fertig_datum=?,
+                fertig_uhrzeit=?,
                 abholtermin=?,
                 abhol_uhrzeit=?,
                 transport_art=?,
@@ -52221,12 +52262,14 @@ def auftrag_detail(auftrag_id):
                 clean_text(form.get("kennzeichen")).upper(),
                 clean_text(form.get("beschreibung")),
                 analyse,
-                format_date(form.get("annahme_datum")),
-                format_time_value(form.get("annahme_uhrzeit")),
-                format_date(form.get("start_datum")),
-                format_date(form.get("fertig_datum")),
-                format_date(form.get("abholtermin")),
-                format_time_value(form.get("abhol_uhrzeit")),
+                termine["annahme_datum"],
+                termine["annahme_uhrzeit"],
+                termine["start_datum"],
+                termine["start_uhrzeit"],
+                termine["fertig_datum"],
+                termine["fertig_uhrzeit"],
+                termine["abholtermin"],
+                termine["abhol_uhrzeit"],
                 clean_text(form.get("transport_art")) or "standard",
                 clean_text(form.get("abhol_adresse")),
                 bonus_netto_betrag,
@@ -52324,6 +52367,8 @@ def auftrag_detail(auftrag_id):
     return render_template(
         "auftrag_detail.html",
         auftrag=auftrag,
+        termin_uhrzeiten={feld: parse_time_value(auftrag.get(feld))
+                         for feld in ("annahme_uhrzeit", "start_uhrzeit", "fertig_uhrzeit", "abhol_uhrzeit")},
         shop_invoice=workshop_shop_invoice(auftrag.get("shop_order_id")),
         autohaeuser=autohaeuser,
         transport_arten=TRANSPORT_ARTEN,

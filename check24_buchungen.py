@@ -515,20 +515,40 @@ class Check24Bookings:
             reifen_termin_revision=reifen_termin_revision+1 WHERE id=?
             AND COALESCE(archiviert,0)=0 AND COALESCE(angebotsphase,0)=0""", (order_id,))
 
-    def reopen_for_office_dates(self, db, order, dates):
-        """Compare office-supplied dates while the caller holds the order row lock."""
+    def reopen_for_office_dates(self, db, order, changes):
+        """Compare printed appointments while the caller holds the order row lock."""
         if not self.p.auftrag_ist_reifen(order):
             return
-        for field, value in dates.items():
-            if order['quelle'] == 'check24' and field in ('start_datum', 'fertig_datum'):
-                # The linked CHECK24 interval supplies both printed work times.
-                continue
-            normalize = self.p.format_time_value if field.endswith('_uhrzeit') else self.p.format_date
-            if normalize(order[field]) != normalize(value):
-                break
-        else:
+        after = {**order, **changes}
+        if after == order:
             return
-        if self.is_check24_order(db, order):
+        for day, clock in (('annahme_datum', 'annahme_uhrzeit'), ('abholtermin', 'abhol_uhrzeit')):
+            old_day, new_day = self.p.parse_date(order.get(day)), self.p.parse_date(after.get(day))
+            if (old_day != new_day or new_day and
+                    self.p.parse_time_value(order.get(clock)) != self.p.parse_time_value(after.get(clock))):
+                self.reopen_print(db, order['id'])
+                return
+
+        from reifen_auftragsetikett import _check24_times, _workshop_times
+        before_times, after_times = _workshop_times(order), _workshop_times(after)
+        intake = self.p.parse_schadenaufnahme_json(order.get('schaden_aufnahme_json'))
+        if intake.get('reifen_storniert_am'):
+            return
+        # A reserved interval takes precedence over the office planning in the A4/A5 header.
+        if order['quelle'] == 'shop':
+            if db.execute("""SELECT 1 FROM shop_montageauftraege m JOIN shop_reifen_termin_slots s
+                    ON s.shop_order_id=m.shop_order_id WHERE m.auftrag_id=?""", (order['id'],)).fetchone():
+                return
+        elif order['quelle'] == 'check24' or intake.get('check24_bestellnummer'):
+            booking = db.execute("""SELECT b.active,b.start_at,b.end_at FROM check24_bookings b
+                JOIN check24_events e ON e.id=b.event_id WHERE b.order_id=?""", (order['id'],)).fetchone()
+            before_times = _check24_times(before_times, booking, intake, order)
+            after_times = _check24_times(after_times, booking, intake, after)
+        elif intake.get('reifen_buchung_id') and db.execute(
+                """SELECT 1 FROM reifen_termin_slots s JOIN leads l ON l.id=s.lead_id
+                   WHERE l.auftrag_id=? AND l.status!='verloren'""", (order['id'],)).fetchone():
+            return
+        if before_times != after_times:
             self.reopen_print(db, order['id'])
 
     def is_check24_order(self, db, order):
