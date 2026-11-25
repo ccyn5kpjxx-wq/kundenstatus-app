@@ -223,7 +223,7 @@ class Check24Bookings:
         if int(order['status']) == 1:
             db.execute('INSERT INTO status_log(auftrag_id,status,zeitstempel) VALUES(?,2,?)', (order_id, self.p.now_str()))
 
-    def _apply(self, db, event, *, existing_order_id=None, verified_data=None):
+    def _apply(self, db, event, *, existing_order_id=None, verified_data=None, confirmed_interval=None):
         data = verified_data if verified_data is not None else json.loads(event['payload'])
         if not data.get('valid') or data.get('kind') != 'new':
             raise ValueError('Diese Nachricht muss anhand des CHECK24-Portals manuell geklärt werden.')
@@ -232,7 +232,8 @@ class Check24Bookings:
             raise ValueError('Bestellnummer bereits übernommen. Abweichende Nachricht bitte mit dem vorhandenen Auftrag vergleichen.')
         if existing_order_id is None and self._manual_orders(db, data['provider_id']):
             raise ValueError('Die CHECK24-Bestellnummer steht bereits in einem manuellen Reifenauftrag. Zuordnung prüfen.')
-        start, end = datetime.fromisoformat(data['start_at']), datetime.fromisoformat(data['end_at'])
+        original_interval = datetime.fromisoformat(data['start_at']), datetime.fromisoformat(data['end_at'])
+        start, end = confirmed_interval or original_interval
         if start <= datetime.now(BERLIN):
             raise ValueError('Der Termin liegt in der Vergangenheit. Bitte im Auftrag manuell nacherfassen.')
         if start.weekday() == 6 or start.hour < 7 or end.hour > 18 or (end.hour == 18 and end.minute):
@@ -246,8 +247,8 @@ class Check24Bookings:
             'Gebuchter Gesamtpreis: ' + data['total_gross'].replace('.', ',') + ' € brutto' if data['total_gross'] else '',
         ]))
         intake = {'anliegen': 'reifenservice', 'reifen_leistungen': ['montage'],
-                  'check24_bestellnummer': data['provider_id'], 'check24_start': data['start_at'],
-                  'check24_ende': data['end_at'], 'check24_preis_brutto': data['total_gross']}
+                  'check24_bestellnummer': data['provider_id'], 'check24_start': start.isoformat(),
+                  'check24_ende': end.isoformat(), 'check24_preis_brutto': data['total_gross']}
         if existing_order_id is None:
             order_id = self.p.create_auftrag('check24', kunde_name=data['customer_name'],
                 kunde_email=data['customer_email'], kontakt_telefon=data['customer_phone'],
@@ -263,8 +264,12 @@ class Check24Bookings:
             intake['check24_leistung'] = data['service']
             self._attach_manual(db, order_id, data, start, intake)
             note = ((event['note'] or '') + f'\nNach CHECK24-Abgleich mit Auftrag {order_id} verknüpft und Montagezeit reserviert.').strip()
+            if (start, end) != original_interval:
+                self.reopen_print(db, order_id)
+                note += (f' Ursprünglicher Montagetermin laut CHECK24-Mail {original_interval[0]:%d.%m.%Y %H:%M}–{original_interval[1]:%H:%M} Uhr. '
+                         f'Im CHECK24-Portal bestätigter und reservierter Termin {start:%d.%m.%Y %H:%M}–{end:%H:%M} Uhr.')
         db.execute('''INSERT INTO check24_bookings(provider_id,order_id,start_at,end_at,event_id)
-            VALUES(?,?,?,?,?) RETURNING provider_id''', (data['provider_id'], order_id, data['start_at'], data['end_at'], event['id'])).fetchall()
+            VALUES(?,?,?,?,?) RETURNING provider_id''', (data['provider_id'], order_id, start.isoformat(), end.isoformat(), event['id'])).fetchall()
         db.execute("UPDATE check24_events SET state='applied',note=?,payload=? WHERE id=?",
                    (note, json.dumps(data, ensure_ascii=False), event['id']))
         return order_id
@@ -391,7 +396,10 @@ class Check24Bookings:
                         return parse_check24_mail(raw)
         raise ValueError('Verifizierte Originalmail nicht wiedergefunden. CHECK24-Postfach erneut abgleichen und Zuordnung wiederholen.')
 
-    def link_existing(self, event_id, order_id):
+    def link_existing(self, event_id, order_id, *, day='', begin='', finish=''):
+        if any((day, begin, finish)) and not all((day, begin, finish)):
+            raise ValueError('Für den abweichenden Montagetermin bitte Datum, Beginn und Ende zusammen eintragen.')
+        confirmed_interval = self.reschedule_interval(day, begin, finish) if day else None
         db = self.p.get_db()
         try:
             event = db.execute('SELECT * FROM check24_events WHERE id=?', (event_id,)).fetchone()
@@ -414,8 +422,13 @@ class Check24Bookings:
                     or data.get('raw_sha256') != event['raw_hash']):
                 raise ValueError('Die Originalnachricht passt nicht zur gespeicherten Buchung.')
             if event['state'] == 'applied':
-                linked = db.execute('SELECT order_id FROM check24_bookings WHERE event_id=? AND active=1', (event_id,)).fetchone()
+                linked = db.execute('SELECT order_id,start_at,end_at FROM check24_bookings WHERE event_id=? AND active=1',
+                                    (event_id,)).fetchone()
                 if linked and linked['order_id'] == order_id:
+                    if confirmed_interval and confirmed_interval != (
+                            datetime.fromisoformat(linked['start_at']), datetime.fromisoformat(linked['end_at'])):
+                        raise ValueError('Der Auftrag ist bereits für eine andere Montagezeit verknüpft. '
+                                         'Bitte die bestätigte Terminänderung am verknüpften Auftrag übernehmen.')
                     return order_id
             if event['state'] not in ('review', 'resolved'):
                 raise ValueError('Diese Nachricht ist bereits bearbeitet.')
@@ -435,7 +448,8 @@ class Check24Bookings:
                 if documented_cancel or later_change:
                     raise ValueError('Zu dieser Bestellnummer liegt ein Stornovermerk oder eine weitere '
                                      'Änderungsnachricht vor. Den aktuellen Termin bitte im Büro klären.')
-            result = self._apply(db, event, existing_order_id=order_id, verified_data=data)
+            result = self._apply(db, event, existing_order_id=order_id, verified_data=data,
+                                 confirmed_interval=confirmed_interval)
             db.commit()
             return result
         except Exception:
@@ -494,16 +508,70 @@ class Check24Bookings:
         finally:
             db.close()
 
-    def reschedule(self, event_id, day, begin, finish, note):
+    @staticmethod
+    def reopen_print(db, order_id):
+        # Bump even if already pending: an older PDF may still be rendering.
+        db.execute("""UPDATE auftraege SET reifen_auftrag_gedruckt_am='',
+            reifen_termin_revision=reifen_termin_revision+1 WHERE id=?
+            AND COALESCE(archiviert,0)=0 AND COALESCE(angebotsphase,0)=0""", (order_id,))
+
+    def reopen_for_office_dates(self, db, order, dates):
+        """Compare office-supplied dates while the caller holds the order row lock."""
+        if not self.p.auftrag_ist_reifen(order):
+            return
+        for field, value in dates.items():
+            if order['quelle'] == 'check24' and field in ('start_datum', 'fertig_datum'):
+                # The linked CHECK24 interval supplies both printed work times.
+                continue
+            normalize = self.p.format_time_value if field.endswith('_uhrzeit') else self.p.format_date
+            if normalize(order[field]) != normalize(value):
+                break
+        else:
+            return
+        if self.is_check24_order(db, order):
+            self.reopen_print(db, order['id'])
+
+    def is_check24_order(self, db, order):
+        if order['quelle'] == 'check24' or self.p.parse_schadenaufnahme_json(
+                order.get('schaden_aufnahme_json')).get('check24_bestellnummer'):
+            return True
+        if order['quelle'] != 'intern':
+            return False
+        # Manual jobs often retain their own internal order number. An expressly
+        # labelled reference identifies the job even before the original mail arrives.
+        reference = (r'\bCHECK24[\s:·-]*(?:(?:Bestellung|Bestellnummer|Bestellnr\.?)[\s:#-]+'
+                     r'|[\s:·-]+(?=[A-Z0-9]{0,19}[0-9]))[A-Z0-9]{4,20}\b')
+        texts = (order.get('beschreibung') or '', order.get('analyse_text') or '')
+        if any(re.search(reference, text, re.I) for text in texts):
+            return True
+        # A bare order number or an ambiguous word such as "CHECK24 Montage"
+        # is conclusive only when the same reference was actually received.
+        candidates = {(order.get('auftragsnummer') or '').strip().upper()}
+        for text in texts:
+            candidates.update(re.findall(r'\bCHECK24[\s:·-]+([A-Z0-9]{4,20})\b', text.upper()))
+        codes = [code for code in candidates if re.fullmatch(r'[A-Z0-9]{4,20}', code)]
+        return bool(codes and db.execute(
+            'SELECT 1 FROM check24_events WHERE provider_id IN (' + ','.join('?' for _ in codes) + ') LIMIT 1',
+            tuple(codes)).fetchone())
+
+    @staticmethod
+    def reschedule_interval(day, begin, finish):
         from check24_mail import _local_datetime
         from datetime import date
         try:
+            if (not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', day)
+                    or not all(re.fullmatch(r'[0-9]{2}:[0-9]{2}', clock) for clock in (begin, finish))):
+                raise ValueError
             start = _local_datetime(date.fromisoformat(day), begin)
             end = _local_datetime(date.fromisoformat(day), finish)
         except (ValueError, TypeError):
             raise ValueError('Bitte gültiges Datum und eindeutige Uhrzeiten eintragen.')
         if start <= datetime.now(BERLIN) or start >= end or start.weekday() == 6 or start.hour < 7 or end.hour > 18 or (end.hour == 18 and end.minute):
             raise ValueError('Bitte ein zukünftiges Zeitintervall innerhalb der Öffnungszeiten auswählen.')
+        return start, end
+
+    def reschedule(self, event_id, day, begin, finish, note):
+        start, end = self.reschedule_interval(day, begin, finish)
         db = self.p.get_db()
         try:
             self.lock(db)
@@ -513,19 +581,28 @@ class Check24Bookings:
                 raise ValueError('Keine aktive Buchung gefunden.')
             db.execute('UPDATE auftraege SET status=status WHERE id=?', (booking['order_id'],))
             order = db.execute('SELECT * FROM auftraege WHERE id=?', (booking['order_id'],)).fetchone()
-            if not order or int(order['status'] or 0) >= 3 or order['lexware_invoice_id'] or order['rechnung_nummer']:
-                raise ValueError('Auftrag bereits in Arbeit oder abgerechnet. Änderung zuerst im Büro klären.')
+            if (not order or order['archiviert'] or int(order['status'] or 0) >= 3
+                    or self.p.reifen_rechnung_gesperrt(dict(order))):
+                raise ValueError('Auftrag archiviert, bereits in Arbeit oder abgerechnet. Änderung zuerst im Büro klären.')
+            same_slot = (start == datetime.fromisoformat(booking['start_at'])
+                         and end == datetime.fromisoformat(booking['end_at']))
+            confirmed = start.strftime('%d.%m.%Y %H:%M') + '–' + end.strftime('%H:%M')
+            db.execute("UPDATE check24_events SET state='resolved',note=? WHERE id=?",
+                       ('Termin nach CHECK24-Abgleich bestätigt: ' + confirmed + '. ' + note, event_id))
+            if same_slot:
+                db.commit()
+                return
             if self._conflict(db, start, end, booking['provider_id']):
                 raise ValueError('Die neue Zeit überschneidet sich mit einer vorhandenen Buchung.')
             intake = json.loads(order['schaden_aufnahme_json'] or '{}')
             intake.update(check24_start=start.isoformat(), check24_ende=end.isoformat())
             db.execute('UPDATE check24_bookings SET start_at=?,end_at=? WHERE provider_id=?', (start.isoformat(), end.isoformat(), booking['provider_id']))
-            description = re.sub(r'(?m)^Termin: .+$', 'Termin: ' + start.strftime('%d.%m.%Y %H:%M') + '–' + end.strftime('%H:%M') + ' Uhr', order['beschreibung'] or '')
-            analysis = re.sub(r'(?m)^Termin: .+$', 'Termin: ' + start.strftime('%d.%m.%Y %H:%M') + '–' + end.strftime('%H:%M') + ' Uhr', order['analyse_text'] or '')
+            self.reopen_print(db, booking['order_id'])
+            description = re.sub(r'(?m)^Termin: .+$', 'Termin: ' + confirmed + ' Uhr', order['beschreibung'] or '')
+            analysis = re.sub(r'(?m)^Termin: .+$', 'Termin: ' + confirmed + ' Uhr', order['analyse_text'] or '')
             db.execute('''UPDATE auftraege SET annahme_datum=?,annahme_uhrzeit=?,schaden_aufnahme_json=?,
                 beschreibung=?,analyse_text=?,geaendert_am=? WHERE id=?''',
                 (start.strftime('%d.%m.%Y'), start.strftime('%H:%M'), json.dumps(intake, ensure_ascii=False), description, analysis, self.p.now_str(), booking['order_id']))
-            db.execute("UPDATE check24_events SET state='resolved',note=? WHERE id=?", ('Termin nach CHECK24-Abgleich geändert: ' + start.strftime('%d.%m.%Y %H:%M') + '–' + end.strftime('%H:%M') + '. ' + note, event_id))
             db.commit()
         except Exception:
             db.rollback()
@@ -559,6 +636,9 @@ class Check24Bookings:
             intake = json.loads(order['schaden_aufnahme_json'] or '{}')
             if disposal is not None:
                 intake['check24_entsorgung_menge'] = int(disposal)
+            if (self.p.parse_date(order['annahme_datum']) != arrival.date()
+                    or self.p.format_time_value(order['annahme_uhrzeit']) != arrival.strftime('%H:%M')):
+                self.reopen_print(db, order_id)
             db.execute('UPDATE auftraege SET annahme_datum=?,annahme_uhrzeit=?,notiz_intern=?,schaden_aufnahme_json=?,geaendert_am=? WHERE id=?',
                        (arrival.strftime('%d.%m.%Y'), arrival.strftime('%H:%M'), note, json.dumps(intake,ensure_ascii=False), self.p.now_str(), order_id))
             db.commit()
@@ -881,7 +961,8 @@ def register_check24(portal):
         if request.form.get('reviewed') != '1' or not order_id or order_id < 1:
             abort(400)
         try:
-            service.link_existing(event_id, order_id)
+            service.link_existing(event_id, order_id, day=request.form.get('day', ''),
+                                  begin=request.form.get('begin', ''), finish=request.form.get('finish', ''))
         except ValueError as exc:
             flash(str(exc), 'warning')
         except (OSError, EOFError, imaplib.IMAP4.error):

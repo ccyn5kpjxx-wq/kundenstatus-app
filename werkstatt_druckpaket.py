@@ -31,7 +31,7 @@ def _order(portal, order_id, tafel, *, connection=None):
     db = connection if connection is not None else portal.get_db()
     try:
         row = db.execute(f"""SELECT {fields}, a.leistungsart, a.schaden_aufnahme_json,
-            a.quelle, a.kunde_name, a.start_uhrzeit,
+            a.quelle, a.kunde_name, a.start_uhrzeit, a.reifen_termin_revision,
             a.angebotsphase, a.angebot_status, a.werkstatt_angebot_text, a.versicherung_id,
             a.versicherung_freigabe_status, a.schaden_eigenauftrag, h.name AS autohaus
             FROM auftraege a LEFT JOIN autohaeuser h ON h.id=a.autohaus_id WHERE a.id=?""",
@@ -48,13 +48,13 @@ def _order(portal, order_id, tafel, *, connection=None):
     return order
 
 
-def _record_tyre_print(portal, order_id, tafel):
-    """Mark the first issued package, atomically and only while the order is accessible."""
+def _record_tyre_print(portal, order_id, tafel, revision):
+    """Acknowledge only the appointment revision used to generate this package."""
     db = portal.get_db()
     try:
         db.execute("""UPDATE auftraege SET reifen_auftrag_gedruckt_am=?
-            WHERE id=? AND COALESCE(reifen_auftrag_gedruckt_am,'')=''
-            AND COALESCE(archiviert,0)=0 AND COALESCE(angebotsphase,0)=0""", (portal.now_str(), order_id))
+            WHERE id=? AND reifen_termin_revision=? AND COALESCE(reifen_auftrag_gedruckt_am,'')=''
+            AND COALESCE(archiviert,0)=0 AND COALESCE(angebotsphase,0)=0""", (portal.now_str(), order_id, revision))
         # Recheck on the transaction connection. A concurrent type/visibility
         # change must not associate the generated package with another workflow.
         current = _order(portal, order_id, tafel, connection=db)
@@ -62,6 +62,8 @@ def _record_tyre_print(portal, order_id, tafel):
             abort(404)
         if auftrag_leistungsart(current) != "reifenservice":
             abort(409, description="Die Auftragsart wurde geändert. Bitte den Auftrag neu öffnen.")
+        if current["reifen_termin_revision"] != revision:
+            abort(409, description="Der Termin wurde während der PDF-Erstellung geändert. Bitte erneut drucken.")
         db.commit()
     except Exception:
         db.rollback()
@@ -346,5 +348,5 @@ def druckpaket(portal, order_id, *, tafel=False, druckauftrag=False):
             pdf = BytesIO(result.tobytes(garbage=3, deflate=True))
     if (druckauftrag and not omitted and not order["archiviert"] and not order["angebotsphase"]
             and auftrag_leistungsart(order) == "reifenservice"):
-        _record_tyre_print(portal, order_id, tafel)
+        _record_tyre_print(portal, order_id, tafel, order["reifen_termin_revision"])
     return pdf

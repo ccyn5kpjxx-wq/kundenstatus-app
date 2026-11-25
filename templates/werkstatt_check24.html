@@ -34,8 +34,9 @@
 <article class="c24-card" data-check24-event="{{ event.id }}">
  <p class="c24-state {% if event.state=='review' %}c24-review{% endif %}">{% if event.state=='applied' %}In Werkstatt eingeplant{% elif event.state=='duplicate' %}Bereits vorhanden{% elif event.state=='resolved' %}Geprüft{% else %}Prüfung erforderlich{% endif %} · {{ d.provider_id or 'Bestellnummer unklar' }}</p>
  <h2>{{ d.customer_name or d.subject }}</h2>
- {% if d.start_at %}<p class="c24-time">{{ d.start_at[8:10] }}.{{ d.start_at[5:7] }}.{{ d.start_at[:4] }} · {{ d.start_at[11:16] }}–{{ d.end_at[11:16] }} Uhr</p>{% endif %}
- {% if event.current_start and event.current_start != d.start_at %}<p class="c24-state">Aktueller Werkstatttermin: {{ event.current_start[8:10] }}.{{ event.current_start[5:7] }}.{{ event.current_start[:4] }} · {{ event.current_start[11:16] }}–{{ event.current_end[11:16] }} Uhr</p><p class="c24-muted">Die Zeit oben stammt aus der ursprünglichen Nachricht.</p>{% endif %}
+ {% set changed = event.current_start and (event.current_start != d.start_at or event.current_end != d.end_at) %}
+ {% if changed %}<p class="c24-time">Aktueller Werkstatttermin: {{ event.current_start[8:10] }}.{{ event.current_start[5:7] }}.{{ event.current_start[:4] }} · {{ event.current_start[11:16] }}–{{ event.current_end[11:16] }} Uhr</p>{% endif %}
+ {% if d.start_at %}<p class="{{ 'c24-muted' if changed else 'c24-time' }}">{% if changed %}Ursprünglicher Termin laut Nachricht: {% endif %}{{ d.start_at[8:10] }}.{{ d.start_at[5:7] }}.{{ d.start_at[:4] }} · {{ d.start_at[11:16] }}–{{ d.end_at[11:16] }} Uhr</p>{% endif %}
  <p>{{ d.service }}</p><ul>{% for tire in d.tires %}<li>{{ tire }}</li>{% endfor %}</ul>
  {% if d.customer_phone %}<p>Telefon: {{ d.customer_phone }}</p>{% endif %}
  {% if d.delivery_date %}<p>Voraussichtliche Lieferung: {{ d.delivery_date[8:10] }}.{{ d.delivery_date[5:7] }}.{{ d.delivery_date[:4] }}</p>{% endif %}
@@ -51,6 +52,11 @@
  <a href="{{ url_for('auftrag_detail', auftrag_id=order_id) }}">Auftrag {{ order_id }} zum Abgleich öffnen</a>
  <form method="post" action="{{ url_for('check24.link_existing',event_id=event.id) }}">
  <input type="hidden" name="order_id" value="{{ order_id }}">
+ <fieldset class="mb-3"><legend class="h6">Abweichender Montagetermin</legend>
+ <p class="c24-muted">Ist der Auftrag bereits auf einen anderen Termin umgebucht, trage die aktuelle Montagezeit aus dem CHECK24-Portal ein. Bei unverändertem Termin bleiben diese Felder leer.</p>
+ <label>Datum <input class="form-control" type="date" name="day"></label>
+ <label>Beginn <input class="form-control" type="time" name="begin"></label>
+ <label>Ende <input class="form-control" type="time" name="finish"></label></fieldset>
  <label><input type="checkbox" name="reviewed" value="1" required> Aktive Buchung, Kunde und Montagezeit im CHECK24-Portal mit Auftrag {{ order_id }} abgeglichen</label><br>
  <button class="btn btn-brand mt-2">Auftrag verknüpfen und Montagezeit reservieren</button></form></details>
  {% elif event.manual_order_ids|length > 1 %}<p class="c24-review">Mehrere manuelle Reifenaufträge enthalten diese Bestellnummer. Bitte die Zuordnung im Büro klären.</p>{% endif %}
