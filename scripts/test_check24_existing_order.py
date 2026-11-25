@@ -12,12 +12,14 @@ class ExistingOrderTest(unittest.TestCase):
     setUp = fixtures.Check24IntegrationTest.setUp
     fake_sync_mailbox = fixtures.Check24IntegrationTest.fake_sync_mailbox
 
-    def manual(self, reference='CHECK24-Bestellung TEST9001.', name='Erika Beispiel', number=''):
+    def manual(self, reference='CHECK24-Bestellung TEST9001.', name='Erika Beispiel', number='',
+               day='30.10.2026', at='08:00', printed=''):
         order = self.p.create_auftrag('intern', leistungsart='reifenservice', kunde_name=name,
             fahrzeug='Reifenservice', beschreibung=reference, kontakt_telefon='0170 0000000', auftragsnummer=number,
-            annahme_datum='30.10.2026', schaden_aufnahme_json='{"notiz":"Alte Räder mitgeben"}')
+            annahme_datum=day, schaden_aufnahme_json='{"notiz":"Alte Räder mitgeben"}')
         db = self.p.get_db()
-        db.execute("UPDATE auftraege SET annahme_uhrzeit='08:00' WHERE id=?", (order,))
+        db.execute('UPDATE auftraege SET annahme_uhrzeit=?,reifen_auftrag_gedruckt_am=? WHERE id=?',
+                   (at, printed, order))
         db.commit()
         db.close()
         self.addCleanup(self.remove_manual, order)
@@ -44,7 +46,7 @@ class ExistingOrderTest(unittest.TestCase):
         return event
 
     def test_verified_resolved_original_and_manual_order_are_joined_once(self):
-        order = self.manual()
+        order = self.manual(printed='26.10.2026 13:15')
         event = self.old_resolved_receipt()
         client = self.p.app.test_client()
         with client.session_transaction() as session:
@@ -70,6 +72,7 @@ class ExistingOrderTest(unittest.TestCase):
             linked = dict(db.execute('SELECT * FROM auftraege WHERE id=?', (order,)).fetchone())
             self.assertEqual(linked['beschreibung'], 'CHECK24-Bestellung TEST9001.')
             self.assertEqual(linked['quelle'], 'check24')
+            self.assertEqual(linked['reifen_auftrag_gedruckt_am'], '26.10.2026 13:15')
             self.assertEqual(json.loads(linked['schaden_aufnahme_json'])['notiz'], 'Alte Räder mitgeben')
             self.assertEqual(self.p.check24_rechnungsbasis(linked)['brutto'], '45.00')
             self.assertEqual(self.p.check24_rechnungsbasis(linked)['leistung'], 'Reifenmontage für 2 Reifen')
@@ -81,6 +84,86 @@ class ExistingOrderTest(unittest.TestCase):
         self.service.ingest(fixtures.synthetic_mail().replace(b'<synthetic-booking@', b'<resend@'),
                             verified=True, auto_apply=True)
         self.assertEqual(self.service.rows()[0]['state'], 'duplicate')
+
+    def test_link_rescheduled_order_reserves_verified_interval_and_preserves_original(self):
+        order = self.manual(day='29.10.2026', at='11:30', printed='26.10.2026 13:15')
+        event = self.old_resolved_receipt()
+        client = self.p.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        page = client.get('/admin/check24').get_data(as_text=True)
+        self.assertIn('Abweichender Montagetermin', page)
+        path = f'/admin/check24/{event}/verknuepfen'
+        slot = {'day': '2026-10-29', 'begin': '11:30', 'finish': '12:30'}
+        form = {'order_id': order, 'reviewed': '1', **slot}
+        self.assertEqual(client.post(path, data=form).status_code, 400)
+        with client.session_transaction() as session:
+            form[self.p.CSRF_FIELD_NAME] = session[self.p.CSRF_FIELD_NAME]
+        with self.fake_sync_mailbox(), patch('check24_buchungen.ionos_verified', return_value=True):
+            result = client.post(path, data=form, follow_redirects=True).get_data(as_text=True)
+        self.assertIn('Aktueller Werkstatttermin: 29.10.2026 · 11:30–12:30 Uhr', result)
+        card = self.service.rows()[0]
+        self.assertEqual(card['order_id'], order)
+        self.assertEqual(card['data']['start_at'], '2026-10-30T08:00:00+01:00')
+        self.assertEqual(card['data']['end_at'], '2026-10-30T08:30:00+01:00')
+        self.assertIn('Portalabgleich dokumentiert.', card['note'])
+        self.assertIn('29.10.2026 11:30–12:30', card['note'])
+        db = self.p.get_db()
+        try:
+            for hour in ('11:00', '12:00'):
+                self.assertTrue(self.service.native_slot_blocked(db, slot['day'], hour))
+            self.assertFalse(self.service.native_slot_blocked(db, '2026-10-30', '08:00'))
+            linked = dict(db.execute('SELECT * FROM auftraege WHERE id=?', (order,)).fetchone())
+            intake = json.loads(linked['schaden_aufnahme_json'])
+            self.assertEqual((intake['check24_start'], intake['check24_ende']), (card['current_start'], card['current_end']))
+            self.assertEqual(self.p.check24_rechnungsbasis(linked)['brutto'], '45.00')
+            self.assertEqual(linked['reifen_auftrag_gedruckt_am'], '')
+            self.assertEqual(linked['reifen_termin_revision'], 1)
+            db.execute("UPDATE auftraege SET reifen_auftrag_gedruckt_am='27.10.2026 09:15' WHERE id=?", (order,))
+            db.commit()
+            self.assertEqual(self.service.link_existing(event, order, **slot), order)
+            with self.assertRaisesRegex(ValueError, 'andere Montagezeit'):
+                self.service.link_existing(event, order, **{**slot, 'finish': '13:00'})
+            self.assertEqual(db.execute('SELECT reifen_auftrag_gedruckt_am FROM auftraege WHERE id=?',
+                                        (order,)).fetchone()[0], '27.10.2026 09:15')
+            self.assertEqual(self.p.get_auftrag(order)['reifen_termin_revision'], 1)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM check24_bookings').fetchone()[0], 1)
+        finally:
+            db.close()
+        self.service.ingest(fixtures.synthetic_mail().replace(b'<synthetic-booking@', b'<resend@'),
+                            verified=True, auto_apply=True)
+        self.assertEqual(self.service.rows()[0]['state'], 'duplicate')
+
+    def test_changed_interval_cannot_override_the_order_or_an_occupied_slot(self):
+        order = self.manual(day='29.10.2026', at='11:30', printed='26.10.2026 13:15')
+        event = self.service.ingest(fixtures.synthetic_mail(), verified=True)
+        slot = {'day': '2026-10-29', 'begin': '11:30', 'finish': '12:30'}
+        for invalid in ({'day': '2026-10-29'}, {**slot, 'finish': '11:15'},
+                        {**slot, 'begin': '10:30'}, {**slot, 'day': '2026-10-28'}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.service.link_existing(event, order, **invalid)
+        other = fixtures.BODY.replace('TEST9001', 'TEST9999').replace(
+            'Fr. 30. Oktober um 08:00 - 08:30', 'Do. 29. Oktober um 12:00 - 13:00')
+        self.service.ingest(fixtures.synthetic_mail(other, subject='Neue CHECK24 Terminbuchung (Bestellnummer: TEST9999)'),
+                            verified=True, auto_apply=True)
+        with self.assertRaisesRegex(ValueError, 'Zeit ist bereits belegt'):
+            self.service.link_existing(event, order, **slot)
+        self.assertEqual(self.p.get_auftrag(order)['quelle'], 'intern')
+        self.assertEqual(self.p.get_auftrag(order)['reifen_auftrag_gedruckt_am'], '26.10.2026 13:15')
+        card = next(item for item in self.service.rows() if item['id'] == event)
+        self.assertEqual(card['state'], 'review')
+        self.assertIsNone(card['order_id'])
+
+    def test_changed_end_only_appears_on_card_and_requires_new_print(self):
+        order = self.manual(printed='26.10.2026 13:15')
+        event = self.service.ingest(fixtures.synthetic_mail(), verified=True)
+        self.service.link_existing(event, order, day='2026-10-30', begin='08:00', finish='09:00')
+        self.assertEqual(self.p.get_auftrag(order)['reifen_auftrag_gedruckt_am'], '')
+        client = self.p.app.test_client()
+        with client.session_transaction() as session:
+            session['admin'] = True
+        self.assertIn('Aktueller Werkstatttermin: 30.10.2026 · 08:00–09:00 Uhr',
+                      client.get('/admin/check24').get_data(as_text=True))
 
     def test_manual_reference_blocks_import_and_requires_unambiguous_identity(self):
         first = self.manual(name='Falscher Name')
@@ -200,6 +283,8 @@ class ExistingOrderTest(unittest.TestCase):
             subject='CHECK24 Storno (Bestellnummer: TEST9001)'), verified=True)
         with self.assertRaisesRegex(ValueError, 'Stornovermerk'):
             self.service.link_existing(event, order)
+        with self.assertRaisesRegex(ValueError, 'Stornovermerk'):
+            self.service.link_existing(event, order, day='2026-10-30', begin='08:00', finish='09:00')
 
     def test_resolved_note_requires_positive_cancellation_of_this_reference(self):
         order = self.manual()

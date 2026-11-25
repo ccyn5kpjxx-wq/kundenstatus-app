@@ -83,7 +83,7 @@
 {% endif %}
 <div class="reifen-order-heading">
   <h2 class="h4">Reifenaufträge</h2>
-  <button type="button" id="reifen-neu-filter" class="btn btn-soft btn-sm" aria-controls="reifen-auftragskarten" aria-pressed="false" title="Reifenaufträge ohne erfassten Auftragsdruck anzeigen" disabled>Neu (<span id="reifen-neu-anzahl">{{ reifenauftraege|selectattr('reifen_auftrag_gedruckt_am', 'equalto', '')|list|length }}</span>)</button>
+  <button type="button" id="reifen-neu-filter" class="btn btn-soft btn-sm" aria-controls="reifen-auftragskarten" aria-pressed="false" title="Aufträge anzeigen, für die ein aktueller Ausdruck aussteht" disabled>Neu (<span id="reifen-neu-anzahl">{{ reifenauftraege|selectattr('reifen_auftrag_gedruckt_am', 'equalto', '')|list|length }}</span>)</button>
 </div>
 <div class="reifen-filter" data-reifen-filter hidden>
   <label for="reifen-suche">Kunde, Kennzeichen oder Auftragsnummer<input id="reifen-suche" class="form-control" type="search" placeholder="Auftrag suchen …"></label>
@@ -95,8 +95,8 @@
   {% set intake=auftrag.schaden_aufnahme %}
   {% set c24=intake.get('check24_bestellnummer') %}
   {% set entsorgung=intake.get('check24_entsorgung_menge', 0)|int %}
-  <article class="reifen-card" data-reifenauftrag="{{ auftrag.id }}" data-order-state="{{ 'fertig' if auftrag.status >= 4 else 'offen' }}">
-    {% if auftrag.reifen_auftrag_gedruckt_am == '' %}<div class="reifen-neu-balken" data-reifen-neu title="Für diesen Werkstattauftrag ist noch kein Druck im Portal erfasst.">Neu</div>{% endif %}
+  <article class="reifen-card" data-reifenauftrag="{{ auftrag.id }}" data-termin-revision="{{ auftrag.reifen_termin_revision or 0 }}" data-order-state="{{ 'fertig' if auftrag.status >= 4 else 'offen' }}">
+    {% if auftrag.reifen_auftrag_gedruckt_am == '' %}<div class="reifen-neu-balken" data-reifen-neu title="Für diesen Termin steht der Auftragsdruck aus.">Neu{% if auftrag.reifen_termin_revision %} · Termin geändert{% endif %}</div>{% endif %}
     <header class="reifen-card-head">
       <div><small>Anlieferung{% if auftrag.annahme_datum_obj %} · {{ ['Mo.','Di.','Mi.','Do.','Fr.','Sa.','So.'][auftrag.annahme_datum_obj.weekday()] }}{% endif %}</small><strong>{{ auftrag.annahme_datum or 'Termin offen' }}{% if auftrag.annahme_uhrzeit %} · {{ auftrag.annahme_uhrzeit }} Uhr{% endif %}</strong></div>
       <span class="reifen-status">{{ auftrag.status_meta.label }}</span>
@@ -146,7 +146,8 @@
   const status = document.getElementById('reifen-status-filter');
   const newFilter = document.getElementById('reifen-neu-filter');
   const newCount = document.getElementById('reifen-neu-anzahl');
-  const cards = Array.from(document.querySelectorAll('[data-reifenauftrag]'));
+  const grid = document.getElementById('reifen-auftragskarten');
+  const cards = () => Array.from(grid.querySelectorAll('[data-reifenauftrag]'));
   if (!panel || !search || !status) return;
   panel.hidden = false;
   newFilter.disabled = false;
@@ -154,7 +155,8 @@
     const query = search.value.trim().toLocaleLowerCase('de');
     let shown = 0;
     let unprinted = 0;
-    cards.forEach(card => {
+    const orders = cards();
+    orders.forEach(card => {
       const isNew = Boolean(card.querySelector('[data-reifen-neu]'));
       if (isNew) unprinted++;
       const matchesStatus = status.value === 'neu' ? isNew
@@ -164,7 +166,7 @@
     });
     newCount.textContent = unprinted;
     newFilter.setAttribute('aria-pressed', String(status.value === 'neu'));
-    document.getElementById('reifen-ergebnis').textContent = shown + ' von ' + cards.length + ' Aufträgen';
+    document.getElementById('reifen-ergebnis').textContent = shown + ' von ' + orders.length + ' Aufträgen';
     document.getElementById('reifen-kein-treffer').hidden = shown > 0;
   };
   search.addEventListener('input', filter);
@@ -173,26 +175,46 @@
     status.value = status.value === 'neu' ? 'offen' : 'neu';
     filter();
   });
+  let refreshing = false;
+  const editingOrder = () => Boolean(grid.querySelector('details[open] form'));
   const refreshPrintStatus = async () => {
-    if (document.hidden) return;
-    const marked = cards.filter(card => card.querySelector('[data-reifen-neu]'));
+    if (document.hidden || refreshing) return;
+    refreshing = true;
     try {
-      for (let offset = 0; offset < marked.length; offset += 100) {
-        const batch = marked.slice(offset, offset + 100);
-        const url = new URL({{ url_for('reifenportal_druckoffen')|tojson }}, location.href);
-        batch.forEach(card => url.searchParams.append('id', card.dataset.reifenauftrag));
-        const response = await fetch(url, {cache:'no-store'});
-        if (!response.ok || response.redirected) break;
-        const pending = new Set(await response.json());
-        batch.forEach(card => {
-          if (!pending.has(Number(card.dataset.reifenauftrag))) card.querySelector('[data-reifen-neu]')?.remove();
-        });
+      const response = await fetch({{ url_for('reifenportal_druckoffen', ansicht='portal')|tojson }}, {cache:'no-store'});
+      if (!response.ok || response.redirected) return;
+      const states = await response.json();
+      const orders = cards();
+      let reloadCards = orders.length !== Object.keys(states).length;
+      for (const card of orders) {
+        const state = states[card.dataset.reifenauftrag];
+        const banner = card.querySelector('[data-reifen-neu]');
+        if (!state || state[0] !== Number(card.dataset.terminRevision) || (state[1] && !banner)) {
+          reloadCards = true;
+        } else if (!state[1] && banner) {
+          banner.remove();
+        }
+      }
+      if (reloadCards && !editingOrder()) {
+        const page = await fetch({{ url_for('admin_reifentermine')|tojson }}, {cache:'no-store'});
+        if (!page.ok || page.redirected) return;
+        const updated = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById(grid.id);
+        if (updated && !editingOrder()) {
+          const expanded = orders.filter(card => card.querySelector('[data-reifen-details][open]'));
+          for (const card of expanded) {
+            updated.querySelector('[data-reifenauftrag="' + card.dataset.reifenauftrag + '"] [data-reifen-details]')?.setAttribute('open', '');
+          }
+          grid.replaceChildren(...updated.childNodes);
+        }
       }
       filter();
     } catch {
       // Keep the last confirmed status until the next successful read.
+    } finally {
+      refreshing = false;
     }
   };
+  window.setInterval(refreshPrintStatus, 60000);
   document.addEventListener('visibilitychange', refreshPrintStatus);
   window.addEventListener('pageshow', event => {
     if (event.persisted) refreshPrintStatus();

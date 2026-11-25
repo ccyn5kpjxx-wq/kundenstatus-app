@@ -214,6 +214,26 @@ class TirePrintQueueTests(unittest.TestCase):
             portal.ensure_reifen_auftragsdruck(db)
             self.assertEqual(db.execute("SELECT reifen_auftrag_gedruckt_am FROM auftraege WHERE id=3").fetchone()[0], "")
 
+    def test_open_tab_snapshot_includes_only_visible_tire_orders_and_their_print_state(self):
+        legacy = self.new_tire_order("Alte Reifenbuchung")
+        unrelated = portal.create_auftrag("intern", leistungsart="mechanik", kunde_name="Mechaniktest")
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE auftraege SET leistungsart='', schaden_aufnahme_json=? WHERE id=?",
+                       (r'{"anliegen":"reifen\u0073ervice"}', legacy))
+            db.execute("UPDATE auftraege SET reifen_termin_revision=2, reifen_auftrag_gedruckt_am=? WHERE id=?",
+                       ("26.10.2026 12:15", self.order))
+            db.execute("UPDATE auftraege SET archiviert=1 WHERE id=?", (self.other,))
+            db.commit()
+        path = "/admin/reifenportal/druckoffen?ansicht=portal"
+        self.assertEqual(portal.app.test_client().get(path).status_code, 302)
+        response = self.client.get(path)
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        states = response.get_json()
+        self.assertEqual(states[str(self.order)], [2, False])
+        self.assertEqual(states[str(legacy)], [0, True])
+        self.assertNotIn(str(unrelated), states)
+        self.assertNotIn(str(self.other), states)
+
 
 if __name__ == "__main__":
     unittest.main()

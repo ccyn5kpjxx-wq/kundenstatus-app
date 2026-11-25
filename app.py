@@ -8400,6 +8400,7 @@ def ensure_reifen_auftragsdruck(db):
         VALUES('reifen_auftragsdruck_start','1',?)
         ON CONFLICT(key) DO NOTHING RETURNING key""", (now_str(),)).fetchone()
     ensure_column(db, "auftraege", "reifen_auftrag_gedruckt_am", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "reifen_termin_revision", "INTEGER NOT NULL DEFAULT 0")
     if not started:
         return
     historical = db.execute("""SELECT id,leistungsart,schaden_aufnahme_json FROM auftraege
@@ -37135,30 +37136,18 @@ def add_verzoegerung(
 
 
 def apply_delay_to_order(auftrag_id, start_datum="", fertig_datum="", abholtermin=""):
-    start_clean = format_date(start_datum)
-    fertig_clean = format_date(fertig_datum)
-    abholung_clean = format_date(abholtermin)
-
-    updates = []
-    values = []
-    if start_clean:
-        updates.append("start_datum=?")
-        values.append(start_clean)
-    if fertig_clean:
-        updates.append("fertig_datum=?")
-        values.append(fertig_clean)
-    if abholung_clean:
-        updates.append("abholtermin=?")
-        values.append(abholung_clean)
-    if not updates:
+    dates = {"start_datum": format_date(start_datum), "fertig_datum": format_date(fertig_datum),
+             "abholtermin": format_date(abholtermin)}
+    dates = {name: value for name, value in dates.items() if value}
+    if not dates:
         return
-
-    updates.append("geaendert_am=?")
-    values.append(now_str())
-    values.append(auftrag_id)
-
+    updates = ", ".join(f"{name}=?" for name in dates)
     db = get_db()
-    db.execute(f"UPDATE auftraege SET {', '.join(updates)} WHERE id=?", tuple(values))
+    db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
+    row = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
+    if row:
+        check24_bookings.reopen_for_office_dates(db, dict(row), dates)
+    db.execute(f"UPDATE auftraege SET {updates}, geaendert_am=? WHERE id=?", (*dates.values(), now_str(), auftrag_id))
     db.commit()
     db.close()
 
@@ -46764,6 +46753,25 @@ def admin_reifentermine():
 @app.get("/admin/reifenportal/druckoffen")
 @admin_required
 def reifenportal_druckoffen():
+    if request.args.get("ansicht") == "portal":
+        db = get_db()
+        try:
+            # Older orders can carry the service only in their JSON intake,
+            # including JSON strings written with Unicode escapes.
+            rows = db.execute("""SELECT id, leistungsart,
+                                        CASE WHEN leistungsart='reifenservice' THEN NULL
+                                             ELSE schaden_aufnahme_json END AS schaden_aufnahme_json,
+                                        reifen_termin_revision, reifen_auftrag_gedruckt_am
+                                 FROM auftraege WHERE archiviert=0 AND angebotsphase=0
+                                   AND (leistungsart='reifenservice' OR schaden_aufnahme_json LIKE ?
+                                        OR schaden_aufnahme_json LIKE ? ESCAPE '!')""", ("%reifenservice%", "%\\u%")).fetchall()
+        finally:
+            db.close()
+        response = jsonify({row["id"]: [row["reifen_termin_revision"] or 0,
+                                        row["reifen_auftrag_gedruckt_am"] == ""]
+                            for row in rows if row["leistungsart"] == "reifenservice" or auftrag_ist_reifen(dict(row))})
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     ids = request.args.getlist("id", type=int)
     if not 1 <= len(ids) <= 100:
         abort(400)
@@ -52135,7 +52143,7 @@ def auftrag_detail(auftrag_id):
         if round(bonus_netto_betrag, 2) != round(bisheriger_bonus, 2):
             bonus_preis_aktualisiert_am = now_str() if bonus_netto_betrag else ""
         db = get_db()
-        if neue_art is not None:
+        if neue_art is not None or gebuchter_termin or auftrag_ist_reifen(auftrag):
             db.execute("UPDATE auftraege SET status=status WHERE id=?", (auftrag_id,))
             zeile = db.execute("SELECT * FROM auftraege WHERE id=?", (auftrag_id,)).fetchone()
             if not zeile:
@@ -52143,20 +52151,23 @@ def auftrag_detail(auftrag_id):
                 db.close()
                 abort(404)
             frisch = dict(zeile)
+            if (frisch['quelle'] == 'check24' and auftrag.get('quelle') != 'check24'
+                    or gebuchter_termin and any(frisch[k] != auftrag.get(k) for k in ('annahme_datum', 'annahme_uhrzeit'))):
+                db.rollback()
+                db.close()
+                flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.", "warning")
+                return redirect(detail_self_url if shop_wunsch else url_for("admin_reifentermine"))
+            if auftrag_ist_reifen(frisch):
+                terminfelder = ("annahme_datum", "annahme_uhrzeit", "start_datum", "fertig_datum",
+                                "abholtermin", "abhol_uhrzeit")
+                check24_bookings.reopen_for_office_dates(db, frisch, {key: form.get(key) for key in terminfelder})
+        if neue_art is not None:
             hat_reifenrechnung = clean_text(frisch.get("reifen_rechnung_json")) not in ("", "{}")
             if (gebuchter_termin or hat_reifenbuchung(frisch) or hat_reifenrechnung) and neue_art != "reifenservice":
                 db.rollback()
                 db.close()
                 abort(400, description="Die Auftragsart einer Reifenbuchung oder gespeicherten Reifenabrechnung bleibt Reifenservice.")
             db.execute("UPDATE auftraege SET leistungsart=? WHERE id=?", (neue_art, auftrag_id))
-        if gebuchter_termin:
-            db.execute("UPDATE auftraege SET status=status WHERE id=?",(auftrag_id,))
-            termin = db.execute("SELECT annahme_datum,annahme_uhrzeit FROM auftraege WHERE id=?",(auftrag_id,)).fetchone()
-            if not termin or termin["annahme_datum"] != auftrag.get("annahme_datum") or termin["annahme_uhrzeit"] != auftrag.get("annahme_uhrzeit"):
-                db.rollback()
-                db.close()
-                flash("Der Reifentermin wurde inzwischen geändert. Bitte neu laden.","warning")
-                return redirect(detail_self_url if shop_wunsch else url_for("admin_reifentermine"))
         db.execute(
             """
             UPDATE auftraege
@@ -54679,6 +54690,10 @@ def admin_auslese_uebernehmen(auftrag_id):
         value = parsed.strftime(DATE_FMT)
     db = get_db()
     changed = db.execute(f"UPDATE auftraege SET {key}=?, geaendert_am=? WHERE id=? AND COALESCE({key},'')=?", (value, now_str(), auftrag_id, old)).rowcount
+    if (changed and key in ('annahme_datum', 'fertig_datum') and format_date(old) != value
+            and auftrag_ist_reifen(order) and check24_bookings.is_check24_order(db, order)
+            and order.get('quelle') != 'check24'):
+        check24_bookings.reopen_print(db, auftrag_id)
     db.commit(); db.close()
     if changed:
         add_benachrichtigung(auftrag_id, 'Dokumentwert übernommen', f"{item['label']}: {old or 'leer'} → {value}. Quelle: {review['original_name']}", quelle='intern')
