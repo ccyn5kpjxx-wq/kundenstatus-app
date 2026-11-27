@@ -263,6 +263,11 @@ class EnrichedPublicCatalog(PublicCatalog):
                     product['quality_facts'] = public_facts
             ev = evidence.get(identifier, {})
             if isinstance(ev, Mapping) and ev.get('variant_fingerprint') == variant_fingerprint(row):
+                if product['category'] == 'tyre' and isinstance(ev.get('tyre_variant_label'), str):
+                    label = _text(ev['tyre_variant_label'], 100)
+                    if label:
+                        product['tyre_variant_label'] = label
+                        entry['search'] += ' ' + _fold(label)
                 gallery = ev.get('gallery')
                 if isinstance(gallery, list) and len(gallery) <= 12:
                     product['images'] = list(dict.fromkeys(product['images'] + [v for v in gallery

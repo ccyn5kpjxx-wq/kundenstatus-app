@@ -890,7 +890,7 @@
     node.append(media);
     const imageNote = modelPhotoNote(product); if (imageNote) node.append(el('small', imageNote, 'shop-muted'));
     const seasonLabel = {summer: 'Sommerreifen', winter: 'Winterreifen', allseason: 'Ganzjahresreifen'}[product.tyre_season];
-    node.append(el('h3', product.name), el('p', [product.brand, product.size, seasonLabel].filter(Boolean).join(' · '), 'shop-card-meta'));
+    node.append(el('h3', product.name), el('p', [product.brand, product.size, product.tyre_variant_label, seasonLabel].filter(Boolean).join(' · '), 'shop-card-meta'));
     if (scoped && !family && product.department === 'wheels') {
       const models = [...new Set(reviewedRimVehicles(product).map(v => [v.make, v.model, v.variant].filter(Boolean).join(' ')))];
       node.append(el('p', models.length ? 'Gutachten für ' + models.join(', ') : 'Fahrzeug im Lieferantenkatalog gelistet · Gutachten für diese Auswahl offen', 'shop-card-meta'));
@@ -969,7 +969,7 @@
     card.append(el('p', criteria.map(key => setCriteria[key]).join(' · '), 'tyre-set-criteria'));
     const identity = el('div', null, 'tyre-set-identity');
     const title = el('div');
-    title.append(el('h4', product.name), el('p', product.size, 'shop-muted'));
+    title.append(el('h4', product.name), el('p', [product.size, product.tyre_variant_label].filter(Boolean).join(' · '), 'shop-muted'));
     if (!/R\s*\d{2}\s+\d{2,3}(?:\/\d{2,3})?\s*[A-Z](?:\b|$)/i.test(product.size)) {
       const geometry = product.geometry || {};
       title.append(el('small', 'Lastindex ' + (geometry.load_index || 'offen') + ' · Geschwindigkeitsindex ' + (geometry.speed_index || 'offen')));
@@ -1773,7 +1773,7 @@
         }
         gallery.append(thumbnails);
       }
-      const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', product.size, 'shop-muted'));
+      const title = el('h2', product.name); title.id = 'product-title'; copy.append(el('p', product.brand, 'shop-eyebrow'), title, el('p', [product.size, product.tyre_variant_label].filter(Boolean).join(' · '), 'shop-muted'));
       appendTyreRating(copy, product, true);
       if (product.category === 'tyre') appendTyreFitment(copy, product, vehicle);
       if (isRim) appendRimFitment(copy, product, vehicle);
