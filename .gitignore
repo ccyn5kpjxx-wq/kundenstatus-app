@@ -22,6 +22,7 @@ instance/
 *.p12
 *.json
 !resources/shop_bridgestone_23886/release.json
+!resources/shop_michelin_680416/release.json
 !resources/shop_wheel_report_rows.json
 !resources/shop_mini_report_rows.json
 !native/ios/GaertnerMitarbeiter/Assets.xcassets/**/Contents.json

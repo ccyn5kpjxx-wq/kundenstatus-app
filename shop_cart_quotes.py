@@ -40,7 +40,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from shop_tyre_pricing import tyre_unit_gross_cent
+from shop_tyre_pricing import fixed_tyre_offer, tyre_unit_gross_cent
 import hashlib
 import hmac
 import json
@@ -457,7 +457,11 @@ class CartQuoteService:
                     block('procurement_price_unconfirmed', product_id=identifier, destination=destination)
                 else:
                     offered = {'unit_gross_cent': price['unit_gross_cent'], 'stock': price['stock']}
-                    if self.tyre_payment_costs and p['category'] == 'tyre':
+                    fixed_offer = fixed_tyre_offer(identifier, p['identity_hash']) if p['category'] == 'tyre' else None
+                    if fixed_offer:
+                        offered['base_unit_gross_cent'] = price['unit_gross_cent']
+                        offered['tyre_price_policy'], offered['unit_gross_cent'] = fixed_offer
+                    elif self.tyre_payment_costs and p['category'] == 'tyre':
                         offered['base_unit_gross_cent'] = price['unit_gross_cent']
                         offered['unit_gross_cent'] = tyre_unit_gross_cent(price['unit_gross_cent'])
                         if offered['unit_gross_cent'] > 10_000_000:
@@ -530,6 +534,8 @@ class CartQuoteService:
                     'items_gross_cent': price['unit_gross_cent'] * row['quantity'] if price else None, 'services': []}
             if price and 'base_unit_gross_cent' in price:
                 item['base_unit_gross_cent'] = price['base_unit_gross_cent']
+            if price and 'tyre_price_policy' in price:
+                item['tyre_price_policy'] = price['tyre_price_policy']
             if p['category'] == 'tyre' and _text(p.get('tyre_size'), 100):
                 item['tyre_size'] = p['tyre_size'].strip()
             if item['items_gross_cent'] is not None:

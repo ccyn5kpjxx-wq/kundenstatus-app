@@ -4,6 +4,20 @@ from datetime import datetime
 from decimal import Decimal, ROUND_CEILING
 
 
+# Final consumer price, including VAT and payment costs. Keep historical policy
+# identifiers stable so that already accepted order snapshots remain verifiable.
+FIXED_TYRE_OFFERS = {
+    'tyre:391657d07bef9198f20aa091': (
+        'b6bfd501c3361fd33f8626971d932a59a68be648c3e8c00e5aff465391dabea8',
+        'michelin_680416_fixed_23810_v1', 23810),
+}
+
+
+def fixed_tyre_offer(product_id, identity_hash):
+    offer = FIXED_TYRE_OFFERS.get(product_id)
+    return offer[1:] if offer and offer[0] == identity_hash else None
+
+
 def tyre_unit_gross_cent(base_unit_gross_cent):
     """Policy v1, also used to validate stored quotes; retain it for historical orders.
 
@@ -20,11 +34,11 @@ def tyre_unit_gross_cent(base_unit_gross_cent):
     return int(gross.to_integral_value(rounding=ROUND_CEILING))
 
 
-def catalogue_tyre_price(quote):
+def catalogue_tyre_price(quote, *, fixed_offer=None):
     """Project each supported quantity tier from its existing base price."""
     prices = {}
     for quantity, tier in quote['prices_by_quantity'].items():
-        unit = tyre_unit_gross_cent(tier['unit_gross_cent'])
+        unit = fixed_offer[1] if fixed_offer else tyre_unit_gross_cent(tier['unit_gross_cent'])
         if unit <= 10_000_000:
             prices[quantity] = {**tier, 'unit_gross_cent': unit, 'items_gross_cent': unit * tier['quantity']}
     return {**quote, 'prices_by_quantity': prices} if prices else None

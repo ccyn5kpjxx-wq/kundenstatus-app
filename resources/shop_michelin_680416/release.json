@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "base_bundle_sha256": "231b53c9759daae0782d78669a20802f5f85229a1d692ac63e9ad2bf0dc19179",
+  "product": {
+    "selection_id": "tyre:391657d07bef9198f20aa091",
+    "category": "tyre",
+    "manufacturer_name": "MICHELIN",
+    "name": "MICHELIN PILOT ALPIN 5",
+    "description": "XL, mit Felgenschutzleiste (FSL), für Elektrofahrzeuge geeignet. Winterreifen mit 3PMSF.",
+    "article_number": "680416",
+    "width": "235",
+    "ratio": "35",
+    "diameter": "19",
+    "load_index": "91",
+    "speed_index": "W",
+    "season": "Winterreifen",
+    "size": "235/35 R19 91W",
+    "dimensions_valid": true,
+    "group": "Winterreifen",
+    "service_category": "standard",
+    "unit_label": "Stück",
+    "runflat": "Nein",
+    "details": {
+      "Herstellerartikelnummer": "680416",
+      "EAN": "3528706804168"
+    },
+    "identifiers": {
+      "ean": "3528706804168",
+      "manufacturer_article_number": "680416"
+    },
+    "photo": "bilder/7ee37d0289b9c83670f73f157fdfa0c4c743a031652fc8686c7d939e92a52e55.jpg",
+    "gallery": [
+      "bilder/7ee37d0289b9c83670f73f157fdfa0c4c743a031652fc8686c7d939e92a52e55.jpg",
+      "bilder/b54f1eae009c2acd0443aab1ff010667fd54e2dfb218abc3e3892fbe2fa1f319.jpg"
+    ],
+    "quote_public": null,
+    "quote_status": "not_queried",
+    "pricing_mode": "rsu_fresh_quote_required",
+    "approval": null,
+    "fitment_status": "not_confirmed",
+    "technical_reports": [],
+    "quality_facts": {
+      "fuel_efficiency": "D",
+      "wet_grip": "B",
+      "vehicle_class": "C1",
+      "external_noise_db": "70",
+      "noise_class": "B"
+    }
+  },
+  "identity_hash": "b6bfd501c3361fd33f8626971d932a59a68be648c3e8c00e5aff465391dabea8",
+  "media_resources": {
+    "7ee37d0289b9c83670f73f157fdfa0c4c743a031652fc8686c7d939e92a52e55.jpg": {
+      "file": "7ee37d0289b9c83670f73f157fdfa0c4c743a031652fc8686c7d939e92a52e55.jpg",
+      "sha256": "8f0b9dca6bac4708a0645d79de39e060a984dbac29a6440358ca746e67827cc6"
+    },
+    "b54f1eae009c2acd0443aab1ff010667fd54e2dfb218abc3e3892fbe2fa1f319.jpg": {
+      "file": "b54f1eae009c2acd0443aab1ff010667fd54e2dfb218abc3e3892fbe2fa1f319.jpg",
+      "sha256": "cd379319e8419624a825946ad4192c9500638bd5de81301c46084ead853c719c"
+    }
+  },
+  "document_resources": {
+    "6693c89457ec5622ade626922ff757130692edb2e987a0ecad240f7e09e3d061.jpg": {
+      "file": "6693c89457ec5622ade626922ff757130692edb2e987a0ecad240f7e09e3d061.jpg",
+      "sha256": "40689d5d1202064b813fd2e92a3cc5da3ee43ed5a78f9cea492262a4fd292148",
+      "url": "https://media2.tyre-shopping.com/tyrelabel2/D/B/B/70/1/1/0/6cd391cd7e3f0f4467992234efa78d34-h200-w200.jpg?manufacturer=MICHELIN&model=680416&size=235%2F35R1991WXL&qr=aHR0cHM6Ly9lcHJlbC5lYy5ldXJvcGEuZXUvcXIvNDExNjE2"
+    },
+    "f01a5e9ad88a0c78e0190f64afea820a19c81f0654f72fff5bfc027087f52c65.pdf": {
+      "file": "f01a5e9ad88a0c78e0190f64afea820a19c81f0654f72fff5bfc027087f52c65.pdf",
+      "sha256": "21b71701bbb2305d50c253aed54e1a668d9a03a757a6668899e33a1934d756a8",
+      "url": "https://eprel.ec.europa.eu/fiches/tyres/Fiche_411616_EN.pdf"
+    }
+  },
+  "product_documents": {
+    "eprel_id": "411616",
+    "tyre_label_url": "/shop/documents/6693c89457ec5622ade626922ff757130692edb2e987a0ecad240f7e09e3d061.jpg",
+    "tyre_sheet_url": "/shop/documents/f01a5e9ad88a0c78e0190f64afea820a19c81f0654f72fff5bfc027087f52c65.pdf",
+    "status": "source_bound_document_pair",
+    "identity_hash": "b6bfd501c3361fd33f8626971d932a59a68be648c3e8c00e5aff465391dabea8"
+  }
+}

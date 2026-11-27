@@ -28,7 +28,7 @@ import json
 import re
 import sqlite3
 from uuid import uuid4
-from shop_tyre_pricing import tyre_unit_gross_cent
+from shop_tyre_pricing import fixed_tyre_offer, tyre_unit_gross_cent
 from shop_workshop_queue import HANDLED_SCHEMA
 
 MAX_CENTS = 100_000_000
@@ -242,7 +242,11 @@ def _validate_snapshot(snapshot, expected_hash, customer_id, mode):
                 or not isinstance(requested.get('services'), Mapping)
                 or not isinstance(requested.get('assembly_group'), str)):
             raise OrderStoreError('invalid_quote_lines')
-        if 'base_unit_gross_cent' in line:
+        if 'tyre_price_policy' in line:
+            if (line.get('category') != 'tyre' or not _amount(line.get('base_unit_gross_cent'))
+                    or (line['tyre_price_policy'], line['unit_gross_cent']) != fixed_tyre_offer(product, line['identity_hash'])):
+                raise OrderStoreError('invalid_quote_lines')
+        elif 'base_unit_gross_cent' in line:
             base = line['base_unit_gross_cent']
             if (line.get('category') != 'tyre' or not product.startswith('tyre:')
                     or not _amount(base) or tyre_unit_gross_cent(base) != line['unit_gross_cent']):

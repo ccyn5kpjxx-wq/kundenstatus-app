@@ -64,6 +64,22 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(importer()["applied"], 1)
         self.assertEqual(self.book.get(extra)["stock_reported"], 9)
 
+    def test_two_additions_accept_only_exact_base_plus_previously_installed_tyres(self):
+        base, first, second = self.ids
+        importer = DailyPriceImport(self.book, self.root, "f"*64, self, supplementary_ids={first, second})
+        for age, ids in enumerate(([base], [base, first], [base, second], self.ids)):
+            stamp = self.stamp + timedelta(seconds=age)
+            scope = [[pid, self.products[pid]["identity_hash"], "tyre", pid[-1]] for pid in ids]
+            self.put(binding_sha256=binding_digest(scope), offers=[[4800, age + i] for i in range(len(ids))],
+                     observed_at=stamp.isoformat())
+            self.assertEqual(importer()["applied"], len(ids))
+            for i, pid in enumerate(ids):
+                self.assertEqual(self.book.get(pid)["stock_reported"], age + i)
+        no_base = [[pid, self.products[pid]["identity_hash"], "tyre", pid[-1]] for pid in [first, second]]
+        self.put(binding_sha256=binding_digest(no_base), offers=[[4800, 3], [4800, 3]])
+        with self.assertRaises(PriceBookError):
+            importer()
+
     def test_batch_up_and_down_unmatched_and_restart_idempotence(self):
         self.book._requested_reviews.add(self.ids[0])
         self.put()

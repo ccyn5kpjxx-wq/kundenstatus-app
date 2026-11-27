@@ -2,6 +2,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
+import json
 from pathlib import Path
 import socket
 import sys
@@ -12,7 +13,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shop_catalog_public import PublicCatalog
 from shop_price_book import PublishedPriceBook
+from shop_order_store import OrderStoreError, _validate_snapshot
+from shop_tyre_release import REVIEWED_TYRES
 from shop_tyre_pricing import cached_tyre_checkout_base, tyre_unit_gross_cent
+from test_shop_order_store import rehash
 from test_shop_cart_quotes import Fixture, NOW, RIM, TYRE, line
 from test_shop_catalog_enriched import tyre
 from test_shop_catalog_public import wheel
@@ -87,6 +91,48 @@ class TyrePricingTests(unittest.TestCase):
         self.assertIsNone(cached_tyre_checkout_base(self.f.products[TYRE],1,self.current,get))
         self.assertEqual(cached_tyre_checkout_base(self.f.products[TYRE],4,self.current,get)['unit_gross_cent'],
                          self.fixed - 50)
+
+    def test_fixed_michelin_price_survives_base_changes_and_both_checkout_paths(self):
+        item = REVIEWED_TYRES[1]
+        release = json.loads((item.assets / 'release.json').read_bytes())
+        pid, identity = item.product_id, release['identity_hash']
+        self.f.products[pid] = {**self.f.products[TYRE], 'id': pid, 'identity_hash': identity, 'fitment_required': False}
+        backend_confirmation = self.f.current()
+        self.f.current = lambda: {**backend_confirmation, 'observed_at': self.clock.isoformat(),
+                                  'expires_at': (self.clock + timedelta(minutes=10)).isoformat()}
+        database = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'book' / 'prices.db'
+        def open_book():
+            return PublishedPriceBook(database, products=self.f.products, approved_ids={pid},
+                                      clock=lambda:self.clock, mode='test').provision(create=True)
+        book = open_book()
+        def fresh(product, qty):
+            return {**self.f.retail(product, qty), 'source': 'RSU', 'unit_gross_cent': supplier_base}
+        for supplier_base in (27100, 27020):
+            book.publish_uniform(self.f.products[pid], fresh(self.f.products[pid], 1))
+            book = open_book()
+            self.assertEqual(book.get(pid)['prices_by_quantity']['1']['unit_gross_cent'], supplier_base)
+            for price_lookup in (lambda product, qty: book.checkout_quote(product, qty, fresh),
+                                 lambda product, qty: cached_tyre_checkout_base(product, qty, fresh, book.get)):
+                for qty in (1, 4):
+                    result = self.f.quote([line(pid, qty)], tyre_payment_costs=True, retail_quote=price_lookup, clock=lambda:self.clock)
+                    self.assertTrue(result.public()['ready'])
+                    snapshot = result.snapshot()
+                    row = snapshot['lines'][0]
+                    self.assertEqual(row['unit_gross_cent'], 23810)
+                    self.assertEqual(row['items_gross_cent'], 23810 * qty)
+                    self.assertEqual(row['base_unit_gross_cent'], supplier_base)
+                    self.assertNotIn('tyre_price_policy', result.public()['lines'][0])
+                    _validate_snapshot(snapshot, snapshot['quote_hash'], snapshot['customer_id'], 'test')
+            self.clock += timedelta(days=1)
+        snapshot['lines'][0]['tyre_price_policy'] = 'different-offer'
+        tampered = rehash(snapshot)
+        with self.assertRaisesRegex(OrderStoreError, 'invalid_quote_lines'):
+            _validate_snapshot(tampered, tampered['quote_hash'], tampered['customer_id'], 'test')
+        published = book.get(pid)
+        forged = {**release['product'], 'size': 'a different variant'}
+        catalogue = PublicCatalog([forged], released_ids={pid}, clock=lambda:self.clock, quote_lookup=lambda _:published,
+                                  quote_lookup_authoritative=True, allow_published_prices=True, tyre_payment_costs=True)
+        self.assertEqual(catalogue.get(pid)['price']['prices_by_quantity']['1']['unit_gross_cent'], tyre_unit_gross_cent(supplier_base))
 
     def test_mixed_cart_total_changes_only_by_tyre_price_difference(self):
         cart = [line(TYRE, 4, group='set1', services={'mounting': True}), line(RIM, 4, group='set1')]

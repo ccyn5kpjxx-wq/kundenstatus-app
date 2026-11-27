@@ -2711,6 +2711,14 @@
       if (!photo.naturalWidth && safeMedia(source)) setImageSource(photo, source, photo.getAttribute('data-fallback-src'));
     }
   }
+  if (body.dataset.page === 'reifen') {
+    const params = new URLSearchParams(root.location.search);
+    const tyre = params.get('artikel');
+    if (tyre && /^tyre:[a-f0-9]{24}$/.test(tyre)) {
+      const quantity = Number(params.get('menge'));
+      openProduct(tyre, false, vehicleFilters, Number.isInteger(quantity) && quantity >= 1 && quantity <= maxQuantity(tyre) ? quantity : 1);
+    }
+  }
   if (body.dataset.page === 'komplettraeder') {
     const linked = new URLSearchParams(root.location.search).get('artikel');
     if (typeof linked === 'string' && /^(alloy_wheel|steel_wheel):[a-f0-9]{24}$/.test(linked)) {
