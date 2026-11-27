@@ -1,4 +1,5 @@
-"""Add the reviewed 23886 tyre to its exact catalogue, using ordinary RSU checkout."""
+"""Add individually reviewed tyres to their exact catalogue, using ordinary RSU checkout."""
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -8,10 +9,27 @@ from shop_documents import ReleasedProductDocuments
 from shop_media import ReleasedMedia
 
 
-ASSETS = Path(__file__).resolve().parent / 'resources' / 'shop_bridgestone_23886'
-PRODUCT_ID = 'tyre:16f79c76e6956f4870cd2815'
-PRIVATE_FILE = 'shop-tyre-16f79c76e6956f4870cd2815.private.json'
-PRIVATE_SHA256 = '0728604a5783b22626ae9ea9e5289302b971cb7505b6758756b02b705bd09ee4'
+RESOURCES = Path(__file__).resolve().parent / 'resources'
+
+
+@dataclass(frozen=True)
+class TyreRelease:
+    product_id: str
+    assets: Path
+    receipt_sha256: str
+    variant_label: str
+
+    @property
+    def receipt_filename(self):
+        return 'shop-tyre-' + self.product_id.removeprefix('tyre:') + '.private.json'
+
+
+REVIEWED_TYRES = (
+    TyreRelease('tyre:16f79c76e6956f4870cd2815', RESOURCES / 'shop_bridgestone_23886',
+                '0728604a5783b22626ae9ea9e5289302b971cb7505b6758756b02b705bd09ee4', 'DriveGuard Runflat (RFT) · XL'),
+    TyreRelease('tyre:391657d07bef9198f20aa091', RESOURCES / 'shop_michelin_680416',
+                '1992daf16c1f73e65d71092ee0475ebf8c33e4dd56b6cc6f601e8e9f696423bc', 'XL · Felgenschutzleiste (FSL)'),
+)
 
 
 class SupplementAssets:
@@ -25,40 +43,41 @@ class SupplementAssets:
         return service.read(asset)
 
 
-def add_reviewed_tyre(bundle, base_digest, release_root, *, secret_root=Path('/etc/secrets')):
+def add_reviewed_tyre(bundle, base_digest, release_root, item, *, secret_root=Path('/etc/secrets')):
     """Return the base untouched unless both the reviewed catalogue and receipt are installed."""
-    release = json.loads((ASSETS / 'release.json').read_bytes())
+    release = json.loads((item.assets / 'release.json').read_bytes())
     if base_digest != release['base_bundle_sha256']:
         return bundle, None
     # A Render secret mount may project its individual file through a symlink.
     # Only the pinned bytes of this named, bounded receipt are accepted.
-    path = release_root / PRIVATE_FILE
+    path = release_root / item.receipt_filename
     if path.is_symlink():
         raise ValueError('invalid_tyre_release_path')
     if not path.exists():
-        path = secret_root / PRIVATE_FILE
+        path = secret_root / item.receipt_filename
         if not path.is_file():
             return bundle, None
     if not path.is_file() or not 0 < path.stat().st_size <= 16_384:
         raise ValueError('invalid_tyre_release_receipt')
     raw = path.read_bytes()
-    if sha256(raw).hexdigest() != PRIVATE_SHA256:
+    if sha256(raw).hexdigest() != item.receipt_sha256:
         raise ValueError('invalid_tyre_release_receipt')
     private = json.loads(raw)
     product, identity = release['product'], release['identity_hash']
     binding, seed = private['binding'], private['seed']
     docs = release['product_documents']
-    if not (product['selection_id'] == PRODUCT_ID and product['category'] == binding['category'] == 'tyre'
+    product_id = item.product_id
+    if not (product['selection_id'] == product_id and product['category'] == binding['category'] == 'tyre'
             and product['quality_facts']['vehicle_class'] == 'C1'
             and product['identifiers']['ean'] == binding['expected_ean']
             and identity == variant_fingerprint(product) == binding['identity_hash'] == seed['identity_hash'] == docs['identity_hash']
-            and PRODUCT_ID not in bundle['publication']['released_ids']
-            and PRODUCT_ID not in bundle['rsu_bindings'] and PRODUCT_ID not in bundle['rsu_price_seeds']['records']):
+            and product_id not in bundle['publication']['released_ids']
+            and product_id not in bundle['rsu_bindings'] and product_id not in bundle['rsu_price_seeds']['records']):
         raise ValueError('invalid_tyre_release_scope')
     images = release['media_resources']
     documents = release['document_resources']
-    media = ReleasedMedia(images, approved_assets=set(images), local_root=ASSETS / 'media')
-    sheets = ReleasedProductDocuments(documents, approved_assets=set(documents), enabled=True, local_root=ASSETS / 'documents')
+    media = ReleasedMedia(images, approved_assets=set(images), local_root=item.assets / 'media')
+    sheets = ReleasedProductDocuments(documents, approved_assets=set(documents), enabled=True, local_root=item.assets / 'documents')
     # Mandatory originals must work offline before granting the normal tyre release.
     for service in (media, sheets):
         for asset in service.resources:
@@ -71,13 +90,13 @@ def add_reviewed_tyre(bundle, base_digest, release_root, *, secret_root=Path('/e
     publication = bundle['publication']
     merged = {**bundle,
         'products': [*bundle['products'], product],
-        'publication': {**publication, 'released_ids': [*publication['released_ids'], PRODUCT_ID],
+        'publication': {**publication, 'released_ids': [*publication['released_ids'], product_id],
                         'image_urls': {**publication['image_urls'], **image_urls},
                         'document_urls': {**publication['document_urls'], **doc_urls}},
-        'browsing_evidence': {**bundle.get('browsing_evidence', {}), PRODUCT_ID: {
-            'variant_fingerprint': identity, 'tyre_variant_label': 'DriveGuard Runflat (RFT) · XL',
+        'browsing_evidence': {**bundle.get('browsing_evidence', {}), product_id: {
+            'variant_fingerprint': identity, 'tyre_variant_label': item.variant_label,
             'gallery': [image_urls[photo] for photo in product['gallery']]}},
-        'product_documents': {**bundle.get('product_documents', {}), PRODUCT_ID: docs},
-        'rsu_bindings': {**bundle['rsu_bindings'], PRODUCT_ID: binding},
-        'shipping_classes': {**bundle['shipping_classes'], PRODUCT_ID: 'pkw_tyre'}}
+        'product_documents': {**bundle.get('product_documents', {}), product_id: docs},
+        'rsu_bindings': {**bundle['rsu_bindings'], product_id: binding},
+        'shipping_classes': {**bundle['shipping_classes'], product_id: 'pkw_tyre'}}
     return merged, {'seed': seed, 'media': media, 'documents': sheets}

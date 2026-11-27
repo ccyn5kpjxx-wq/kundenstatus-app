@@ -190,15 +190,17 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         bundle, parts_release = load_parts_release(root, parts_record, bundle,
             base_bundle_sha256=descriptor['bundle']['sha256'])
         blocked_document_ids = unavailable_document_product_ids(bundle, descriptor.get('unavailable_product_documents'))
-        from shop_tyre_release import PRODUCT_ID as added_tyre_id, SupplementAssets, add_reviewed_tyre
-        added_tyre = None
+        from shop_tyre_release import REVIEWED_TYRES, SupplementAssets, add_reviewed_tyre
+        added_tyres = {}
         if descriptor.get('fixed_pricebook_enabled') is True and descriptor.get('rsu_reads_approved') is True:
-            try:
-                bundle, added_tyre = add_reviewed_tyre(bundle, descriptor['bundle']['sha256'], root)
-            except (OSError, KeyError, ValueError):
-                app.logger.warning('Zusätzlicher RSU-Reifen konnte nicht freigegeben werden.')
-        if added_tyre:
-            recommendation_document_ids.add(added_tyre_id)
+            for item in REVIEWED_TYRES:
+                try:
+                    bundle, added = add_reviewed_tyre(bundle, descriptor['bundle']['sha256'], root, item)
+                    if added:
+                        added_tyres[item.product_id] = added
+                except (OSError, KeyError, ValueError):
+                    app.logger.warning('Zusätzlicher RSU-Reifen %s konnte nicht freigegeben werden.', item.product_id)
+        recommendation_document_ids.update(added_tyres)
         rows, publication = bundle['products'], bundle['publication']
         if not isinstance(rows, list) or not 1 <= len(rows) <= 100000 or not isinstance(publication, dict):
             raise ProductionError('release_catalogue_invalid')
@@ -295,12 +297,12 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
             pricebook = PublishedPriceBook(data / 'shop-pricebook' / 'prices.sqlite3',
                 products=identities, approved_ids=procurement_ids, mode='live').provision(create=True)
             pricebook.seed(seeds['records'], evidence_id=seeds['evidence_id'])
-            if added_tyre:
+            for added_tyre_id, added_tyre in added_tyres.items():
                 seed = added_tyre['seed']
                 pricebook.seed({added_tyre_id: seed}, evidence_id=seed['evidence_id'])
             from shop_rsu_daily_import import DailyPriceImport
             daily_import = DailyPriceImport(pricebook, root, descriptor['bundle']['sha256'], supplier,
-                supplementary_ids={added_tyre_id} if added_tyre else ())
+                supplementary_ids=added_tyres)
             try:
                 daily_import()
             except (OSError, ValueError, sqlite3.Error):
@@ -371,7 +373,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 if isinstance(document_resources.get(asset), Mapping) and document_resources[asset].get('kind') == 'wheel_report'},
             checkout_excluded_ids=blocked_document_ids,
             rsu_only_prices=True, allow_published_prices=fixed_prices, tyre_payment_costs=True,
-            preferred_ids=(set(seeds['records']) | ({added_tyre_id} if added_tyre else set())) if fixed_prices else None,
+            preferred_ids=set(seeds['records']).union(added_tyres) if fixed_prices else None,
             shipping_ready_ids=shipping_ready, parts_notices=parts_notices, inquiry_prices=inquiry_prices,
             recommendation_ladder=descriptor.get('tyre_recommendation_selection_approved') is True,
             recommendation_document_ids=recommendation_document_ids, wheel_pickup_freight=wheel_pickup_freight,
@@ -386,7 +388,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
         media = ReleasedMedia(media_manifest['resources'], approved_assets=set(media_manifest['approved_assets']),
                               local_root=root / 'media', allow_network=descriptor.get('media_reads_approved') is True,
                               max_network_reads=3, max_cache_bytes=64 * 1024 * 1024)
-        if added_tyre:
+        for added_tyre in added_tyres.values():
             media = SupplementAssets(media, added_tyre['media'])
         app.config.update(SHOP_PUBLIC_CATALOGUE_ENABLED=True, SHOP_FRONTEND_ENABLED=True,
                           SHOP_MEDIA_ENABLED=True, SHOP_ORDER_MODE='live',
@@ -401,7 +403,7 @@ def prepare_shop_runtime(portal, *, environ=None, provider_factory=None, backgro
                 local_root=root / 'documents', enabled=True,
                 allow_network=descriptor.get('document_reads_approved') is True,
                 max_network_reads_per_period=5000, max_concurrent_reads=1, spacing_seconds=.2)
-            if added_tyre:
+            for added_tyre in added_tyres.values():
                 documents = SupplementAssets(documents, added_tyre['documents'])
             dependencies['documents_service'] = documents
             app.config['SHOP_DOCUMENTS_ENABLED'] = True

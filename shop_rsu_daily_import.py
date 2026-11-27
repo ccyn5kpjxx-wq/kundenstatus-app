@@ -4,6 +4,7 @@ from decimal import Decimal
 import gzip
 from hashlib import sha256
 import io
+from itertools import combinations
 import json
 from pathlib import Path
 import zlib
@@ -91,10 +92,15 @@ class DailyPriceImport:
             _check(verified and verified.get("confirmed") is True and verified.get("supplier") == "RSU"
                    and verified.get("product_id") == identifier and verified.get("identity_hash") == product["identity_hash"])
             binding_rows.append([identifier, product["identity_hash"], product["category"], verified["supplier_article_id"]])
-        if len(binding_rows) != len(batch["offers"]) and self.supplementary_ids:
-            # Existing signed batches cover the whole original bundle. A separately
-            # released SKU uses ordinary Q1 review until the producer includes it.
-            binding_rows = [row for row in binding_rows if row[0] not in self.supplementary_ids]
+        missing = len(binding_rows) - len(batch["offers"])
+        if 0 < missing <= len(self.supplementary_ids):
+            # Legacy producers can cover any previously installed subset of
+            # the pinned additions. Never omit a product from the base scope.
+            for excluded in combinations(self.supplementary_ids, missing):
+                previous = [row for row in binding_rows if row[0] not in excluded]
+                if binding_digest(previous) == batch["binding_sha256"]:
+                    binding_rows = previous
+                    break
         _check(binding_digest(binding_rows) == batch["binding_sha256"] and len(binding_rows) == len(batch["offers"]))
         observed = _stamp(batch["observed_at"])
         source = batch["rsu_csv_sha256"]
