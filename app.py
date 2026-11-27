@@ -10756,6 +10756,7 @@ def init_db():
     ensure_column(db, "auftraege", "lexware_invoice_url", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "rechnung_status", "TEXT DEFAULT 'offen'")
     ensure_column(db, "auftraege", "rechnung_nummer", "TEXT DEFAULT ''")
+    ensure_column(db, "auftraege", "shop_rechnung_datei_id", "INTEGER")
     ensure_column(db, "auftraege", "rechnung_geschrieben_am", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "kontakt_telefon", "TEXT DEFAULT ''")
     ensure_column(db, "auftraege", "notiz_intern", "TEXT DEFAULT ''")
@@ -22668,6 +22669,26 @@ def list_dateien(auftrag_id):
     ).fetchall()
     db.close()
     return [hydrate_datei(dict(row)) for row in rows]
+
+
+def interne_shoprechnungsnummer(datei):
+    if (datei["quelle"] != "intern" or datei["kategorie"] not in {"assistent", "standard", "rechnung"}
+            or any(datei.get(flag) for flag in ("kunde_sichtbar", "partner_sichtbar", "versicherung_sichtbar"))
+            or not datei["original_available"]):
+        return None
+    match = re.fullmatch(r"Rechnung-(RE[0-9]{4,12})\.pdf", datei["original_name"])
+    if not match:
+        return None
+    path = upload_file_path(datei)
+    try:
+        if path and path.is_file():
+            with path.open("rb") as original:
+                pdf = original.read(5) == b"%PDF-"
+        else:
+            pdf = (load_datei_backup_bytes(datei) or b"").startswith(b"%PDF-")
+    except OSError:
+        return None
+    return match[1] if pdf else None
 
 
 def list_dateien_for_auftraege(auftrag_ids):
@@ -52260,6 +52281,12 @@ def auftrag_detail(auftrag_id):
         return redirect(detail_self_url)
 
     dateien = list_dateien(auftrag_id)
+    shop_rechnungsdateien = {}
+    if session.get("admin") is True and auftrag.get("shop_order_id"):
+        for datei in dateien:
+            nummer = interne_shoprechnungsnummer(datei)
+            if nummer:
+                shop_rechnungsdateien[datei["id"]] = nummer
     standard_dateien = dateien_mit_kategorie(dateien, "standard")
     bonusrechnungen = dateien_mit_kategorie(dateien, "bonusrechnung")
     rechnungsdateien = [
@@ -52275,7 +52302,9 @@ def auftrag_detail(auftrag_id):
     return render_template(
         "auftrag_detail.html",
         auftrag=auftrag,
-        shop_invoice=workshop_shop_invoice(auftrag.get("shop_order_id")),
+        shop_rechnungsdateien=shop_rechnungsdateien,
+        shop_invoice=(workshop_shop_invoice(auftrag.get("shop_order_id"))
+                      if auftrag.get("shop_rechnung_datei_id") is None else None),
         autohaeuser=autohaeuser,
         transport_arten=TRANSPORT_ARTEN,
         statusliste=STATUSLISTE,
@@ -52298,6 +52327,62 @@ def auftrag_detail(auftrag_id):
         detail_self_url=detail_self_url,
         back_context=back_context,
     )
+
+
+@app.get("/admin/auftrag/<int:auftrag_id>/shoprechnung/<int:datei_id>.pdf")
+@admin_required
+def admin_shoprechnung_pdf(auftrag_id, datei_id):
+    if session.get("admin") is not True:
+        abort(403)
+    auftrag = get_auftrag(auftrag_id)
+    if not auftrag or not auftrag.get("shop_order_id") or auftrag.get("shop_rechnung_datei_id") != datei_id:
+        abort(404)
+    datei = get_datei(datei_id)
+    if not datei or datei["auftrag_id"] != auftrag_id or not interne_shoprechnungsnummer(datei):
+        abort(404)
+    response = make_response(send_upload_file(datei))
+    if response.mimetype != "application/pdf":
+        abort(404)
+    response.headers.set("Content-Disposition", "inline", filename=datei["original_name"])
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Content-Security-Policy"] = "sandbox; default-src 'none'; frame-ancestors 'none'"
+    return response
+
+
+@app.post("/admin/auftrag/<int:auftrag_id>/shoprechnung/datei/<int:datei_id>")
+@admin_required
+def admin_shoprechnung_datei(auftrag_id, datei_id):
+    if session.get("admin") is not True:
+        abort(403)
+    erwartet = request.form.get("bisherige_datei_id")
+    if erwartet is None or (erwartet and not re.fullmatch(r"[1-9][0-9]{0,18}", erwartet)):
+        abort(400)
+    db = open_fresh_db()
+    try:
+        if not USE_POSTGRES:
+            db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            """SELECT d.*, a.shop_rechnung_datei_id,
+                      EXISTS(SELECT 1 FROM datei_backups b WHERE b.datei_id=d.id) AS _backup_available
+               FROM dateien d JOIN auftraege a ON a.id=d.auftrag_id
+               JOIN shop_montageauftraege m ON m.auftrag_id=a.id WHERE a.id=? AND d.id=?"""
+            + (" FOR UPDATE OF a,d,m" if USE_POSTGRES else ""), (auftrag_id, datei_id),
+        ).fetchone()
+        if not row or not interne_shoprechnungsnummer(hydrate_datei(dict(row))):
+            abort(404)
+        bisher = row["shop_rechnung_datei_id"]
+        if bisher != datei_id:
+            if str(bisher or "") != erwartet:
+                abort(409, description="Die Zuordnung wurde inzwischen geändert. Bitte den Auftrag neu laden.")
+            db.execute("UPDATE auftraege SET shop_rechnung_datei_id=? WHERE id=?", (datei_id, auftrag_id))
+        db.commit()
+    finally:
+        db.close()
+    if bisher != datei_id:
+        app.logger.info("Interner Shoprechnungslink für Auftrag %s von Datei %s auf %s geändert.",
+                        auftrag_id, bisher, datei_id)
+    flash("Rechnungs-PDF im Auftragskopf verknüpft.", "success")
+    return redirect(url_for("auftrag_detail", auftrag_id=auftrag_id), code=303)
 
 
 @app.route("/admin/auftrag/<int:auftrag_id>/verkauf", methods=["POST"])
