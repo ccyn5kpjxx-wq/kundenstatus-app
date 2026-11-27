@@ -90,6 +90,12 @@ class FrontendChecks(unittest.TestCase):
                     self.assertEqual(page.location, origin + path + '?artikel=test&utm_source=ads')
                 previous = self.client.get('/shop/warenkorb/?auswahl=old', base_url=alias)
                 tyre_entry = self.client.get('/shop/reifen/?montage=1&email=PRIVATE', base_url=alias)
+                tyre_link = '/shop/reifen/?artikel=tyre%3A391657d07bef9198f20aa091'
+                self.assertEqual(self.client.get(tyre_link + '&menge=4', base_url=alias).location,
+                                 origin + tyre_link + '&menge=4')
+                for invalid in ('0', '5', '4&menge=1'):
+                    self.assertEqual(self.client.get(tyre_link + '&menge=' + invalid, base_url=alias).location,
+                                     origin + tyre_link)
                 self.assertEqual(tyre_entry.location, origin + '/shop/reifen/?montage=1')
                 self.assertIn('data-transfer="send"', previous.text)
                 self.assertIn('href="' + origin + '/shop/warenkorb/"', previous.text)

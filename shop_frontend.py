@@ -139,6 +139,8 @@ def create_shop_frontend_blueprint(*, url_prefix='/shop', csrf_token=None,
                             'q', 'width', 'ratio', 'diameter', 'season')
             params = [(key, request.args[key]) for key in allowed
                       if key in request.args and len(request.args[key]) <= 256]
+            if request.endpoint == 'shop_frontend.reifen' and request.args.getlist('menge') in (['1'], ['2'], ['3'], ['4']):
+                params.append(('menge', request.args['menge']))
             if request.endpoint == 'shop_frontend.reifen' and request.args.getlist('montage') == ['1']:
                 params.append(('montage', '1'))
             return redirect(target + ('?' + urlencode(params) if params else ''), code=302)

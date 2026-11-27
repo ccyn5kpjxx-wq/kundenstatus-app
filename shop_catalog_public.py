@@ -14,7 +14,7 @@ import json
 import re
 import unicodedata
 from shop_tyre_tests import ADAC_TYRE_TESTS
-from shop_tyre_pricing import catalogue_tyre_price
+from shop_tyre_pricing import FIXED_TYRE_OFFERS, catalogue_tyre_price, fixed_tyre_offer
 
 MAX_PRODUCTS = 100_000
 MAX_PAGE_SIZE = 48
@@ -392,6 +392,7 @@ class PublicCatalog:
             if department == 'wheels':
                 product['wheel_vehicle_makes'] = _wheel_vehicle_makes(row, product['fitment'])
             self._rows[sid] = {"public": product, "quote": _quote(row, allow_published_prices=self._allow_published_prices),
+                               "fixed_tyre_offer": fixed_tyre_offer(sid, variant_fingerprint(row)) if sid in FIXED_TYRE_OFFERS else None,
                                "wheel_make_terms": frozenset(_fold(name) for name in product.get('wheel_vehicle_makes', ())),
                                "search": _fold(" ".join([product["name"], product["brand"], product["size"],
                                                             product["article_number"], *product["specifications"].values()]))}
@@ -457,8 +458,8 @@ class PublicCatalog:
                 vehicle["conditions"] = vehicle["conditions"][:3]
         quote = entry["quote"]
         product.update(price_status="update_required", price=None, order_enabled=False)
-        if quote and self._tyre_payment_costs and product['category'] == 'tyre':
-            quote = catalogue_tyre_price(quote)
+        if quote and product['category'] == 'tyre' and (self._tyre_payment_costs or entry.get('fixed_tyre_offer')):
+            quote = catalogue_tyre_price(quote, fixed_offer=entry.get('fixed_tyre_offer'))
         if quote and _stamp(quote["observed_at"]) <= now < _stamp(quote["expires_at"]):
             product.update(price_status="current", price=deepcopy(quote))
             if quote.get('kind') == 'merchant_pricebook':
