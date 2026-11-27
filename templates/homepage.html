@@ -31,6 +31,13 @@
     </nav>
   </header>
   <main id="inhalt">
+    <aside class="move-strip" aria-label="Hinweis zur Anfahrt">
+      <div class="wrap">
+        <span><strong>Wir sind umgezogen.</strong> {{ werkstatt_oeffentlich.adresse }}<br>
+          Google Maps kann Sie noch zum früheren Standort in Lohrbach führen.</span>
+        <a href="{{ werkstatt_anfahrt_url }}" target="_blank" rel="noopener noreferrer">Route zur neuen Werkstatt <span aria-hidden="true">↗</span></a>
+      </div>
+    </aside>
     <section class="workshop-hero" aria-labelledby="hero-title">
       <div class="workshop-intro">
         <p class="workshop-eyebrow">Gärtner · Meisterbetrieb</p>
@@ -173,6 +180,7 @@
         <div class="location-copy">
           <h2 id="location-title">So finden Sie uns in Mosbach</h2>
           <address><strong>{{ werkstatt_oeffentlich.strasse }}</strong><br>{{ werkstatt_oeffentlich.plz_ort }}</address>
+          <p>Falls Ihr Navi Lohrbach anzeigt, nutzen Sie den Routenlink zur neuen Werkstatt.</p>
           <a class="text-link" href="{{ werkstatt_anfahrt_url }}" target="_blank" rel="noopener noreferrer">Route planen ↗</a><br><a class="text-link" href="#kontakt">Öffnungszeiten &amp; Telefon →</a>
         </div>
         <div class="location-views">
