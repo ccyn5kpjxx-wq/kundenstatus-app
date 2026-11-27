@@ -282,7 +282,14 @@
     <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
       {% if session.get('admin') is sameas true %}
         <a class="btn btn-soft btn-sm" href="{{ url_for('shop_admin.order_detail', order_id=auftrag.shop_order_id) }}">Shopbestellung öffnen</a>
-        {% if shop_invoice and shop_invoice.state == 'ready' %}
+        {% if auftrag.get('shop_rechnung_datei_id') is not none %}
+          {% set datei_id = auftrag.shop_rechnung_datei_id %}
+          {% if datei_id in shop_rechnungsdateien %}
+          <a class="btn btn-brand btn-sm" href="{{ url_for('admin_shoprechnung_pdf', auftrag_id=auftrag.id, datei_id=datei_id) }}" target="_blank" rel="noopener">Shoprechnung {{ shop_rechnungsdateien[datei_id] }} öffnen und drucken</a>
+          {% else %}
+          <span class="text-warning-emphasis">Verknüpftes Rechnungs-PDF fehlt. Bitte die Unterlagen prüfen.</span>
+          {% endif %}
+        {% elif shop_invoice and shop_invoice.state == 'ready' %}
         <a class="btn btn-brand btn-sm" href="{{ url_for('shop_admin.invoice_pdf', order_id=auftrag.shop_order_id) }}" target="_blank" rel="noopener">Shoprechnung {{ shop_invoice.number }} öffnen und drucken</a>
         {% elif shop_invoice %}
         <a class="btn btn-soft btn-sm" href="{{ url_for('shop_admin.order_detail', order_id=auftrag.shop_order_id, _anchor='rechnung') }}">Shoprechnung · {{ shop_invoice.label }}</a>
@@ -806,6 +813,13 @@
       <button class="btn btn-soft btn-sm" type="submit">Sichtbarkeit speichern</button>
     </div>
   </form>
+  {% if session.get('admin') is sameas true and d.id in shop_rechnungsdateien and d.id != auftrag.get('shop_rechnung_datei_id') %}
+  <form method="post" action="{{ url_for('admin_shoprechnung_datei', auftrag_id=auftrag.id, datei_id=d.id) }}" class="mb-3">
+    {{ csrf_field()|safe }}
+    <input type="hidden" name="bisherige_datei_id" value="{{ auftrag.get('shop_rechnung_datei_id') or '' }}">
+    <button class="btn btn-soft btn-sm" type="submit">{{ shop_rechnungsdateien[d.id] }} als Shoprechnung verknüpfen</button>
+  </form>
+  {% endif %}
   {% else %}<p>Noch keine Dateien hinterlegt.</p>{% endfor %}
   {% if auftrag['kunden_status_url'] %}<a class="btn btn-soft mt-2" href="{{ auftrag['kunden_status_url'] }}" target="_blank" rel="noopener">Kundensicht prüfen</a>{% endif %}
 </details>

@@ -195,6 +195,78 @@ class ShopWerkstattauftragTest(TestCase):
                 self.assertIsNone(portal.workshop_shop_invoice(None))
             service.statuses.assert_not_called()
 
+    def test_admin_can_link_a_private_invoice_without_changing_billing_or_notifying(self):
+        job = self.ensure()
+        pdf = b"%PDF-1.4\nPrivate test invoice\n%%EOF"
+        stored = uuid4().hex + ".pdf"
+        path = portal.UPLOAD_DIR / stored
+        path.write_bytes(pdf)
+        with closing(portal.get_db()) as db:
+            attachment = db.execute("""INSERT INTO dateien
+                (auftrag_id,original_name,stored_name,mime_type,quelle,kategorie,hochgeladen_am)
+                VALUES (?, 'Rechnung-RE1001.pdf', ?, 'application/pdf','intern','standard',?)""",
+                (job, stored, portal.now_str())).lastrowid
+            self.assertTrue(portal.store_datei_backup(db, attachment, path))
+            db.commit()
+        self.order_id = self.order["id"] = "sho_" + uuid4().hex
+        other_job = self.ensure()
+        before = portal.get_auftrag(job)
+        notices = portal.list_benachrichtigungen(job, include_internal=True)
+        detail = f"/admin/auftrag/{job}"
+        action = f"{detail}/shoprechnung/datei/{attachment}"
+        href = f"{detail}/shoprechnung/{attachment}.pdf"
+        client = portal.app.test_client()
+        form = {"csrf_token": "test-csrf", "bisherige_datei_id": ""}
+        with client.session_transaction() as session:
+            session.update(admin=1, csrf_token=form["csrf_token"])
+        self.assertEqual(client.post(action, data=form).status_code, 403)
+        with client.session_transaction() as session:
+            session["admin"] = True
+        self.assertEqual(client.post(action).status_code, 400)
+        self.assertEqual(client.post(action, data={**form, "bisherige_datei_id": "99"}).status_code, 409)
+        other_action = f"/admin/auftrag/{other_job}/shoprechnung/datei/{attachment}"
+        self.assertEqual(client.post(other_action, data=form).status_code, 404)
+        self.assertEqual(client.get(href).status_code, 404)
+        self.assertIn(f'action="{action}"', client.get(detail).get_data(as_text=True))
+        with patch.object(portal, "add_benachrichtigung", side_effect=AssertionError("unexpected notification")):
+            self.assertEqual(client.post(action, data=form).status_code, 303)
+            self.assertEqual(client.post(action, data=form).status_code, 303)
+        self.assertEqual(portal.list_benachrichtigungen(job, include_internal=True), notices)
+        after = portal.get_auftrag(job)
+        self.assertEqual(after["shop_rechnung_datei_id"], attachment)
+        for key in ("status", "rechnung_status", "rechnung_nummer", "lexware_invoice_id", "bonus_netto_betrag"):
+            self.assertEqual(after[key], before[key])
+        html = client.get(detail).get_data(as_text=True)
+        self.assertIn(f'href="{href}" target="_blank"', html)
+        self.assertIn("Shoprechnung RE1001 öffnen und drucken", html)
+        path.unlink()  # The normal upload backup remains readable without recreating the file.
+        response = client.get(href)
+        self.assertEqual((response.status_code, response.mimetype, response.data), (200, "application/pdf", pdf))
+        self.assertTrue(response.headers["Content-Disposition"].startswith("inline;"))
+        self.assertIn("no-store", response.headers["Cache-Control"])
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertIn("sandbox", response.headers["Content-Security-Policy"])
+        self.assertFalse(path.exists())
+        with closing(portal.get_db()) as db:
+            db.execute("UPDATE dateien SET kunde_sichtbar=1 WHERE id=?", (attachment,))
+            db.commit()
+        self.assertEqual(client.get(href).status_code, 404)
+        self.assertEqual(client.post(action, data=form).status_code, 404)
+        with patch.object(portal, "workshop_shop_invoice", side_effect=AssertionError("old invoice requested")):
+            self.assertIn("Verknüpftes Rechnungs-PDF fehlt", client.get(detail).get_data(as_text=True))
+
+    def test_only_exact_internal_invoice_pdfs_can_be_linked(self):
+        path = portal.UPLOAD_DIR / (uuid4().hex + ".pdf")
+        path.write_bytes(b"%PDF-1.4\n%%EOF")
+        doc = {"quelle": "intern", "kategorie": "assistent", "original_name": "Rechnung-RE1002.pdf",
+               "stored_name": path.name, "original_available": True}
+        self.assertEqual(portal.interne_shoprechnungsnummer(doc), "RE1002")
+        for invalid in ({"original_name": "Stornorechnung-RE1002.pdf"}, {"original_name": "Rechnung-RE1002.pdf.html"},
+                        {"quelle": "kunde"}, {"kategorie": "bonusrechnung"}, {"partner_sichtbar": 1}):
+            self.assertIsNone(portal.interne_shoprechnungsnummer({**doc, **invalid}))
+        path.write_bytes(b"HTML test")
+        self.assertIsNone(portal.interne_shoprechnungsnummer(doc))
+
     def test_board_print_requires_workshop_session_and_current_operational_release(self):
         number = self.ensure()
         label = f"/werkstatt/auftrag/{number}/reifenetikett"
