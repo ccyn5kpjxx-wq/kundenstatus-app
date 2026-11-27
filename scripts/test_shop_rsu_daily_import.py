@@ -50,6 +50,20 @@ class ImportTests(unittest.TestCase):
         (self.root/POINTER).write_text(json.dumps({"sha256":digest}))
         return digest
 
+    def test_supplement_preserves_complete_original_batch_and_supports_next_full_batch(self):
+        extra = self.ids[-1]
+        importer = DailyPriceImport(self.book, self.root, "f"*64, self, supplementary_ids={extra})
+        original_scope = [[pid, self.products[pid]["identity_hash"], "tyre", pid[-1]] for pid in self.ids[:-1]]
+        self.put(binding_sha256=binding_digest(original_scope), offers=[[4844, 20], [4800, 0]])
+        self.assertEqual(importer()["applied"], 2)
+        self.assertEqual(self.book.get(extra)["stock_reported"], 1)
+        self.put(binding_sha256=binding_digest(original_scope[:1]), offers=[[4844, 20]])
+        with self.assertRaises(PriceBookError):
+            importer()
+        self.put(offers=[[4844, 20], [4800, 0], [4800, 9]])
+        self.assertEqual(importer()["applied"], 1)
+        self.assertEqual(self.book.get(extra)["stock_reported"], 9)
+
     def test_batch_up_and_down_unmatched_and_restart_idempotence(self):
         self.book._requested_reviews.add(self.ids[0])
         self.put()

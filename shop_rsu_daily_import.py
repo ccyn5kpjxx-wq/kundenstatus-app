@@ -60,9 +60,10 @@ def batch_path(root, digest):
 
 
 class DailyPriceImport:
-    def __init__(self, book, release_root, bundle_sha256, supplier):
+    def __init__(self, book, release_root, bundle_sha256, supplier, *, supplementary_ids=()):
         self.book, self.root, self.bundle = book, Path(release_root), bundle_sha256
         self.supplier = supplier
+        self.supplementary_ids = frozenset(supplementary_ids)
         self._applied = ""
         self.last_result = None
 
@@ -90,6 +91,10 @@ class DailyPriceImport:
             _check(verified and verified.get("confirmed") is True and verified.get("supplier") == "RSU"
                    and verified.get("product_id") == identifier and verified.get("identity_hash") == product["identity_hash"])
             binding_rows.append([identifier, product["identity_hash"], product["category"], verified["supplier_article_id"]])
+        if len(binding_rows) != len(batch["offers"]) and self.supplementary_ids:
+            # Existing signed batches cover the whole original bundle. A separately
+            # released SKU uses ordinary Q1 review until the producer includes it.
+            binding_rows = [row for row in binding_rows if row[0] not in self.supplementary_ids]
         _check(binding_digest(binding_rows) == batch["binding_sha256"] and len(binding_rows) == len(batch["offers"]))
         observed = _stamp(batch["observed_at"])
         source = batch["rsu_csv_sha256"]

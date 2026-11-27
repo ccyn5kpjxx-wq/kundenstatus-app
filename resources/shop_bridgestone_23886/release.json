@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "base_bundle_sha256": "231b53c9759daae0782d78669a20802f5f85229a1d692ac63e9ad2bf0dc19179",
+  "product": {
+    "selection_id": "tyre:16f79c76e6956f4870cd2815",
+    "category": "tyre",
+    "manufacturer_name": "BRIDGESTONE",
+    "name": "BRIDGESTONE TURANZA ALL SEASON 6",
+    "description": "DriveGuard Runflat (RFT), XL, 3PMSF, ENLITEN",
+    "article_number": "23886",
+    "width": "225",
+    "ratio": "50",
+    "diameter": "17",
+    "load_index": "98",
+    "speed_index": "V",
+    "season": "Ganzjahresreifen",
+    "size": "225/50 R17 98V",
+    "dimensions_valid": true,
+    "group": "Ganzjahresreifen",
+    "service_category": "standard",
+    "unit_label": "Stück",
+    "runflat": "Ja",
+    "details": {
+      "Herstellerartikelnummer": "23886",
+      "EAN": "3286342388618"
+    },
+    "identifiers": {
+      "ean": "3286342388618",
+      "manufacturer_article_number": "23886"
+    },
+    "photo": "bilder/d94c259b1bc70779bed542a778855d36f7fa4fd29f13f7ced97c9eac89a48957.jpg",
+    "gallery": [
+      "bilder/d94c259b1bc70779bed542a778855d36f7fa4fd29f13f7ced97c9eac89a48957.jpg",
+      "bilder/25f27892b4a8bc1f2e93d851a5e69f113fdc9c73264c93e2be0d5a9de690dead.jpg"
+    ],
+    "quote_public": null,
+    "quote_status": "not_queried",
+    "pricing_mode": "rsu_fresh_quote_required",
+    "approval": null,
+    "fitment_status": "not_confirmed",
+    "technical_reports": [],
+    "quality_facts": {
+      "fuel_efficiency": "D",
+      "wet_grip": "B",
+      "vehicle_class": "C1",
+      "external_noise_db": "71"
+    }
+  },
+  "identity_hash": "c81f3358abce26c411f8d89324dc8e38e81de69509e6311321e4455a6f80df6c",
+  "media_resources": {
+    "d94c259b1bc70779bed542a778855d36f7fa4fd29f13f7ced97c9eac89a48957.jpg": {
+      "file": "d94c259b1bc70779bed542a778855d36f7fa4fd29f13f7ced97c9eac89a48957.jpg",
+      "sha256": "5c789e10105012ba68dcf6b2b6f6ccabf5fcbc6ef3fe48dc856584f543849059"
+    },
+    "25f27892b4a8bc1f2e93d851a5e69f113fdc9c73264c93e2be0d5a9de690dead.jpg": {
+      "file": "25f27892b4a8bc1f2e93d851a5e69f113fdc9c73264c93e2be0d5a9de690dead.jpg",
+      "sha256": "df9f6b89376f50d4284524d0b8cd8889b1cbf95d0c817599439cd68902df16e7"
+    }
+  },
+  "document_resources": {
+    "f29546e45375525f904477f640093fd5190a78186e71424c8b5068e2f9aed9a7.jpg": {
+      "url": "https://media3.tyre-shopping.com/tyrelabel2/D/B/B/71/1/1/0/02a532007345e56c349001b3581bf7ad-h200-w200.jpg?manufacturer=BRIDGESTONE&model=23886&size=225%2F50R1798VXL&qr=aHR0cHM6Ly9lcHJlbC5lYy5ldXJvcGEuZXUvcXIvNTAxNTY3",
+      "file": "f29546e45375525f904477f640093fd5190a78186e71424c8b5068e2f9aed9a7.jpg",
+      "sha256": "e48925525109289e188db9b950864ca2f8feedd75c83490f262a0717a97f7add"
+    },
+    "ddb2f911a278ae33ca16cf05d234760bd7cf04e056eeb651c44280b20ccab437.pdf": {
+      "url": "https://eprel.ec.europa.eu/fiches/tyres/Fiche_501567_EN.pdf",
+      "file": "ddb2f911a278ae33ca16cf05d234760bd7cf04e056eeb651c44280b20ccab437.pdf",
+      "sha256": "778ede2f2167ba4ffeddd7ae0e658272440beeb2f97b9f4e54a1061d13820570"
+    }
+  },
+  "product_documents": {
+    "eprel_id": "501567",
+    "tyre_label_url": "/shop/documents/f29546e45375525f904477f640093fd5190a78186e71424c8b5068e2f9aed9a7.jpg",
+    "tyre_sheet_url": "/shop/documents/ddb2f911a278ae33ca16cf05d234760bd7cf04e056eeb651c44280b20ccab437.pdf",
+    "status": "source_bound_document_pair",
+    "identity_hash": "c81f3358abce26c411f8d89324dc8e38e81de69509e6311321e4455a6f80df6c"
+  }
+}
