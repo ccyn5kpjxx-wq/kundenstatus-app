@@ -11,6 +11,13 @@
   border-bottom: 1px solid var(--line);
 }
 .home-overview .site-nav { min-height: 76px; }
+.home-overview .move-strip {
+  padding-top: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff4e8;
+  font-size: 15px;
+}
+.home-overview .move-strip .wrap { align-items: center; }
 .home-overview .nav-portal { background: transparent; border-color: #777b75; }
 .home-overview .workshop-hero {
   display: grid;
